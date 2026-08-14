@@ -3,8 +3,8 @@ import type {
   FillInstruction,
   FillResult,
 } from "@munshi-apply/contracts";
-import { canTransition } from "./index";
 import type { PreflightGateSummary } from "./policies";
+import { canTransition } from "./transitions";
 
 export type SecurityCheckpointKind =
   | "CAPTCHA"
@@ -182,7 +182,10 @@ export function canResumeFromCheckpoint(
   observation: AutoPilotObservation,
 ): { resumable: boolean; reason: string } {
   if (checkpoint.applicationId !== observation.applicationId) {
-    return { resumable: false, reason: "Checkpoint belongs to another application" };
+    return {
+      resumable: false,
+      reason: "Checkpoint belongs to another application",
+    };
   }
   if (checkpoint.state === observation.state) {
     return { resumable: true, reason: "Observation matches checkpoint state" };
@@ -205,7 +208,10 @@ export function verifyFillAction(
 ): ActionVerification {
   const result = results.find((candidate) => candidate.controlId === controlId);
   if (!result) {
-    return { success: false, reason: "No fill verification result was returned" };
+    return {
+      success: false,
+      reason: "No fill verification result was returned",
+    };
   }
   return {
     success: result.status === "FILLED",
@@ -236,5 +242,8 @@ export function verifyNavigationAction(
       reason: "Navigation produced an invalid application-state transition",
     };
   }
-  return { success: true, reason: "Navigation produced a verified application change" };
+  return {
+    success: true,
+    reason: "Navigation produced a verified application change",
+  };
 }
