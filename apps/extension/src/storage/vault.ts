@@ -1,9 +1,11 @@
 import {
   ApplicationPageSchema,
-  MasterProfileSchema,
   type ApplicationPage,
-  type MasterProfile,
 } from "@munshi-apply/contracts";
+import {
+  parseProfileSnapshot,
+  type ProfileSnapshot,
+} from "@munshi-apply/contracts/profile-vault";
 
 const databaseName = "munshi-apply-vault";
 const databaseVersion = 1;
@@ -71,18 +73,14 @@ async function write(
   });
 }
 
-export async function getProfile(): Promise<MasterProfile | null> {
+export async function getProfile(): Promise<ProfileSnapshot | null> {
   const candidate = await read(profilesStore, activeProfileKey);
   if (candidate === undefined) return null;
-  return MasterProfileSchema.parse(candidate);
+  return parseProfileSnapshot(candidate);
 }
 
-export async function saveProfile(profile: MasterProfile): Promise<void> {
-  await write(
-    profilesStore,
-    activeProfileKey,
-    MasterProfileSchema.parse(profile),
-  );
+export async function saveProfile(profile: ProfileSnapshot): Promise<void> {
+  await write(profilesStore, activeProfileKey, parseProfileSnapshot(profile));
 }
 
 export async function getPage(

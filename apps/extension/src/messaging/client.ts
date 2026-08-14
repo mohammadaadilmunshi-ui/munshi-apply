@@ -4,8 +4,11 @@ import type {
   FillResult,
   ExtensionRequest,
   ExtensionResponse,
-  MasterProfile,
 } from "@munshi-apply/contracts";
+import {
+  parseProfileSnapshot,
+  type ProfileSnapshot,
+} from "@munshi-apply/contracts/profile-vault";
 
 export type ExtensionRuntimeHealth = {
   status: string;
@@ -31,7 +34,7 @@ type ProfileSaveWaiter = {
   reject: (error: unknown) => void;
 };
 
-let queuedProfile: MasterProfile | null = null;
+let queuedProfile: ProfileSnapshot | null = null;
 let profileSaveRunning = false;
 let profileSaveWaiters: ProfileSaveWaiter[] = [];
 
@@ -73,12 +76,13 @@ export async function getActivePage(): Promise<ApplicationPage | null> {
   return (await send({ type: "GET_ACTIVE_PAGE" })) as ApplicationPage | null;
 }
 
-export async function getProfile(): Promise<MasterProfile | null> {
-  return (await send({ type: "GET_PROFILE" })) as MasterProfile | null;
+export async function getProfile(): Promise<ProfileSnapshot | null> {
+  const candidate = await send({ type: "GET_PROFILE" });
+  return candidate === null ? null : parseProfileSnapshot(candidate);
 }
 
-export function saveProfile(profile: MasterProfile): Promise<void> {
-  queuedProfile = profile;
+export function saveProfile(profile: ProfileSnapshot): Promise<void> {
+  queuedProfile = parseProfileSnapshot(profile);
   return new Promise((resolve, reject) => {
     profileSaveWaiters.push({ resolve, reject });
     if (profileSaveRunning) return;

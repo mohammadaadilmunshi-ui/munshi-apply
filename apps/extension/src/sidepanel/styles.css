@@ -220,16 +220,99 @@ p {
   margin-bottom: 5px;
   text-transform: capitalize;
 }
-.form-grid input {
+.form-grid input,
+.form-grid textarea {
   background: #fff;
   border: 1px solid #bfc2c7;
   border-radius: 8px;
   padding: 10px;
   width: 100%;
 }
-.form-grid input:focus {
+.form-grid textarea {
+  min-height: 74px;
+  resize: vertical;
+}
+.form-grid input:focus,
+.form-grid textarea:focus {
   border-color: #b85c38;
   outline: 2px solid #edd1c5;
+}
+.repeatable-profile {
+  border-top: 1px solid #d8dade;
+  margin-top: 28px;
+  padding-top: 4px;
+}
+.repeatable-intro p {
+  margin-top: -4px;
+}
+.record-section {
+  margin-top: 22px;
+}
+.record-section-heading,
+.record-card-heading {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+.record-section-heading h3 {
+  margin: 0 0 3px;
+}
+.record-section-heading span,
+.record-card-heading span,
+.record-empty {
+  color: #777c84;
+  font-size: 11px;
+}
+.record-empty {
+  background: #f7f3ef;
+  border: 1px dashed #d6cec6;
+  border-radius: 10px;
+  padding: 12px;
+}
+.record-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 10px;
+}
+.record-card {
+  background: #fff;
+  border: 1px solid #d8dade;
+  border-radius: 12px;
+  padding: 14px;
+}
+.record-card-heading strong,
+.record-card-heading span {
+  display: block;
+}
+.record-card-heading strong {
+  font-size: 13px;
+}
+.record-card-heading span {
+  margin-top: 3px;
+}
+.record-actions {
+  display: flex;
+  gap: 5px;
+}
+.icon-button {
+  background: #f7f3ef;
+  border: 1px solid #d6cec6;
+  border-radius: 7px;
+  color: #30343b;
+  line-height: 1;
+  min-height: 29px;
+  min-width: 29px;
+}
+.icon-button.destructive {
+  color: #8b3f24;
+}
+.icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+.record-fields {
+  margin-bottom: 0;
 }
 .primary {
   background: #b85c38;

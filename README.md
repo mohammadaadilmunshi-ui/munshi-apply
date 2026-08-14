@@ -83,6 +83,8 @@ To connect the local companion, copy the unpacked extension ID shown on `edge://
 
 The macOS runtime defaults to `~/Library/Application Support/MUNSHI Apply/`; no private database, résumé, evidence, backup, diagnostic, or secret belongs in this repository.
 
+The owner-only mobile workspace source is tracked in `apps/owner-workspace` and has an independent lint/build/test workflow. Its deployment provenance and release procedure are documented in `docs/OWNER_WORKSPACE.md`.
+
 ## Configuration
 
 No API key is required for the deterministic profile, review, sync, scanner, or guarded-fill workflow. OpenAI remains optional.

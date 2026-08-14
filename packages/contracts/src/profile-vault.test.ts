@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ApplicationResumeSelectionSchema,
   ProfileRecordSchema,
+  ProfileSnapshotSchema,
   ResumeVersionSchema,
 } from "./profile-vault";
 
@@ -42,6 +43,59 @@ describe("ProfileRecordSchema", () => {
       "employment-1",
       "employment-2",
     ]);
+  });
+
+  it("upgrades a legacy flat profile to a versioned empty record snapshot", () => {
+    const snapshot = ProfileSnapshotSchema.parse({
+      profileId: "profile-legacy",
+      displayName: "Legacy profile",
+      facts: [],
+      createdAt: now,
+      updatedAt: now,
+      schemaVersion: 1,
+    });
+
+    expect(snapshot.snapshotVersion).toBe(1);
+    expect(snapshot.records).toEqual([]);
+    expect(snapshot.recordTombstones).toEqual([]);
+  });
+
+  it("rejects duplicate record ids and record/tombstone overlap", () => {
+    const record = employmentRecord("employment-1", "Employer One");
+    expect(() =>
+      ProfileSnapshotSchema.parse({
+        profileId: "profile-1",
+        displayName: "Profile",
+        facts: [],
+        records: [record, record],
+        recordTombstones: [],
+        createdAt: now,
+        updatedAt: now,
+        schemaVersion: 1,
+        snapshotVersion: 1,
+      }),
+    ).toThrow(/Duplicate profile record id/);
+
+    expect(() =>
+      ProfileSnapshotSchema.parse({
+        profileId: "profile-1",
+        displayName: "Profile",
+        facts: [],
+        records: [record],
+        recordTombstones: [
+          {
+            recordId: record.recordId,
+            kind: record.kind,
+            deletedAt: now,
+            confirmed: true,
+          },
+        ],
+        createdAt: now,
+        updatedAt: now,
+        schemaVersion: 1,
+        snapshotVersion: 1,
+      }),
+    ).toThrow(/Record and tombstone overlap/);
   });
 });
 

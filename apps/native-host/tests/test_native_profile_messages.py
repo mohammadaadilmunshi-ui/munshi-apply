@@ -27,13 +27,16 @@ def test_native_profile_snapshot_protocol_round_trip(tmp_path: Path) -> None:
                 "kind": "PROJECT",
                 "label": "Project A",
                 "facts": [],
+                "sortOrder": 0,
                 "createdAt": now,
                 "updatedAt": now,
             }
         ],
+        "recordTombstones": [],
         "createdAt": now,
         "updatedAt": now,
         "schemaVersion": 1,
+        "snapshotVersion": 1,
     }
 
     assert handle(

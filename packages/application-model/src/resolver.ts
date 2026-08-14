@@ -5,6 +5,10 @@ import type {
   SemanticType,
   TrustLevel,
 } from "@munshi-apply/contracts";
+import type {
+  ProfileRecordKind,
+  ProfileSnapshot,
+} from "@munshi-apply/contracts/profile-vault";
 
 export type ResolutionState = "READY" | "REVIEW" | "UNRESOLVED";
 
@@ -68,6 +72,34 @@ const semanticFactKey: Readonly<Partial<Record<SemanticType, string>>> = {
   PREVIOUS_APPLICATION: "previous_application",
 };
 
+type RecordFactMapping = {
+  kind: ProfileRecordKind;
+  key: string;
+};
+
+const semanticRecordFact: Readonly<
+  Partial<Record<SemanticType, RecordFactMapping>>
+> = {
+  EDUCATION: { kind: "EDUCATION", key: "school_name" },
+  SCHOOL_NAME: { kind: "EDUCATION", key: "school_name" },
+  DEGREE: { kind: "EDUCATION", key: "degree" },
+  FIELD_OF_STUDY: { kind: "EDUCATION", key: "field_of_study" },
+  GRADUATION_DATE: { kind: "EDUCATION", key: "graduation_date" },
+  GPA: { kind: "EDUCATION", key: "gpa" },
+  EMPLOYMENT: { kind: "EMPLOYMENT", key: "employer_name" },
+  EMPLOYER_NAME: { kind: "EMPLOYMENT", key: "employer_name" },
+  JOB_TITLE: { kind: "EMPLOYMENT", key: "job_title" },
+  EMPLOYMENT_DATES: { kind: "EMPLOYMENT", key: "employment_start_date" },
+  EMPLOYMENT_RESPONSIBILITIES: {
+    kind: "EMPLOYMENT",
+    key: "responsibilities",
+  },
+  RELEVANT_EXPERIENCE: { kind: "EMPLOYMENT", key: "responsibilities" },
+  CERTIFICATIONS: { kind: "CERTIFICATION", key: "certification_name" },
+  LICENSES: { kind: "CERTIFICATION", key: "certification_name" },
+  LANGUAGES: { kind: "LANGUAGE", key: "language" },
+};
+
 const trustedFactLevels = new Set<TrustLevel>([
   "VERIFIED",
   "USER_CONFIRMED",
@@ -85,12 +117,30 @@ export function factKeyForSemanticType(
   return semanticFactKey[semanticType] ?? null;
 }
 
+function recordFactForSemanticType(
+  semanticType: SemanticType,
+  profile: MasterProfile | ProfileSnapshot,
+): ProfileFact | undefined {
+  const mapping = semanticRecordFact[semanticType];
+  if (!mapping || !("records" in profile)) return undefined;
+  return [...profile.records]
+    .filter((record) => record.kind === mapping.kind)
+    .sort(
+      (left, right) =>
+        left.sortOrder - right.sortOrder ||
+        left.recordId.localeCompare(right.recordId),
+    )
+    .map((record) => record.facts.find((fact) => fact.key === mapping.key))
+    .find((fact): fact is ProfileFact => fact !== undefined);
+}
+
 export function resolveProfileAnswer(
   question: Question,
-  profile: MasterProfile,
+  profile: MasterProfile | ProfileSnapshot,
 ): AnswerResolution {
   const key = factKeyForSemanticType(question.semanticType);
-  if (!key) {
+  const recordMapping = semanticRecordFact[question.semanticType];
+  if (!key && !recordMapping) {
     return {
       state: "UNRESOLVED",
       value: null,
@@ -104,18 +154,21 @@ export function resolveProfileAnswer(
     };
   }
 
-  const fact = profile.facts.find((candidate) => candidate.key === key);
+  const fact =
+    recordFactForSemanticType(question.semanticType, profile) ??
+    profile.facts.find((candidate) => candidate.key === key);
+  const sourceKey = fact?.key ?? recordMapping?.key ?? key;
   if (!fact) {
     return {
       state: "UNRESOLVED",
       value: null,
       sourceFactId: null,
-      sourceKey: key,
+      sourceKey,
       trustLevel: null,
       sensitive: question.sensitive,
       protected: false,
       confidence: question.confidence,
-      reasons: [`Profile fact ${key} is not available`],
+      reasons: [`Profile fact ${sourceKey} is not available`],
     };
   }
 
@@ -125,12 +178,12 @@ export function resolveProfileAnswer(
       state: "UNRESOLVED",
       value: null,
       sourceFactId: fact.factId,
-      sourceKey: key,
+      sourceKey: fact.key,
       trustLevel: fact.trustLevel,
       sensitive: question.sensitive || fact.protected,
       protected: fact.protected,
       confidence: question.confidence,
-      reasons: [`Profile fact ${key} is empty`],
+      reasons: [`Profile fact ${fact.key} is empty`],
     };
   }
 
@@ -139,13 +192,13 @@ export function resolveProfileAnswer(
       state: "REVIEW",
       value,
       sourceFactId: fact.factId,
-      sourceKey: key,
+      sourceKey: fact.key,
       trustLevel: fact.trustLevel,
       sensitive: question.sensitive || fact.protected,
       protected: fact.protected,
       confidence: question.confidence,
       reasons: [
-        `Profile fact ${key} has non-authoritative trust level ${fact.trustLevel}`,
+        `Profile fact ${fact.key} has non-authoritative trust level ${fact.trustLevel}`,
       ],
     };
   }
@@ -168,7 +221,7 @@ export function resolveProfileAnswer(
     state: requiresReview ? "REVIEW" : "READY",
     value,
     sourceFactId: fact.factId,
-    sourceKey: key,
+    sourceKey: fact.key,
     trustLevel: fact.trustLevel,
     sensitive: question.sensitive || fact.protected,
     protected: fact.protected,

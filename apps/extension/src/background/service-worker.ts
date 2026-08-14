@@ -1,23 +1,22 @@
 import {
   ApplicationPageSchema,
   FillPlanSchema,
-  MasterProfileSchema,
   type ApplicationPage,
   type ExtensionRequest,
   type ExtensionResponse,
 } from "@munshi-apply/contracts";
+import { parseProfileSnapshot } from "@munshi-apply/contracts/profile-vault";
 import {
   clearPagesForTab,
   getLatestPage,
   getPage,
   getPagesForTab,
-  getProfile,
   savePage,
-  saveProfile,
 } from "../storage/vault";
 import { getNativeHealth } from "../messaging/native";
 import {
   getCloudConnection,
+  getCloudSnapshot,
   isCloudEncryptionReady,
   publishApplicationSnapshot,
 } from "../storage/cloud";
@@ -25,6 +24,11 @@ import {
   ProtectedProfileConflictError,
   synchronizeProtectedProfile,
 } from "../storage/profile-sync";
+import {
+  loadAuthoritativeProfileSnapshot,
+  persistAuthoritativeProfileSnapshot,
+} from "../storage/profile-authority";
+import { migrateLegacyProfileSnapshot } from "../storage/profile-migration";
 
 const supportsSidePanel =
   typeof chrome.sidePanel?.setPanelBehavior === "function";
@@ -140,16 +144,28 @@ async function routeMessage(
       case "NATIVE_HEALTH":
         return { ok: true, data: await getNativeHealth() };
       case "GET_PROFILE": {
-        const localProfile = await getProfile();
+        let localProfile = await loadAuthoritativeProfileSnapshot();
+        if (localProfile) {
+          const migration = migrateLegacyProfileSnapshot(localProfile);
+          localProfile = migration.snapshot;
+          if (migration.migrated) {
+            await persistAuthoritativeProfileSnapshot(localProfile);
+          }
+        }
         const connection = await getCloudConnection();
-        if (localProfile && connection && (await isCloudEncryptionReady())) {
+        if (connection && (await isCloudEncryptionReady())) {
           try {
-            const synchronized = await synchronizeProtectedProfile(
-              connection,
-              localProfile,
-            );
-            await saveProfile(synchronized);
-            return { ok: true, data: synchronized };
+            if (localProfile) {
+              localProfile = await synchronizeProtectedProfile(
+                connection,
+                localProfile,
+              );
+            } else {
+              localProfile = (await getCloudSnapshot(connection)).profile;
+            }
+            if (localProfile) {
+              await persistAuthoritativeProfileSnapshot(localProfile);
+            }
           } catch (error) {
             if (error instanceof ProtectedProfileConflictError) throw error;
             // Local-first operation continues when cloud is temporarily unavailable.
@@ -158,20 +174,20 @@ async function routeMessage(
         return { ok: true, data: localProfile };
       }
       case "SAVE_PROFILE": {
-        const parsed = MasterProfileSchema.parse(request.payload);
-        await saveProfile(parsed);
+        const parsed = parseProfileSnapshot(request.payload);
+        await persistAuthoritativeProfileSnapshot(parsed);
         const connection = await getCloudConnection();
         if (connection && (await isCloudEncryptionReady())) {
           const synchronized = await synchronizeProtectedProfile(
             connection,
             parsed,
           );
+          await persistAuthoritativeProfileSnapshot(synchronized);
           if (JSON.stringify(synchronized) !== JSON.stringify(parsed)) {
             throw new Error(
               "Profile changed on another device. Refresh before saving again.",
             );
           }
-          await saveProfile(synchronized);
         }
         return { ok: true };
       }

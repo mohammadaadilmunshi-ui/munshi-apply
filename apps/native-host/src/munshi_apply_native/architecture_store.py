@@ -17,12 +17,13 @@ class ArchitectureStore:
             connection.execute(
                 """
                 INSERT INTO profile_records (
-                    record_id, profile_id, kind, label, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    record_id, profile_id, kind, label, sort_order, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(record_id) DO UPDATE SET
                     profile_id = excluded.profile_id,
                     kind = excluded.kind,
                     label = excluded.label,
+                    sort_order = excluded.sort_order,
                     updated_at = excluded.updated_at
                 """,
                 (
@@ -30,6 +31,7 @@ class ArchitectureStore:
                     record["profile_id"],
                     record["kind"],
                     record["label"],
+                    record.get("sort_order", 0),
                     record["created_at"],
                     record["updated_at"],
                 ),
@@ -67,7 +69,7 @@ class ArchitectureStore:
                     """
                     SELECT * FROM profile_records
                     WHERE profile_id = ?
-                    ORDER BY kind, updated_at DESC, record_id
+                    ORDER BY kind, sort_order, record_id
                     """,
                     (profile_id,),
                 ).fetchall()
@@ -76,7 +78,7 @@ class ArchitectureStore:
                     """
                     SELECT * FROM profile_records
                     WHERE profile_id = ? AND kind = ?
-                    ORDER BY updated_at DESC, record_id
+                    ORDER BY sort_order, record_id
                     """,
                     (profile_id, kind),
                 ).fetchall()

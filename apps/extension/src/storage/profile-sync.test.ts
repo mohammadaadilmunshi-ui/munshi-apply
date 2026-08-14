@@ -1,4 +1,5 @@
-import type { MasterProfile, ProfileFact } from "@munshi-apply/contracts";
+import type { ProfileFact } from "@munshi-apply/contracts";
+import type { ProfileSnapshot } from "@munshi-apply/contracts/profile-vault";
 import { describe, expect, it } from "vitest";
 import {
   protectedProfileConflictKeys,
@@ -33,14 +34,17 @@ function fact(
 function profile(
   facts: ProfileFact[],
   updatedAt = "2026-08-14T12:00:00.000Z",
-): MasterProfile {
+): ProfileSnapshot {
   return {
     profileId: "profile-test",
     displayName: "Test profile",
     facts,
+    records: [],
+    recordTombstones: [],
     createdAt: "2026-08-14T10:00:00.000Z",
     updatedAt,
     schemaVersion: 1,
+    snapshotVersion: 1,
   };
 }
 
@@ -122,5 +126,92 @@ describe("protected profile convergence", () => {
         (candidate) => candidate.key === "preferred_name",
       )?.value,
     ).toBe("New");
+  });
+
+  it("preserves repeatable records when synchronizing with a legacy flat profile", () => {
+    const local = {
+      ...profile([], "2026-08-14T12:05:00.000Z"),
+      records: [
+        {
+          recordId: "employment-1",
+          kind: "EMPLOYMENT" as const,
+          label: "Employer One",
+          facts: [],
+          sortOrder: 0,
+          createdAt: "2026-08-14T12:00:00.000Z",
+          updatedAt: "2026-08-14T12:05:00.000Z",
+        },
+      ],
+    };
+    const remote = profile([], "2026-08-14T12:06:00.000Z");
+
+    expect(reconcileProtectedProfile(local, remote).records).toEqual(
+      local.records,
+    );
+  });
+
+  it("honors a newer explicitly confirmed record deletion", () => {
+    const local = {
+      ...profile([], "2026-08-14T12:06:00.000Z"),
+      recordTombstones: [
+        {
+          recordId: "employment-1",
+          kind: "EMPLOYMENT" as const,
+          deletedAt: "2026-08-14T12:06:00.000Z",
+          confirmed: true as const,
+        },
+      ],
+    };
+    const remote = {
+      ...profile([], "2026-08-14T12:05:00.000Z"),
+      records: [
+        {
+          recordId: "employment-1",
+          kind: "EMPLOYMENT" as const,
+          label: "Employer One",
+          facts: [],
+          sortOrder: 0,
+          createdAt: "2026-08-14T12:00:00.000Z",
+          updatedAt: "2026-08-14T12:05:00.000Z",
+        },
+      ],
+    };
+
+    const reconciled = reconcileProtectedProfile(local, remote);
+    expect(reconciled.records).toEqual([]);
+    expect(reconciled.recordTombstones).toEqual(local.recordTombstones);
+  });
+
+  it("blocks contradictory protected facts inside the same record", () => {
+    const local = {
+      ...profile([]),
+      records: [
+        {
+          recordId: "education-1",
+          kind: "EDUCATION" as const,
+          label: "School",
+          facts: [fact("graduation_date", "2026-12-16")],
+          sortOrder: 0,
+          createdAt: "2026-08-14T12:00:00.000Z",
+          updatedAt: "2026-08-14T12:00:00.000Z",
+        },
+      ],
+    };
+    const remote = {
+      ...profile([]),
+      records: [
+        {
+          ...local.records[0]!,
+          facts: [fact("graduation_date", "2027-01-01")],
+        },
+      ],
+    };
+
+    expect(protectedProfileConflictKeys(local, remote)).toEqual([
+      "record:education-1:graduation_date",
+    ]);
+    expect(() => reconcileProtectedProfile(local, remote)).toThrow(
+      /record:education-1:graduation_date/,
+    );
   });
 });

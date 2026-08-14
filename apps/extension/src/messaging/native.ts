@@ -1,3 +1,8 @@
+import {
+  parseProfileSnapshot,
+  type ProfileSnapshot,
+} from "@munshi-apply/contracts/profile-vault";
+
 const nativeHostName = "systems.munshi.apply";
 
 type NativeResponse =
@@ -52,6 +57,22 @@ export async function getNativeHealth(
   timeoutMilliseconds = 3_000,
 ): Promise<unknown> {
   return sendNative({ type: "PING" }, timeoutMilliseconds);
+}
+
+export async function getNativeProfileSnapshot(): Promise<ProfileSnapshot | null> {
+  const candidate = await sendNative<unknown>({
+    type: "GET_PROFILE_SNAPSHOT",
+  });
+  return candidate === null ? null : parseProfileSnapshot(candidate);
+}
+
+export async function saveNativeProfileSnapshot(
+  snapshot: ProfileSnapshot,
+): Promise<void> {
+  await sendNative({
+    type: "SAVE_PROFILE_SNAPSHOT",
+    payload: parseProfileSnapshot(snapshot),
+  });
 }
 
 export async function getAISettings(): Promise<AISettings> {

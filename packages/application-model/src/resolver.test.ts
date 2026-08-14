@@ -3,6 +3,7 @@ import type {
   ProfileFact,
   Question,
 } from "@munshi-apply/contracts";
+import type { ProfileSnapshot } from "@munshi-apply/contracts/profile-vault";
 import { describe, expect, it } from "vitest";
 import { factKeyForSemanticType, resolveProfileAnswer } from "./resolver";
 
@@ -31,6 +32,18 @@ function profile(facts: ProfileFact[]): MasterProfile {
     createdAt: now,
     updatedAt: now,
     schemaVersion: 1,
+  };
+}
+
+function snapshot(
+  records: ProfileSnapshot["records"],
+  facts: ProfileFact[] = [],
+): ProfileSnapshot {
+  return {
+    ...profile(facts),
+    records,
+    recordTombstones: [],
+    snapshotVersion: 1,
   };
 }
 
@@ -130,5 +143,93 @@ describe("resolveProfileAnswer", () => {
       sourceKey: "first_name",
       value: null,
     });
+  });
+
+  it("resolves repeatable records in explicit profile order", () => {
+    const result = resolveProfileAnswer(
+      question({ semanticType: "SCHOOL_NAME", rawText: "University name" }),
+      snapshot([
+        {
+          recordId: "education-2",
+          kind: "EDUCATION",
+          label: "Second school",
+          facts: [
+            fact({
+              factId: "school-2",
+              key: "school_name",
+              value: "Second school",
+              category: "EDUCATION",
+            }),
+          ],
+          sortOrder: 1,
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          recordId: "education-1",
+          kind: "EDUCATION",
+          label: "First school",
+          facts: [
+            fact({
+              factId: "school-1",
+              key: "school_name",
+              value: "First school",
+              category: "EDUCATION",
+            }),
+          ],
+          sortOrder: 0,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ]),
+    );
+
+    expect(result).toMatchObject({
+      state: "READY",
+      value: "First school",
+      sourceFactId: "school-1",
+      sourceKey: "school_name",
+    });
+  });
+
+  it("prefers canonical record facts and falls back to legacy flat facts", () => {
+    const legacyEmployer = fact({
+      factId: "legacy-employer",
+      key: "current_employer",
+      value: "Legacy employer",
+      category: "EMPLOYMENT",
+    });
+    const recordEmployer = fact({
+      factId: "record-employer",
+      key: "employer_name",
+      value: "Canonical employer",
+      category: "EMPLOYMENT",
+    });
+    const employerQuestion = question({
+      semanticType: "EMPLOYER_NAME",
+      rawText: "Current employer",
+    });
+    const canonical = snapshot(
+      [
+        {
+          recordId: "employment-1",
+          kind: "EMPLOYMENT",
+          label: "Canonical employer",
+          facts: [recordEmployer],
+          sortOrder: 0,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+      [legacyEmployer],
+    );
+
+    expect(resolveProfileAnswer(employerQuestion, canonical).value).toBe(
+      "Canonical employer",
+    );
+    expect(
+      resolveProfileAnswer(employerQuestion, snapshot([], [legacyEmployer]))
+        .value,
+    ).toBe("Legacy employer");
   });
 });

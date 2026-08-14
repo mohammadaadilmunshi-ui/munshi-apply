@@ -1,15 +1,18 @@
-import type { MasterProfile } from "@munshi-apply/contracts";
+import type { ProfileSnapshot } from "@munshi-apply/contracts/profile-vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { saveProfile } from "./client";
 
-function profile(displayName: string, updatedAt: string): MasterProfile {
+function profile(displayName: string, updatedAt: string): ProfileSnapshot {
   return {
     profileId: "profile-test",
     displayName,
     facts: [],
+    records: [],
+    recordTombstones: [],
     createdAt: "2026-08-14T00:00:00.000Z",
     updatedAt,
     schemaVersion: 1,
+    snapshotVersion: 1,
   };
 }
 

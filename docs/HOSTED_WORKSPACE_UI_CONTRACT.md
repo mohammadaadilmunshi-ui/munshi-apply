@@ -1,12 +1,12 @@
 # Hosted owner workspace UI and source-control contract
 
-Status: required M1/M0.5 release contract.
+Status: implemented M1/M0.5 release contract; owner recovery drill remains.
 
 ## Purpose
 
 The responsive owner workspace is a separate runtime from the Edge extension and macOS native companion. Its production UI must nevertheless use the same canonical cross-device state and safety rules as the desktop workflow.
 
-The currently deployed `chatgpt.site` workspace predates source-controlled ownership of its frontend. Until its exact deployment source is imported into this repository and the tracked implementation is redeployed, the hosted UI is not considered reproducible from GitHub and M1 hosted-workspace parity remains incomplete.
+The exact workspace source is tracked in `apps/owner-workspace` and independently gated by `.github/workflows/owner-workspace.yml`. Deployment provenance and the release procedure are recorded in `docs/OWNER_WORKSPACE.md`.
 
 No replacement host, paid service, domain change, re-pairing, or credential migration may be performed merely to close this gap. Deployment requires the existing hosted runtime/source or a separately authorized migration plan.
 

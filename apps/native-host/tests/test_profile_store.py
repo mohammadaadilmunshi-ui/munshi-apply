@@ -51,13 +51,16 @@ def test_profile_snapshot_round_trip_includes_repeatable_records(tmp_path: Path)
                         "protected": False,
                     }
                 ],
+                "sortOrder": 0,
                 "createdAt": now,
                 "updatedAt": now,
             }
         ],
+        "recordTombstones": [],
         "createdAt": now,
         "updatedAt": now,
         "schemaVersion": 1,
+        "snapshotVersion": 1,
     }
 
     store.save(profile)
@@ -102,13 +105,16 @@ def test_profile_snapshot_replace_removes_stale_facts_and_records(tmp_path: Path
                 "kind": "EDUCATION",
                 "label": "School A",
                 "facts": [],
+                "sortOrder": 0,
                 "createdAt": now,
                 "updatedAt": now,
             }
         ],
+        "recordTombstones": [],
         "createdAt": now,
         "updatedAt": now,
         "schemaVersion": 1,
+        "snapshotVersion": 1,
     }
     store.save(original)
 
@@ -149,3 +155,54 @@ def test_legacy_flat_profile_without_records_remains_readable(tmp_path: Path) ->
     assert restored is not None
     assert restored["profileId"] == "profile-legacy"
     assert restored["records"] == []
+    assert restored["recordTombstones"] == []
+    assert restored["snapshotVersion"] == 1
+
+
+def test_invalid_duplicate_records_do_not_replace_existing_snapshot(tmp_path: Path) -> None:
+    store = create_store(tmp_path)
+    now = datetime.now(UTC).isoformat()
+    original = {
+        "profileId": "profile-1",
+        "displayName": "Application profile",
+        "facts": [],
+        "records": [],
+        "recordTombstones": [],
+        "createdAt": now,
+        "updatedAt": now,
+        "schemaVersion": 1,
+        "snapshotVersion": 1,
+    }
+    store.save(original)
+    duplicate = {
+        **original,
+        "records": [
+            {
+                "recordId": "employment-1",
+                "kind": "EMPLOYMENT",
+                "label": "Employer",
+                "facts": [],
+                "sortOrder": 0,
+                "createdAt": now,
+                "updatedAt": now,
+            },
+            {
+                "recordId": "employment-1",
+                "kind": "EMPLOYMENT",
+                "label": "Duplicate",
+                "facts": [],
+                "sortOrder": 1,
+                "createdAt": now,
+                "updatedAt": now,
+            },
+        ],
+    }
+
+    try:
+        store.save(duplicate)
+    except ValueError as error:
+        assert "Duplicate profile record id" in str(error)
+    else:
+        raise AssertionError("Duplicate records were accepted")
+
+    assert store.latest() == original

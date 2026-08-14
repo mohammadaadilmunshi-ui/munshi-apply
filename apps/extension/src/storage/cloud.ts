@@ -1,4 +1,8 @@
-import type { ApplicationPage, MasterProfile } from "@munshi-apply/contracts";
+import type { ApplicationPage } from "@munshi-apply/contracts";
+import {
+  parseProfileSnapshot,
+  type ProfileSnapshot,
+} from "@munshi-apply/contracts/profile-vault";
 
 export type CloudConnection = {
   baseUrl: string;
@@ -68,7 +72,7 @@ export type ApplicationReview = {
 };
 
 export type CloudSnapshot = {
-  profile: MasterProfile | null;
+  profile: ProfileSnapshot | null;
   profileVersion: number;
   applications: ApplicationPage[];
   reviews: ApplicationReview[];
@@ -486,7 +490,7 @@ function latestEvents(events: CloudSyncEvent[]): Map<string, CloudSyncEvent> {
   return latest;
 }
 
-async function postEncryptedEntity(input: {
+export async function postEncryptedEntity(input: {
   connection: CloudConnection;
   rawKey: string;
   entityType: string;
@@ -525,7 +529,13 @@ async function postEncryptedEntity(input: {
   if (!response.ok) {
     throw new Error(payload.error ?? "Encrypted cloud update failed");
   }
-  return payload.event?.version ?? input.baseVersion + 1;
+  const expectedVersion = input.baseVersion + 1;
+  if (payload.event?.version !== expectedVersion) {
+    throw new Error(
+      "Encrypted cloud update was not acknowledged at the expected version",
+    );
+  }
+  return expectedVersion;
 }
 
 export async function getCloudSnapshot(
@@ -535,16 +545,15 @@ export async function getCloudSnapshot(
   if (!rawKey) throw new Error("Encrypted synchronization is not enabled");
   const { events, nextCursor } = await fetchCloudEvents(connection, 0);
   const latest = latestEvents(events);
-  let profile: MasterProfile | null = null;
+  let profile: ProfileSnapshot | null = null;
   let profileVersion = 0;
   const applications: ApplicationPage[] = [];
   const reviews: ApplicationReview[] = [];
   const resumes: ResumeRecord[] = [];
   for (const event of latest.values()) {
     if (event.entityType === "PROFILE.V1") {
-      profile = await decryptJson<MasterProfile>(
-        rawKey,
-        event.payloadCiphertext,
+      profile = parseProfileSnapshot(
+        await decryptJson<unknown>(rawKey, event.payloadCiphertext),
       );
       profileVersion = event.baseVersion + 1;
     } else if (event.entityType === "APPLICATION.V1") {
@@ -573,40 +582,6 @@ export async function getCloudSnapshot(
     resumes,
     nextCursor,
   };
-}
-
-export async function synchronizeProfile(
-  connection: CloudConnection,
-  localProfile: MasterProfile,
-): Promise<MasterProfile> {
-  const rawKey = await getWorkspaceEncryptionKey();
-  if (!rawKey) throw new Error("Encrypted synchronization is not enabled");
-  const snapshot = await getCloudSnapshot(connection);
-  if (!snapshot.profile) {
-    if (localProfile.facts.length > 0) {
-      await postEncryptedEntity({
-        connection,
-        rawKey,
-        entityType: "PROFILE.V1",
-        entityId: "profile-master",
-        baseVersion: 0,
-        value: localProfile,
-      });
-    }
-    return localProfile;
-  }
-  if (localProfile.updatedAt > snapshot.profile.updatedAt) {
-    await postEncryptedEntity({
-      connection,
-      rawKey,
-      entityType: "PROFILE.V1",
-      entityId: "profile-master",
-      baseVersion: snapshot.profileVersion,
-      value: localProfile,
-    });
-    return localProfile;
-  }
-  return snapshot.profile;
 }
 
 export async function publishApplicationSnapshot(

@@ -11,6 +11,7 @@ export default tseslint.config(
       "**/dist-mobile/**",
       "**/coverage/**",
       "**/node_modules/**",
+      "apps/owner-workspace/**",
     ],
   },
   eslint.configs.recommended,
