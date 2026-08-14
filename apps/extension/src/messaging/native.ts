@@ -10,7 +10,8 @@ import {
 const nativeHostName = "systems.munshi.apply";
 
 type NativeResponse =
-  { ok: true; data?: unknown } | { ok: false; error: string };
+  | { ok: true; data?: unknown }
+  | { ok: false; error: string };
 
 export type AISettings = {
   provider: "openai";
@@ -19,8 +20,96 @@ export type AISettings = {
   monthlyBudgetUsd: number;
   warningBudgetUsd: number;
   hardStop: boolean;
+  allowApplicationDrafts: boolean;
+  allowProfileEvidence: boolean;
+  allowResumeEvidence: boolean;
   keyConfigured: boolean;
   keySource: "keychain" | "environment" | "none";
+};
+
+export type AIUsageSummary = {
+  month: string;
+  spentUsd: number;
+  reservedUsd: number;
+  projectedUsd: number;
+  remainingUsd: number;
+  requestCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  estimatedCostUsd: number;
+};
+
+export type AIPricingStatus = {
+  provider: "openai";
+  model: string;
+  inputUsdPerMillionTokens: number;
+  outputUsdPerMillionTokens: number;
+  verifiedAt: string;
+  source: string;
+  ageDays: number;
+  stale: boolean;
+};
+
+export type AIControlStatus = {
+  settings: AISettings;
+  usage: AIUsageSummary;
+  pricing: AIPricingStatus | null;
+  guardrails: {
+    safeDraftSemanticTypes: string[];
+    consequentialQuestionsManual: true;
+    protectedEvidenceExcluded: true;
+    ownerReviewRequired: true;
+    finalSubmissionManual: true;
+  };
+};
+
+export type AIDraftRequest = {
+  applicationId: string;
+  question: string;
+  semanticType: string;
+  correlationId: string;
+  maxWords?: number;
+  maxOutputTokens?: number;
+};
+
+export type AIDraftPreview = {
+  state: "READY_FOR_PROVIDER";
+  providerCallMade: false;
+  model: string;
+  evidenceIds: string[];
+  estimatedInputTokens: number;
+  plannedCostUsd: number;
+  budget: {
+    state: "ALLOW" | "WARN";
+    month: string;
+    spentUsd: number;
+    reservedUsd: number;
+    plannedCostUsd: number;
+    projectedUsd: number;
+    remainingUsd: number;
+    reason: string;
+  };
+  reviewRequired: true;
+};
+
+export type AIDraftResult = {
+  status: "DRAFT_REVIEW_REQUIRED";
+  provider: "openai";
+  model: string;
+  responseId: string;
+  text: string;
+  claims: { claimId: string; text: string; evidenceIds: string[] }[];
+  evidenceIds: string[];
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    costUsd: number;
+    estimated: false;
+  };
+  budgetState: "ALLOW" | "WARN";
+  reviewRequired: true;
+  approved: false;
 };
 
 export type NativeCheckpointSaveResult = {
@@ -62,11 +151,173 @@ async function sendNative<T>(
   });
 }
 
-function parseCheckpointSaveResult(value: unknown): NativeCheckpointSaveResult {
+function objectValue(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("Native checkpoint save response must be an object");
+    throw new Error(`${label} must be an object`);
   }
-  const candidate = value as Record<string, unknown>;
+  return value as Record<string, unknown>;
+}
+
+function stringValue(value: unknown, label: string): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`${label} must be a non-empty string`);
+  }
+  return value.trim();
+}
+
+function finiteNumber(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new Error(`${label} must be a non-negative finite number`);
+  }
+  return value;
+}
+
+function integerValue(value: unknown, label: string): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 0) {
+    throw new Error(`${label} must be a non-negative integer`);
+  }
+  return Number(value);
+}
+
+export function parseAISettings(value: unknown): AISettings {
+  const candidate = objectValue(value, "AI settings");
+  if (candidate.provider !== "openai") {
+    throw new Error("AI settings provider is invalid");
+  }
+  const keySource = candidate.keySource;
+  if (
+    keySource !== "keychain" &&
+    keySource !== "environment" &&
+    keySource !== "none"
+  ) {
+    throw new Error("AI key source is invalid");
+  }
+  const booleans = [
+    "enabled",
+    "hardStop",
+    "allowApplicationDrafts",
+    "allowProfileEvidence",
+    "allowResumeEvidence",
+    "keyConfigured",
+  ] as const;
+  for (const field of booleans) {
+    if (typeof candidate[field] !== "boolean") {
+      throw new Error(`AI settings ${field} must be boolean`);
+    }
+  }
+  const monthlyBudgetUsd = finiteNumber(
+    candidate.monthlyBudgetUsd,
+    "monthlyBudgetUsd",
+  );
+  const warningBudgetUsd = finiteNumber(
+    candidate.warningBudgetUsd,
+    "warningBudgetUsd",
+  );
+  if (monthlyBudgetUsd > 0 && warningBudgetUsd > monthlyBudgetUsd) {
+    throw new Error("AI warning budget cannot exceed the monthly budget");
+  }
+  return {
+    provider: "openai",
+    enabled: candidate.enabled as boolean,
+    model: typeof candidate.model === "string" ? candidate.model : "",
+    monthlyBudgetUsd,
+    warningBudgetUsd,
+    hardStop: candidate.hardStop as boolean,
+    allowApplicationDrafts: candidate.allowApplicationDrafts as boolean,
+    allowProfileEvidence: candidate.allowProfileEvidence as boolean,
+    allowResumeEvidence: candidate.allowResumeEvidence as boolean,
+    keyConfigured: candidate.keyConfigured as boolean,
+    keySource,
+  };
+}
+
+function parseUsage(value: unknown): AIUsageSummary {
+  const candidate = objectValue(value, "AI usage summary");
+  return {
+    month: stringValue(candidate.month, "AI usage month"),
+    spentUsd: finiteNumber(candidate.spentUsd, "AI spentUsd"),
+    reservedUsd: finiteNumber(candidate.reservedUsd, "AI reservedUsd"),
+    projectedUsd: finiteNumber(candidate.projectedUsd, "AI projectedUsd"),
+    remainingUsd: finiteNumber(candidate.remainingUsd, "AI remainingUsd"),
+    requestCount: integerValue(candidate.requestCount, "AI requestCount"),
+    inputTokens: integerValue(candidate.inputTokens, "AI inputTokens"),
+    outputTokens: integerValue(candidate.outputTokens, "AI outputTokens"),
+    estimatedCostUsd: finiteNumber(
+      candidate.estimatedCostUsd,
+      "AI estimatedCostUsd",
+    ),
+  };
+}
+
+function parsePricing(value: unknown): AIPricingStatus | null {
+  if (value === null) return null;
+  const candidate = objectValue(value, "AI pricing status");
+  if (candidate.provider !== "openai") {
+    throw new Error("AI pricing provider is invalid");
+  }
+  if (typeof candidate.stale !== "boolean") {
+    throw new Error("AI pricing stale status is invalid");
+  }
+  const verifiedAt = stringValue(candidate.verifiedAt, "AI pricing verifiedAt");
+  if (Number.isNaN(Date.parse(verifiedAt))) {
+    throw new Error("AI pricing verifiedAt must be a timestamp");
+  }
+  return {
+    provider: "openai",
+    model: stringValue(candidate.model, "AI pricing model"),
+    inputUsdPerMillionTokens: finiteNumber(
+      candidate.inputUsdPerMillionTokens,
+      "AI input pricing",
+    ),
+    outputUsdPerMillionTokens: finiteNumber(
+      candidate.outputUsdPerMillionTokens,
+      "AI output pricing",
+    ),
+    verifiedAt,
+    source: stringValue(candidate.source, "AI pricing source"),
+    ageDays: integerValue(candidate.ageDays, "AI pricing ageDays"),
+    stale: candidate.stale,
+  };
+}
+
+export function parseAIControlStatus(value: unknown): AIControlStatus {
+  const candidate = objectValue(value, "AI control status");
+  const guardrails = objectValue(candidate.guardrails, "AI guardrails");
+  const lockedFlags = [
+    "consequentialQuestionsManual",
+    "protectedEvidenceExcluded",
+    "ownerReviewRequired",
+    "finalSubmissionManual",
+  ] as const;
+  for (const field of lockedFlags) {
+    if (guardrails[field] !== true) {
+      throw new Error(`AI guardrail ${field} must remain locked on`);
+    }
+  }
+  if (
+    !Array.isArray(guardrails.safeDraftSemanticTypes) ||
+    !guardrails.safeDraftSemanticTypes.every(
+      (item) => typeof item === "string" && item.trim(),
+    )
+  ) {
+    throw new Error("AI safe draft semantic types are invalid");
+  }
+  return {
+    settings: parseAISettings(candidate.settings),
+    usage: parseUsage(candidate.usage),
+    pricing: parsePricing(candidate.pricing),
+    guardrails: {
+      safeDraftSemanticTypes: [...guardrails.safeDraftSemanticTypes] as string[],
+      consequentialQuestionsManual: true,
+      protectedEvidenceExcluded: true,
+      ownerReviewRequired: true,
+      finalSubmissionManual: true,
+    },
+  };
+}
+
+function parseCheckpointSaveResult(value: unknown): NativeCheckpointSaveResult {
+  const candidate = objectValue(value, "Native checkpoint save response");
   if (typeof candidate.created !== "boolean") {
     throw new Error(
       "Native checkpoint save response is missing created status",
@@ -82,10 +333,7 @@ function parseCreatedResult(
   value: unknown,
   label: string,
 ): { created: boolean } {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`${label} response must be an object`);
-  }
-  const candidate = value as Record<string, unknown>;
+  const candidate = objectValue(value, label);
   if (typeof candidate.created !== "boolean") {
     throw new Error(`${label} response is missing created status`);
   }
@@ -164,34 +412,45 @@ export async function getLatestNativeApplicationCheckpoint(
 }
 
 export async function getAISettings(): Promise<AISettings> {
-  return sendNative<AISettings>({ type: "GET_AI_SETTINGS" });
+  return parseAISettings(
+    await sendNative<unknown>({ type: "GET_AI_SETTINGS" }),
+  );
 }
 
 export async function saveAISettings(
   settings: AISettings,
 ): Promise<AISettings> {
-  return sendNative<AISettings>({
-    type: "SAVE_AI_SETTINGS",
-    payload: {
-      provider: settings.provider,
-      enabled: settings.enabled,
-      model: settings.model,
-      monthlyBudgetUsd: settings.monthlyBudgetUsd,
-      warningBudgetUsd: settings.warningBudgetUsd,
-      hardStop: settings.hardStop,
-    },
-  });
+  return parseAISettings(
+    await sendNative<unknown>({
+      type: "SAVE_AI_SETTINGS",
+      payload: {
+        provider: settings.provider,
+        enabled: settings.enabled,
+        model: settings.model,
+        monthlyBudgetUsd: settings.monthlyBudgetUsd,
+        warningBudgetUsd: settings.warningBudgetUsd,
+        hardStop: settings.hardStop,
+        allowApplicationDrafts: settings.allowApplicationDrafts,
+        allowProfileEvidence: settings.allowProfileEvidence,
+        allowResumeEvidence: settings.allowResumeEvidence,
+      },
+    }),
+  );
 }
 
 export async function setOpenAIKey(apiKey: string): Promise<AISettings> {
-  return sendNative<AISettings>({
-    type: "SET_OPENAI_API_KEY",
-    payload: { apiKey },
-  });
+  return parseAISettings(
+    await sendNative<unknown>({
+      type: "SET_OPENAI_API_KEY",
+      payload: { apiKey },
+    }),
+  );
 }
 
 export async function deleteOpenAIKey(): Promise<AISettings> {
-  return sendNative<AISettings>({ type: "DELETE_OPENAI_API_KEY" });
+  return parseAISettings(
+    await sendNative<unknown>({ type: "DELETE_OPENAI_API_KEY" }),
+  );
 }
 
 export async function testOpenAIConnection(): Promise<{ modelCount: number }> {
@@ -207,4 +466,28 @@ export async function listOpenAIModels(): Promise<string[]> {
     15_000,
   );
   return result.models;
+}
+
+export async function getAIControlStatus(): Promise<AIControlStatus> {
+  return parseAIControlStatus(
+    await sendNative<unknown>({ type: "GET_AI_CONTROL_STATUS" }),
+  );
+}
+
+export async function previewAIDraft(
+  request: AIDraftRequest,
+): Promise<AIDraftPreview> {
+  return sendNative<AIDraftPreview>({
+    type: "PREVIEW_AI_DRAFT",
+    payload: request,
+  });
+}
+
+export async function generateAIDraft(
+  request: AIDraftRequest,
+): Promise<AIDraftResult> {
+  return sendNative<AIDraftResult>(
+    { type: "GENERATE_AI_DRAFT", payload: request },
+    60_000,
+  );
 }
