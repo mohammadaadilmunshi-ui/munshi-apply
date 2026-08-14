@@ -21,7 +21,7 @@ describe("profile save queue", () => {
   it("coalesces rapid edits and resolves only after the newest save finishes", async () => {
     const responders: Array<(value: unknown) => void> = [];
     const sendMessage = vi.fn(
-      () =>
+      (_request: unknown) =>
         new Promise<unknown>((resolve) => {
           responders.push(resolve);
         }),
