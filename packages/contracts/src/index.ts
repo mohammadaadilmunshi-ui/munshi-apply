@@ -169,46 +169,6 @@ export const controlKinds = [
 export const ControlKindSchema = z.enum(controlKinds);
 export type ControlKind = z.infer<typeof ControlKindSchema>;
 
-export const ControlSchema = z.object({
-  controlId: z.string().min(1),
-  frameId: z.number().int().nonnegative(),
-  kind: ControlKindSchema,
-  tagName: z.string().min(1),
-  name: z.string(),
-  label: z.string(),
-  placeholder: z.string(),
-  ariaLabel: z.string(),
-  required: z.boolean(),
-  disabled: z.boolean(),
-  visible: z.boolean(),
-  options: z.array(z.string()),
-});
-export type Control = z.infer<typeof ControlSchema>;
-
-export const QuestionSchema = z.object({
-  questionId: z.string().min(1),
-  controlId: z.string().min(1),
-  rawText: z.string(),
-  semanticType: SemanticTypeSchema,
-  confidence: z.number().min(0).max(1),
-  sensitive: z.boolean(),
-  requiresReview: z.boolean(),
-});
-export type Question = z.infer<typeof QuestionSchema>;
-
-export const ApplicationPageSchema = z.object({
-  pageId: z.string().min(1),
-  tabId: z.number().int(),
-  frameId: z.number().int().nonnegative(),
-  documentId: z.string().min(1),
-  url: z.string().url(),
-  title: z.string(),
-  observedAt: z.string().datetime(),
-  controls: z.array(ControlSchema),
-  questions: z.array(QuestionSchema),
-});
-export type ApplicationPage = z.infer<typeof ApplicationPageSchema>;
-
 export const applicationStates = [
   "JOB_CONTEXT",
   "AUTH",
@@ -228,6 +188,84 @@ export const applicationStates = [
 ] as const;
 export const ApplicationStateSchema = z.enum(applicationStates);
 export type ApplicationState = z.infer<typeof ApplicationStateSchema>;
+
+export const securityCheckpointKinds = [
+  "CAPTCHA",
+  "MFA",
+  "OTP",
+  "IDENTITY_VERIFICATION",
+  "AUTHENTICATION",
+] as const;
+export const SecurityCheckpointKindSchema = z.enum(securityCheckpointKinds);
+export type SecurityCheckpointKind = z.infer<typeof SecurityCheckpointKindSchema>;
+
+export const navigationActions = [
+  "NEXT",
+  "BACK",
+  "REVIEW",
+  "FINAL_SUBMIT",
+] as const;
+export const NavigationActionSchema = z.enum(navigationActions);
+export type NavigationAction = z.infer<typeof NavigationActionSchema>;
+
+export const ControlSchema = z.object({
+  controlId: z.string().min(1),
+  frameId: z.number().int().nonnegative(),
+  kind: ControlKindSchema,
+  tagName: z.string().min(1),
+  name: z.string(),
+  label: z.string(),
+  placeholder: z.string(),
+  ariaLabel: z.string(),
+  required: z.boolean(),
+  disabled: z.boolean(),
+  visible: z.boolean(),
+  options: z.array(z.string()),
+  multiple: z.boolean().default(false),
+  autocomplete: z.string().default(""),
+  invalid: z.boolean().default(false),
+  validationMessage: z.string().default(""),
+});
+export type Control = z.infer<typeof ControlSchema>;
+
+export const QuestionSchema = z.object({
+  questionId: z.string().min(1),
+  controlId: z.string().min(1),
+  rawText: z.string(),
+  semanticType: SemanticTypeSchema,
+  confidence: z.number().min(0).max(1),
+  sensitive: z.boolean(),
+  requiresReview: z.boolean(),
+});
+export type Question = z.infer<typeof QuestionSchema>;
+
+export const NavigationCandidateSchema = z.object({
+  controlId: z.string().min(1),
+  frameId: z.number().int().nonnegative(),
+  action: NavigationActionSchema,
+  label: z.string(),
+  disabled: z.boolean(),
+});
+export type NavigationCandidate = z.infer<typeof NavigationCandidateSchema>;
+
+export const ApplicationPageSchema = z.object({
+  pageId: z.string().min(1),
+  tabId: z.number().int(),
+  frameId: z.number().int().nonnegative(),
+  documentId: z.string().min(1),
+  url: z.string().url(),
+  title: z.string(),
+  observedAt: z.string().datetime(),
+  controls: z.array(ControlSchema),
+  questions: z.array(QuestionSchema),
+  applicationState: ApplicationStateSchema.default("QUESTIONS"),
+  pageFingerprint: z.string().default(""),
+  securityCheckpoint: SecurityCheckpointKindSchema.nullable().default(null),
+  validationErrorCount: z.number().int().nonnegative().default(0),
+  navigationCandidates: z.array(NavigationCandidateSchema).default([]),
+  finalSubmissionBoundary: z.boolean().default(false),
+});
+export type ApplicationPage = z.infer<typeof ApplicationPageSchema>;
 
 export const eventTypes = [
   "PAGE_DETECTED",
@@ -288,4 +326,5 @@ export type ExtensionRequest =
   | { type: "PING" };
 
 export type ExtensionResponse =
-  { ok: true; data?: unknown } | { ok: false; error: string };
+  | { ok: true; data?: unknown }
+  | { ok: false; error: string };

@@ -1,8 +1,13 @@
 import type {
   ApplicationPage,
+  ApplicationState,
   Control,
   ControlKind,
+  NavigationAction,
+  NavigationCandidate,
   Question,
+  SecurityCheckpointKind,
+  SemanticType,
 } from "@munshi-apply/contracts";
 import { classifyQuestion } from "@munshi-apply/semantic-engine";
 
@@ -11,6 +16,7 @@ const selector = [
   "select",
   "textarea",
   "button",
+  "[role='button']",
   "[role='combobox']",
   "[contenteditable='true']",
 ].join(",");
@@ -37,6 +43,10 @@ function collectInteractiveElements(root: Document | ShadowRoot): Element[] {
 
 function compactText(value: string | null | undefined): string {
   return (value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function normalized(value: string | null | undefined): string {
+  return compactText(value).toLocaleLowerCase("en-US");
 }
 
 function isVisible(element: Element): boolean {
@@ -101,28 +111,31 @@ function groupLegend(element: Element): string {
   return compactText(fieldset?.querySelector(":scope > legend")?.textContent);
 }
 
+function labelledByText(element: Element): string {
+  const labelledBy = element.getAttribute("aria-labelledby");
+  if (!labelledBy) return "";
+  const root = element.getRootNode();
+  return labelledBy
+    .split(/\s+/)
+    .map((id) => {
+      const labelledElement =
+        root instanceof Document
+          ? root.getElementById(id)
+          : root instanceof ShadowRoot
+            ? root.querySelector(`#${CSS.escape(id)}`)
+            : null;
+      return compactText(labelledElement?.textContent);
+    })
+    .filter(Boolean)
+    .join(" ");
+}
+
 function labelFor(element: Element): string {
   const ariaLabel = compactText(element.getAttribute("aria-label"));
   if (ariaLabel) return ariaLabel;
 
-  const labelledBy = element.getAttribute("aria-labelledby");
-  if (labelledBy) {
-    const root = element.getRootNode();
-    const value = labelledBy
-      .split(/\s+/)
-      .map((id) => {
-        const labelledElement =
-          root instanceof Document
-            ? root.getElementById(id)
-            : root instanceof ShadowRoot
-              ? root.querySelector(`#${CSS.escape(id)}`)
-              : null;
-        return compactText(labelledElement?.textContent);
-      })
-      .filter(Boolean)
-      .join(" ");
-    if (value) return value;
-  }
+  const labelled = labelledByText(element);
+  if (labelled) return labelled;
 
   if (element instanceof HTMLInputElement) {
     if (element.type === "radio") {
@@ -131,6 +144,9 @@ function labelFor(element: Element): string {
     }
     const labels = inputLabel(element);
     if (labels) return labels;
+    if (["button", "submit", "reset"].includes(element.type)) {
+      return compactText(element.value);
+    }
   }
 
   if (
@@ -144,24 +160,39 @@ function labelFor(element: Element): string {
     if (labels) return labels;
   }
 
+  if (
+    element instanceof HTMLButtonElement ||
+    element.getAttribute("role") === "button"
+  ) {
+    const text = compactText(element.textContent);
+    if (text) return text;
+  }
+
   const container = element.closest("fieldset, [role='group'], .form-group");
-  const legend = compactText(container?.querySelector("legend")?.textContent);
-  return legend;
+  return compactText(container?.querySelector("legend")?.textContent);
 }
 
 function kindFor(element: Element): ControlKind {
   if (element.getAttribute("role") === "combobox") return "COMBOBOX";
   if (element instanceof HTMLTextAreaElement) return "TEXTAREA";
   if (element instanceof HTMLSelectElement) return "SELECT";
-  if (element instanceof HTMLButtonElement) return "BUTTON";
+  if (
+    element instanceof HTMLButtonElement ||
+    element.getAttribute("role") === "button"
+  ) {
+    return "BUTTON";
+  }
   if (element instanceof HTMLInputElement) {
     const mapping: Partial<Record<string, ControlKind>> = {
+      button: "BUTTON",
       checkbox: "CHECKBOX",
       date: "DATE",
       email: "EMAIL",
       file: "FILE",
       number: "NUMBER",
       radio: "RADIO",
+      reset: "BUTTON",
+      submit: "BUTTON",
       tel: "TEL",
       text: "TEXT",
     };
@@ -206,9 +237,7 @@ function controlledComboboxOptions(element: Element): string[] {
 
 function optionsFor(element: Element): string[] {
   if (element instanceof HTMLSelectElement) {
-    return Array.from(element.options).map((option) =>
-      compactText(option.text),
-    );
+    return Array.from(element.options).map((option) => compactText(option.text));
   }
   if (element instanceof HTMLInputElement && element.type === "radio") {
     return radioGroup(element).map(radioOptionLabel).filter(Boolean);
@@ -219,12 +248,49 @@ function optionsFor(element: Element): string[] {
   return [];
 }
 
+function validationState(element: Element): {
+  invalid: boolean;
+  validationMessage: string;
+} {
+  const ariaInvalid = element.getAttribute("aria-invalid") === "true";
+  const candidate =
+    element instanceof HTMLInputElement ||
+    element instanceof HTMLSelectElement ||
+    element instanceof HTMLTextAreaElement
+      ? compactText(element.validationMessage)
+      : "";
+  let ariaMessage = "";
+  if (ariaInvalid) {
+    const describedBy = element.getAttribute("aria-describedby");
+    const root = element.getRootNode();
+    if (describedBy && (root instanceof Document || root instanceof ShadowRoot)) {
+      ariaMessage = describedBy
+        .split(/\s+/)
+        .map((id) => {
+          const node =
+            root instanceof Document
+              ? root.getElementById(id)
+              : root.querySelector(`#${CSS.escape(id)}`);
+          return compactText(node?.textContent);
+        })
+        .filter(Boolean)
+        .join(" ");
+    }
+  }
+  return {
+    invalid: ariaInvalid || Boolean(candidate),
+    validationMessage: ariaMessage || candidate,
+  };
+}
+
 function stableControlSignature(element: Element): string {
   const url = new URL(window.location.href);
   const type = element instanceof HTMLInputElement ? element.type : "";
   const optionValue =
     element instanceof HTMLInputElement &&
-    (element.type === "radio" || element.type === "checkbox")
+    (element.type === "radio" ||
+      element.type === "checkbox" ||
+      ["button", "submit", "reset"].includes(element.type))
       ? element.value
       : "";
   return [
@@ -251,20 +317,16 @@ function createControl(element: Element): Control | null {
     return null;
   }
 
-  const name = compactText(element.getAttribute("name"));
-  const label = labelFor(element);
-  const placeholder = compactText(element.getAttribute("placeholder"));
-  const ariaLabel = compactText(element.getAttribute("aria-label"));
-
+  const validation = validationState(element);
   return {
     controlId: `ctl-${hash(stableControlSignature(element))}`,
     frameId: 0,
     kind: kindFor(element),
     tagName: element.tagName.toLowerCase(),
-    name,
-    label,
-    placeholder,
-    ariaLabel,
+    name: compactText(element.getAttribute("name")),
+    label: labelFor(element),
+    placeholder: compactText(element.getAttribute("placeholder")),
+    ariaLabel: compactText(element.getAttribute("aria-label")),
     required:
       element.hasAttribute("required") ||
       element.getAttribute("aria-required") === "true",
@@ -274,6 +336,12 @@ function createControl(element: Element): Control | null {
       element.getAttribute("aria-disabled") === "true",
     visible: true,
     options: optionsFor(element),
+    multiple:
+      (element instanceof HTMLSelectElement && element.multiple) ||
+      (element instanceof HTMLInputElement && element.multiple),
+    autocomplete: compactText(element.getAttribute("autocomplete")),
+    invalid: validation.invalid,
+    validationMessage: validation.validationMessage,
   };
 }
 
@@ -326,6 +394,189 @@ function questionIdentity(entry: ControlEntry, question: Question): string {
   return entry.control.controlId;
 }
 
+function navigationActionFor(label: string): NavigationAction | null {
+  const value = normalized(label);
+  if (!value) return null;
+  if (
+    /^(submit|submit application|send application|complete application|finish application|apply now|review and submit)$/.test(
+      value,
+    ) ||
+    /\bsubmit (my |this )?application\b/.test(value)
+  ) {
+    return "FINAL_SUBMIT";
+  }
+  if (/^(back|previous|go back)$/.test(value)) return "BACK";
+  if (
+    /^(review|review application|preview application|save and review)$/.test(
+      value,
+    )
+  ) {
+    return "REVIEW";
+  }
+  if (
+    /^(next|continue|continue application|save and continue|save & continue|proceed)$/.test(
+      value,
+    )
+  ) {
+    return "NEXT";
+  }
+  return null;
+}
+
+function navigationCandidates(entries: readonly ControlEntry[]): NavigationCandidate[] {
+  return entries.flatMap((entry) => {
+    if (entry.control.kind !== "BUTTON") return [];
+    const action = navigationActionFor(entry.control.label);
+    if (!action) return [];
+    if (
+      entry.element instanceof HTMLInputElement &&
+      entry.element.type === "reset"
+    ) {
+      return [];
+    }
+    return [
+      {
+        controlId: entry.control.controlId,
+        frameId: entry.control.frameId,
+        action,
+        label: entry.control.label,
+        disabled: entry.control.disabled,
+      },
+    ];
+  });
+}
+
+function detectSecurityCheckpoint(): SecurityCheckpointKind | null {
+  const body = normalized(document.body?.textContent).slice(0, 120_000);
+  if (
+    document.querySelector(
+      "iframe[src*='recaptcha'], iframe[src*='hcaptcha'], iframe[src*='challenges.cloudflare.com'], [class*='captcha' i], [id*='captcha' i]",
+    ) ||
+    /\b(recaptcha|hcaptcha|captcha|verify you are human|human verification)\b/.test(body)
+  ) {
+    return "CAPTCHA";
+  }
+  if (/\b(identity verification|verify your identity|proof of identity)\b/.test(body)) {
+    return "IDENTITY_VERIFICATION";
+  }
+  if (/\b(multi[- ]factor|two[- ]factor|2fa|authenticator app)\b/.test(body)) {
+    return "MFA";
+  }
+  if (
+    /\b(one[- ]time (passcode|password|code)|verification code|security code|enter the code we sent|otp)\b/.test(
+      body,
+    )
+  ) {
+    return "OTP";
+  }
+  if (document.querySelector("input[type='password']")) return "AUTHENTICATION";
+  return null;
+}
+
+const personalTypes = new Set<SemanticType>([
+  "PERSONAL",
+  "FIRST_NAME",
+  "MIDDLE_NAME",
+  "LAST_NAME",
+  "PREFERRED_NAME",
+  "CONTACT",
+  "ADDRESS",
+  "STREET_ADDRESS",
+  "ADDRESS_LINE_2",
+  "CITY",
+  "STATE_PROVINCE",
+  "POSTAL_CODE",
+  "COUNTRY",
+  "EMAIL",
+  "PHONE",
+]);
+const educationTypes = new Set<SemanticType>([
+  "EDUCATION",
+  "SCHOOL_NAME",
+  "DEGREE",
+  "FIELD_OF_STUDY",
+  "GRADUATION_DATE",
+  "GPA",
+]);
+const experienceTypes = new Set<SemanticType>([
+  "EMPLOYMENT",
+  "EMPLOYER_NAME",
+  "JOB_TITLE",
+  "EMPLOYMENT_DATES",
+  "EMPLOYMENT_RESPONSIBILITIES",
+]);
+const eeoTypes = new Set<SemanticType>([
+  "VETERAN_STATUS",
+  "PROTECTED_VETERAN_STATUS",
+  "DISABILITY_STATUS",
+  "GENDER",
+  "RACE_ETHNICITY",
+  "EEO_SELF_ID",
+]);
+const disclosureTypes = new Set<SemanticType>([
+  "CONFLICT_OF_INTEREST",
+  "NON_COMPETE",
+  "BACKGROUND_CHECK",
+  "DRUG_SCREENING",
+]);
+
+function hasQuestionType(
+  questions: readonly Question[],
+  types: ReadonlySet<SemanticType>,
+): boolean {
+  return questions.some((question) => types.has(question.semanticType));
+}
+
+function inferApplicationState(input: {
+  questions: readonly Question[];
+  controls: readonly Control[];
+  navigation: readonly NavigationCandidate[];
+  securityCheckpoint: SecurityCheckpointKind | null;
+  finalSubmissionBoundary: boolean;
+}): ApplicationState {
+  const context = normalized(
+    `${document.title} ${window.location.pathname} ${document.body?.textContent ?? ""}`,
+  ).slice(0, 120_000);
+
+  if (
+    /\b(thank you for applying|application received|application has been submitted|application submitted successfully)\b/.test(
+      context,
+    )
+  ) {
+    return "CONFIRMATION";
+  }
+  if (input.securityCheckpoint === "AUTHENTICATION") return "AUTH";
+  if (
+    input.securityCheckpoint === "MFA" ||
+    input.securityCheckpoint === "OTP" ||
+    input.securityCheckpoint === "IDENTITY_VERIFICATION"
+  ) {
+    return "VERIFY_ACCOUNT";
+  }
+  if (input.finalSubmissionBoundary) return "SUBMISSION";
+  if (
+    input.navigation.some((candidate) => candidate.action === "REVIEW") ||
+    /\breview (your |my )?application\b/.test(context)
+  ) {
+    return "REVIEW";
+  }
+  if (hasQuestionType(input.questions, eeoTypes)) return "EEO";
+  if (hasQuestionType(input.questions, disclosureTypes)) return "DISCLOSURES";
+  if (
+    input.controls.some(
+      (control) =>
+        control.kind === "FILE" && /\b(resume|résumé|cv)\b/i.test(control.label),
+    ) ||
+    /\b(upload (your )?(resume|résumé|cv)\b/.test(context)
+  ) {
+    return "RESUME";
+  }
+  if (hasQuestionType(input.questions, educationTypes)) return "EDUCATION";
+  if (hasQuestionType(input.questions, experienceTypes)) return "EXPERIENCE";
+  if (hasQuestionType(input.questions, personalTypes)) return "PERSONAL";
+  return "QUESTIONS";
+}
+
 export function scanDocument(): ApplicationPage {
   const entries = scanControlEntries();
   const controls = entries.map((entry) => entry.control);
@@ -341,8 +592,19 @@ export function scanDocument(): ApplicationPage {
   }
   const url = new URL(window.location.href);
   const pageSignature = `${url.origin}${url.pathname}|${document.title}`;
-
-  return {
+  const navigation = navigationCandidates(entries);
+  const securityCheckpoint = detectSecurityCheckpoint();
+  const finalSubmissionBoundary = navigation.some(
+    (candidate) => candidate.action === "FINAL_SUBMIT" && !candidate.disabled,
+  );
+  const applicationState = inferApplicationState({
+    questions,
+    controls,
+    navigation,
+    securityCheckpoint,
+    finalSubmissionBoundary,
+  });
+  const page: ApplicationPage = {
     pageId: `page-${hash(pageSignature)}`,
     tabId: -1,
     frameId: 0,
@@ -352,7 +614,14 @@ export function scanDocument(): ApplicationPage {
     observedAt: new Date().toISOString(),
     controls,
     questions,
+    applicationState,
+    pageFingerprint: "",
+    securityCheckpoint,
+    validationErrorCount: controls.filter((control) => control.invalid).length,
+    navigationCandidates: navigation,
+    finalSubmissionBoundary,
   };
+  return { ...page, pageFingerprint: snapshotFingerprint(page) };
 }
 
 export function controlElementMap(): Map<string, Element> {
@@ -370,6 +639,11 @@ export function snapshotFingerprint(page: ApplicationPage): string {
       pageId: page.pageId,
       controls: page.controls,
       questions: page.questions,
+      applicationState: page.applicationState,
+      securityCheckpoint: page.securityCheckpoint,
+      validationErrorCount: page.validationErrorCount,
+      navigationCandidates: page.navigationCandidates,
+      finalSubmissionBoundary: page.finalSubmissionBoundary,
     }),
   );
 }

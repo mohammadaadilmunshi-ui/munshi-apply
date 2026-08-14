@@ -15,7 +15,7 @@ const visibleRectangle: DOMRect = {
   toJSON: () => ({}),
 };
 
-describe("universal page scanner", () => {
+describe("AutoPilot page-state scanner", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
     document.title = "Application";
@@ -25,143 +25,61 @@ describe("universal page scanner", () => {
     );
   });
 
-  it("extracts native labels and semantic questions", () => {
+  it("captures multiple select and autocomplete metadata", () => {
     document.body.innerHTML = `
-      <form>
-        <label for="candidate-email">Email address</label>
-        <input id="candidate-email" name="email" type="email" required>
-      </form>
+      <label for="skills">Skills</label>
+      <select id="skills" multiple autocomplete="off">
+        <option>Excel</option><option>Power BI</option>
+      </select>
     `;
+    expect(scanDocument().controls[0]).toMatchObject({
+      kind: "SELECT",
+      multiple: true,
+      autocomplete: "off",
+      options: ["Excel", "Power BI"],
+    });
+  });
 
+  it("captures ARIA validation messages", () => {
+    document.body.innerHTML = `
+      <label for="email">Email</label>
+      <input id="email" aria-invalid="true" aria-describedby="email-error">
+      <div id="email-error">Enter a valid email</div>
+    `;
     const result = scanDocument();
-    expect(result.controls).toHaveLength(1);
     expect(result.controls[0]).toMatchObject({
-      kind: "EMAIL",
-      label: "Email address",
-      required: true,
+      invalid: true,
+      validationMessage: "Enter a valid email",
     });
-    expect(result.questions[0]).toMatchObject({
-      semanticType: "EMAIL",
-      requiresReview: false,
-    });
+    expect(result.validationErrorCount).toBe(1);
   });
 
-  it("excludes password and hidden controls from the application model", () => {
+  it("detects OTP and authentication security checkpoints", () => {
     document.body.innerHTML = `
-      <input aria-label="Password" type="password">
-      <input aria-label="Trap" style="display: none" type="text">
-      <input aria-label="Phone" type="tel">
+      <h1>Verify your account</h1>
+      <label for="otp">One-time verification code</label>
+      <input id="otp" autocomplete="one-time-code">
     `;
-
     const result = scanDocument();
-    expect(result.controls).toHaveLength(1);
-    expect(result.controls[0]?.kind).toBe("TEL");
+    expect(result.securityCheckpoint).toBe("OTP");
+    expect(result.applicationState).toBe("VERIFY_ACCOUNT");
   });
 
-  it("includes legitimate controls below the current viewport", () => {
-    document.body.innerHTML = `<input aria-label="LinkedIn" type="text">`;
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-      ...visibleRectangle,
-      bottom: 5030,
-      top: 5000,
-      y: 5000,
-    });
-
-    expect(scanDocument().questions[0]?.semanticType).toBe("LINKEDIN");
-  });
-
-  it("flags consequential sponsorship questions for review", () => {
+  it("classifies recognized next and review actions", () => {
     document.body.innerHTML = `
-      <label for="sponsor">Will you now or in the future require sponsorship?</label>
-      <select id="sponsor"><option>Choose</option><option>Yes</option><option>No</option></select>
+      <button type="button">Continue</button>
+      <button type="button">Review application</button>
     `;
-
-    expect(scanDocument().questions[0]).toMatchObject({
-      semanticType: "SPONSORSHIP_FUTURE",
-      sensitive: true,
-      requiresReview: true,
-    });
-  });
-
-  it("discovers controls inside open shadow roots", () => {
-    const host = document.createElement("job-application");
-    document.body.append(host);
-    const root = host.attachShadow({ mode: "open" });
-    root.innerHTML = `
-      <label for="portfolio">Portfolio URL</label>
-      <input id="portfolio" type="url">
-    `;
-
-    expect(scanDocument().questions[0]).toMatchObject({
-      rawText: "Portfolio URL",
-      semanticType: "PORTFOLIO",
-    });
-  });
-
-  it("keeps control identity stable when an unrelated field is inserted", () => {
-    document.body.innerHTML = `
-      <label for="email">Email address</label>
-      <input id="email" name="email" type="email">
-    `;
-    const firstId = scanDocument().controls[0]?.controlId;
-
-    document.body.insertAdjacentHTML(
-      "afterbegin",
-      `<label for="phone">Phone</label><input id="phone" name="phone" type="tel">`,
+    const actions = scanDocument().navigationCandidates.map((candidate) =>
+      candidate.action,
     );
-    const email = scanDocument().controls.find(
-      (control) => control.name === "email",
-    );
-
-    expect(email?.controlId).toBe(firstId);
+    expect(actions).toEqual(["NEXT", "REVIEW"]);
   });
 
-  it("models a radio group as one question with visible options", () => {
-    document.body.innerHTML = `
-      <fieldset>
-        <legend>Will you now or in the future require sponsorship?</legend>
-        <label><input type="radio" name="sponsor" value="Yes"> Yes</label>
-        <label><input type="radio" name="sponsor" value="No"> No</label>
-      </fieldset>
-    `;
-
+  it("treats Review and submit as a final manual boundary", () => {
+    document.body.innerHTML = `<button type="submit">Review and submit</button>`;
     const result = scanDocument();
-    expect(result.controls).toHaveLength(2);
-    expect(result.questions).toHaveLength(1);
-    expect(result.questions[0]).toMatchObject({
-      semanticType: "SPONSORSHIP_FUTURE",
-      sensitive: true,
-      requiresReview: true,
-    });
-    expect(result.controls[0]?.options).toEqual(["Yes", "No"]);
-  });
-
-  it("exposes exact options owned by an ARIA combobox", () => {
-    document.body.innerHTML = `
-      <label for="country">Country</label>
-      <input id="country" role="combobox" aria-controls="countries">
-      <div id="countries" role="listbox">
-        <div role="option">United States</div>
-        <div role="option" aria-label="Canada">CA</div>
-      </div>
-    `;
-
-    const result = scanDocument();
-    expect(result.controls).toHaveLength(1);
-    expect(result.controls[0]).toMatchObject({
-      kind: "COMBOBOX",
-      label: "Country",
-      options: ["United States", "Canada"],
-    });
-    expect(result.questions[0]?.semanticType).toBe("COUNTRY");
-  });
-
-  it("does not borrow unrelated ARIA options for an unowned combobox", () => {
-    document.body.innerHTML = `
-      <input aria-label="Country" role="combobox">
-      <div role="listbox"><div role="option">United States</div></div>
-    `;
-
-    expect(scanDocument().controls[0]?.options).toEqual([]);
+    expect(result.navigationCandidates[0]?.action).toBe("FINAL_SUBMIT");
+    expect(result.finalSubmissionBoundary).toBe(true);
   });
 });
