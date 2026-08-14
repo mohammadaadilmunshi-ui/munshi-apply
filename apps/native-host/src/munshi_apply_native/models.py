@@ -88,15 +88,11 @@ class ApplicationCheckpointPayload(BaseModel):
     sequence: int = Field(ge=0)
     state: ApplicationState
     page_id: str = Field(alias="pageId", min_length=1, max_length=256)
-    page_fingerprint: str = Field(
-        alias="pageFingerprint", min_length=1, max_length=512
-    )
+    page_fingerprint: str = Field(alias="pageFingerprint", min_length=1, max_length=512)
     completed_control_ids: list[str] = Field(alias="completedControlIds")
     pending_control_ids: list[str] = Field(alias="pendingControlIds")
     selected_resume_id: str | None = Field(alias="selectedResumeId", default=None)
-    selected_resume_sha256: str | None = Field(
-        alias="selectedResumeSha256", default=None
-    )
+    selected_resume_sha256: str | None = Field(alias="selectedResumeSha256", default=None)
     created_at: datetime = Field(alias="createdAt")
 
     @field_validator("checkpoint_id", "application_id", "page_id", "page_fingerprint")
@@ -139,16 +135,12 @@ class ApplicationCheckpointPayload(BaseModel):
         if len(stripped) != 64 or any(
             character not in "0123456789abcdef" for character in stripped
         ):
-            raise ValueError(
-                "selectedResumeSha256 must be a lowercase SHA-256 digest"
-            )
+            raise ValueError("selectedResumeSha256 must be a lowercase SHA-256 digest")
         return stripped
 
     @model_validator(mode="after")
     def validate_consistency(self) -> ApplicationCheckpointPayload:
-        if (self.selected_resume_id is None) != (
-            self.selected_resume_sha256 is None
-        ):
+        if (self.selected_resume_id is None) != (self.selected_resume_sha256 is None):
             raise ValueError("Résumé checkpoint identity and digest must be stored together")
         completed = set(self.completed_control_ids)
         if any(item in completed for item in self.pending_control_ids):

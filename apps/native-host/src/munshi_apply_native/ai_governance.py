@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import re
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Callable
 
 from .ai_budget_store import AIBudgetStore
 from .ai_settings import AIConfiguration, AISettingsStore
@@ -115,7 +115,9 @@ class AIGovernanceService:
             raise ValueError("Selected model has no verified MUNSHI pricing snapshot")
         age_days = (now - _PRICING_VERIFIED_AT).total_seconds() / 86_400
         if age_days < 0 or age_days > _PRICING_MAX_AGE_DAYS:
-            raise ValueError("OpenAI pricing snapshot is stale and must be re-verified before paid usage")
+            raise ValueError(
+                "OpenAI pricing snapshot is stale and must be re-verified before paid usage"
+            )
         return pricing
 
     def _pricing_status(self, model: str, *, now: datetime) -> dict[str, object] | None:
@@ -172,7 +174,9 @@ class AIGovernanceService:
             raise ValueError("AI draft request requires correlationId")
         max_words = payload.get("maxWords")
         if max_words is not None and (
-            not isinstance(max_words, int) or isinstance(max_words, bool) or not 1 <= max_words <= 500
+            not isinstance(max_words, int)
+            or isinstance(max_words, bool)
+            or not 1 <= max_words <= 500
         ):
             raise ValueError("AI draft maxWords must be an integer between 1 and 500")
         max_output_tokens = payload.get("maxOutputTokens", 512)
@@ -237,7 +241,9 @@ class AIGovernanceService:
             )
             if not semantic_match and overlap == 0:
                 continue
-            score = (0.8 if semantic_match else 0.15 * overlap) + (0.2 * overlap if semantic_match else 0)
+            score = (0.8 if semantic_match else 0.15 * overlap) + (
+                0.2 * overlap if semantic_match else 0
+            )
             candidates.append((score, node))
         candidates.sort(
             key=lambda item: (
@@ -264,7 +270,9 @@ class AIGovernanceService:
             selected_ids.add(evidence_id)
             characters += len(text)
         if not selected:
-            raise ValueError("No authoritative non-protected evidence is available for this AI draft")
+            raise ValueError(
+                "No authoritative non-protected evidence is available for this AI draft"
+            )
         contradiction = any(
             edge.get("relation") == "CONTRADICTS"
             and edge.get("from_evidence_id") in selected_ids
@@ -376,7 +384,9 @@ class AIGovernanceService:
         edges = graph.get("edges")
         edge_list = edges if isinstance(edges, list) else []
         for claim in result.claims:
-            if not claim.evidence_ids or any(item not in evidence_ids for item in claim.evidence_ids):
+            if not claim.evidence_ids or any(
+                item not in evidence_ids for item in claim.evidence_ids
+            ):
                 raise ValueError("AI draft contains a claim unsupported by the supplied evidence")
             claim_ids = set(claim.evidence_ids)
             if any(

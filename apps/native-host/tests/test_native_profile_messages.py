@@ -39,9 +39,7 @@ def test_native_profile_snapshot_protocol_round_trip(tmp_path: Path) -> None:
         "snapshotVersion": 1,
     }
 
-    assert handle(
-        {"type": "SAVE_PROFILE_SNAPSHOT", "payload": profile}, db
-    ) == {"ok": True}
+    assert handle({"type": "SAVE_PROFILE_SNAPSHOT", "payload": profile}, db) == {"ok": True}
     assert handle({"type": "GET_PROFILE_SNAPSHOT"}, db) == {
         "ok": True,
         "data": profile,

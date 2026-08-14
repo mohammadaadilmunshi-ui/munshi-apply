@@ -15,12 +15,13 @@ def test_migrations_are_idempotent(tmp_path: Path) -> None:
         "003_profile_evidence_checkpoints.sql",
         "004_learning_analytics.sql",
         "005_profile_snapshot_ordering.sql",
+        "006_ai_budget_reservations.sql",
     ]
     assert database.migrate() == []
     health = database.health()
     assert health["status"] == "healthy"
-    assert health["migration_count"] == 5
-    assert health["schema_version"] == "005_profile_snapshot_ordering.sql"
+    assert health["migration_count"] == 6
+    assert health["schema_version"] == "006_ai_budget_reservations.sql"
 
 
 def test_architecture_tables_are_created_with_integrity_constraints(tmp_path: Path) -> None:
@@ -43,6 +44,7 @@ def test_architecture_tables_are_created_with_integrity_constraints(tmp_path: Pa
             "application_checkpoints",
             "application_resume_selections",
             "ai_usage",
+            "ai_budget_reservations",
             "interaction_recipes",
             "recipe_attempts",
             "application_outcomes",

@@ -33,7 +33,11 @@ function money(value: number): string {
   }).format(value);
 }
 
-export function AIControlCenter({ nativeAvailable }: { nativeAvailable: boolean }) {
+export function AIControlCenter({
+  nativeAvailable,
+}: {
+  nativeAvailable: boolean;
+}) {
   const [status, setStatus] = useState<AIControlStatus | null>(null);
   const [settings, setSettings] = useState<AISettings>(defaultSettings);
   const [models, setModels] = useState<string[]>([]);
@@ -76,7 +80,9 @@ export function AIControlCenter({ nativeAvailable }: { nativeAvailable: boolean 
         "OpenAI credential stored in macOS Keychain. The saved secret is never displayed by MUNSHI.",
       );
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to store API key");
+      setMessage(
+        error instanceof Error ? error.message : "Unable to store API key",
+      );
     } finally {
       setBusy(false);
     }
@@ -91,7 +97,9 @@ export function AIControlCenter({ nativeAvailable }: { nativeAvailable: boolean 
       await refresh();
       setMessage("Stored OpenAI credential removed from macOS Keychain.");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to delete API key");
+      setMessage(
+        error instanceof Error ? error.message : "Unable to delete API key",
+      );
     } finally {
       setBusy(false);
     }
@@ -109,7 +117,9 @@ export function AIControlCenter({ nativeAvailable }: { nativeAvailable: boolean 
       );
     } catch (error) {
       setMessage(
-        error instanceof Error ? error.message : "OpenAI connection test failed",
+        error instanceof Error
+          ? error.message
+          : "OpenAI connection test failed",
       );
     } finally {
       setBusy(false);
@@ -162,18 +172,21 @@ export function AIControlCenter({ nativeAvailable }: { nativeAvailable: boolean 
       </div>
 
       <p>
-        You control the provider, permissions, and budget. Connecting OpenAI does
-        not let MUNSHI invent facts or silently approve generated answers.
+        You control the provider, permissions, and budget. Connecting OpenAI
+        does not let MUNSHI invent facts or silently approve generated answers.
       </p>
 
       <h3>OpenAI connection</h3>
       <div className="cloud-pairing">
         <p>
-          Saved credential: {settings.keyConfigured ? "•••••••• · secured" : "none"}
+          Saved credential:{" "}
+          {settings.keyConfigured ? "•••••••• · secured" : "none"}
           {settings.keyConfigured ? ` · ${settings.keySource}` : ""}
         </p>
         <label>
-          <span>{settings.keyConfigured ? "Replace API key" : "OpenAI API key"}</span>
+          <span>
+            {settings.keyConfigured ? "Replace API key" : "OpenAI API key"}
+          </span>
           <input
             type="password"
             autoComplete="off"
@@ -189,7 +202,9 @@ export function AIControlCenter({ nativeAvailable }: { nativeAvailable: boolean 
           disabled={busy || !apiKey.trim()}
           onClick={() => void storeKey()}
         >
-          {settings.keyConfigured ? "Replace Keychain key" : "Store in macOS Keychain"}
+          {settings.keyConfigured
+            ? "Replace Keychain key"
+            : "Store in macOS Keychain"}
         </button>
         <button
           className="quiet"
@@ -219,7 +234,10 @@ export function AIControlCenter({ nativeAvailable }: { nativeAvailable: boolean 
             value={settings.model}
             placeholder="Test connection, then select a priced model"
             onChange={(event) =>
-              setSettings((current) => ({ ...current, model: event.target.value }))
+              setSettings((current) => ({
+                ...current,
+                model: event.target.value,
+              }))
             }
           />
           <datalist id="munshi-ai-models">
@@ -233,7 +251,10 @@ export function AIControlCenter({ nativeAvailable }: { nativeAvailable: boolean 
             type="checkbox"
             checked={settings.enabled}
             onChange={(event) =>
-              setSettings((current) => ({ ...current, enabled: event.target.checked }))
+              setSettings((current) => ({
+                ...current,
+                enabled: event.target.checked,
+              }))
             }
           />
           AI master switch
@@ -317,7 +338,10 @@ export function AIControlCenter({ nativeAvailable }: { nativeAvailable: boolean 
             type="checkbox"
             checked={settings.hardStop}
             onChange={(event) =>
-              setSettings((current) => ({ ...current, hardStop: event.target.checked }))
+              setSettings((current) => ({
+                ...current,
+                hardStop: event.target.checked,
+              }))
             }
           />
           Hard stop when projected spend exceeds the monthly maximum
@@ -342,7 +366,8 @@ export function AIControlCenter({ nativeAvailable }: { nativeAvailable: boolean 
           </div>
           <label>
             <span>
-              Monthly usage · {money(status.usage.projectedUsd)} projected · {money(status.usage.remainingUsd)} remaining
+              Monthly usage · {money(status.usage.projectedUsd)} projected ·{" "}
+              {money(status.usage.remainingUsd)} remaining
             </span>
             <progress max={100} value={budgetPercent} />
           </label>
@@ -369,7 +394,9 @@ export function AIControlCenter({ nativeAvailable }: { nativeAvailable: boolean 
             {money(status.pricing.outputUsdPerMillionTokens)} output / 1M
           </span>
           <span>
-            Pricing verified {new Date(status.pricing.verifiedAt).toLocaleDateString()} · age {status.pricing.ageDays} days
+            Pricing verified{" "}
+            {new Date(status.pricing.verifiedAt).toLocaleDateString()} · age{" "}
+            {status.pricing.ageDays} days
           </span>
           {status.pricing.stale && (
             <span className="diagnostic-error">
@@ -382,7 +409,8 @@ export function AIControlCenter({ nativeAvailable }: { nativeAvailable: boolean 
         <div className="safety-callout">
           <strong>No verified pricing for selected model</strong>
           <span>
-            MUNSHI will not make a paid generation request with an unpriced model.
+            MUNSHI will not make a paid generation request with an unpriced
+            model.
           </span>
         </div>
       )}

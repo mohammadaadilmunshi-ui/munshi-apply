@@ -13,7 +13,9 @@ from munshi_apply_native.database import Database
 from munshi_apply_native.native_messaging import handle
 
 
-def create_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Database, AISettingsStore]:
+def create_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Database, AISettingsStore]:
     migrations = Path(__file__).resolve().parents[3] / "migrations"
     database = Database(tmp_path / "test.sqlite", migrations)
     database.migrate()
@@ -50,11 +52,15 @@ def create_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Dat
     )
     monkeypatch.setattr(store, "key_source", lambda: "keychain")
     monkeypatch.setattr(store, "_keychain_read", lambda: "test-key-" + ("x" * 40))
-    monkeypatch.setattr(ai_governance, "_default_clock", lambda: datetime(2026, 8, 14, 18, 0, tzinfo=UTC))
+    monkeypatch.setattr(
+        ai_governance, "_default_clock", lambda: datetime(2026, 8, 14, 18, 0, tzinfo=UTC)
+    )
     return database, store
 
 
-def test_control_status_never_exposes_secret(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_control_status_never_exposes_secret(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     database, store = create_runtime(tmp_path, monkeypatch)
     result = handle({"type": "GET_AI_CONTROL_STATUS"}, database, store)
     assert result["ok"] is True

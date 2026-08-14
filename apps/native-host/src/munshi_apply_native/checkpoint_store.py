@@ -13,12 +13,8 @@ class ApplicationCheckpointStore:
     @staticmethod
     def _from_row(row: Any) -> dict[str, Any]:
         item = dict(row)
-        item["completed_control_ids"] = json.loads(
-            item.pop("completed_control_ids_json")
-        )["items"]
-        item["pending_control_ids"] = json.loads(
-            item.pop("pending_control_ids_json")
-        )["items"]
+        item["completed_control_ids"] = json.loads(item.pop("completed_control_ids_json"))["items"]
+        item["pending_control_ids"] = json.loads(item.pop("pending_control_ids_json"))["items"]
         return item
 
     def save(self, checkpoint: dict[str, Any]) -> bool:
@@ -36,9 +32,7 @@ class ApplicationCheckpointStore:
                 existing = self._from_row(existing_sequence)
                 if existing == checkpoint:
                     return False
-                raise ValueError(
-                    "Checkpoint sequence already exists with different content"
-                )
+                raise ValueError("Checkpoint sequence already exists with different content")
 
             existing_id = connection.execute(
                 "SELECT * FROM application_checkpoints WHERE checkpoint_id = ?",
@@ -75,12 +69,8 @@ class ApplicationCheckpointStore:
                     checkpoint["state"],
                     checkpoint["page_id"],
                     checkpoint["page_fingerprint"],
-                    canonical_json(
-                        {"items": checkpoint.get("completed_control_ids", [])}
-                    ),
-                    canonical_json(
-                        {"items": checkpoint.get("pending_control_ids", [])}
-                    ),
+                    canonical_json({"items": checkpoint.get("completed_control_ids", [])}),
+                    canonical_json({"items": checkpoint.get("pending_control_ids", [])}),
                     checkpoint.get("selected_resume_id"),
                     checkpoint.get("selected_resume_sha256"),
                     checkpoint["created_at"],

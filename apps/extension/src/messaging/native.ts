@@ -10,8 +10,7 @@ import {
 const nativeHostName = "systems.munshi.apply";
 
 type NativeResponse =
-  | { ok: true; data?: unknown }
-  | { ok: false; error: string };
+  { ok: true; data?: unknown } | { ok: false; error: string };
 
 export type AISettings = {
   provider: "openai";
@@ -307,7 +306,9 @@ export function parseAIControlStatus(value: unknown): AIControlStatus {
     usage: parseUsage(candidate.usage),
     pricing: parsePricing(candidate.pricing),
     guardrails: {
-      safeDraftSemanticTypes: [...guardrails.safeDraftSemanticTypes] as string[],
+      safeDraftSemanticTypes: [
+        ...guardrails.safeDraftSemanticTypes,
+      ] as string[],
       consequentialQuestionsManual: true,
       protectedEvidenceExcluded: true,
       ownerReviewRequired: true,

@@ -27,7 +27,9 @@ def create_database(tmp_path: Path) -> Database:
     return database
 
 
-def configured_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **overrides: object) -> AISettingsStore:
+def configured_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **overrides: object
+) -> AISettingsStore:
     store = AISettingsStore(tmp_path / "runtime")
     payload: dict[str, object] = {
         "provider": "openai",
@@ -94,7 +96,9 @@ def service(
     return AIGovernanceService(database, store, **kwargs)  # type: ignore[arg-type]
 
 
-def test_zero_budget_blocks_before_provider(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_zero_budget_blocks_before_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     database = create_database(tmp_path)
     store = configured_store(tmp_path, monkeypatch, monthlyBudgetUsd=0, warningBudgetUsd=0)
     add_evidence(database)
@@ -136,8 +140,14 @@ def test_unresolved_selected_contradiction_blocks_generation(
 ) -> None:
     database = create_database(tmp_path)
     store = configured_store(tmp_path, monkeypatch)
-    add_evidence(database, evidence_id="ev-1", text="I prefer this role because of recruiting analytics.")
-    add_evidence(database, evidence_id="ev-2", text="I prefer this role because I do not want recruiting analytics.")
+    add_evidence(
+        database, evidence_id="ev-1", text="I prefer this role because of recruiting analytics."
+    )
+    add_evidence(
+        database,
+        evidence_id="ev-2",
+        text="I prefer this role because I do not want recruiting analytics.",
+    )
     ArchitectureStore(database).add_evidence_edge(
         {"from_evidence_id": "ev-1", "to_evidence_id": "ev-2", "relation": "CONTRADICTS"}
     )
@@ -241,7 +251,7 @@ def test_second_reservation_sees_first_active_reservation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database = create_database(tmp_path)
-    store = configured_store(tmp_path, monkeypatch, monthlyBudgetUsd=0.001, warningBudgetUsd=0)
+    store = configured_store(tmp_path, monkeypatch, monthlyBudgetUsd=0.005, warningBudgetUsd=0)
     add_evidence(database)
     first = service(database, store).preview(request())
     planned = float(first["plannedCostUsd"])
@@ -252,7 +262,7 @@ def test_second_reservation_sees_first_active_reservation(
         model="gpt-5.6-luna",
         correlation_id="one",
         planned_cost_usd=planned,
-        monthly_budget_usd=0.001,
+        monthly_budget_usd=0.005,
         warning_budget_usd=0,
         hard_stop=True,
         at=FIXED_NOW.isoformat(),
@@ -263,7 +273,7 @@ def test_second_reservation_sees_first_active_reservation(
         model="gpt-5.6-luna",
         correlation_id="two",
         planned_cost_usd=planned,
-        monthly_budget_usd=0.001,
+        monthly_budget_usd=0.005,
         warning_budget_usd=0,
         hard_stop=True,
         at=FIXED_NOW.isoformat(),

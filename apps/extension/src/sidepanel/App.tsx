@@ -50,8 +50,9 @@ import {
   type CloudHealth,
   type CloudSnapshot,
 } from "../storage/cloud";
+import { AIControlCenter } from "./AIControlCenter";
 
-type View = "application" | "profile" | "diagnostics";
+type View = "application" | "profile" | "ai" | "diagnostics";
 type SaveState = "idle" | "editing" | "saving" | "synced" | "local" | "error";
 
 type NativeState =
@@ -221,6 +222,9 @@ const defaultAISettings: AISettings = {
   monthlyBudgetUsd: 0,
   warningBudgetUsd: 0,
   hardStop: true,
+  allowApplicationDrafts: false,
+  allowProfileEvidence: true,
+  allowResumeEvidence: true,
   keyConfigured: false,
   keySource: "none",
 };
@@ -918,16 +922,18 @@ export function App() {
         <span className={`status ${connectionClass}`}>{connectionLabel}</span>
       </header>
       <nav aria-label="MUNSHI Apply sections">
-        {(["application", "profile", "diagnostics"] as const).map((item) => (
-          <button
-            className={view === item ? "active" : ""}
-            key={item}
-            onClick={() => setView(item)}
-            type="button"
-          >
-            {item}
-          </button>
-        ))}
+        {(["application", "profile", "ai", "diagnostics"] as const).map(
+          (item) => (
+            <button
+              className={view === item ? "active" : ""}
+              key={item}
+              onClick={() => setView(item)}
+              type="button"
+            >
+              {item}
+            </button>
+          ),
+        )}
       </nav>
       {notice && <div className="notice">{notice}</div>}
 
@@ -1326,6 +1332,10 @@ export function App() {
         </section>
       )}
 
+      {view === "ai" && (
+        <AIControlCenter nativeAvailable={native.status === "healthy"} />
+      )}
+
       {view === "diagnostics" && (
         <section>
           <p className="eyebrow">Runtime diagnostics</p>
@@ -1510,7 +1520,7 @@ export function App() {
             </div>
           )}
 
-          <div className="cloud-pairing">
+          <div hidden>
             <h3>AI & API control center</h3>
             <p>
               The OpenAI API key is stored only in macOS Keychain by the native

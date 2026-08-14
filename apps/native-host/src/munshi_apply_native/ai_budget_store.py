@@ -149,7 +149,12 @@ class AIBudgetStore:
         hard_stop: bool,
         at: str,
     ) -> dict[str, object]:
-        if not reservation_id.strip() or not provider.strip() or not model.strip() or not correlation_id.strip():
+        if (
+            not reservation_id.strip()
+            or not provider.strip()
+            or not model.strip()
+            or not correlation_id.strip()
+        ):
             raise ValueError("AI reservation identifiers must not be empty")
         timestamp = self._timestamp(at)
         planned = self._money(planned_cost_usd, "planned_cost_usd")
@@ -290,7 +295,10 @@ class AIBudgetStore:
                 SELECT COUNT(*) AS request_count,
                        COALESCE(SUM(input_tokens), 0) AS input_tokens,
                        COALESCE(SUM(output_tokens), 0) AS output_tokens,
-                       COALESCE(SUM(CASE WHEN estimated = 1 THEN cost_usd ELSE 0 END), 0) AS estimated_cost
+                       COALESCE(
+                           SUM(CASE WHEN estimated = 1 THEN cost_usd ELSE 0 END),
+                           0
+                       ) AS estimated_cost
                 FROM ai_usage
                 WHERE substr(occurred_at, 1, 7) = ?
                 """,

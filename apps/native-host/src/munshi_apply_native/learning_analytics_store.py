@@ -256,9 +256,7 @@ class LearningAnalyticsStore:
                 and existing_variants == requested_variants
             )
             if not same_definition:
-                raise ValueError(
-                    "Experiment id already refers to a different immutable definition"
-                )
+                raise ValueError("Experiment id already refers to a different immutable definition")
             allowed = _EXPERIMENT_TRANSITIONS.get(existing["status"], set())
             if experiment["status"] not in allowed:
                 raise ValueError("Invalid experiment status transition")
