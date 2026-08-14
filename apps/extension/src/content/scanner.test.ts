@@ -135,4 +135,33 @@ describe("universal page scanner", () => {
     });
     expect(result.controls[0]?.options).toEqual(["Yes", "No"]);
   });
+
+  it("exposes exact options owned by an ARIA combobox", () => {
+    document.body.innerHTML = `
+      <label for="country">Country</label>
+      <input id="country" role="combobox" aria-controls="countries">
+      <div id="countries" role="listbox">
+        <div role="option">United States</div>
+        <div role="option" aria-label="Canada">CA</div>
+      </div>
+    `;
+
+    const result = scanDocument();
+    expect(result.controls).toHaveLength(1);
+    expect(result.controls[0]).toMatchObject({
+      kind: "COMBOBOX",
+      label: "Country",
+      options: ["United States", "Canada"],
+    });
+    expect(result.questions[0]?.semanticType).toBe("COUNTRY");
+  });
+
+  it("does not borrow unrelated ARIA options for an unowned combobox", () => {
+    document.body.innerHTML = `
+      <input aria-label="Country" role="combobox">
+      <div role="listbox"><div role="option">United States</div></div>
+    `;
+
+    expect(scanDocument().controls[0]?.options).toEqual([]);
+  });
 });
