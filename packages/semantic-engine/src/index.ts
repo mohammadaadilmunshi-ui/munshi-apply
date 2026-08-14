@@ -128,6 +128,14 @@ const rules: readonly Rule[] = [
     highRisk: true,
   },
   {
+    id: "current-sponsorship",
+    pattern:
+      /\b(currently|at this time|right now).{0,40}\b(require|need).{0,30}\b(sponsor|sponsorship)\b|\b(require|need).{0,30}\b(sponsor|sponsorship).{0,40}\b(currently|at this time|right now)\b/i,
+    semanticType: "SPONSORSHIP_CURRENT",
+    sensitive: true,
+    highRisk: true,
+  },
+  {
     id: "immigration-assistance",
     pattern: /\b(immigration|visa) (assistance|support)\b/i,
     semanticType: "IMMIGRATION_ASSISTANCE",
