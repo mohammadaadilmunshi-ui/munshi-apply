@@ -76,9 +76,11 @@ describe("retrieveEvidence", () => {
       semanticType: "RELEVANT_EXPERIENCE",
     });
 
-    expect(result.items.some((item) => item.evidenceId === "employment-generated")).toBe(
-      false,
-    );
+    expect(
+      result.items.some(
+        (item) => item.evidenceId === "employment-generated",
+      ),
+    ).toBe(false);
     expect(result.excludedByTrustCount).toBe(1);
   });
 
