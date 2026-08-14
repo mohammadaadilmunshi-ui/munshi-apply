@@ -3,15 +3,17 @@ import type {
   FillInstruction,
 } from "@munshi-apply/contracts";
 import { applyFillInstructions } from "./fill";
+import { applyNavigationAction } from "./navigation";
 import { scanDocument, snapshotFingerprint } from "./scanner";
 
 let previousFingerprint = "";
 let pending: number | undefined;
+let pendingForce = false;
 
-async function publishSnapshot(): Promise<void> {
+async function publishSnapshot(force = false): Promise<void> {
   const page = scanDocument();
   const fingerprint = snapshotFingerprint(page);
-  if (fingerprint === previousFingerprint) return;
+  if (!force && fingerprint === previousFingerprint) return;
   previousFingerprint = fingerprint;
   const request: ExtensionRequest = { type: "PAGE_SNAPSHOT", payload: page };
   try {
@@ -21,11 +23,14 @@ async function publishSnapshot(): Promise<void> {
   }
 }
 
-function scheduleScan(): void {
+function scheduleScan(force = false): void {
+  pendingForce ||= force;
   if (pending !== undefined) window.clearTimeout(pending);
   pending = window.setTimeout(() => {
     pending = undefined;
-    void publishSnapshot();
+    const forceThisScan = pendingForce;
+    pendingForce = false;
+    void publishSnapshot(forceThisScan);
   }, 150);
 }
 
@@ -37,7 +42,7 @@ function wrapHistoryMethod(method: "pushState" | "replaceState"): void {
   }) as History["pushState"];
 }
 
-const observer = new MutationObserver(scheduleScan);
+const observer = new MutationObserver(() => scheduleScan());
 observer.observe(document.documentElement, {
   attributes: true,
   childList: true,
@@ -59,25 +64,34 @@ observer.observe(document.documentElement, {
   ],
 });
 
-document.addEventListener("input", scheduleScan, true);
-document.addEventListener("change", scheduleScan, true);
-window.addEventListener("popstate", scheduleScan);
-window.addEventListener("hashchange", scheduleScan);
+document.addEventListener("input", () => scheduleScan(), true);
+document.addEventListener("change", () => scheduleScan(), true);
+window.addEventListener("popstate", () => scheduleScan());
+window.addEventListener("hashchange", () => scheduleScan());
 wrapHistoryMethod("pushState");
 wrapHistoryMethod("replaceState");
 void publishSnapshot();
 
 chrome.runtime.onMessage.addListener(
   (
-    message: { type?: string; instructions?: FillInstruction[] },
+    message: {
+      type?: string;
+      instructions?: FillInstruction[];
+      controlId?: string;
+    },
     _sender,
     sendResponse,
   ) => {
-    if (message.type !== "APPLY_FILL_INSTRUCTIONS" || !message.instructions) {
+    if (message.type === "APPLY_FILL_INSTRUCTIONS" && message.instructions) {
+      sendResponse({ results: applyFillInstructions(message.instructions) });
+      scheduleScan(true);
       return false;
     }
-    sendResponse({ results: applyFillInstructions(message.instructions) });
-    scheduleScan();
+    if (message.type === "APPLY_NAVIGATION_ACTION" && message.controlId) {
+      sendResponse({ result: applyNavigationAction(message.controlId) });
+      scheduleScan(true);
+      return false;
+    }
     return false;
   },
 );

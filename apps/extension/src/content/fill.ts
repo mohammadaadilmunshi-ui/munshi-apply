@@ -1,4 +1,5 @@
 import type { FillInstruction, FillResult } from "@munshi-apply/contracts";
+import { fillNativeMultiSelect } from "./multi-select";
 import { controlElementMap } from "./scanner";
 
 function dispatchValueEvents(element: HTMLElement): void {
@@ -216,7 +217,9 @@ function fillElement(element: Element, value: string): boolean {
   }
   if (element instanceof HTMLInputElement) {
     if (
-      ["file", "password", "hidden", "submit", "button"].includes(element.type)
+      ["file", "password", "hidden", "submit", "button", "reset"].includes(
+        element.type,
+      )
     ) {
       return false;
     }
@@ -238,6 +241,7 @@ function fillElement(element: Element, value: string): boolean {
     return element.value === value;
   }
   if (element instanceof HTMLSelectElement) {
+    if (element.multiple) return fillNativeMultiSelect(element, value);
     const requested = normalized(value);
     const option = Array.from(element.options).find(
       (candidate) =>
