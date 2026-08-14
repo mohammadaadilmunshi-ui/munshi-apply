@@ -49,9 +49,7 @@ describe("classifyQuestion", () => {
     expect(classifyQuestion("Certifications").semanticType).toBe(
       "CERTIFICATIONS",
     );
-    expect(classifyQuestion("Languages spoken").semanticType).toBe(
-      "LANGUAGES",
-    );
+    expect(classifyQuestion("Languages spoken").semanticType).toBe("LANGUAGES");
     expect(classifyQuestion("How did you hear about us?").semanticType).toBe(
       "REFERRAL",
     );

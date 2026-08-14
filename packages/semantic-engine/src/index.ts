@@ -57,7 +57,8 @@ const rules: readonly Rule[] = [
   },
   {
     id: "address-line-2",
-    pattern: /^(address line 2|address 2|apartment|apt\.?|suite|unit)( number| #)?$/i,
+    pattern:
+      /^(address line 2|address 2|apartment|apt\.?|suite|unit)( number| #)?$/i,
     semanticType: "ADDRESS_LINE_2",
   },
   {
@@ -79,7 +80,8 @@ const rules: readonly Rule[] = [
   { id: "country", pattern: /^country$/i, semanticType: "COUNTRY" },
   {
     id: "school-name",
-    pattern: /^(school|school name|university|university name|college|college name|institution|institution name)$/i,
+    pattern:
+      /^(school|school name|university|university name|college|college name|institution|institution name)$/i,
     semanticType: "SCHOOL_NAME",
   },
   { id: "gpa", pattern: /\bg\.?p\.?a\.?\b/i, semanticType: "GPA" },
@@ -100,7 +102,8 @@ const rules: readonly Rule[] = [
   },
   {
     id: "employer-name",
-    pattern: /^(employer|employer name|company name|current employer|most recent employer)$/i,
+    pattern:
+      /^(employer|employer name|company name|current employer|most recent employer)$/i,
     semanticType: "EMPLOYER_NAME",
   },
   {
@@ -125,16 +128,16 @@ const rules: readonly Rule[] = [
     highRisk: true,
   },
   {
-    id: "sponsorship",
-    pattern: /\b(sponsor|sponsorship|visa assistance)\b/i,
-    semanticType: "SPONSORSHIP_CURRENT",
+    id: "immigration-assistance",
+    pattern: /\b(immigration|visa) (assistance|support)\b/i,
+    semanticType: "IMMIGRATION_ASSISTANCE",
     sensitive: true,
     highRisk: true,
   },
   {
-    id: "immigration-assistance",
-    pattern: /\b(immigration|visa) (assistance|support)\b/i,
-    semanticType: "IMMIGRATION_ASSISTANCE",
+    id: "sponsorship",
+    pattern: /\b(sponsor|sponsorship|visa assistance)\b/i,
+    semanticType: "SPONSORSHIP_CURRENT",
     sensitive: true,
     highRisk: true,
   },
@@ -186,13 +189,15 @@ const rules: readonly Rule[] = [
   },
   {
     id: "previous-employee",
-    pattern: /\b(previously|ever).{0,30}\b(worked|employed).{0,30}\b(company|organization|us|here)\b/i,
+    pattern:
+      /\b(previously|ever).{0,30}\b(worked|employed).{0,30}\b(company|organization|us|here)\b/i,
     semanticType: "PREVIOUS_EMPLOYEE",
     highRisk: true,
   },
   {
     id: "previous-application",
-    pattern: /\b(previously|ever).{0,30}\b(applied|application).{0,30}\b(company|organization|us|here|position|role)\b/i,
+    pattern:
+      /\b(previously|ever).{0,30}\b(applied|application).{0,30}\b(company|organization|us|here|position|role)\b/i,
     semanticType: "PREVIOUS_APPLICATION",
     highRisk: true,
   },
