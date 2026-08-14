@@ -108,6 +108,17 @@ class ArchitectureStore:
         """Freeze the exact résumé bytes selected for one application."""
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            resume = connection.execute(
+                "SELECT resume_id, sha256 FROM resumes WHERE resume_id = ?",
+                (selection["resume_id"],),
+            ).fetchone()
+            if resume is None:
+                raise ValueError("Cannot lock an unknown résumé")
+            if resume["sha256"] != selection["resume_sha256"]:
+                raise ValueError(
+                    "Résumé selection hash does not match the authoritative résumé bytes"
+                )
+
             existing = connection.execute(
                 """
                 SELECT * FROM application_resume_selections
