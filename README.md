@@ -14,18 +14,21 @@ Version `0.2.0` adds the first end-to-end encrypted, cross-device workflow to th
 - generic DOM and ARIA control discovery across top-level pages, injectable frames, and open Shadow DOM;
 - deterministic classification for common application questions;
 - mandatory review flags for sensitive and consequential questions;
-- a local Master Profile vault with protected facts;
+- a structured Master Profile vault with protected facts and desktop autosave;
 - owner-held AES-256-GCM encryption for synchronized profile facts, résumés, application checkpoints, and reviews;
 - short-lived device pairing, revocation, and recovery-key workflows;
 - a hosted iPhone workspace that remains available while the Mac is off;
 - per-application answer approval and résumé selection synchronized between iPhone and desktop;
 - guarded filling of approved native controls with post-action DOM verification;
+- a secure desktop OpenAI configuration foundation with macOS Keychain storage, model discovery, and local budget controls;
 - shared TypeScript contracts validated with Zod;
 - a Python native companion with authoritative SQLite persistence, transactional outbox delivery, a health API, Native Messaging, and an optional signed n8n event bridge;
 - private-runtime installation, verification, backup, update, rollback, and release-packaging operations;
 - synthetic application fixtures, unit tests, CI, and security documentation.
 
 This milestone fills only explicitly approved, supported controls. File-picker selection, CAPTCHA, MFA, OTP, identity verification, and final submission remain deliberate manual checkpoints. Unsupported custom widgets remain manual.
+
+Connecting an AI provider does not enable generated application answers in this release. Evidence retrieval, contradiction checks, usage metering, budget enforcement, and generated-response validation remain M6 gates.
 
 ## Repository map
 
@@ -82,9 +85,13 @@ The macOS runtime defaults to `~/Library/Application Support/MUNSHI Apply/`; no 
 
 ## Configuration
 
-No API key is required for the current milestone. Provider keys and n8n are deliberately optional. See [Configuration](docs/CONFIGURATION.md) before adding any secret.
+No API key is required for the deterministic profile, review, sync, scanner, or guarded-fill workflow. OpenAI remains optional.
 
-No chargeable cloud, storage, AI, email, observability, or distribution option may be enabled without explicit owner approval. The planned private cloud workspace begins on available free allowances and must warn before any paid upgrade is required.
+When the updated native companion is installed on macOS, **Diagnostics → AI & API control center** can store an OpenAI API key in macOS Keychain, remove it, test the connection, discover models visible to that key, and save local model/budget controls. The key is not stored in GitHub, browser storage, synchronized profile data, or cloud workspace records.
+
+See [Configuration](docs/CONFIGURATION.md) before adding any secret.
+
+No chargeable cloud, storage, AI, email, observability, or distribution option may be enabled without explicit owner approval. The private cloud workspace begins on available no-cost allowances and must warn before any paid upgrade is required.
 
 ## Safety boundary
 
