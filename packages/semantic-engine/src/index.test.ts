@@ -12,6 +12,15 @@ describe("classifyQuestion", () => {
     });
   });
 
+  it("keeps generic sponsorship manual until a dedicated fact exists", () => {
+    expect(classifyQuestion("Do you require sponsorship?")).toMatchObject({
+      semanticType: "UNKNOWN",
+      sensitive: true,
+      requiresReview: true,
+      matchedRule: "sponsorship",
+    });
+  });
+
   it("forces explicit approval for other high-risk questions", () => {
     expect(classifyQuestion("Desired salary")).toMatchObject({
       semanticType: "SALARY_EXPECTATION",
