@@ -29,9 +29,7 @@ describe("profile save queue", () => {
     vi.stubGlobal("chrome", { runtime: { sendMessage } });
 
     const first = saveProfile(profile("first", "2026-08-14T12:00:00.000Z"));
-    const second = saveProfile(
-      profile("newest", "2026-08-14T12:00:01.000Z"),
-    );
+    const second = saveProfile(profile("newest", "2026-08-14T12:00:01.000Z"));
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
     responders[0]?.({ ok: true });

@@ -80,7 +80,8 @@ describe("protected profile convergence", () => {
 
     const reconciled = reconcileProtectedProfile(local, remote);
     expect(
-      reconciled.facts.find((candidate) => candidate.key === "legal_name")?.value,
+      reconciled.facts.find((candidate) => candidate.key === "legal_name")
+        ?.value,
     ).toBe("Confirmed name");
   });
 

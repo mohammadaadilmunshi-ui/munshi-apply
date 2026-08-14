@@ -97,7 +97,9 @@ export function reconcileProtectedProfile(
   const remoteByKey = new Map(
     remoteProfile.facts.map((fact) => [fact.key, fact] as const),
   );
-  const baseByKey = new Map(base.facts.map((fact) => [fact.key, fact] as const));
+  const baseByKey = new Map(
+    base.facts.map((fact) => [fact.key, fact] as const),
+  );
   const protectedKeys = new Set(
     [...localProfile.facts, ...remoteProfile.facts]
       .filter((fact) => fact.protected)
@@ -202,11 +204,6 @@ export async function synchronizeProtectedProfile(
     ...reconciled,
     updatedAt: new Date().toISOString(),
   };
-  await postProfile(
-    connection,
-    rawKey,
-    synchronized,
-    snapshot.profileVersion,
-  );
+  await postProfile(connection, rawKey, synchronized, snapshot.profileVersion);
   return synchronized;
 }
