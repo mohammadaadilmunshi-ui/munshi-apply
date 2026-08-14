@@ -6,6 +6,7 @@ import sys
 from datetime import datetime
 from typing import BinaryIO
 
+from .ai_governance import AIGovernanceService
 from .ai_settings import AIConfiguration, AISettingsStore
 from .application_store import ApplicationStore
 from .checkpoint_store import ApplicationCheckpointStore
@@ -96,15 +97,10 @@ def handle(
         return {"ok": True, "data": {"created": created}}
     if message_type == "SAVE_APPLICATION_CHECKPOINT":
         checkpoint = ApplicationCheckpointPayload.model_validate(message.get("payload"))
-        created = ApplicationCheckpointStore(database).save(
-            checkpoint.database_record()
-        )
+        created = ApplicationCheckpointStore(database).save(checkpoint.database_record())
         return {
             "ok": True,
-            "data": {
-                "created": created,
-                "checkpoint": checkpoint.wire_payload(),
-            },
+            "data": {"created": created, "checkpoint": checkpoint.wire_payload()},
         }
     if message_type == "GET_LATEST_APPLICATION_CHECKPOINT":
         application_id = checkpoint_lookup_application_id(message)
@@ -121,6 +117,9 @@ def handle(
         "DELETE_OPENAI_API_KEY",
         "TEST_OPENAI_CONNECTION",
         "LIST_OPENAI_MODELS",
+        "GET_AI_CONTROL_STATUS",
+        "PREVIEW_AI_DRAFT",
+        "GENERATE_AI_DRAFT",
     }:
         if ai_store is None:
             return {"ok": False, "error": "AI settings store is unavailable"}
@@ -144,6 +143,13 @@ def handle(
             return {"ok": True, "data": {"modelCount": len(models)}}
         if message_type == "LIST_OPENAI_MODELS":
             return {"ok": True, "data": {"models": ai_store.list_models()}}
+        governance = AIGovernanceService(database, ai_store)
+        if message_type == "GET_AI_CONTROL_STATUS":
+            return {"ok": True, "data": governance.control_status()}
+        if message_type == "PREVIEW_AI_DRAFT":
+            return {"ok": True, "data": governance.preview(message.get("payload"))}
+        if message_type == "GENERATE_AI_DRAFT":
+            return {"ok": True, "data": governance.generate(message.get("payload"))}
 
     return {"ok": False, "error": "Unsupported native message"}
 
@@ -156,7 +162,7 @@ def main() -> None:
     while message := read_message(sys.stdin.buffer):
         try:
             write_message(sys.stdout.buffer, handle(message, database, ai_store))
-        except Exception as error:  # The protocol must return structured failures.
+        except Exception as error:
             write_message(sys.stdout.buffer, {"ok": False, "error": str(error)})
 
 

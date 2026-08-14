@@ -24,6 +24,9 @@ class AIConfiguration:
     monthly_budget_usd: float = 0.0
     warning_budget_usd: float = 0.0
     hard_stop: bool = True
+    allow_application_drafts: bool = False
+    allow_profile_evidence: bool = True
+    allow_resume_evidence: bool = True
 
     @classmethod
     def from_payload(cls, payload: object) -> AIConfiguration:
@@ -45,6 +48,9 @@ class AIConfiguration:
             monthly_budget_usd=monthly,
             warning_budget_usd=warning,
             hard_stop=bool(payload.get("hardStop", True)),
+            allow_application_drafts=bool(payload.get("allowApplicationDrafts", False)),
+            allow_profile_evidence=bool(payload.get("allowProfileEvidence", True)),
+            allow_resume_evidence=bool(payload.get("allowResumeEvidence", True)),
         )
 
     def public_dict(self) -> dict[str, object]:
@@ -55,6 +61,9 @@ class AIConfiguration:
             "monthlyBudgetUsd": self.monthly_budget_usd,
             "warningBudgetUsd": self.warning_budget_usd,
             "hardStop": self.hard_stop,
+            "allowApplicationDrafts": self.allow_application_drafts,
+            "allowProfileEvidence": self.allow_profile_evidence,
+            "allowResumeEvidence": self.allow_resume_evidence,
         }
 
 
@@ -83,21 +92,12 @@ class AISettingsStore:
             self.legacy_config_path.unlink()
             self.legacy_config_path.parent.rmdir()
         except OSError:
-            # Migration has already succeeded; leaving an old copy is safer than
-            # failing configuration loading because another legacy file exists.
             pass
         return config
 
     def save(self, config: AIConfiguration) -> None:
         self.config_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        payload = {
-            "provider": config.provider,
-            "enabled": config.enabled,
-            "model": config.model,
-            "monthlyBudgetUsd": config.monthly_budget_usd,
-            "warningBudgetUsd": config.warning_budget_usd,
-            "hardStop": config.hard_stop,
-        }
+        payload = config.public_dict()
         with tempfile.NamedTemporaryFile(
             "w",
             encoding="utf-8",
