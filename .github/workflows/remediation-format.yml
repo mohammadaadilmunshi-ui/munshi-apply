@@ -1,0 +1,48 @@
+name: Remediation format
+
+on:
+  push:
+    branches:
+      - feat/v3-foundation-alignment
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Apply pinned Prettier
+        run: |
+          npx prettier --write \
+            apps/extension/src/messaging/client.test.ts \
+            apps/extension/src/storage/profile-sync.ts \
+            apps/extension/src/storage/profile-sync.test.ts \
+            packages/semantic-engine/src/index.ts \
+            packages/semantic-engine/src/index.test.ts
+      - name: Commit canonical formatting if needed
+        run: |
+          if git diff --quiet; then
+            echo "Formatting already canonical."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            apps/extension/src/messaging/client.test.ts \
+            apps/extension/src/storage/profile-sync.ts \
+            apps/extension/src/storage/profile-sync.test.ts \
+            packages/semantic-engine/src/index.ts \
+            packages/semantic-engine/src/index.test.ts
+          git commit -m "style: apply canonical remediation formatting"
+          git push origin HEAD:feat/v3-foundation-alignment
