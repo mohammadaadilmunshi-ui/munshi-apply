@@ -23,7 +23,7 @@ jobs:
 
       - name: Guard exact AI tranche parent
         run: |
-          test "$(git rev-parse HEAD^)" = "9bec1eb39f39b5786e252abde9e453cbd5539995"
+          test "$(git rev-parse HEAD^)" = "e08473e7aebefeb8b237662918b86ac9c24ec215"
           test "$(git branch --show-current)" = "feat/v3-foundation-alignment"
 
       - name: Set up Node
@@ -98,6 +98,8 @@ jobs:
             apps/extension/src/messaging/native.ts \
             apps/extension/src/messaging/native-ai.test.ts \
             .github/workflows/ai-control-integration-helper.yml
+          python -m ruff format apps/native-host
+          python -m ruff check --fix apps/native-host
 
       - name: Verify complete extension tranche
         run: npm run check
