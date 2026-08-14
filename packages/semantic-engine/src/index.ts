@@ -276,7 +276,7 @@ export function classifyQuestion(rawText: string): ClassificationResult {
   return {
     semanticType: rule.semanticType,
     confidence: rule.highRisk ? 0.9 : 0.94,
-    sensitive: rule.sensitive ?? false,
+    sensitive: rule.sensitive ?? rule.highRisk ?? false,
     requiresReview: rule.highRisk ?? false,
     matchedRule: rule.id,
   };
