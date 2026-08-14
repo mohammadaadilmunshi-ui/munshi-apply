@@ -167,6 +167,8 @@ A hosted UI release is not verified until all of the following pass with synthet
 9. recovery restore reproduces the synthetic profile and résumé in a fresh client;
 10. the deployed hosted source corresponds to a committed, reproducible repository revision.
 
-## Current deployment boundary
+## Deployment gate
 
-The existing owner workspace remains operational and must not be broken merely to satisfy source-control cleanup. The current GitHub/Vercel connections do not expose that `chatgpt.site` frontend as an editable deployment target. Therefore this repository can enforce the shared contract and regression tests now, but the visible hosted pixels change only when the tracked source is attached to the existing runtime or an owner-authorized deployment migration is performed.
+The existing owner workspace remains operational and must not be broken merely to satisfy source-control cleanup. The current GitHub and connected Vercel projects do not expose that `chatgpt.site` frontend as an editable deployment target. Direct retrieval of the private hosted URL from the available web environment also does not provide the authenticated deployment source.
+
+Therefore the repository now enforces the shared state contract and regression tests, but the visible hosted UI changes only after the exact hosted source/project is reattached or exported and imported into `apps/owner-workspace/`. A newly invented replacement frontend is not an acceptable substitute because it could silently change authentication, pairing, encryption, or owner-only access semantics.
