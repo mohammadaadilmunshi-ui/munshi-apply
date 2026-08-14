@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import struct
 import sys
+from datetime import datetime
 from typing import BinaryIO
 
 from .ai_settings import AIConfiguration, AISettingsStore
+from .application_store import ApplicationStore
 from .checkpoint_store import ApplicationCheckpointStore
 from .database import Database
 from .models import ApplicationCheckpointPayload, EventEnvelope
@@ -48,6 +50,26 @@ def checkpoint_lookup_application_id(message: dict[str, object]) -> str:
     return application_id.strip()
 
 
+def ensure_application_payload(message: dict[str, object]) -> tuple[str, str]:
+    payload = message.get("payload")
+    if not isinstance(payload, dict):
+        raise ValueError("Application ensure payload must be an object")
+    application_id = payload.get("applicationId")
+    observed_at = payload.get("observedAt")
+    if not isinstance(application_id, str) or not application_id.strip():
+        raise ValueError("Application ensure requires applicationId")
+    if not isinstance(observed_at, str) or not observed_at.strip():
+        raise ValueError("Application ensure requires observedAt")
+    normalized_observed_at = observed_at.strip()
+    try:
+        parsed = datetime.fromisoformat(normalized_observed_at.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError("Application ensure observedAt must be an ISO timestamp") from error
+    if parsed.tzinfo is None:
+        raise ValueError("Application ensure observedAt must include a timezone")
+    return application_id.strip(), normalized_observed_at
+
+
 def handle(
     message: dict[str, object],
     database: Database,
@@ -68,6 +90,10 @@ def handle(
             raise ValueError("Profile snapshot payload must be an object")
         ProfileStore(database).save(payload)
         return {"ok": True}
+    if message_type == "ENSURE_APPLICATION":
+        application_id, observed_at = ensure_application_payload(message)
+        created = ApplicationStore(database).ensure(application_id, observed_at)
+        return {"ok": True, "data": {"created": created}}
     if message_type == "SAVE_APPLICATION_CHECKPOINT":
         checkpoint = ApplicationCheckpointPayload.model_validate(message.get("payload"))
         created = ApplicationCheckpointStore(database).save(

@@ -1,11 +1,18 @@
+import type { PreflightGateSummary } from "@munshi-apply/application-model";
 import {
   ApplicationPageSchema,
   FillPlanSchema,
   type ApplicationPage,
   type ExtensionRequest,
   type ExtensionResponse,
+  type FillInstruction,
+  type FillResult,
 } from "@munshi-apply/contracts";
 import { parseProfileSnapshot } from "@munshi-apply/contracts/profile-vault";
+import {
+  AutoPilotController,
+  type AutoPilotStartInput,
+} from "./autopilot-controller";
 import {
   clearPagesForTab,
   getLatestPage,
@@ -13,7 +20,12 @@ import {
   getPagesForTab,
   savePage,
 } from "../storage/vault";
-import { getNativeHealth } from "../messaging/native";
+import {
+  ensureNativeApplication,
+  getLatestNativeApplicationCheckpoint,
+  getNativeHealth,
+  saveNativeApplicationCheckpoint,
+} from "../messaging/native";
 import {
   getCloudConnection,
   getCloudSnapshot,
@@ -32,37 +44,20 @@ import { migrateLegacyProfileSnapshot } from "../storage/profile-migration";
 
 const supportsSidePanel =
   typeof chrome.sidePanel?.setPanelBehavior === "function";
+const AUTO_PILOT_RUNTIME_STORAGE_KEY = "autopilot-runtime-v1";
 
-async function initialize(): Promise<void> {
-  if (supportsSidePanel) {
-    await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
-  }
-}
+type AutoPilotStartPayload = Omit<AutoPilotStartInput, "tabId"> & {
+  tabId?: number;
+};
 
-if (!supportsSidePanel) {
-  chrome.action.onClicked.addListener(() => {
-    void chrome.tabs.create({
-      url: chrome.runtime.getURL("sidepanel/index.html"),
-    });
-  });
-}
+type AutoPilotRuntimeRequest =
+  | { type: "AUTOPILOT_START"; payload: AutoPilotStartPayload }
+  | { type: "AUTOPILOT_STOP"; payload?: { reason?: string } }
+  | { type: "AUTOPILOT_STATUS" };
 
-chrome.runtime.onInstalled.addListener(() => {
-  void initialize();
-});
+type RuntimeRequest = ExtensionRequest | AutoPilotRuntimeRequest;
 
-chrome.runtime.onStartup.addListener(() => {
-  void initialize();
-});
-
-async function getActivePage(): Promise<unknown> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (tab?.id !== undefined && /^https?:\/\//.test(tab.url ?? "")) {
-    const activePage = await getMergedPageForTab(tab.id);
-    if (activePage) return activePage;
-  }
-  return getLatestPage();
-}
+let initialized = false;
 
 async function getMergedPageForTab(
   tabId: number,
@@ -85,6 +80,118 @@ async function getMergedPageForTab(
         .map((page) => page.observedAt)
         .sort((left, right) => right.localeCompare(left))[0] ?? base.observedAt,
   };
+}
+
+async function sendFillInstruction(
+  tabId: number,
+  instruction: FillInstruction,
+): Promise<FillResult[]> {
+  const response = (await chrome.tabs.sendMessage(
+    tabId,
+    {
+      type: "APPLY_FILL_INSTRUCTIONS",
+      instructions: [instruction],
+    },
+    { frameId: instruction.frameId },
+  )) as { results?: FillResult[] } | undefined;
+  return response?.results ?? [];
+}
+
+async function sendNavigationAction(
+  tabId: number,
+  frameId: number,
+  controlId: string,
+): Promise<{
+  status: "NAVIGATED" | "REFUSED" | "FAILED";
+  reason: string;
+}> {
+  const response = (await chrome.tabs.sendMessage(
+    tabId,
+    { type: "APPLY_NAVIGATION_ACTION", controlId },
+    { frameId },
+  )) as
+    | {
+        result?: {
+          status: "NAVIGATED" | "REFUSED" | "FAILED";
+          reason: string;
+        };
+      }
+    | undefined;
+  if (!response?.result) {
+    return {
+      status: "FAILED",
+      reason: "Navigation content script returned no verification result",
+    };
+  }
+  return response.result;
+}
+
+const autoPilotController = new AutoPilotController({
+  loadRuntime: async () => {
+    const stored = await chrome.storage.session.get(
+      AUTO_PILOT_RUNTIME_STORAGE_KEY,
+    );
+    return stored[AUTO_PILOT_RUNTIME_STORAGE_KEY] ?? null;
+  },
+  saveRuntime: async (state) => {
+    if (state === null) {
+      await chrome.storage.session.remove(AUTO_PILOT_RUNTIME_STORAGE_KEY);
+      return;
+    }
+    await chrome.storage.session.set({
+      [AUTO_PILOT_RUNTIME_STORAGE_KEY]: state,
+    });
+  },
+  getPage: getMergedPageForTab,
+  fill: sendFillInstruction,
+  navigate: sendNavigationAction,
+  ensureApplication: ensureNativeApplication,
+  saveCheckpoint: saveNativeApplicationCheckpoint,
+  getLatestCheckpoint: getLatestNativeApplicationCheckpoint,
+  scheduleTimeout: (delayMilliseconds, callback) => {
+    setTimeout(callback, delayMilliseconds);
+  },
+});
+
+async function initialize(): Promise<void> {
+  if (supportsSidePanel) {
+    await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  }
+  if (initialized) return;
+  initialized = true;
+  try {
+    await autoPilotController.recover();
+  } catch {
+    // Runtime recovery is fail-closed inside the controller. The side panel can
+    // still open for diagnostics if native messaging is temporarily unavailable.
+  }
+}
+
+if (!supportsSidePanel) {
+  chrome.action.onClicked.addListener(() => {
+    void chrome.tabs.create({
+      url: chrome.runtime.getURL("sidepanel/index.html"),
+    });
+  });
+}
+
+chrome.runtime.onInstalled.addListener(() => {
+  void initialize();
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  void initialize();
+});
+
+void initialize();
+
+async function getActivePage(): Promise<unknown> {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id !== undefined && /^https?:\/\//.test(tab.url ?? "")) {
+    const activePage = await getMergedPageForTab(tab.id);
+    if (activePage) return activePage;
+  }
+  return getLatestPage();
 }
 
 async function extensionHealth(): Promise<unknown> {
@@ -133,8 +240,26 @@ async function applyFillPlan(payload: unknown): Promise<unknown> {
   return { pageId: plan.pageId, results };
 }
 
+async function autoPilotStart(payload: AutoPilotStartPayload): Promise<unknown> {
+  const tabId =
+    payload.tabId ??
+    (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id;
+  if (tabId === undefined) {
+    throw new Error("No active application tab found");
+  }
+  const input: AutoPilotStartInput = {
+    tabId,
+    applicationId: payload.applicationId,
+    preflight: payload.preflight as PreflightGateSummary,
+    fillInstructions: payload.fillInstructions,
+    selectedResumeId: payload.selectedResumeId,
+    selectedResumeSha256: payload.selectedResumeSha256,
+  };
+  return autoPilotController.start(input);
+}
+
 async function routeMessage(
-  request: ExtensionRequest,
+  request: RuntimeRequest,
   sender: chrome.runtime.MessageSender,
 ): Promise<ExtensionResponse> {
   try {
@@ -195,6 +320,15 @@ async function routeMessage(
         return { ok: true, data: await applyFillPlan(request.payload) };
       case "GET_ACTIVE_PAGE":
         return { ok: true, data: await getActivePage() };
+      case "AUTOPILOT_START":
+        return { ok: true, data: await autoPilotStart(request.payload) };
+      case "AUTOPILOT_STOP":
+        return {
+          ok: true,
+          data: await autoPilotController.stop(request.payload?.reason),
+        };
+      case "AUTOPILOT_STATUS":
+        return { ok: true, data: await autoPilotController.status() };
       case "PAGE_SNAPSHOT": {
         const tabId = sender.tab?.id;
         const frameId = sender.frameId ?? 0;
@@ -225,10 +359,11 @@ async function routeMessage(
         }
         await savePage(page);
         const mergedPage = await getMergedPageForTab(tabId);
+        const activePage = mergedPage ?? page;
         const connection = await getCloudConnection();
-        if (mergedPage && connection && (await isCloudEncryptionReady())) {
+        if (connection && (await isCloudEncryptionReady())) {
           try {
-            await publishApplicationSnapshot(connection, mergedPage);
+            await publishApplicationSnapshot(connection, activePage);
           } catch {
             // Page discovery remains local-first and retries on the next scan.
           }
@@ -236,11 +371,12 @@ async function routeMessage(
         try {
           await chrome.runtime.sendMessage({
             type: "ACTIVE_PAGE_UPDATED",
-            payload: mergedPage ?? page,
+            payload: activePage,
           });
         } catch {
           // The side panel is optional and may be closed while the sensor is active.
         }
+        await autoPilotController.onPageSnapshot(tabId, activePage);
         return { ok: true };
       }
     }
@@ -253,7 +389,7 @@ async function routeMessage(
 
 chrome.runtime.onMessage.addListener(
   (
-    request: ExtensionRequest,
+    request: RuntimeRequest,
     sender,
     sendResponse: (response: ExtensionResponse) => void,
   ) => {

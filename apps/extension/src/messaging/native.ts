@@ -10,7 +10,8 @@ import {
 const nativeHostName = "systems.munshi.apply";
 
 type NativeResponse =
-  { ok: true; data?: unknown } | { ok: false; error: string };
+  | { ok: true; data?: unknown }
+  | { ok: false; error: string };
 
 export type AISettings = {
   provider: "openai";
@@ -78,6 +79,17 @@ function parseCheckpointSaveResult(value: unknown): NativeCheckpointSaveResult {
   };
 }
 
+function parseCreatedResult(value: unknown, label: string): { created: boolean } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${label} response must be an object`);
+  }
+  const candidate = value as Record<string, unknown>;
+  if (typeof candidate.created !== "boolean") {
+    throw new Error(`${label} response is missing created status`);
+  }
+  return { created: candidate.created };
+}
+
 export async function getNativeHealth(
   timeoutMilliseconds = 3_000,
 ): Promise<unknown> {
@@ -98,6 +110,30 @@ export async function saveNativeProfileSnapshot(
     type: "SAVE_PROFILE_SNAPSHOT",
     payload: parseProfileSnapshot(snapshot),
   });
+}
+
+export async function ensureNativeApplication(
+  applicationId: string,
+  observedAt: string,
+): Promise<{ created: boolean }> {
+  const normalizedApplicationId = applicationId.trim();
+  if (!normalizedApplicationId) {
+    throw new Error("applicationId must be a non-empty string");
+  }
+  if (
+    !/^\d{4}-\d{2}-\d{2}T/.test(observedAt) ||
+    Number.isNaN(Date.parse(observedAt))
+  ) {
+    throw new Error("observedAt must be an ISO timestamp");
+  }
+  const result = await sendNative<unknown>({
+    type: "ENSURE_APPLICATION",
+    payload: {
+      applicationId: normalizedApplicationId,
+      observedAt,
+    },
+  });
+  return parseCreatedResult(result, "Native application ensure");
 }
 
 export async function saveNativeApplicationCheckpoint(
