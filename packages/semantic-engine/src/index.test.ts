@@ -12,6 +12,19 @@ describe("classifyQuestion", () => {
     });
   });
 
+  it("forces explicit approval for other high-risk questions", () => {
+    expect(classifyQuestion("Desired salary")).toMatchObject({
+      semanticType: "SALARY_EXPECTATION",
+      sensitive: true,
+      requiresReview: true,
+    });
+    expect(classifyQuestion("Full legal name")).toMatchObject({
+      semanticType: "PERSONAL",
+      sensitive: true,
+      requiresReview: true,
+    });
+  });
+
   it("classifies common deterministic contact questions", () => {
     expect(classifyQuestion("Email address").semanticType).toBe("EMAIL");
     expect(classifyQuestion("Mobile phone").semanticType).toBe("PHONE");
