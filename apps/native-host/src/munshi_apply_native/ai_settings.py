@@ -153,19 +153,17 @@ class AISettingsStore:
             raise ValueError("Secure desktop key entry currently requires macOS Keychain")
         if not isinstance(api_key, str) or len(api_key.strip()) < 20:
             raise ValueError("OpenAI API key is incomplete")
+        cleaned_key = api_key.strip()
+        password_hex = cleaned_key.encode("utf-8").hex()
+        command = (
+            f"add-generic-password -a {_KEYCHAIN_ACCOUNT} "
+            f"-s {_KEYCHAIN_SERVICE} -U -X {password_hex}\n"
+        )
         result = subprocess.run(  # noqa: S603
-            [
-                "/usr/bin/security",
-                "add-generic-password",
-                "-a",
-                _KEYCHAIN_ACCOUNT,
-                "-s",
-                _KEYCHAIN_SERVICE,
-                "-w",
-                api_key.strip(),
-                "-U",
-            ],
+            ["/usr/bin/security", "-q", "-i"],
             check=False,
+            input=command,
+            text=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
