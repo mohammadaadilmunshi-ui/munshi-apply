@@ -73,7 +73,11 @@ describe("resume upload validation", () => {
 
   it("rejects empty and oversized files", () => {
     expect(() =>
-      validateResumeFile({ name: "resume.pdf", size: 0, type: "application/pdf" }),
+      validateResumeFile({
+        name: "resume.pdf",
+        size: 0,
+        type: "application/pdf",
+      }),
     ).toThrow("between 1 byte and 12 MB");
     expect(() =>
       validateResumeFile({

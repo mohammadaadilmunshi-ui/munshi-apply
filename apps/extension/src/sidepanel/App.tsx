@@ -424,9 +424,14 @@ export function App() {
     try {
       const connection = await getCloudConnection();
       if (connection && cloud.status === "connected" && cloud.data.encryptionReady) {
+        const selectedResume = cloudSnapshot?.resumes.find(
+          (resume) => resume.resumeId === selectedResumeId,
+        );
         const review: ApplicationReview = {
           reviewId: `review-${page.pageId}`, pageId: page.pageId,
-          resumeId: selectedResumeId || null, approvedAt: now(),
+          resumeId: selectedResumeId || null,
+          resumeSha256: selectedResume?.sha256 ?? null,
+          approvedAt: now(),
           answers: page.questions.map((question) => {
             const answer = answers[question.questionId] ?? { value: "", approved: false, sensitive: question.sensitive };
             return { questionId: question.questionId, controlId: question.controlId, value: answer.value, approved: answer.approved, sensitive: question.sensitive };
