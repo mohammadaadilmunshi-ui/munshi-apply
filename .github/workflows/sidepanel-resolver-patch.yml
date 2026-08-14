@@ -1,0 +1,36 @@
+name: Sidepanel resolver patch
+
+on:
+  push:
+    branches:
+      - feat/v3-foundation-alignment
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: python scripts/patch-sidepanel-resolver.py
+      - run: npx prettier --write apps/extension/src/sidepanel/App.tsx
+      - run: npm run typecheck --workspace @munshi-apply/extension
+      - name: Commit sidepanel integration
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/extension/src/sidepanel/App.tsx
+          git commit -m "feat: use central preflight resolver in side panel"
+          git push origin HEAD:feat/v3-foundation-alignment
