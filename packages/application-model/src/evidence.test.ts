@@ -77,9 +77,7 @@ describe("retrieveEvidence", () => {
     });
 
     expect(
-      result.items.some(
-        (item) => item.evidenceId === "employment-generated",
-      ),
+      result.items.some((item) => item.evidenceId === "employment-generated"),
     ).toBe(false);
     expect(result.excludedByTrustCount).toBe(1);
   });
@@ -118,6 +116,8 @@ describe("evidenceHasContradiction", () => {
     expect(
       evidenceHasContradiction(graph, ["employment-verified", "education"]),
     ).toBe(true);
-    expect(evidenceHasContradiction(graph, ["employment-verified"])).toBe(false);
+    expect(evidenceHasContradiction(graph, ["employment-verified"])).toBe(
+      false,
+    );
   });
 });
