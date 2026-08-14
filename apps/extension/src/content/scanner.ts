@@ -172,6 +172,38 @@ function kindFor(element: Element): ControlKind {
     : "UNKNOWN";
 }
 
+function controlledComboboxOptions(element: Element): string[] {
+  const root = element.getRootNode();
+  if (!(root instanceof Document || root instanceof ShadowRoot)) return [];
+  const ids = [
+    element.getAttribute("aria-controls"),
+    element.getAttribute("aria-owns"),
+  ]
+    .filter((value): value is string => Boolean(value))
+    .flatMap((value) => value.split(/\s+/))
+    .filter(Boolean);
+  const labels: string[] = [];
+  for (const id of ids) {
+    const container =
+      root instanceof Document
+        ? root.getElementById(id)
+        : root.querySelector(`#${CSS.escape(id)}`);
+    if (!container) continue;
+    const candidates = [
+      ...(container.getAttribute("role") === "option" ? [container] : []),
+      ...Array.from(container.querySelectorAll("[role='option']")),
+    ];
+    for (const candidate of candidates) {
+      const label =
+        compactText(candidate.getAttribute("aria-label")) ||
+        compactText(candidate.textContent) ||
+        compactText(candidate.getAttribute("data-value"));
+      if (label) labels.push(label);
+    }
+  }
+  return [...new Set(labels)];
+}
+
 function optionsFor(element: Element): string[] {
   if (element instanceof HTMLSelectElement) {
     return Array.from(element.options).map((option) =>
@@ -180,6 +212,9 @@ function optionsFor(element: Element): string[] {
   }
   if (element instanceof HTMLInputElement && element.type === "radio") {
     return radioGroup(element).map(radioOptionLabel).filter(Boolean);
+  }
+  if (element.getAttribute("role") === "combobox") {
+    return controlledComboboxOptions(element);
   }
   return [];
 }
