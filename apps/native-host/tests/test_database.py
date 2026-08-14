@@ -9,9 +9,73 @@ from munshi_apply_native.database import Database
 def test_migrations_are_idempotent(tmp_path: Path) -> None:
     migrations = Path(__file__).resolve().parents[3] / "migrations"
     database = Database(tmp_path / "test.sqlite", migrations)
-    assert database.migrate() == ["001_initial.sql", "002_transactional_outbox.sql"]
+    assert database.migrate() == [
+        "001_initial.sql",
+        "002_transactional_outbox.sql",
+        "003_profile_evidence_checkpoints.sql",
+    ]
     assert database.migrate() == []
-    assert database.health()["status"] == "healthy"
+    health = database.health()
+    assert health["status"] == "healthy"
+    assert health["migration_count"] == 3
+    assert health["schema_version"] == "003_profile_evidence_checkpoints.sql"
+
+
+def test_architecture_tables_are_created_with_integrity_constraints(tmp_path: Path) -> None:
+    migrations = Path(__file__).resolve().parents[3] / "migrations"
+    database = Database(tmp_path / "test.sqlite", migrations)
+    database.migrate()
+
+    with database.connect() as connection:
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        assert {
+            "profile_records",
+            "profile_record_facts",
+            "evidence_nodes",
+            "evidence_edges",
+            "application_checkpoints",
+            "application_resume_selections",
+            "ai_usage",
+        }.issubset(tables)
+
+        now = datetime.now(UTC).isoformat()
+        connection.execute(
+            """
+            INSERT INTO profiles (
+                profile_id, display_name, schema_version, created_at, updated_at
+            ) VALUES ('profile-1', 'Profile', 1, ?, ?)
+            """,
+            (now, now),
+        )
+        connection.execute(
+            """
+            INSERT INTO profile_records (
+                record_id, profile_id, kind, label, created_at, updated_at
+            ) VALUES ('record-1', 'profile-1', 'EMPLOYMENT', 'Employer', ?, ?)
+            """,
+            (now, now),
+        )
+        connection.execute(
+            """
+            INSERT INTO profile_record_facts (
+                fact_id, record_id, key, value_json, category, trust_level,
+                source, confirmed_at, updated_at, protected
+            ) VALUES (
+                'record-fact-1', 'record-1', 'employer_name', '"Employer"',
+                'EMPLOYMENT', 'USER_CONFIRMED', 'profile-record', ?, ?, 0
+            )
+            """,
+            (now, now),
+        )
+        assert (
+            connection.execute("SELECT COUNT(*) FROM profile_record_facts").fetchone()[0]
+            == 1
+        )
 
 
 def event_record() -> dict[str, object]:
