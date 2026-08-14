@@ -170,4 +170,63 @@ describe("guarded field filling", () => {
     );
     expect(result[0]?.status).toBe("FAILED");
   });
+
+  it("selects and verifies an exact option in an ARIA combobox", () => {
+    document.body.innerHTML = `
+      <label for="country">Country</label>
+      <input id="country" role="combobox" aria-controls="country-options" value="">
+      <div id="country-options" role="listbox">
+        <div id="country-us" role="option">United States</div>
+        <div id="country-ca" role="option">Canada</div>
+      </div>
+    `;
+    const input = document.getElementById("country") as HTMLInputElement;
+    const option = document.getElementById("country-us") as HTMLElement;
+    option.addEventListener("click", () => {
+      input.value = "United States";
+      option.setAttribute("aria-selected", "true");
+    });
+    const question = scanDocument().questions[0];
+    expect(question).toBeDefined();
+
+    const result = applyFillInstructions([
+      {
+        controlId: question!.controlId,
+        frameId: 0,
+        value: "United States",
+        sensitive: false,
+        approved: true,
+      },
+    ]);
+
+    expect(input.value).toBe("United States");
+    expect(option.getAttribute("aria-selected")).toBe("true");
+    expect(result[0]?.status).toBe("FILLED");
+  });
+
+  it("restores an ARIA combobox when no exact option can be verified", () => {
+    document.body.innerHTML = `
+      <label for="country">Country</label>
+      <input id="country" role="combobox" aria-controls="country-options" value="Canada">
+      <div id="country-options" role="listbox">
+        <div role="option">Canada</div>
+      </div>
+    `;
+    const input = document.getElementById("country") as HTMLInputElement;
+    const question = scanDocument().questions[0];
+    expect(question).toBeDefined();
+
+    const result = applyFillInstructions([
+      {
+        controlId: question!.controlId,
+        frameId: 0,
+        value: "United States",
+        sensitive: false,
+        approved: true,
+      },
+    ]);
+
+    expect(input.value).toBe("Canada");
+    expect(result[0]?.status).toBe("FAILED");
+  });
 });
