@@ -80,6 +80,9 @@ def test_preview_message_is_provider_free_and_review_gated(
             "type": "PREVIEW_AI_DRAFT",
             "payload": {
                 "applicationId": "app-1",
+                "pageId": "page-1",
+                "questionId": "q-1",
+                "controlId": "control-1",
                 "question": "Why this role?",
                 "semanticType": "WHY_ROLE",
                 "correlationId": "q-1",

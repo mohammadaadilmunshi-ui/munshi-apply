@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from .ai_budget_store import AIBudgetStore
+from .ai_draft_store import AIDraftStore
 from .ai_settings import AIConfiguration, AISettingsStore
+from .application_store import ApplicationStore
 from .architecture_store import ArchitectureStore
 from .database import Database
 from .providers import (
@@ -101,7 +103,9 @@ class AIGovernanceService:
         self.provider_factory = provider_factory
         self.clock = clock
         self.architecture = ArchitectureStore(database)
+        self.applications = ApplicationStore(database)
         self.budget = AIBudgetStore(database)
+        self.drafts = AIDraftStore(database)
 
     def _now(self) -> datetime:
         now = self.clock()
@@ -161,11 +165,20 @@ class AIGovernanceService:
         if not isinstance(payload, dict):
             raise ValueError("AI draft request must be an object")
         application_id = payload.get("applicationId")
+        page_id = payload.get("pageId")
+        question_id = payload.get("questionId")
+        control_id = payload.get("controlId")
         question = payload.get("question")
         semantic_type = payload.get("semanticType")
         correlation_id = payload.get("correlationId")
         if not isinstance(application_id, str) or not application_id.strip():
             raise ValueError("AI draft request requires applicationId")
+        if not isinstance(page_id, str) or not page_id.strip():
+            raise ValueError("AI draft request requires pageId")
+        if not isinstance(question_id, str) or not question_id.strip():
+            raise ValueError("AI draft request requires questionId")
+        if not isinstance(control_id, str) or not control_id.strip():
+            raise ValueError("AI draft request requires controlId")
         if not isinstance(question, str) or not question.strip():
             raise ValueError("AI draft request requires question")
         if not isinstance(semantic_type, str) or not semantic_type.strip():
@@ -188,6 +201,9 @@ class AIGovernanceService:
             raise ValueError(f"AI draft maxOutputTokens must be between 1 and {_MAX_OUTPUT_TOKENS}")
         return {
             "applicationId": application_id.strip(),
+            "pageId": page_id.strip(),
+            "questionId": question_id.strip(),
+            "controlId": control_id.strip(),
             "question": question.strip(),
             "semanticType": semantic_type.strip(),
             "correlationId": correlation_id.strip(),
@@ -417,6 +433,7 @@ class AIGovernanceService:
         assert isinstance(reservation_id, str)
         assert isinstance(now, datetime)
         correlation_id = str(request["correlationId"])
+        self.applications.ensure(str(request["applicationId"]), now.isoformat())
         usage_id = f"ai-use-{reservation_id.removeprefix('ai-res-')}"
         try:
             provider = self.provider_factory(self.ai_store.get_api_key())
@@ -464,28 +481,51 @@ class AIGovernanceService:
             graph=graph,
             max_words=request["maxWords"] if isinstance(request["maxWords"], int) else None,
         )
+        claims = [
+            {
+                "claimId": claim.claim_id,
+                "text": claim.text,
+                "evidenceIds": list(claim.evidence_ids),
+            }
+            for claim in result.claims
+        ]
+        usage = {
+            "inputTokens": result.usage.input_tokens,
+            "outputTokens": result.usage.output_tokens,
+            "totalTokens": result.usage.total_tokens,
+            "costUsd": actual_cost,
+            "estimated": False,
+        }
+        draft = self.drafts.create(
+            {
+                "draftId": f"ai-draft-{uuid.uuid4()}",
+                "applicationId": request["applicationId"],
+                "pageId": request["pageId"],
+                "questionId": request["questionId"],
+                "controlId": request["controlId"],
+                "question": request["question"],
+                "semanticType": request["semanticType"],
+                "provider": "openai",
+                "model": result.model,
+                "responseId": result.response_id,
+                "text": result.text,
+                "evidenceIds": sorted(evidence_ids),
+                "claims": claims,
+                "usage": usage,
+                "generatedAt": self._now().isoformat(),
+            }
+        )
         return {
             "status": "DRAFT_REVIEW_REQUIRED",
+            "draftId": draft["draftId"],
+            "draft": draft,
             "provider": "openai",
             "model": result.model,
             "responseId": result.response_id,
             "text": result.text,
-            "claims": [
-                {
-                    "claimId": claim.claim_id,
-                    "text": claim.text,
-                    "evidenceIds": list(claim.evidence_ids),
-                }
-                for claim in result.claims
-            ],
+            "claims": claims,
             "evidenceIds": sorted(evidence_ids),
-            "usage": {
-                "inputTokens": result.usage.input_tokens,
-                "outputTokens": result.usage.output_tokens,
-                "totalTokens": result.usage.total_tokens,
-                "costUsd": actual_cost,
-                "estimated": False,
-            },
+            "usage": usage,
             "budgetState": prepared["budget"]["state"],
             "reviewRequired": True,
             "approved": False,

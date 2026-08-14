@@ -36,7 +36,9 @@ export function buildAutoPilotLaunchPlan(
   page: ApplicationPage,
   answers: Record<string, AutoPilotAnswer>,
 ): AutoPilotLaunchPlan {
-  const controls = new Map(page.controls.map((control) => [control.controlId, control]));
+  const controls = new Map(
+    page.controls.map((control) => [control.controlId, control]),
+  );
   const instructions: FillInstruction[] = [];
   const manual = new Map<string, Control>();
   let reviewCount = 0;
@@ -45,11 +47,12 @@ export function buildAutoPilotLaunchPlan(
 
   for (const question of page.questions) {
     const control = controls.get(question.controlId);
-    if (!control || control.disabled || !control.visible) continue;
+    if (!control || control.disabled) continue;
     if (control.kind === "FILE") {
       if (!control.fileSelected) manual.set(control.controlId, control);
       continue;
     }
+    if (!control.visible) continue;
     if (!fillableKinds.has(control.kind)) {
       if (control.required) manual.set(control.controlId, control);
       continue;
@@ -76,9 +79,9 @@ export function buildAutoPilotLaunchPlan(
 
   for (const control of page.controls) {
     if (
-      control.visible &&
       !control.disabled &&
       control.required &&
+      (control.kind === "FILE" || control.visible) &&
       (control.kind === "FILE" || !fillableKinds.has(control.kind)) &&
       !(control.kind === "FILE" && control.fileSelected)
     ) {

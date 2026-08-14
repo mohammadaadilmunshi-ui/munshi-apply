@@ -5,10 +5,12 @@ import { controlElementMap } from "./scanner";
 export type FillInteractionOptions = {
   optionTimeoutMs?: number;
   pollIntervalMs?: number;
+  verificationTimeoutMs?: number;
 };
 
 const DEFAULT_OPTION_TIMEOUT_MS = 1_200;
 const DEFAULT_POLL_INTERVAL_MS = 25;
+const DEFAULT_VERIFICATION_TIMEOUT_MS = 500;
 
 function dispatchValueEvents(element: HTMLElement): void {
   element.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
@@ -76,29 +78,25 @@ function radioCandidateValues(element: HTMLInputElement): string[] {
   ].filter(Boolean);
 }
 
+function radioMatches(candidate: HTMLInputElement, requested: string): boolean {
+  const values = radioCandidateValues(candidate);
+  if (values.includes(requested)) return true;
+  if (["true", "yes", "1", "checked"].includes(requested)) {
+    return values.some((value) => ["true", "yes", "1"].includes(value));
+  }
+  if (["false", "no", "0", "unchecked"].includes(requested)) {
+    return values.some((value) => ["false", "no", "0"].includes(value));
+  }
+  return false;
+}
+
 function fillRadio(element: HTMLInputElement, value: string): boolean {
   const requested = normalized(value);
-  const candidates = radioCandidates(element);
-  let match = candidates.find((candidate) =>
-    radioCandidateValues(candidate).includes(requested),
+  const candidates = radioCandidates(element).filter((candidate) =>
+    radioMatches(candidate, requested),
   );
-
-  if (!match && ["true", "yes", "1", "checked"].includes(requested)) {
-    match = candidates.find((candidate) =>
-      radioCandidateValues(candidate).some((candidateValue) =>
-        ["true", "yes", "1"].includes(candidateValue),
-      ),
-    );
-  }
-  if (!match && ["false", "no", "0", "unchecked"].includes(requested)) {
-    match = candidates.find((candidate) =>
-      radioCandidateValues(candidate).some((candidateValue) =>
-        ["false", "no", "0"].includes(candidateValue),
-      ),
-    );
-  }
-  if (!match) return false;
-
+  if (candidates.length !== 1) return false;
+  const match = candidates[0]!;
   match.focus();
   setNativeChecked(match, true);
   dispatchValueEvents(match);
@@ -361,11 +359,41 @@ async function fillCombobox(
   return verified;
 }
 
+function elementUnavailable(element: Element): boolean {
+  if (!(element instanceof HTMLElement)) return true;
+  if (element.getAttribute("aria-disabled") === "true") return true;
+  if ("disabled" in element && Boolean((element as HTMLInputElement).disabled))
+    return true;
+  return false;
+}
+
+async function waitForVerification(
+  verify: () => boolean,
+  timeoutMilliseconds: number,
+  pollIntervalMilliseconds: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMilliseconds;
+  while (Date.now() <= deadline) {
+    if (verify()) return true;
+    await delay(pollIntervalMilliseconds);
+  }
+  return verify();
+}
+
+function radioVerified(element: HTMLInputElement, value: string): boolean {
+  const requested = normalized(value);
+  const checked = radioCandidates(element).filter(
+    (candidate) => candidate.checked,
+  );
+  return checked.length === 1 && radioMatches(checked[0]!, requested);
+}
+
 async function fillElement(
   element: Element,
   value: string,
   options: Required<FillInteractionOptions>,
 ): Promise<boolean> {
+  if (elementUnavailable(element)) return false;
   if (
     element instanceof HTMLElement &&
     element.getAttribute("role") === "combobox"
@@ -380,47 +408,160 @@ async function fillElement(
     ) {
       return false;
     }
+    if (element.readOnly && !["radio", "checkbox"].includes(element.type)) {
+      return false;
+    }
     if (element.type === "radio") {
-      return fillRadio(element, value);
+      const group = radioCandidates(element);
+      const original = group.map((candidate) => candidate.checked);
+      if (!fillRadio(element, value)) return false;
+      const verified = await waitForVerification(
+        () => radioVerified(element, value),
+        options.verificationTimeoutMs,
+        options.pollIntervalMs,
+      );
+      if (!verified) {
+        group.forEach((candidate, index) => {
+          setNativeChecked(candidate, original[index] ?? false);
+          dispatchValueEvents(candidate);
+        });
+      }
+      return verified;
     }
     if (element.type === "checkbox") {
-      return fillCheckbox(element, value);
+      const original = element.checked;
+      if (!fillCheckbox(element, value)) return false;
+      const requested = normalized(value);
+      const shouldCheck = ["true", "yes", "1", "checked"].includes(requested);
+      const verified = await waitForVerification(
+        () => element.checked === shouldCheck,
+        options.verificationTimeoutMs,
+        options.pollIntervalMs,
+      );
+      if (!verified) {
+        setNativeChecked(element, original);
+        dispatchValueEvents(element);
+      }
+      return verified;
     }
     if (element.type === "date") {
-      return fillDate(element, value);
+      const original = element.value;
+      if (!fillDate(element, value)) return false;
+      const requested = canonicalDate(value);
+      const verified =
+        Boolean(requested) &&
+        (await waitForVerification(
+          () => element.value === requested && element.validity.valid,
+          options.verificationTimeoutMs,
+          options.pollIntervalMs,
+        ));
+      if (!verified) {
+        setNativeValue(element, original);
+        dispatchValueEvents(element);
+      }
+      return verified;
     }
+    const original = element.value;
     element.focus();
     setNativeValue(element, value);
     dispatchValueEvents(element);
-    return element.value === value;
+    const verified = await waitForVerification(
+      () => element.value === value && element.validity.valid,
+      options.verificationTimeoutMs,
+      options.pollIntervalMs,
+    );
+    if (!verified) {
+      setNativeValue(element, original);
+      dispatchValueEvents(element);
+    }
+    return verified;
   }
   if (element instanceof HTMLTextAreaElement) {
+    if (element.readOnly) return false;
+    const original = element.value;
     element.focus();
     setNativeValue(element, value);
     dispatchValueEvents(element);
-    return element.value === value;
+    const verified = await waitForVerification(
+      () => element.value === value && element.validity.valid,
+      options.verificationTimeoutMs,
+      options.pollIntervalMs,
+    );
+    if (!verified) {
+      setNativeValue(element, original);
+      dispatchValueEvents(element);
+    }
+    return verified;
   }
   if (element instanceof HTMLSelectElement) {
     if (element.multiple) return fillNativeMultiSelect(element, value);
     const requested = normalized(value);
-    const option = Array.from(element.options).find(
+    const matches = Array.from(element.options).filter(
       (candidate) =>
         normalized(candidate.value) === requested ||
         normalized(candidate.text) === requested,
     );
-    if (!option) return false;
+    if (matches.length !== 1) return false;
+    const option = matches[0]!;
+    const original = element.value;
     element.focus();
     element.value = option.value;
     dispatchValueEvents(element);
-    return element.value === option.value;
+    const verified = await waitForVerification(
+      () => element.value === option.value && element.validity.valid,
+      options.verificationTimeoutMs,
+      options.pollIntervalMs,
+    );
+    if (!verified) {
+      element.value = original;
+      dispatchValueEvents(element);
+    }
+    return verified;
   }
   if (element instanceof HTMLElement && element.isContentEditable) {
+    const original = element.textContent ?? "";
     element.focus();
     element.textContent = value;
     dispatchValueEvents(element);
-    return element.textContent === value;
+    const verified = await waitForVerification(
+      () => element.textContent === value,
+      options.verificationTimeoutMs,
+      options.pollIntervalMs,
+    );
+    if (!verified) {
+      element.textContent = original;
+      dispatchValueEvents(element);
+    }
+    return verified;
   }
   return false;
+}
+
+export type FilePickerAssistResult = {
+  status: "OWNER_ACTION_REQUESTED" | "REFUSED";
+  reason: string;
+};
+
+export function assistFilePicker(controlId: string): FilePickerAssistResult {
+  const element = controlElementMap().get(controlId);
+  if (
+    !(element instanceof HTMLInputElement) ||
+    element.type !== "file" ||
+    element.disabled ||
+    element.getAttribute("aria-disabled") === "true"
+  ) {
+    return {
+      status: "REFUSED",
+      reason: "The employer file input changed, is disabled, or is unavailable",
+    };
+  }
+  element.focus();
+  element.click();
+  return {
+    status: "OWNER_ACTION_REQUESTED",
+    reason:
+      "Employer file picker requested. File selection remains an explicit owner action.",
+  };
 }
 
 export async function applyFillInstructions(
@@ -433,6 +574,9 @@ export async function applyFillInstructions(
       interactionOptions.optionTimeoutMs ?? DEFAULT_OPTION_TIMEOUT_MS,
     pollIntervalMs:
       interactionOptions.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
+    verificationTimeoutMs:
+      interactionOptions.verificationTimeoutMs ??
+      DEFAULT_VERIFICATION_TIMEOUT_MS,
   };
   const results: FillResult[] = [];
 

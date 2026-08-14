@@ -11,6 +11,7 @@ import {
 import { parseProfileSnapshot } from "@munshi-apply/contracts/profile-vault";
 import {
   AutoPilotController,
+  type AutoPilotResumeInput,
   type AutoPilotStartInput,
 } from "./autopilot-controller";
 import {
@@ -52,8 +53,14 @@ type AutoPilotStartPayload = Omit<AutoPilotStartInput, "tabId"> & {
 
 type AutoPilotRuntimeRequest =
   | { type: "AUTOPILOT_START"; payload: AutoPilotStartPayload }
+  | { type: "AUTOPILOT_PAUSE"; payload?: { reason?: string } }
+  | { type: "AUTOPILOT_RESUME"; payload: AutoPilotResumeInput }
   | { type: "AUTOPILOT_STOP"; payload?: { reason?: string } }
-  | { type: "AUTOPILOT_STATUS" };
+  | { type: "AUTOPILOT_STATUS" }
+  | {
+      type: "AUTOPILOT_ASSIST_FILE";
+      payload: { frameId: number; controlId: string };
+    };
 
 type RuntimeRequest = ExtensionRequest | AutoPilotRuntimeRequest;
 
@@ -122,6 +129,22 @@ async function sendNavigationAction(
       status: "FAILED",
       reason: "Navigation content script returned no verification result",
     };
+  }
+  return response.result;
+}
+
+async function sendFilePickerAssist(
+  tabId: number,
+  frameId: number,
+  controlId: string,
+): Promise<unknown> {
+  const response = (await chrome.tabs.sendMessage(
+    tabId,
+    { type: "APPLY_FILE_PICKER_ASSIST", controlId },
+    { frameId },
+  )) as { result?: unknown } | undefined;
+  if (!response?.result) {
+    throw new Error("File-picker handoff returned no verification result");
   }
   return response.result;
 }
@@ -324,6 +347,33 @@ async function routeMessage(
         return { ok: true, data: await getActivePage() };
       case "AUTOPILOT_START":
         return { ok: true, data: await autoPilotStart(request.payload) };
+      case "AUTOPILOT_PAUSE":
+        return {
+          ok: true,
+          data: await autoPilotController.pause(request.payload?.reason),
+        };
+      case "AUTOPILOT_RESUME":
+        return {
+          ok: true,
+          data: await autoPilotController.resume(request.payload),
+        };
+      case "AUTOPILOT_ASSIST_FILE": {
+        const [tab] = await chrome.tabs.query({
+          active: true,
+          currentWindow: true,
+        });
+        if (tab?.id === undefined) {
+          throw new Error("No active application tab found");
+        }
+        return {
+          ok: true,
+          data: await sendFilePickerAssist(
+            tab.id,
+            request.payload.frameId,
+            request.payload.controlId,
+          ),
+        };
+      }
       case "AUTOPILOT_STOP":
         return {
           ok: true,

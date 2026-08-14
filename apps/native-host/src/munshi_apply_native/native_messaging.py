@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 import struct
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import BinaryIO
 
+from .ai_draft_store import AIDraftStore
 from .ai_governance import AIGovernanceService
 from .ai_settings import AIConfiguration, AISettingsStore
 from .application_store import ApplicationStore
@@ -120,6 +121,12 @@ def handle(
         "GET_AI_CONTROL_STATUS",
         "PREVIEW_AI_DRAFT",
         "GENERATE_AI_DRAFT",
+        "LIST_AI_DRAFTS",
+        "GET_APPROVED_AI_DRAFT",
+        "UPDATE_AI_DRAFT",
+        "APPROVE_AI_DRAFT",
+        "REJECT_AI_DRAFT",
+        "MARK_AI_DRAFT_USED",
     }:
         if ai_store is None:
             return {"ok": False, "error": "AI settings store is unavailable"}
@@ -143,6 +150,57 @@ def handle(
             return {"ok": True, "data": {"modelCount": len(models)}}
         if message_type == "LIST_OPENAI_MODELS":
             return {"ok": True, "data": {"models": ai_store.list_models()}}
+        if message_type in {
+            "LIST_AI_DRAFTS",
+            "GET_APPROVED_AI_DRAFT",
+            "UPDATE_AI_DRAFT",
+            "APPROVE_AI_DRAFT",
+            "REJECT_AI_DRAFT",
+            "MARK_AI_DRAFT_USED",
+        }:
+            payload = message.get("payload")
+            if not isinstance(payload, dict):
+                raise ValueError("AI draft lifecycle payload must be an object")
+            drafts = AIDraftStore(database)
+            at = datetime.now(UTC).isoformat()
+            if message_type == "LIST_AI_DRAFTS":
+                application_id = payload.get("applicationId")
+                page_id = payload.get("pageId")
+                if not isinstance(application_id, str):
+                    raise ValueError("AI draft list requires applicationId")
+                if page_id is not None and not isinstance(page_id, str):
+                    raise ValueError("AI draft pageId must be a string")
+                return {
+                    "ok": True,
+                    "data": drafts.list_for_application(application_id, page_id),
+                }
+            if message_type == "GET_APPROVED_AI_DRAFT":
+                return {"ok": True, "data": drafts.approved_for(payload)}
+            draft_id = payload.get("draftId")
+            if not isinstance(draft_id, str):
+                raise ValueError("AI draft lifecycle request requires draftId")
+            if message_type == "UPDATE_AI_DRAFT":
+                return {
+                    "ok": True,
+                    "data": drafts.update_text(
+                        draft_id,
+                        payload.get("text"),
+                        payload.get("expectedSha256"),
+                        at,
+                    ),
+                }
+            if message_type == "APPROVE_AI_DRAFT":
+                return {
+                    "ok": True,
+                    "data": drafts.approve(
+                        draft_id,
+                        payload.get("expectedSha256"),
+                        at,
+                    ),
+                }
+            if message_type == "REJECT_AI_DRAFT":
+                return {"ok": True, "data": drafts.reject(draft_id, at)}
+            return {"ok": True, "data": drafts.mark_used(draft_id, at)}
         governance = AIGovernanceService(database, ai_store)
         if message_type == "GET_AI_CONTROL_STATUS":
             return {"ok": True, "data": governance.control_status()}

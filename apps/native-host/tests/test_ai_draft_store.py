@@ -82,8 +82,6 @@ def test_rejected_draft_cannot_be_edited_or_approved(tmp_path: Path) -> None:
     rejected = store.reject(created["draftId"], NOW)
     assert rejected["status"] == "REJECTED"
     with pytest.raises(ValueError, match="no longer"):
-        store.update_text(
-            rejected["draftId"], "Changed", rejected["contentSha256"], NOW
-        )
+        store.update_text(rejected["draftId"], "Changed", rejected["contentSha256"], NOW)
     with pytest.raises(ValueError, match="current draft"):
         store.approve(rejected["draftId"], rejected["contentSha256"], NOW)

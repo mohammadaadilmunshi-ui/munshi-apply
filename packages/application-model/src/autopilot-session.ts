@@ -20,6 +20,7 @@ export const autoPilotSessionStatuses = [
   "RUNNING",
   "WAITING_RESCAN",
   "WAITING_NAVIGATION",
+  "PAUSED_OWNER",
   "PAUSED_REVIEW",
   "PAUSED_SECURITY",
   "PAUSED_FINAL",
@@ -74,6 +75,8 @@ export type AutoPilotSessionAction =
       after: AutoPilotObservation;
       at: string;
     }
+  | { type: "PAUSE_OWNER"; reason: string; at: string }
+  | { type: "RESUME"; observation: AutoPilotObservation; at: string }
   | { type: "PAUSE_REVIEW"; reason: string; at: string }
   | {
       type: "PAUSE_SECURITY";
@@ -474,6 +477,36 @@ export function reduceAutoPilotSession(
       }
       return withObservation(current, action.after, action.at, "RUNNING");
     }
+
+    case "PAUSE_OWNER":
+      return {
+        ...current,
+        status: "PAUSED_OWNER",
+        securityCheckpoint: null,
+        pauseReason: requiredString(action.reason, "reason"),
+        updatedAt: action.at,
+      };
+
+    case "RESUME":
+      if (
+        !["PAUSED_OWNER", "PAUSED_REVIEW", "PAUSED_SECURITY"].includes(
+          current.status,
+        )
+      ) {
+        return {
+          ...current,
+          status: "PAUSED_ERROR",
+          pauseReason:
+            "AutoPilot can resume only from an owner-review/security pause",
+          updatedAt: action.at,
+        };
+      }
+      return withObservation(
+        { ...current, securityCheckpoint: null, pauseReason: null },
+        action.observation,
+        action.at,
+        "RUNNING",
+      );
 
     case "PAUSE_REVIEW":
       return {

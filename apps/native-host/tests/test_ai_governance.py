@@ -77,6 +77,9 @@ def add_evidence(
 def request(semantic_type: str = "WHY_ROLE") -> dict[str, object]:
     return {
         "applicationId": "app-1",
+        "pageId": "page-1",
+        "questionId": "question-1",
+        "controlId": "control-1",
         "question": "Why are you interested in this role?",
         "semanticType": semantic_type,
         "correlationId": "question-1",
@@ -192,6 +195,8 @@ def test_mocked_generation_is_evidence_bound_review_only_and_records_actual_usag
     assert result["reviewRequired"] is True
     assert result["approved"] is False
     assert result["evidenceIds"] == ["ev-1"]
+    assert result["draft"]["status"] == "DRAFT"
+    assert result["draft"]["questionId"] == "question-1"
     with database.connect() as connection:
         usage = connection.execute("SELECT * FROM ai_usage").fetchone()
         reservation = connection.execute("SELECT * FROM ai_budget_reservations").fetchone()

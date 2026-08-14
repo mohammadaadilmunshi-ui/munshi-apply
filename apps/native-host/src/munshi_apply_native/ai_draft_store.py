@@ -180,6 +180,33 @@ class AIDraftStore:
                 ).fetchall()
         return [self._wire(row) for row in rows]
 
+    def approved_for(self, binding: dict[str, object]) -> dict[str, object] | None:
+        application_id = _required(binding.get("applicationId"), "applicationId")
+        page_id = _required(binding.get("pageId"), "pageId")
+        question_id = _required(binding.get("questionId"), "questionId")
+        control_id = _required(binding.get("controlId"), "controlId")
+        question_fingerprint = _fingerprint(binding)
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM ai_drafts
+                WHERE application_id = ? AND page_id = ? AND question_id = ?
+                  AND control_id = ? AND question_fingerprint = ?
+                  AND status IN ('APPROVED', 'USED')
+                ORDER BY CASE status WHEN 'APPROVED' THEN 0 ELSE 1 END,
+                         generated_at DESC
+                LIMIT 1
+                """,
+                (
+                    application_id,
+                    page_id,
+                    question_id,
+                    control_id,
+                    question_fingerprint,
+                ),
+            ).fetchone()
+        return None if row is None else self._wire(row)
+
     def _load_for_update(self, connection: object, draft_id: str) -> object:
         row = connection.execute(
             "SELECT * FROM ai_drafts WHERE draft_id = ?", (draft_id,)
@@ -216,9 +243,7 @@ class AIDraftStore:
             connection.commit()
         return self._wire(row)
 
-    def approve(
-        self, draft_id: str, expected_sha256: str, approved_at: str
-    ) -> dict[str, object]:
+    def approve(self, draft_id: str, expected_sha256: str, approved_at: str) -> dict[str, object]:
         draft_id = _required(draft_id, "draftId")
         expected_sha256 = _required(expected_sha256, "expectedSha256")
         approved_at = _timestamp(approved_at, "approvedAt")

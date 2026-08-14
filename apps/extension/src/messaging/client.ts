@@ -1,5 +1,10 @@
 import type {
+  AutoPilotSession,
+  PreflightGateSummary,
+} from "@munshi-apply/application-model";
+import type {
   ApplicationPage,
+  FillInstruction,
   FillPlan,
   FillResult,
   ExtensionRequest,
@@ -29,6 +34,38 @@ export type NativeRuntimeHealth = {
   outbox: Record<string, number>;
 };
 
+export type AutoPilotControllerStatus = {
+  session: AutoPilotSession;
+  tabId: number;
+  lastUrl: string;
+  waitingFor: "FILL" | "NAVIGATION" | null;
+  actionDeadlineAt: string | null;
+};
+
+export type AutoPilotStartPayload = {
+  applicationId: string;
+  preflight: PreflightGateSummary;
+  fillInstructions: readonly FillInstruction[];
+  selectedResumeId: string | null;
+  selectedResumeSha256: string | null;
+};
+
+export type AutoPilotResumePayload = {
+  preflight: PreflightGateSummary;
+  fillInstructions: readonly FillInstruction[];
+};
+
+type AutoPilotRuntimeRequest =
+  | { type: "AUTOPILOT_START"; payload: AutoPilotStartPayload }
+  | { type: "AUTOPILOT_PAUSE"; payload?: { reason?: string } }
+  | { type: "AUTOPILOT_RESUME"; payload: AutoPilotResumePayload }
+  | { type: "AUTOPILOT_STOP"; payload?: { reason?: string } }
+  | { type: "AUTOPILOT_STATUS" }
+  | {
+      type: "AUTOPILOT_ASSIST_FILE";
+      payload: { frameId: number; controlId: string };
+    };
+
 type ProfileSaveWaiter = {
   resolve: () => void;
   reject: (error: unknown) => void;
@@ -38,7 +75,9 @@ let queuedProfile: ProfileSnapshot | null = null;
 let profileSaveRunning = false;
 let profileSaveWaiters: ProfileSaveWaiter[] = [];
 
-async function send(request: ExtensionRequest): Promise<unknown> {
+async function send(
+  request: ExtensionRequest | AutoPilotRuntimeRequest,
+): Promise<unknown> {
   const response = (await chrome.runtime.sendMessage(
     request,
   )) as ExtensionResponse;
@@ -100,9 +139,60 @@ export async function getNativeHealth(): Promise<NativeRuntimeHealth> {
 }
 
 export async function applyFillPlan(plan: FillPlan): Promise<FillResult[]> {
-  const result = (await send({
-    type: "APPLY_FILL_PLAN",
-    payload: plan,
-  })) as { results?: FillResult[] };
+  const result = (await send({ type: "APPLY_FILL_PLAN", payload: plan })) as {
+    results?: FillResult[];
+  };
   return result.results ?? [];
+}
+
+export async function getAutoPilotStatus(): Promise<AutoPilotControllerStatus | null> {
+  return (await send({
+    type: "AUTOPILOT_STATUS",
+  })) as AutoPilotControllerStatus | null;
+}
+
+export async function startAutoPilot(
+  payload: AutoPilotStartPayload,
+): Promise<AutoPilotControllerStatus> {
+  return (await send({
+    type: "AUTOPILOT_START",
+    payload,
+  })) as AutoPilotControllerStatus;
+}
+
+export async function pauseAutoPilot(
+  reason = "Paused by owner",
+): Promise<AutoPilotControllerStatus | null> {
+  return (await send({
+    type: "AUTOPILOT_PAUSE",
+    payload: { reason },
+  })) as AutoPilotControllerStatus | null;
+}
+
+export async function resumeAutoPilot(
+  payload: AutoPilotResumePayload,
+): Promise<AutoPilotControllerStatus | null> {
+  return (await send({
+    type: "AUTOPILOT_RESUME",
+    payload,
+  })) as AutoPilotControllerStatus | null;
+}
+
+export async function stopAutoPilot(
+  reason = "Stopped by owner",
+): Promise<AutoPilotControllerStatus | null> {
+  return (await send({
+    type: "AUTOPILOT_STOP",
+    payload: { reason },
+  })) as AutoPilotControllerStatus | null;
+}
+
+export async function requestFilePickerAssist(
+  frameId: number,
+  controlId: string,
+): Promise<{ status: string; reason: string }> {
+  return (await send({
+    type: "AUTOPILOT_ASSIST_FILE",
+    payload: { frameId, controlId },
+  })) as { status: string; reason: string };
 }

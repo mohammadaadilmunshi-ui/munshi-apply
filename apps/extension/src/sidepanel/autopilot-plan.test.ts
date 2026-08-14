@@ -86,7 +86,9 @@ describe("buildAutoPilotLaunchPlan", () => {
       "q-name": { value: "Aadil", approved: true, sensitive: false },
     });
     expect(result.preflight.state).toBe("REVIEW");
-    expect(result.manualControls.map((item) => item.controlId)).toEqual(["resume"]);
+    expect(result.manualControls.map((item) => item.controlId)).toEqual([
+      "resume",
+    ]);
     expect(result.fillInstructions).toHaveLength(1);
   });
 

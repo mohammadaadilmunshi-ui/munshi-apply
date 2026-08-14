@@ -2,7 +2,7 @@ import type {
   ExtensionRequest,
   FillInstruction,
 } from "@munshi-apply/contracts";
-import { applyFillInstructions } from "./fill";
+import { applyFillInstructions, assistFilePicker } from "./fill";
 import { applyNavigationAction } from "./navigation";
 import { scanDocument, snapshotFingerprint } from "./scanner";
 
@@ -102,6 +102,11 @@ chrome.runtime.onMessage.addListener(
           scheduleScan(true);
         });
       return true;
+    }
+    if (message.type === "APPLY_FILE_PICKER_ASSIST" && message.controlId) {
+      sendResponse({ result: assistFilePicker(message.controlId) });
+      scheduleScan(true);
+      return false;
     }
     if (message.type === "APPLY_NAVIGATION_ACTION" && message.controlId) {
       sendResponse({ result: applyNavigationAction(message.controlId) });

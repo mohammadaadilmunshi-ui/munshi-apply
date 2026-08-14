@@ -314,7 +314,10 @@ function stableControlSignature(element: Element): string {
 }
 
 function createControl(element: Element): Control | null {
-  if (!isVisible(element)) return null;
+  const visible = isVisible(element);
+  const fileInput =
+    element instanceof HTMLInputElement && element.type === "file";
+  if (!visible && !fileInput) return null;
   if (
     element instanceof HTMLInputElement &&
     ["hidden", "password"].includes(element.type)
@@ -339,7 +342,7 @@ function createControl(element: Element): Control | null {
       ("disabled" in element &&
         Boolean((element as HTMLInputElement).disabled)) ||
       element.getAttribute("aria-disabled") === "true",
-    visible: true,
+    visible,
     options: optionsFor(element),
     multiple:
       (element instanceof HTMLSelectElement && element.multiple) ||
@@ -347,6 +350,10 @@ function createControl(element: Element): Control | null {
     autocomplete: compactText(element.getAttribute("autocomplete")),
     invalid: validation.invalid,
     validationMessage: validation.validationMessage,
+    fileSelected:
+      element instanceof HTMLInputElement && element.type === "file"
+        ? Boolean(element.files?.length)
+        : undefined,
   };
 }
 

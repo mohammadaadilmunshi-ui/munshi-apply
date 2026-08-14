@@ -54,6 +54,11 @@ export type AutoPilotStartInput = {
   selectedResumeSha256: string | null;
 };
 
+export type AutoPilotResumeInput = {
+  preflight: PreflightGateSummary;
+  fillInstructions: readonly FillInstruction[];
+};
+
 export type NavigationResult = {
   status: "NAVIGATED" | "REFUSED" | "FAILED";
   reason: string;
@@ -448,6 +453,7 @@ export class AutoPilotController {
     runtime: AutoPilotRuntimeState,
     observation: AutoPilotObservation,
     action:
+      | { type: "OWNER"; reason: string }
       | { type: "REVIEW"; reason: string }
       | {
           type: "SECURITY";
@@ -470,7 +476,13 @@ export class AutoPilotController {
         purpose: "PAUSE",
         at: this.now(),
       });
-      if (action.type === "REVIEW") {
+      if (action.type === "OWNER") {
+        session = reduceAutoPilotSession(session, {
+          type: "PAUSE_OWNER",
+          reason: action.reason,
+          at: this.now(),
+        });
+      } else if (action.type === "REVIEW") {
         session = reduceAutoPilotSession(session, {
           type: "PAUSE_REVIEW",
           reason: action.reason,
@@ -814,6 +826,85 @@ export class AutoPilotController {
 
   async start(input: AutoPilotStartInput): Promise<AutoPilotControllerStatus> {
     return this.exclusive(() => this.startInternal(input));
+  }
+
+  async pause(
+    reason = "Paused by owner",
+  ): Promise<AutoPilotControllerStatus | null> {
+    return this.exclusive(async () => {
+      const runtime = await this.load();
+      if (!runtime) return null;
+      if (runtime.session.status !== "RUNNING") {
+        throw new Error(
+          "AutoPilot can be owner-paused only between verified actions",
+        );
+      }
+      const page = await this.dependencies.getPage(runtime.tabId);
+      if (!page) throw new Error("No active application page is available");
+      const paused = await this.persistPause(
+        runtime,
+        observationFor(runtime, page),
+        { type: "OWNER", reason },
+      );
+      return this.statusFromRuntime(paused);
+    });
+  }
+
+  async resume(
+    input: AutoPilotResumeInput,
+  ): Promise<AutoPilotControllerStatus | null> {
+    return this.exclusive(async () => {
+      let runtime = await this.load();
+      if (!runtime) return null;
+      if (
+        !["PAUSED_OWNER", "PAUSED_REVIEW", "PAUSED_SECURITY"].includes(
+          runtime.session.status,
+        )
+      ) {
+        throw new Error("This AutoPilot state is not safely resumable");
+      }
+      const page = await this.dependencies.getPage(runtime.tabId);
+      if (!page) throw new Error("No active application page is available");
+      if (new URL(page.url).origin !== new URL(runtime.lastUrl).origin) {
+        throw new Error(
+          "Application origin changed while AutoPilot was paused",
+        );
+      }
+      const preflight = parsePreflight(input.preflight);
+      const instructions = parseFillInstructions(input.fillInstructions);
+      const completed = new Set(runtime.session.completedControlIds);
+      const session = reduceAutoPilotSession(
+        parseAutoPilotSession({
+          ...runtime.session,
+          pendingControlIds: instructions
+            .filter((instruction) => instruction.approved)
+            .map((instruction) => instruction.controlId)
+            .filter((controlId) => !completed.has(controlId)),
+        }),
+        {
+          type: "RESUME",
+          observation: observationFor(runtime, page),
+          at: this.now(),
+        },
+      );
+      runtime = parseAutoPilotRuntimeState({
+        ...runtime,
+        session,
+        preflight,
+        fillInstructions: instructions,
+        lastUrl: page.url,
+        waitingFor: null,
+        beforeNavigation: null,
+        actionDeadlineAt: null,
+        dispatchingFillControlId: null,
+        navigationDispatchAttempted: false,
+      });
+      await this.persist(runtime);
+      if (runtime.session.status === "RUNNING") {
+        runtime = await this.executeRunningStep(runtime, page);
+      }
+      return this.statusFromRuntime(runtime);
+    });
   }
 
   async stop(

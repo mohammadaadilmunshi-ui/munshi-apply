@@ -182,4 +182,25 @@ describe("AutoPilot session model", () => {
     });
     expect(wrong.status).toBe("PAUSED_ERROR");
   });
+
+  it("supports an explicit owner pause and fresh-observation resume", () => {
+    const started = reduceAutoPilotSession(freshSession(), {
+      type: "START",
+      observation,
+      at: "2026-08-14T21:00:01.000Z",
+    });
+    const paused = reduceAutoPilotSession(started, {
+      type: "PAUSE_OWNER",
+      reason: "Owner requested pause",
+      at: "2026-08-14T21:00:02.000Z",
+    });
+    expect(paused.status).toBe("PAUSED_OWNER");
+    const resumed = reduceAutoPilotSession(paused, {
+      type: "RESUME",
+      observation: { ...observation, pageFingerprint: "fingerprint-2" },
+      at: "2026-08-14T21:00:03.000Z",
+    });
+    expect(resumed.status).toBe("RUNNING");
+    expect(resumed.pauseReason).toBeNull();
+  });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ApplicationPage } from "@munshi-apply/contracts";
 import {
   getAutoPilotStatus,
@@ -39,11 +39,11 @@ export function AutoPilotControlCenter({
     [answers, page],
   );
 
-  async function refresh(): Promise<void> {
+  const refresh = useCallback(async (): Promise<void> => {
     const next = await getAutoPilotStatus();
     setStatus(next);
     onStatusChange?.(next);
-  }
+  }, [onStatusChange]);
 
   useEffect(() => {
     void refresh().catch(() => undefined);
@@ -51,9 +51,12 @@ export function AutoPilotControlCenter({
       void refresh().catch(() => undefined);
     }, 900);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [refresh]);
 
-  async function run(action: () => Promise<unknown>, success: string): Promise<void> {
+  async function run(
+    action: () => Promise<unknown>,
+    success: string,
+  ): Promise<void> {
     setBusy(true);
     setMessage("");
     try {
@@ -61,7 +64,9 @@ export function AutoPilotControlCenter({
       await refresh();
       setMessage(success);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "AutoPilot action failed");
+      setMessage(
+        error instanceof Error ? error.message : "AutoPilot action failed",
+      );
     } finally {
       setBusy(false);
     }
@@ -72,10 +77,7 @@ export function AutoPilotControlCenter({
     status?.session.status === "PAUSED_OWNER" ||
     status?.session.status === "PAUSED_REVIEW" ||
     status?.session.status === "PAUSED_SECURITY";
-  const pausable =
-    status?.session.status === "RUNNING" ||
-    status?.session.status === "WAITING_RESCAN" ||
-    status?.session.status === "WAITING_NAVIGATION";
+  const pausable = status?.session.status === "RUNNING";
 
   return (
     <section>
@@ -92,7 +94,9 @@ export function AutoPilotControlCenter({
       {!nativeAvailable && (
         <div className="safety-callout">
           <strong>Native companion required</strong>
-          <span>Durable checkpoints are required before AutoPilot may navigate.</span>
+          <span>
+            Durable checkpoints are required before AutoPilot may navigate.
+          </span>
         </div>
       )}
 
@@ -105,7 +109,11 @@ export function AutoPilotControlCenter({
               <span>completed</span>
             </article>
             <article>
-              <strong>{status?.session.pendingControlIds.length ?? plan?.fillInstructions.length ?? 0}</strong>
+              <strong>
+                {status?.session.pendingControlIds.length ??
+                  plan?.fillInstructions.length ??
+                  0}
+              </strong>
               <span>pending</span>
             </article>
             <article>
@@ -115,18 +123,26 @@ export function AutoPilotControlCenter({
           </div>
 
           <div className="cloud-connection">
-            <strong>Current page: {page.applicationState.replaceAll("_", " ")}</strong>
+            <strong>
+              Current page: {page.applicationState.replaceAll("_", " ")}
+            </strong>
             <span>Waiting for: {status?.waitingFor ?? "none"}</span>
-            <span>Last verified page: {status?.session.lastPageId ?? "not started"}</span>
             <span>
-              Résumé binding: {status?.session.selectedResumeId ?? selectedResumeId ?? "none"}
+              Last verified page: {status?.session.lastPageId ?? "not started"}
+            </span>
+            <span>
+              Résumé binding:{" "}
+              {status?.session.selectedResumeId ?? selectedResumeId ?? "none"}
             </span>
             {status?.session.pauseReason && (
-              <span className="diagnostic-error">{status.session.pauseReason}</span>
+              <span className="diagnostic-error">
+                {status.session.pauseReason}
+              </span>
             )}
             {status?.session.securityCheckpoint && (
               <span className="diagnostic-error">
-                Owner action required: {status.session.securityCheckpoint.replaceAll("_", " ")}
+                Owner action required:{" "}
+                {status.session.securityCheckpoint.replaceAll("_", " ")}
               </span>
             )}
           </div>
@@ -135,10 +151,16 @@ export function AutoPilotControlCenter({
             <div className="cloud-connection">
               <strong>Live pre-flight: {plan.preflight.state}</strong>
               <span>{plan.preflight.readyCount} approved fill actions</span>
-              <span>{plan.preflight.reviewCount} require review/manual interaction</span>
-              <span>{plan.preflight.unresolvedCount} required answers unresolved</span>
+              <span>
+                {plan.preflight.reviewCount} require review/manual interaction
+              </span>
+              <span>
+                {plan.preflight.unresolvedCount} required answers unresolved
+              </span>
               {plan.optionalUnansweredCount > 0 && (
-                <span>{plan.optionalUnansweredCount} optional questions left blank</span>
+                <span>
+                  {plan.optionalUnansweredCount} optional questions left blank
+                </span>
               )}
             </div>
           )}
@@ -148,7 +170,9 @@ export function AutoPilotControlCenter({
               <h3>Manual browser handoff</h3>
               {plan.manualControls.map((control) => (
                 <article className="answer-card" key={control.controlId}>
-                  <strong>{control.label || control.name || "Manual control"}</strong>
+                  <strong>
+                    {control.label || control.name || "Manual control"}
+                  </strong>
                   <span>{control.kind.replaceAll("_", " ")}</span>
                   {control.kind === "FILE" ? (
                     <button
@@ -157,7 +181,11 @@ export function AutoPilotControlCenter({
                       disabled={busy}
                       onClick={() =>
                         void run(
-                          () => requestFilePickerAssist(control.frameId, control.controlId),
+                          () =>
+                            requestFilePickerAssist(
+                              control.frameId,
+                              control.controlId,
+                            ),
                           "Employer file picker requested. Choose the file yourself; MUNSHI will continue only after a fresh scan confirms a selection.",
                         )
                       }
@@ -166,7 +194,8 @@ export function AutoPilotControlCenter({
                     </button>
                   ) : (
                     <span className="diagnostic-error">
-                      This required control is not safe for autonomous interaction.
+                      This required control is not safe for autonomous
+                      interaction.
                     </span>
                   )}
                 </article>
@@ -204,7 +233,12 @@ export function AutoPilotControlCenter({
               className="quiet"
               type="button"
               disabled={busy || !pausable}
-              onClick={() => void run(() => pauseAutoPilot(), "AutoPilot paused after a durable checkpoint.")}
+              onClick={() =>
+                void run(
+                  () => pauseAutoPilot(),
+                  "AutoPilot paused after a durable checkpoint.",
+                )
+              }
             >
               Pause
             </button>
@@ -229,7 +263,9 @@ export function AutoPilotControlCenter({
               className="quiet destructive"
               type="button"
               disabled={busy || !status || status.session.status === "STOPPED"}
-              onClick={() => void run(() => stopAutoPilot(), "AutoPilot stopped by owner.")}
+              onClick={() =>
+                void run(() => stopAutoPilot(), "AutoPilot stopped by owner.")
+              }
             >
               Stop
             </button>
@@ -243,8 +279,9 @@ export function AutoPilotControlCenter({
       <div className="safety-callout">
         <strong>Permanent owner boundaries</strong>
         <span>
-          AutoPilot never performs final submission, CAPTCHA, MFA, OTP, identity verification,
-          authentication, or OS file selection. Those actions pause or hand control to you.
+          AutoPilot never performs final submission, CAPTCHA, MFA, OTP, identity
+          verification, authentication, or OS file selection. Those actions
+          pause or hand control to you.
         </span>
       </div>
     </section>

@@ -24,6 +24,7 @@ import {
   getNativeHealth,
   getProfile,
   saveProfile,
+  type AutoPilotControllerStatus,
   type ExtensionRuntimeHealth,
   type NativeRuntimeHealth,
 } from "../messaging/client";
@@ -31,6 +32,7 @@ import {
   deleteOpenAIKey,
   getAISettings,
   listOpenAIModels,
+  markAIDraftUsed,
   saveAISettings,
   setOpenAIKey,
   testOpenAIConnection,
@@ -51,8 +53,10 @@ import {
   type CloudSnapshot,
 } from "../storage/cloud";
 import { AIControlCenter } from "./AIControlCenter";
+import { AIDraftReview } from "./AIDraftReview";
+import { AutoPilotControlCenter } from "./AutoPilotControlCenter";
 
-type View = "application" | "profile" | "ai" | "diagnostics";
+type View = "application" | "profile" | "autopilot" | "ai" | "diagnostics";
 type SaveState = "idle" | "editing" | "saving" | "synced" | "local" | "error";
 
 type NativeState =
@@ -213,6 +217,7 @@ type AnswerDraft = {
   value: string;
   approved: boolean;
   sensitive: boolean;
+  sourceDraftId?: string | null;
 };
 
 const defaultAISettings: AISettings = {
@@ -262,6 +267,8 @@ export function App() {
   const [aiModels, setAiModels] = useState<string[]>([]);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiMessage, setAiMessage] = useState("");
+  const [autoPilotStatus, setAutoPilotStatus] =
+    useState<AutoPilotControllerStatus | null>(null);
 
   const refreshAI = useCallback(async () => {
     try {
@@ -430,6 +437,16 @@ export function App() {
       return cloudSnapshot?.resumes[0]?.resumeId ?? "";
     });
   }, [cloudSnapshot, page, profile]);
+
+  const selectedResume = useMemo(
+    () =>
+      cloudSnapshot?.resumes.find(
+        (resume) => resume.resumeId === selectedResumeId,
+      ) ?? null,
+    [cloudSnapshot, selectedResumeId],
+  );
+  const activeApplicationId =
+    autoPilotStatus?.session.applicationId ?? page?.pageId ?? "";
 
   const reviewCount = useMemo(
     () =>
@@ -827,6 +844,20 @@ export function App() {
         pageId: page.pageId,
         instructions,
       });
+      const usedDraftIds = results
+        .filter((result) => result.status === "FILLED")
+        .flatMap((result) => {
+          const question = page.questions.find(
+            (candidate) => candidate.controlId === result.controlId,
+          );
+          const draftId = question
+            ? answers[question.questionId]?.sourceDraftId
+            : null;
+          return draftId ? [draftId] : [];
+        });
+      await Promise.allSettled(
+        usedDraftIds.map((draftId) => markAIDraftUsed(draftId)),
+      );
       const filled = results.filter(
         (result) => result.status === "FILLED",
       ).length;
@@ -922,18 +953,18 @@ export function App() {
         <span className={`status ${connectionClass}`}>{connectionLabel}</span>
       </header>
       <nav aria-label="MUNSHI Apply sections">
-        {(["application", "profile", "ai", "diagnostics"] as const).map(
-          (item) => (
-            <button
-              className={view === item ? "active" : ""}
-              key={item}
-              onClick={() => setView(item)}
-              type="button"
-            >
-              {item}
-            </button>
-          ),
-        )}
+        {(
+          ["application", "profile", "autopilot", "ai", "diagnostics"] as const
+        ).map((item) => (
+          <button
+            className={view === item ? "active" : ""}
+            key={item}
+            onClick={() => setView(item)}
+            type="button"
+          >
+            {item}
+          </button>
+        ))}
       </nav>
       {notice && <div className="notice">{notice}</div>}
 
@@ -1010,6 +1041,7 @@ export function App() {
                               ...answer,
                               value: event.target.value,
                               approved: false,
+                              sourceDraftId: null,
                             },
                           }))
                         }
@@ -1031,6 +1063,23 @@ export function App() {
                         />
                         Approved for this application
                       </label>
+                      <AIDraftReview
+                        applicationId={activeApplicationId || page.pageId}
+                        pageId={page.pageId}
+                        question={question}
+                        nativeAvailable={native.status === "healthy"}
+                        onApproved={(value, draftId) =>
+                          setAnswers((current) => ({
+                            ...current,
+                            [question.questionId]: {
+                              value,
+                              approved: true,
+                              sensitive: question.sensitive,
+                              sourceDraftId: draftId,
+                            },
+                          }))
+                        }
+                      />
                     </article>
                   );
                 })}
@@ -1079,6 +1128,18 @@ export function App() {
             </p>
           )}
         </section>
+      )}
+
+      {view === "autopilot" && (
+        <AutoPilotControlCenter
+          page={page}
+          answers={answers}
+          applicationId={activeApplicationId || page?.pageId || ""}
+          selectedResumeId={selectedResumeId || null}
+          selectedResumeSha256={selectedResume?.sha256 ?? null}
+          nativeAvailable={native.status === "healthy"}
+          onStatusChange={setAutoPilotStatus}
+        />
       )}
 
       {view === "profile" && (

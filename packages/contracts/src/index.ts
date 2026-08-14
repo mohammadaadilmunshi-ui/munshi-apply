@@ -227,6 +227,7 @@ export const ControlSchema = z.object({
   autocomplete: z.string().default(""),
   invalid: z.boolean().default(false),
   validationMessage: z.string().default(""),
+  fileSelected: z.boolean().optional(),
 });
 export type Control = z.infer<typeof ControlSchema>;
 

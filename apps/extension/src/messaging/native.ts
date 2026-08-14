@@ -64,6 +64,9 @@ export type AIControlStatus = {
 
 export type AIDraftRequest = {
   applicationId: string;
+  pageId: string;
+  questionId: string;
+  controlId: string;
   question: string;
   semanticType: string;
   correlationId: string;
@@ -91,8 +94,43 @@ export type AIDraftPreview = {
   reviewRequired: true;
 };
 
+export type AIDraftStatus =
+  "DRAFT" | "APPROVED" | "REJECTED" | "SUPERSEDED" | "USED";
+
+export type AIDraftRecord = {
+  draftId: string;
+  applicationId: string;
+  pageId: string;
+  questionId: string;
+  controlId: string;
+  questionFingerprint: string;
+  semanticType: string;
+  provider: "openai";
+  model: string;
+  responseId: string;
+  originalText: string;
+  currentText: string;
+  contentSha256: string;
+  status: AIDraftStatus;
+  evidenceIds: string[];
+  claims: { claimId: string; text: string; evidenceIds: string[] }[];
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    costUsd: number;
+    estimated?: boolean;
+  };
+  generatedAt: string;
+  updatedAt: string;
+  approvedAt: string | null;
+  usedAt: string | null;
+};
+
 export type AIDraftResult = {
   status: "DRAFT_REVIEW_REQUIRED";
+  draftId: string;
+  draft: AIDraftRecord;
   provider: "openai";
   model: string;
   responseId: string;
@@ -317,6 +355,98 @@ export function parseAIControlStatus(value: unknown): AIControlStatus {
   };
 }
 
+function parseAIDraftRecord(value: unknown): AIDraftRecord {
+  const candidate = objectValue(value, "AI draft");
+  const statuses = new Set([
+    "DRAFT",
+    "APPROVED",
+    "REJECTED",
+    "SUPERSEDED",
+    "USED",
+  ]);
+  if (typeof candidate.status !== "string" || !statuses.has(candidate.status)) {
+    throw new Error("AI draft status is invalid");
+  }
+  if (candidate.provider !== "openai") {
+    throw new Error("AI draft provider is invalid");
+  }
+  const contentSha256 = stringValue(
+    candidate.contentSha256,
+    "AI draft contentSha256",
+  );
+  if (!/^[a-f0-9]{64}$/.test(contentSha256)) {
+    throw new Error("AI draft content digest is invalid");
+  }
+  if (
+    !Array.isArray(candidate.evidenceIds) ||
+    !candidate.evidenceIds.every(
+      (item) => typeof item === "string" && item.trim(),
+    )
+  ) {
+    throw new Error("AI draft evidenceIds are invalid");
+  }
+  if (!Array.isArray(candidate.claims)) {
+    throw new Error("AI draft claims are invalid");
+  }
+  const claims = candidate.claims.map((item) => {
+    const claim = objectValue(item, "AI draft claim");
+    if (
+      !Array.isArray(claim.evidenceIds) ||
+      !claim.evidenceIds.every(
+        (entry) => typeof entry === "string" && entry.trim(),
+      )
+    ) {
+      throw new Error("AI draft claim evidence is invalid");
+    }
+    return {
+      claimId: stringValue(claim.claimId, "AI draft claimId"),
+      text: stringValue(claim.text, "AI draft claim text"),
+      evidenceIds: [...claim.evidenceIds] as string[],
+    };
+  });
+  const usage = objectValue(candidate.usage, "AI draft usage");
+  const timestamp = (input: unknown, label: string): string => {
+    const result = stringValue(input, label);
+    if (Number.isNaN(Date.parse(result)))
+      throw new Error(`${label} is invalid`);
+    return result;
+  };
+  const nullableTimestamp = (input: unknown, label: string): string | null =>
+    input === null ? null : timestamp(input, label);
+  return {
+    draftId: stringValue(candidate.draftId, "AI draftId"),
+    applicationId: stringValue(candidate.applicationId, "AI applicationId"),
+    pageId: stringValue(candidate.pageId, "AI pageId"),
+    questionId: stringValue(candidate.questionId, "AI questionId"),
+    controlId: stringValue(candidate.controlId, "AI controlId"),
+    questionFingerprint: stringValue(
+      candidate.questionFingerprint,
+      "AI question fingerprint",
+    ),
+    semanticType: stringValue(candidate.semanticType, "AI semantic type"),
+    provider: "openai",
+    model: stringValue(candidate.model, "AI model"),
+    responseId: stringValue(candidate.responseId, "AI responseId"),
+    originalText: stringValue(candidate.originalText, "AI original text"),
+    currentText: stringValue(candidate.currentText, "AI current text"),
+    contentSha256,
+    status: candidate.status as AIDraftStatus,
+    evidenceIds: [...candidate.evidenceIds] as string[],
+    claims,
+    usage: {
+      inputTokens: integerValue(usage.inputTokens, "AI draft inputTokens"),
+      outputTokens: integerValue(usage.outputTokens, "AI draft outputTokens"),
+      totalTokens: integerValue(usage.totalTokens, "AI draft totalTokens"),
+      costUsd: finiteNumber(usage.costUsd, "AI draft costUsd"),
+      estimated: usage.estimated === true,
+    },
+    generatedAt: timestamp(candidate.generatedAt, "AI generatedAt"),
+    updatedAt: timestamp(candidate.updatedAt, "AI updatedAt"),
+    approvedAt: nullableTimestamp(candidate.approvedAt, "AI approvedAt"),
+    usedAt: nullableTimestamp(candidate.usedAt, "AI usedAt"),
+  };
+}
+
 function parseCheckpointSaveResult(value: unknown): NativeCheckpointSaveResult {
   const candidate = objectValue(value, "Native checkpoint save response");
   if (typeof candidate.created !== "boolean") {
@@ -490,5 +620,70 @@ export async function generateAIDraft(
   return sendNative<AIDraftResult>(
     { type: "GENERATE_AI_DRAFT", payload: request },
     60_000,
+  );
+}
+
+export async function listAIDrafts(
+  applicationId: string,
+  pageId?: string,
+): Promise<AIDraftRecord[]> {
+  const result = await sendNative<unknown>({
+    type: "LIST_AI_DRAFTS",
+    payload: { applicationId, pageId },
+  });
+  if (!Array.isArray(result)) throw new Error("AI draft list is invalid");
+  return result.map(parseAIDraftRecord);
+}
+
+export async function getApprovedAIDraft(
+  request: AIDraftRequest,
+): Promise<AIDraftRecord | null> {
+  const result = await sendNative<unknown>({
+    type: "GET_APPROVED_AI_DRAFT",
+    payload: request,
+  });
+  return result === null ? null : parseAIDraftRecord(result);
+}
+
+export async function updateAIDraft(
+  draftId: string,
+  text: string,
+  expectedSha256: string,
+): Promise<AIDraftRecord> {
+  return parseAIDraftRecord(
+    await sendNative<unknown>({
+      type: "UPDATE_AI_DRAFT",
+      payload: { draftId, text, expectedSha256 },
+    }),
+  );
+}
+
+export async function approveAIDraft(
+  draftId: string,
+  expectedSha256: string,
+): Promise<AIDraftRecord> {
+  return parseAIDraftRecord(
+    await sendNative<unknown>({
+      type: "APPROVE_AI_DRAFT",
+      payload: { draftId, expectedSha256 },
+    }),
+  );
+}
+
+export async function rejectAIDraft(draftId: string): Promise<AIDraftRecord> {
+  return parseAIDraftRecord(
+    await sendNative<unknown>({
+      type: "REJECT_AI_DRAFT",
+      payload: { draftId },
+    }),
+  );
+}
+
+export async function markAIDraftUsed(draftId: string): Promise<AIDraftRecord> {
+  return parseAIDraftRecord(
+    await sendNative<unknown>({
+      type: "MARK_AI_DRAFT_USED",
+      payload: { draftId },
+    }),
   );
 }

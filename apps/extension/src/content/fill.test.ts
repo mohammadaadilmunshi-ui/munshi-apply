@@ -383,4 +383,84 @@ describe("guarded field filling", () => {
     expect(invalid[0]?.status).toBe("FAILED");
     expect(input.value).toBe("2026-12-17");
   });
+
+  it("fails closed when a native select has duplicate exact labels", async () => {
+    document.body.innerHTML = `
+      <label for="state">State</label>
+      <select id="state"><option value="NJ">New Jersey</option><option value="NEW_JERSEY">New Jersey</option></select>
+    `;
+    const question = scanDocument().questions[0]!;
+    const result = await applyFillInstructions([
+      {
+        controlId: question.controlId,
+        frameId: 0,
+        value: "New Jersey",
+        sensitive: false,
+        approved: true,
+      },
+    ]);
+    expect(result[0]?.status).toBe("FAILED");
+  });
+
+  it("fails closed when a radio answer maps to more than one exact option", async () => {
+    document.body.innerHTML = `
+      <fieldset><legend>Preference</legend>
+        <label><input type="radio" name="pref" value="Yes"> Yes</label>
+        <label><input type="radio" name="pref" value="Yes"> Yes</label>
+      </fieldset>
+    `;
+    const question = scanDocument().questions[0]!;
+    const result = await applyFillInstructions([
+      {
+        controlId: question.controlId,
+        frameId: 0,
+        value: "Yes",
+        sensitive: false,
+        approved: true,
+      },
+    ]);
+    expect(result[0]?.status).toBe("FAILED");
+    expect(document.querySelectorAll("input:checked")).toHaveLength(0);
+  });
+
+  it("waits for controlled native input verification instead of trusting dispatch", async () => {
+    document.body.innerHTML = `<label for="name">Name</label><input id="name">`;
+    const input = document.getElementById("name") as HTMLInputElement;
+    input.addEventListener(
+      "input",
+      () => {
+        const current = input.value;
+        input.value = "";
+        setTimeout(() => {
+          input.value = current;
+        }, 10);
+      },
+      { once: true },
+    );
+    const question = scanDocument().questions[0]!;
+    const result = await applyFillInstructions(
+      [
+        {
+          controlId: question.controlId,
+          frameId: 0,
+          value: "Aadil",
+          sensitive: false,
+          approved: true,
+        },
+      ],
+      { verificationTimeoutMs: 80, pollIntervalMs: 5 },
+    );
+    expect(result[0]?.status).toBe("FILLED");
+    expect(input.value).toBe("Aadil");
+  });
+
+  it("reports only whether a file has been selected, never its local path", () => {
+    document.body.innerHTML = `<label for="resume">Resume</label><input id="resume" type="file" required>`;
+    const control = scanDocument().controls.find(
+      (item) => item.kind === "FILE",
+    );
+    expect(control).toBeDefined();
+    expect(control?.fileSelected).toBe(false);
+    expect(JSON.stringify(control)).not.toContain("fakepath");
+  });
 });
