@@ -27,10 +27,22 @@ def run_runtime(*arguments: str) -> subprocess.CompletedProcess[str]:
 def test_runtime_migration_health_and_backup_round_trip(tmp_path: Path) -> None:
     runtime_root = tmp_path / "private-runtime"
     database = runtime_root / "database/munshi-apply.sqlite"
+    ai_settings = runtime_root / "settings/ai.json"
 
-    first = run_runtime("migrate", "--database", str(database), "--migrations", str(MIGRATIONS))
-    second = run_runtime("migrate", "--database", str(database), "--migrations", str(MIGRATIONS))
-    health = run_runtime("health", "--database", str(database), "--migrations", str(MIGRATIONS))
+    first = run_runtime(
+        "migrate", "--database", str(database), "--migrations", str(MIGRATIONS)
+    )
+    second = run_runtime(
+        "migrate", "--database", str(database), "--migrations", str(MIGRATIONS)
+    )
+    health = run_runtime(
+        "health", "--database", str(database), "--migrations", str(MIGRATIONS)
+    )
+    ai_settings.parent.mkdir(parents=True)
+    ai_settings.write_text(
+        '{"provider":"openai","model":"gpt-test","enabled":false}\n',
+        encoding="utf-8",
+    )
     backup = run_runtime("backup", "--runtime-root", str(runtime_root))
     backup_path = Path(backup.stdout.strip())
     verified = run_runtime("verify-backup", "--backup", str(backup_path))
@@ -42,11 +54,16 @@ def test_runtime_migration_health_and_backup_round_trip(tmp_path: Path) -> None:
     assert json.loads(second.stdout)["applied"] == []
     assert json.loads(health.stdout)["status"] == "healthy"
     assert "Backup verified" in verified.stdout
+    assert (backup_path / "settings/ai.json").read_text(encoding="utf-8") == (
+        ai_settings.read_text(encoding="utf-8")
+    )
 
 
 def test_native_protocol_source_health_check(tmp_path: Path) -> None:
     database = tmp_path / "native.sqlite"
-    run_runtime("migrate", "--database", str(database), "--migrations", str(MIGRATIONS))
+    run_runtime(
+        "migrate", "--database", str(database), "--migrations", str(MIGRATIONS)
+    )
 
     completed = run_runtime(
         "native-smoke",
@@ -113,10 +130,15 @@ def test_release_packaging_creates_required_verified_artifacts(tmp_path: Path) -
     mobile_extension_dist = fixture_repository / "apps/extension/dist-mobile"
     mobile_extension_dist.mkdir(parents=True)
     (mobile_extension_dist / "manifest.json").write_text(
-        '{"manifest_version": 3, "name": "MUNSHI Apply Mobile"}\n', encoding="utf-8"
+        '{"manifest_version": 3, "name": "MUNSHI Apply Mobile"}\n',
+        encoding="utf-8",
     )
-    (mobile_extension_dist / "service-worker.js").write_text("export {};\n", encoding="utf-8")
-    (mobile_extension_dist / "service-worker.js.map").write_text("{}\n", encoding="utf-8")
+    (mobile_extension_dist / "service-worker.js").write_text(
+        "export {};\n", encoding="utf-8"
+    )
+    (mobile_extension_dist / "service-worker.js.map").write_text(
+        "{}\n", encoding="utf-8"
+    )
     fixture_migrations = fixture_repository / "migrations"
     shutil.copytree(MIGRATIONS, fixture_migrations)
     subprocess.run(  # noqa: S603 - fixed interpreter and repository script.
