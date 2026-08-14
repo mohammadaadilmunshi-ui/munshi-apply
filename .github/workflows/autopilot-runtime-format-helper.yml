@@ -23,7 +23,7 @@ jobs:
 
       - name: Guard exact tranche parent
         run: |
-          test "$(git rev-parse HEAD^)" = "a7e32eb2d3c258b944eed1a6c01d1bdb47565c63"
+          test "$(git rev-parse HEAD^)" = "cc8e2f54c6604734a35783e30ed192419c58616d"
           test "$(git branch --show-current)" = "feat/v3-foundation-alignment"
 
       - name: Set up Node
@@ -42,6 +42,7 @@ jobs:
             apps/extension/src/background/autopilot-controller.ts \
             apps/extension/src/background/service-worker.ts \
             apps/extension/src/content/fill.ts \
+            apps/extension/src/content/interaction-runtime.test.ts \
             apps/extension/src/messaging/native.ts \
             .github/workflows/autopilot-runtime-format-helper.yml
 

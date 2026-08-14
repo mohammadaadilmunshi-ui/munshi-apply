@@ -27,7 +27,7 @@ describe("verified interaction runtime", () => {
     );
   });
 
-  it("fills an exact native multi-select set and rolls back an unsupported request", () => {
+  it("fills an exact native multi-select set and rolls back an unsupported request", async () => {
     document.body.innerHTML = `
       <label for="skills">Skills</label>
       <select id="skills" multiple>
@@ -38,7 +38,7 @@ describe("verified interaction runtime", () => {
     const question = scanDocument().questions[0]!;
     const select = document.getElementById("skills") as HTMLSelectElement;
 
-    const first = applyFillInstructions([
+    const first = await applyFillInstructions([
       {
         controlId: question.controlId,
         frameId: 0,
@@ -52,7 +52,7 @@ describe("verified interaction runtime", () => {
       Array.from(select.selectedOptions).map((option) => option.text),
     ).toEqual(["Excel", "Python"]);
 
-    const second = applyFillInstructions([
+    const second = await applyFillInstructions([
       {
         controlId: question.controlId,
         frameId: 0,
