@@ -1,0 +1,54 @@
+name: Format helper
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/format-helper.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Correct scanner regex
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("apps/extension/src/content/scanner.ts")
+          text = path.read_text()
+          broken = r'/\b(upload (your )?(resume|résumé|cv)\b/'
+          fixed = r'/\b(upload (your )?(resume|résumé|cv))\b/'
+          if broken not in text:
+              raise SystemExit("expected broken scanner regex was not found")
+          path.write_text(text.replace(broken, fixed, 1))
+          PY
+      - name: Format affected files
+        run: >-
+          npx prettier --write
+          apps/extension/src/content/scanner.ts
+          apps/extension/src/content/scanner.test.ts
+          packages/contracts/src/index.ts
+      - name: Verify formatting and scanner tests
+        run: |
+          npx prettier --check apps/extension/src/content/scanner.ts apps/extension/src/content/scanner.test.ts packages/contracts/src/index.ts
+          ./node_modules/.bin/vitest run apps/extension/src/content/scanner.test.ts apps/extension/src/content/interaction-runtime.test.ts
+      - uses: actions/upload-artifact@v7
+        with:
+          name: formatted-module-fix
+          path: |
+            apps/extension/src/content/scanner.ts
+            apps/extension/src/content/scanner.test.ts
+            packages/contracts/src/index.ts
+          if-no-files-found: error
+          retention-days: 1
