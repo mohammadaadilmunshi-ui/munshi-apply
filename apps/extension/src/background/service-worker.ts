@@ -25,6 +25,7 @@ import {
   ensureNativeApplication,
   getLatestNativeApplicationCheckpoint,
   getNativeHealth,
+  markAIDraftUsed,
   saveNativeApplicationCheckpoint,
 } from "../messaging/native";
 import {
@@ -171,6 +172,9 @@ const autoPilotController = new AutoPilotController({
   ensureApplication: ensureNativeApplication,
   saveCheckpoint: saveNativeApplicationCheckpoint,
   getLatestCheckpoint: getLatestNativeApplicationCheckpoint,
+  markDraftUsed: async (draftId) => {
+    await markAIDraftUsed(draftId);
+  },
   scheduleTimeout: (delayMilliseconds, callback) => {
     setTimeout(callback, delayMilliseconds);
   },

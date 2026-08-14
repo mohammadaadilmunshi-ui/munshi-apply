@@ -234,6 +234,14 @@ const defaultAISettings: AISettings = {
   keySource: "none",
 };
 
+function sameOrigin(left: string, right: string): boolean {
+  try {
+    return new URL(left).origin === new URL(right).origin;
+  } catch {
+    return false;
+  }
+}
+
 export function App() {
   const [view, setView] = useState<View>("application");
   const [page, setPage] = useState<ApplicationPage | null>(null);
@@ -445,8 +453,15 @@ export function App() {
       ) ?? null,
     [cloudSnapshot, selectedResumeId],
   );
-  const activeApplicationId =
-    autoPilotStatus?.session.applicationId ?? page?.pageId ?? "";
+  const runtimeOwnsCurrentPage = Boolean(
+    autoPilotStatus &&
+    page &&
+    autoPilotStatus.session.status !== "STOPPED" &&
+    sameOrigin(autoPilotStatus.lastUrl, page.url),
+  );
+  const activeApplicationId = runtimeOwnsCurrentPage
+    ? autoPilotStatus!.session.applicationId
+    : (page?.pageId ?? "");
 
   const reviewCount = useMemo(
     () =>

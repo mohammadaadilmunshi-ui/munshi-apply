@@ -101,4 +101,19 @@ describe("buildAutoPilotLaunchPlan", () => {
     expect(result.preflight.state).toBe("READY");
     expect(result.manualControls).toHaveLength(0);
   });
+
+  it("carries an approved AI draft identity into the AutoPilot fill instruction", () => {
+    const current = page();
+    current.controls = [current.controls[0]!];
+    current.questions = [current.questions[0]!];
+    const result = buildAutoPilotLaunchPlan(current, {
+      "q-name": {
+        value: "Evidence-backed answer",
+        approved: true,
+        sensitive: false,
+        sourceDraftId: "draft-1",
+      },
+    });
+    expect(result.fillInstructions[0]?.sourceDraftId).toBe("draft-1");
+  });
 });

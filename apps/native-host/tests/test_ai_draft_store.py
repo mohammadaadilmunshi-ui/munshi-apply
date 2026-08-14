@@ -85,3 +85,14 @@ def test_rejected_draft_cannot_be_edited_or_approved(tmp_path: Path) -> None:
         store.update_text(rejected["draftId"], "Changed", rejected["contentSha256"], NOW)
     with pytest.raises(ValueError, match="current draft"):
         store.approve(rejected["draftId"], rejected["contentSha256"], NOW)
+
+
+def test_mark_used_is_idempotent_for_recovery(tmp_path: Path) -> None:
+    store = AIDraftStore(database(tmp_path))
+    created = store.create(record())
+    approved = store.approve(created["draftId"], created["contentSha256"], NOW)
+    first = store.mark_used(approved["draftId"], NOW)
+    second = store.mark_used(approved["draftId"], NOW)
+    assert first["status"] == "USED"
+    assert second["status"] == "USED"
+    assert second["usedAt"] == first["usedAt"]

@@ -77,7 +77,11 @@ export function AutoPilotControlCenter({
     status?.session.status === "PAUSED_OWNER" ||
     status?.session.status === "PAUSED_REVIEW" ||
     status?.session.status === "PAUSED_SECURITY";
-  const pausable = status?.session.status === "RUNNING";
+  const pausable =
+    status?.session.status === "RUNNING" ||
+    status?.session.status === "WAITING_RESCAN" ||
+    status?.session.status === "WAITING_NAVIGATION";
+  const pauseQueued = status?.ownerPauseRequested === true;
 
   return (
     <section>
@@ -127,6 +131,17 @@ export function AutoPilotControlCenter({
               Current page: {page.applicationState.replaceAll("_", " ")}
             </strong>
             <span>Waiting for: {status?.waitingFor ?? "none"}</span>
+            {pauseQueued && (
+              <span className="diagnostic-error">
+                Pause requested · current action will verify before AutoPilot
+                stops
+              </span>
+            )}
+            {status?.pendingDraftUsageId && (
+              <span className="diagnostic-error">
+                Recording approved AI-answer usage before continuing
+              </span>
+            )}
             <span>
               Last verified page: {status?.session.lastPageId ?? "not started"}
             </span>
@@ -232,11 +247,11 @@ export function AutoPilotControlCenter({
             <button
               className="quiet"
               type="button"
-              disabled={busy || !pausable}
+              disabled={busy || !pausable || pauseQueued}
               onClick={() =>
                 void run(
                   () => pauseAutoPilot(),
-                  "AutoPilot paused after a durable checkpoint.",
+                  "Pause requested. MUNSHI will finish verifying any in-flight action, persist a checkpoint, and stop before the next action.",
                 )
               }
             >

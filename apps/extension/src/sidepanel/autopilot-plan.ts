@@ -74,6 +74,7 @@ export function buildAutoPilotLaunchPlan(
       value: answer.value,
       sensitive: question.sensitive,
       approved: true,
+      sourceDraftId: answer.sourceDraftId ?? undefined,
     });
   }
 

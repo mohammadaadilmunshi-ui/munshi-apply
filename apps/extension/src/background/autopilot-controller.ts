@@ -35,6 +35,9 @@ export type AutoPilotRuntimeState = {
   actionDeadlineAt: string | null;
   dispatchingFillControlId: string | null;
   navigationDispatchAttempted: boolean;
+  ownerPauseRequested: boolean;
+  ownerPauseReason: string | null;
+  pendingDraftUsageId: string | null;
 };
 
 export type AutoPilotControllerStatus = {
@@ -43,6 +46,9 @@ export type AutoPilotControllerStatus = {
   lastUrl: string;
   waitingFor: AutoPilotWaitingFor;
   actionDeadlineAt: string | null;
+  ownerPauseRequested: boolean;
+  ownerPauseReason: string | null;
+  pendingDraftUsageId: string | null;
 };
 
 export type AutoPilotStartInput = {
@@ -89,6 +95,7 @@ export type AutoPilotControllerDependencies = {
   getLatestCheckpoint: (
     applicationId: string,
   ) => Promise<AutoPilotCheckpoint | null>;
+  markDraftUsed: (draftId: string) => Promise<void>;
   now?: () => string;
   randomId?: () => string;
   scheduleTimeout?: (delayMilliseconds: number, callback: () => void) => void;
@@ -197,6 +204,10 @@ function parseFillInstructions(value: unknown): FillInstruction[] {
       value: candidate.value,
       sensitive: candidate.sensitive,
       approved: candidate.approved,
+      sourceDraftId:
+        candidate.sourceDraftId === undefined
+          ? undefined
+          : requiredString(candidate.sourceDraftId, "sourceDraftId"),
     };
   });
 }
@@ -280,6 +291,18 @@ export function parseAutoPilotRuntimeState(
       "dispatchingFillControlId",
     ),
     navigationDispatchAttempted: candidate.navigationDispatchAttempted,
+    ownerPauseRequested:
+      candidate.ownerPauseRequested === undefined
+        ? false
+        : Boolean(candidate.ownerPauseRequested),
+    ownerPauseReason:
+      candidate.ownerPauseReason === undefined
+        ? null
+        : nullableString(candidate.ownerPauseReason, "ownerPauseReason"),
+    pendingDraftUsageId:
+      candidate.pendingDraftUsageId === undefined
+        ? null
+        : nullableString(candidate.pendingDraftUsageId, "pendingDraftUsageId"),
   };
 }
 
@@ -424,6 +447,8 @@ export class AutoPilotController {
       actionDeadlineAt: null,
       dispatchingFillControlId: null,
       navigationDispatchAttempted: false,
+      ownerPauseRequested: false,
+      ownerPauseReason: null,
     });
     await this.persist(failed);
     return failed;
@@ -510,6 +535,8 @@ export class AutoPilotController {
         actionDeadlineAt: null,
         dispatchingFillControlId: null,
         navigationDispatchAttempted: false,
+        ownerPauseRequested: false,
+        ownerPauseReason: null,
       });
       await this.persist(paused);
       return paused;
@@ -561,11 +588,39 @@ export class AutoPilotController {
     return current;
   }
 
+  private async settlePendingDraftUsage(
+    runtime: AutoPilotRuntimeState,
+  ): Promise<AutoPilotRuntimeState> {
+    if (!runtime.pendingDraftUsageId) return runtime;
+    try {
+      await this.dependencies.markDraftUsed(runtime.pendingDraftUsageId);
+    } catch (error) {
+      return this.fail(
+        runtime,
+        `AI draft usage attribution could not be persisted: ${
+          error instanceof Error ? error.message : "unknown error"
+        }`,
+      );
+    }
+    const settled = parseAutoPilotRuntimeState({
+      ...runtime,
+      pendingDraftUsageId: null,
+    });
+    await this.persist(settled);
+    return settled;
+  }
+
   private async executeRunningStep(
     runtime: AutoPilotRuntimeState,
     page: ApplicationPage,
   ): Promise<AutoPilotRuntimeState> {
     if (runtime.session.status !== "RUNNING") return runtime;
+    if (runtime.ownerPauseRequested) {
+      return this.persistPause(runtime, observationFor(runtime, page), {
+        type: "OWNER",
+        reason: runtime.ownerPauseReason ?? "Paused by owner",
+      });
+    }
     if (canonicalUrl(page.url) !== canonicalUrl(runtime.lastUrl)) {
       return this.fail(
         runtime,
@@ -586,6 +641,7 @@ export class AutoPilotController {
         const armed = parseAutoPilotRuntimeState({
           ...runtime,
           dispatchingFillControlId: plan.action.instruction.controlId,
+          pendingDraftUsageId: plan.action.instruction.sourceDraftId ?? null,
           actionDeadlineAt: this.deadline(FILL_TIMEOUT_MS),
         });
         await this.persist(armed);
@@ -632,8 +688,10 @@ export class AutoPilotController {
           actionDeadlineAt: this.deadline(FILL_TIMEOUT_MS),
         });
         await this.persist(waiting);
+        const attributed = await this.settlePendingDraftUsage(waiting);
+        if (attributed.session.status === "PAUSED_ERROR") return attributed;
         this.scheduleDeadline(FILL_TIMEOUT_MS);
-        return waiting;
+        return attributed;
       }
 
       case "NAVIGATE_NEXT": {
@@ -751,6 +809,9 @@ export class AutoPilotController {
       actionDeadlineAt: null,
       dispatchingFillControlId: null,
       navigationDispatchAttempted: false,
+      ownerPauseRequested: false,
+      ownerPauseReason: null,
+      pendingDraftUsageId: null,
     });
     const observation = observationFor(runtime, page);
     const latest = await this.dependencies.getLatestCheckpoint(applicationId);
@@ -821,6 +882,9 @@ export class AutoPilotController {
       lastUrl: runtime.lastUrl,
       waitingFor: runtime.waitingFor,
       actionDeadlineAt: runtime.actionDeadlineAt,
+      ownerPauseRequested: runtime.ownerPauseRequested,
+      ownerPauseReason: runtime.ownerPauseReason,
+      pendingDraftUsageId: runtime.pendingDraftUsageId,
     };
   }
 
@@ -832,11 +896,28 @@ export class AutoPilotController {
     reason = "Paused by owner",
   ): Promise<AutoPilotControllerStatus | null> {
     return this.exclusive(async () => {
-      const runtime = await this.load();
+      let runtime = await this.load();
       if (!runtime) return null;
+      if (runtime.session.status === "PAUSED_OWNER") {
+        return this.statusFromRuntime(runtime);
+      }
+      if (
+        runtime.session.status === "WAITING_RESCAN" ||
+        runtime.session.status === "WAITING_NAVIGATION" ||
+        runtime.waitingFor !== null ||
+        runtime.dispatchingFillControlId !== null
+      ) {
+        runtime = parseAutoPilotRuntimeState({
+          ...runtime,
+          ownerPauseRequested: true,
+          ownerPauseReason: requiredString(reason, "reason"),
+        });
+        await this.persist(runtime);
+        return this.statusFromRuntime(runtime);
+      }
       if (runtime.session.status !== "RUNNING") {
         throw new Error(
-          "AutoPilot can be owner-paused only between verified actions",
+          "This AutoPilot state cannot accept an owner pause request",
         );
       }
       const page = await this.dependencies.getPage(runtime.tabId);
@@ -898,6 +979,8 @@ export class AutoPilotController {
         actionDeadlineAt: null,
         dispatchingFillControlId: null,
         navigationDispatchAttempted: false,
+        ownerPauseRequested: false,
+        ownerPauseReason: null,
       });
       await this.persist(runtime);
       if (runtime.session.status === "RUNNING") {
@@ -925,6 +1008,8 @@ export class AutoPilotController {
         actionDeadlineAt: null,
         dispatchingFillControlId: null,
         navigationDispatchAttempted: false,
+        ownerPauseRequested: false,
+        ownerPauseReason: null,
       });
       await this.persist(stopped);
       return this.statusFromRuntime(stopped);
@@ -1031,6 +1116,12 @@ export class AutoPilotController {
       return this.statusFromRuntime(runtime);
     }
     const page = await this.dependencies.getPage(runtime.tabId);
+    if (runtime.pendingDraftUsageId) {
+      runtime = await this.settlePendingDraftUsage(runtime);
+      if (runtime.session.status === "PAUSED_ERROR") {
+        return this.statusFromRuntime(runtime);
+      }
+    }
     if (!page) {
       runtime = await this.fail(
         runtime,

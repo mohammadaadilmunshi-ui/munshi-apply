@@ -110,6 +110,7 @@ function harness(initialPage: ApplicationPage, options: HarnessOptions = {}) {
   let checkpointAttempts = 0;
   let fillCount = 0;
   let navigateCount = 0;
+  let draftUseCount = 0;
   let id = 0;
   let clock = Date.parse("2026-08-14T21:00:01.000Z");
   const events: string[] = [];
@@ -166,6 +167,10 @@ function harness(initialPage: ApplicationPage, options: HarnessOptions = {}) {
       return { created, checkpoint };
     },
     getLatestCheckpoint: async () => latestCheckpoint,
+    markDraftUsed: async (draftId) => {
+      draftUseCount += 1;
+      events.push(`draft-used:${draftId}`);
+    },
     now: () => {
       const value = new Date(clock).toISOString();
       clock += 1_000;
@@ -189,7 +194,7 @@ function harness(initialPage: ApplicationPage, options: HarnessOptions = {}) {
     },
     events,
     counts() {
-      return { fillCount, navigateCount, checkpointAttempts };
+      return { fillCount, navigateCount, checkpointAttempts, draftUseCount };
     },
   };
 }
@@ -356,5 +361,45 @@ describe("persistent AutoPilot controller", () => {
 
     expect(recovered?.session.status).toBe("STOPPED");
     expect(test.counts().fillCount).toBe(fillCount);
+  });
+
+  it("queues an owner pause during a fill wait and pauses before the next action", async () => {
+    const test = harness(page({ controls: ["first", "last"] }));
+    const started = await test.controller.start(
+      startInput([instruction("first"), instruction("last")]),
+    );
+    expect(started.session.status).toBe("WAITING_RESCAN");
+
+    const requested = await test.controller.pause("Owner requested pause");
+    expect(requested?.ownerPauseRequested).toBe(true);
+    expect(requested?.waitingFor).toBe("FILL");
+
+    const fresh = page({
+      controls: ["first", "last"],
+      observedAt: "2026-08-14T22:00:00.000Z",
+    });
+    test.setPage(fresh);
+    const paused = await test.controller.onPageSnapshot(7, fresh);
+
+    expect(paused?.session.status).toBe("PAUSED_OWNER");
+    expect(paused?.ownerPauseRequested).toBe(false);
+    expect(paused?.session.completedControlIds).toEqual(["first"]);
+    expect(test.counts().fillCount).toBe(1);
+    expect(test.counts().checkpointAttempts).toBeGreaterThan(0);
+  });
+
+  it("records approved AI draft usage exactly once after a verified AutoPilot fill", async () => {
+    const test = harness(page({ controls: ["narrative"] }));
+    const aiInstruction: FillInstruction = {
+      ...instruction("narrative"),
+      sourceDraftId: "draft-1",
+    };
+
+    const started = await test.controller.start(startInput([aiInstruction]));
+
+    expect(started.session.status).toBe("WAITING_RESCAN");
+    expect(started.pendingDraftUsageId).toBeNull();
+    expect(test.counts().draftUseCount).toBe(1);
+    expect(test.events).toContain("draft-used:draft-1");
   });
 });

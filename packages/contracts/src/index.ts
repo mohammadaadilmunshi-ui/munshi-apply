@@ -64,6 +64,7 @@ export const FillInstructionSchema = z.object({
   value: z.string(),
   sensitive: z.boolean(),
   approved: z.boolean(),
+  sourceDraftId: z.string().min(1).optional(),
 });
 export type FillInstruction = z.infer<typeof FillInstructionSchema>;
 

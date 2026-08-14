@@ -40,6 +40,9 @@ export type AutoPilotControllerStatus = {
   lastUrl: string;
   waitingFor: "FILL" | "NAVIGATION" | null;
   actionDeadlineAt: string | null;
+  ownerPauseRequested: boolean;
+  ownerPauseReason: string | null;
+  pendingDraftUsageId: string | null;
 };
 
 export type AutoPilotStartPayload = {

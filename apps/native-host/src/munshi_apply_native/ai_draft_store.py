@@ -292,6 +292,9 @@ class AIDraftStore:
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = self._load_for_update(connection, draft_id)
+            if row["status"] == "USED":
+                connection.commit()
+                return self._wire(row)
             if row["status"] != "APPROVED":
                 raise ValueError("Only an approved AI draft can be marked used")
             connection.execute(
