@@ -12,7 +12,18 @@ describe("classifyQuestion", () => {
     });
   });
 
-  it("keeps generic sponsorship manual until a dedicated fact exists", () => {
+  it("classifies explicit current sponsorship as a dedicated protected concept", () => {
+    expect(
+      classifyQuestion("Do you currently require sponsorship?"),
+    ).toMatchObject({
+      semanticType: "SPONSORSHIP_CURRENT",
+      sensitive: true,
+      requiresReview: true,
+      matchedRule: "current-sponsorship",
+    });
+  });
+
+  it("keeps ambiguous generic sponsorship wording manual", () => {
     expect(classifyQuestion("Do you require sponsorship?")).toMatchObject({
       semanticType: "UNKNOWN",
       sensitive: true,
