@@ -58,12 +58,8 @@ describe("protected profile convergence", () => {
   });
 
   it("does not block ordinary non-protected edits", () => {
-    const local = profile([
-      fact("preferred_name", "A", { protected: false }),
-    ]);
-    const remote = profile([
-      fact("preferred_name", "B", { protected: false }),
-    ]);
+    const local = profile([fact("preferred_name", "A", { protected: false })]);
+    const remote = profile([fact("preferred_name", "B", { protected: false })]);
 
     expect(protectedProfileConflictKeys(local, remote)).toEqual([]);
   });
