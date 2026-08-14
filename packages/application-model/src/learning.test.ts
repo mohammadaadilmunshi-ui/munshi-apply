@@ -23,7 +23,11 @@ const recipe: InteractionRecipe = {
   createdAt: "2026-08-14T18:00:00.000Z",
 };
 
-function attempt(index: number, success: boolean, verified = true): RecipeAttempt {
+function attempt(
+  index: number,
+  success: boolean,
+  verified = true,
+): RecipeAttempt {
   return {
     attemptId: `attempt-${index}`,
     recipeId: recipe.recipeId,
@@ -114,7 +118,12 @@ describe("verified recipe learning", () => {
     expect(
       shouldRollbackRecipe(
         promoted,
-        [attempt(1, true), attempt(2, false), attempt(3, false), attempt(4, false)],
+        [
+          attempt(1, true),
+          attempt(2, false),
+          attempt(3, false),
+          attempt(4, false),
+        ],
         3,
       ),
     ).toBe(true);

@@ -48,8 +48,16 @@ describe("summarizeExperiment", () => {
     const summary = summarizeExperiment({
       experiment,
       assignments: [
-        { experimentId: experiment.experimentId, subjectId: "app-1", variantId: "a" },
-        { experimentId: experiment.experimentId, subjectId: "app-2", variantId: "b" },
+        {
+          experimentId: experiment.experimentId,
+          subjectId: "app-1",
+          variantId: "a",
+        },
+        {
+          experimentId: experiment.experimentId,
+          subjectId: "app-2",
+          variantId: "b",
+        },
       ],
       outcomesBySubject: new Map([
         [
@@ -75,10 +83,26 @@ describe("summarizeExperiment", () => {
     const summary = summarizeExperiment({
       experiment,
       assignments: [
-        { experimentId: experiment.experimentId, subjectId: "a1", variantId: "a" },
-        { experimentId: experiment.experimentId, subjectId: "a2", variantId: "a" },
-        { experimentId: experiment.experimentId, subjectId: "b1", variantId: "b" },
-        { experimentId: experiment.experimentId, subjectId: "b2", variantId: "b" },
+        {
+          experimentId: experiment.experimentId,
+          subjectId: "a1",
+          variantId: "a",
+        },
+        {
+          experimentId: experiment.experimentId,
+          subjectId: "a2",
+          variantId: "a",
+        },
+        {
+          experimentId: experiment.experimentId,
+          subjectId: "b1",
+          variantId: "b",
+        },
+        {
+          experimentId: experiment.experimentId,
+          subjectId: "b2",
+          variantId: "b",
+        },
       ],
       outcomesBySubject: new Map([
         [
@@ -97,8 +121,14 @@ describe("summarizeExperiment", () => {
     });
 
     expect(summary.analysisReady).toBe(true);
-    expect(summary.variants.find((variant) => variant.variantId === "a")?.positiveOutcomeRate).toBe(0.5);
-    expect(summary.variants.find((variant) => variant.variantId === "b")?.positiveOutcomeRate).toBe(0);
+    expect(
+      summary.variants.find((variant) => variant.variantId === "a")
+        ?.positiveOutcomeRate,
+    ).toBe(0.5);
+    expect(
+      summary.variants.find((variant) => variant.variantId === "b")
+        ?.positiveOutcomeRate,
+    ).toBe(0);
     expect(summary.reason).toContain("without implying causality");
   });
 });
@@ -107,6 +137,6 @@ describe("validateOpaqueAttributionToken", () => {
   it("accepts opaque non-semantic tokens and rejects unsafe short or punctuated values", () => {
     expect(validateOpaqueAttributionToken("7KQ2N9X4_abcd")).toBe(true);
     expect(validateOpaqueAttributionToken("short")).toBe(false);
-    expect(validateOpaqueAttributionToken("job=secret")) .toBe(false);
+    expect(validateOpaqueAttributionToken("job=secret")).toBe(false);
   });
 });

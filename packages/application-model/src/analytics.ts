@@ -1,10 +1,5 @@
 export type ApplicationOutcomeStage =
-  | "APPLIED"
-  | "ASSESSMENT"
-  | "INTERVIEW"
-  | "OFFER"
-  | "REJECTED"
-  | "WITHDRAWN";
+  "APPLIED" | "ASSESSMENT" | "INTERVIEW" | "OFFER" | "REJECTED" | "WITHDRAWN";
 
 export type ApplicationOutcomeEvent = {
   eventId: string;
@@ -61,7 +56,10 @@ function validateExperiment(experiment: ExperimentDefinition): void {
   if (!experiment.experimentId.trim() || !experiment.label.trim()) {
     throw new Error("Experiment id and label are required");
   }
-  if (!Number.isSafeInteger(experiment.minimumSamplePerVariant) || experiment.minimumSamplePerVariant < 1) {
+  if (
+    !Number.isSafeInteger(experiment.minimumSamplePerVariant) ||
+    experiment.minimumSamplePerVariant < 1
+  ) {
     throw new Error("minimumSamplePerVariant must be a positive integer");
   }
   if (experiment.variants.length < 2) {
@@ -72,7 +70,8 @@ function validateExperiment(experiment: ExperimentDefinition): void {
     if (!variant.variantId.trim() || !variant.label.trim()) {
       throw new Error("Variant id and label are required");
     }
-    if (ids.has(variant.variantId)) throw new Error("Variant ids must be unique");
+    if (ids.has(variant.variantId))
+      throw new Error("Variant ids must be unique");
     ids.add(variant.variantId);
     if (!Number.isFinite(variant.weight) || variant.weight <= 0) {
       throw new Error("Variant weights must be positive finite numbers");
@@ -153,7 +152,8 @@ export function summarizeExperiment(input: {
   });
 
   const analysisReady = variants.every(
-    (variant) => variant.assignedCount >= input.experiment.minimumSamplePerVariant,
+    (variant) =>
+      variant.assignedCount >= input.experiment.minimumSamplePerVariant,
   );
   return {
     experimentId: input.experiment.experimentId,

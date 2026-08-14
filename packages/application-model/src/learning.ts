@@ -108,7 +108,9 @@ export function recipePerformance(
     successes,
     failures,
     successRate:
-      verified.length === 0 ? 0 : Number((successes / verified.length).toFixed(6)),
+      verified.length === 0
+        ? 0
+        : Number((successes / verified.length).toFixed(6)),
   };
 }
 
@@ -166,12 +168,17 @@ export function shouldRollbackRecipe(
   consecutiveVerifiedFailures: number,
 ): boolean {
   validateRecipe(recipe);
-  if (!Number.isSafeInteger(consecutiveVerifiedFailures) || consecutiveVerifiedFailures < 1) {
+  if (
+    !Number.isSafeInteger(consecutiveVerifiedFailures) ||
+    consecutiveVerifiedFailures < 1
+  ) {
     throw new Error("consecutiveVerifiedFailures must be a positive integer");
   }
   if (recipe.state !== "PROMOTED") return false;
   const verified = attempts
-    .filter((attempt) => attempt.recipeId === recipe.recipeId && attempt.verified)
+    .filter(
+      (attempt) => attempt.recipeId === recipe.recipeId && attempt.verified,
+    )
     .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt));
   if (verified.length < consecutiveVerifiedFailures) return false;
   return verified
