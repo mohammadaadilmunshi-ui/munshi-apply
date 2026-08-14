@@ -31,11 +31,25 @@ The macOS default is:
 
 Override it for development or testing with `MUNSHI_RUNTIME_ROOT`. Override only the database with `MUNSHI_DATABASE_PATH`.
 
-Non-secret AI preferences are stored locally under the private runtime. The OpenAI API key is not stored there.
+Non-secret AI preferences are stored in:
+
+```text
+~/Library/Application Support/MUNSHI Apply/settings/ai.json
+```
+
+They are included in the normal metadata backup. Older `config/ai.json` preferences, if present, are migrated to the backed-up `settings/` location when loaded. The OpenAI API key is never stored in either file.
+
+## Verification modes
+
+Development/source verification and installed-runtime verification have different dependency contracts.
+
+Use the normal source quality gates in development and CI. They include formatting, linting, TypeScript checks/tests, build/artifact verification, secret scanning, Ruff, and Pytest.
+
+The updater uses `./scripts/verify.sh --runtime-only`. This validates the production artifact, database/migrations, installed native launcher, Native Messaging smoke health, and optional native-host manifest without requiring developer-only Ruff/Pytest packages in the production virtual environment.
 
 ## OpenAI desktop configuration
 
-The desktop Diagnostics view now includes an **AI & API control center**. The owner can:
+The desktop Diagnostics view includes an **AI & API control center**. The owner can:
 
 - paste or replace an OpenAI API key;
 - remove the stored key;
