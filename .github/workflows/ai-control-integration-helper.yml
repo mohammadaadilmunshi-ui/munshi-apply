@@ -23,7 +23,7 @@ jobs:
 
       - name: Guard exact AI tranche parent
         run: |
-          test "$(git rev-parse HEAD^)" = "e08473e7aebefeb8b237662918b86ac9c24ec215"
+          test "$(git rev-parse HEAD^)" = "b7f00575e1401a9467dffea85aaa2b3c6bceecc2"
           test "$(git branch --show-current)" = "feat/v3-foundation-alignment"
 
       - name: Set up Node
@@ -42,15 +42,22 @@ jobs:
           npm ci
           python -m pip install -e './apps/native-host[dev]'
 
-      - name: Integrate first-class AI view
+      - name: Integrate AI view and migration expectations
         run: |
           python - <<'PY'
           from pathlib import Path
 
-          path = Path('apps/extension/src/sidepanel/App.tsx')
-          text = path.read_text(encoding='utf-8')
+          def replace_once(path: Path, old: str, new: str) -> None:
+              text = path.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(
+                      f'expected exactly one match in {path}, found {count}: {old[:90]}'
+                  )
+              path.write_text(text.replace(old, new, 1), encoding='utf-8')
 
-          replacements = [
+          app = Path('apps/extension/src/sidepanel/App.tsx')
+          app_replacements = [
               (
                   'type View = "application" | "profile" | "diagnostics";',
                   'type View = "application" | "profile" | "ai" | "diagnostics";',
@@ -72,12 +79,14 @@ jobs:
                   '          <div hidden>\n            <h3>AI & API control center</h3>',
               ),
           ]
-          for old, new in replacements:
+          text = app.read_text(encoding='utf-8')
+          for old, new in app_replacements:
               count = text.count(old)
               if count != 1:
-                  raise SystemExit(f'expected exactly one App.tsx match, found {count}: {old[:80]}')
+                  raise SystemExit(
+                      f'expected exactly one App.tsx match, found {count}: {old[:90]}'
+                  )
               text = text.replace(old, new, 1)
-
           marker = '      {view === "diagnostics" && (\n'
           if text.count(marker) != 1:
               raise SystemExit('diagnostics view marker is not unique')
@@ -86,11 +95,55 @@ jobs:
               '        <AIControlCenter nativeAvailable={native.status === "healthy"} />\n'
               '      )}\n\n'
           )
-          text = text.replace(marker, ai_view + marker, 1)
-          path.write_text(text, encoding='utf-8')
+          app.write_text(text.replace(marker, ai_view + marker, 1), encoding='utf-8')
+
+          budget_store = Path(
+              'apps/native-host/src/munshi_apply_native/ai_budget_store.py'
+          )
+          replace_once(
+              budget_store,
+              '                       COALESCE(SUM(CASE WHEN estimated = 1 THEN cost_usd ELSE 0 END), 0) AS estimated_cost\n',
+              '                       COALESCE(\n'
+              '                           SUM(CASE WHEN estimated = 1 THEN cost_usd ELSE 0 END),\n'
+              '                           0\n'
+              '                       ) AS estimated_cost\n',
+          )
+
+          database_test = Path('apps/native-host/tests/test_database.py')
+          replace_once(
+              database_test,
+              '        "005_profile_snapshot_ordering.sql",\n    ]\n    assert database.migrate() == []\n',
+              '        "005_profile_snapshot_ordering.sql",\n'
+              '        "006_ai_budget_reservations.sql",\n'
+              '    ]\n'
+              '    assert database.migrate() == []\n',
+          )
+          replace_once(
+              database_test,
+              '    assert health["migration_count"] == 5\n    assert health["schema_version"] == "005_profile_snapshot_ordering.sql"\n',
+              '    assert health["migration_count"] == 6\n'
+              '    assert health["schema_version"] == "006_ai_budget_reservations.sql"\n',
+          )
+          replace_once(
+              database_test,
+              '            "ai_usage",\n            "interaction_recipes",\n',
+              '            "ai_usage",\n'
+              '            "ai_budget_reservations",\n'
+              '            "interaction_recipes",\n',
+          )
+
+          operations_test = Path('apps/native-host/tests/test_operations.py')
+          replace_once(
+              operations_test,
+              '        "005_profile_snapshot_ordering.sql",\n    ]\n    assert json.loads(second.stdout)["applied"] == []\n',
+              '        "005_profile_snapshot_ordering.sql",\n'
+              '        "006_ai_budget_reservations.sql",\n'
+              '    ]\n'
+              '    assert json.loads(second.stdout)["applied"] == []\n',
+          )
           PY
 
-      - name: Apply repository formatting
+      - name: Apply authoritative formatting
         run: |
           npx prettier --write \
             apps/extension/src/sidepanel/App.tsx \
@@ -100,14 +153,13 @@ jobs:
             .github/workflows/ai-control-integration-helper.yml
           python -m ruff format apps/native-host
           python -m ruff check --fix apps/native-host
+          python -m ruff check apps/native-host
 
       - name: Verify complete extension tranche
         run: npm run check
 
       - name: Verify complete native tranche
-        run: |
-          python -m ruff check apps/native-host
-          python -m pytest apps/native-host
+        run: python -m pytest apps/native-host
 
       - name: Remove temporary helper and commit exact result
         run: |
