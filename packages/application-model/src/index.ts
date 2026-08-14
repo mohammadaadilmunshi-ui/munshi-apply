@@ -1,5 +1,6 @@
 export * from "./analytics";
 export * from "./autopilot";
+export * from "./autopilot-session";
 export * from "./budget";
 export * from "./context";
 export * from "./evidence";
