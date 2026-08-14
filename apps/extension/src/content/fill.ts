@@ -92,6 +92,21 @@ function fillRadio(element: HTMLInputElement, value: string): boolean {
   return match.checked;
 }
 
+function fillCheckbox(element: HTMLInputElement, value: string): boolean {
+  const requested = normalized(value);
+  const truthy = ["true", "yes", "1", "checked"];
+  const falsy = ["false", "no", "0", "unchecked"];
+  if (!truthy.includes(requested) && !falsy.includes(requested)) {
+    return false;
+  }
+
+  const shouldCheck = truthy.includes(requested);
+  element.focus();
+  setNativeChecked(element, shouldCheck);
+  dispatchValueEvents(element);
+  return element.checked === shouldCheck;
+}
+
 function fillElement(element: Element, value: string): boolean {
   if (element instanceof HTMLInputElement) {
     if (
@@ -103,13 +118,7 @@ function fillElement(element: Element, value: string): boolean {
       return fillRadio(element, value);
     }
     if (element.type === "checkbox") {
-      const shouldCheck = ["true", "yes", "1", "checked"].includes(
-        normalized(value),
-      );
-      element.focus();
-      setNativeChecked(element, shouldCheck);
-      dispatchValueEvents(element);
-      return element.checked === shouldCheck;
+      return fillCheckbox(element, value);
     }
     element.focus();
     setNativeValue(element, value);
