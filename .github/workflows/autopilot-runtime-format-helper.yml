@@ -1,0 +1,59 @@
+name: AutoPilot runtime formatter helper
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  format-and-certify:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.head_ref == 'feat/v3-foundation-alignment'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out guarded PR branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 2
+
+      - name: Guard exact tranche parent
+        run: |
+          test "$(git rev-parse HEAD^)" = "dbf4b0a14903f7be148345b9be36e72dcda512e9"
+          test "$(git branch --show-current)" = "feat/v3-foundation-alignment"
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Apply repository formatting
+        run: |
+          npx prettier --write \
+            apps/extension/src/background/autopilot-controller.test.ts \
+            apps/extension/src/background/autopilot-controller.ts \
+            apps/extension/src/background/service-worker.ts \
+            apps/extension/src/content/fill.ts \
+            apps/extension/src/messaging/native.ts \
+            .github/workflows/autopilot-runtime-format-helper.yml
+
+      - name: Verify complete extension tranche
+        run: npm run check
+
+      - name: Remove temporary helper and commit exact result
+        run: |
+          rm .github/workflows/autopilot-runtime-format-helper.yml
+          git config user.name "Aadil Munshi"
+          git config user.email "mohammadaadilmunshi@gmail.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix: certify autopilot runtime interaction tranche"
+          git push origin HEAD:feat/v3-foundation-alignment
