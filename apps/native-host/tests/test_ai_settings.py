@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+import munshi_apply_native.ai_settings as ai_settings
 from munshi_apply_native.ai_settings import AIConfiguration, AISettingsStore
 
 
@@ -85,3 +87,31 @@ def test_status_never_returns_secret(tmp_path: Path, monkeypatch: pytest.MonkeyP
     serialized = json.dumps(store.status())
     assert sample_value not in serialized
     assert '"keyConfigured": true' in serialized
+
+
+def test_keychain_write_keeps_secret_out_of_process_arguments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = AISettingsStore(tmp_path)
+    sample_value = "sk-proj-test_" + ("z" * 40)
+    captured: dict[str, object] = {}
+
+    def fake_run(args: list[str], **kwargs: object) -> SimpleNamespace:
+        captured["args"] = args
+        captured.update(kwargs)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(ai_settings.sys, "platform", "darwin")
+    monkeypatch.setattr(ai_settings.subprocess, "run", fake_run)
+
+    store.set_api_key(sample_value)
+
+    args = captured["args"]
+    assert isinstance(args, list)
+    assert args == ["/usr/bin/security", "-q", "-i"]
+    assert sample_value not in " ".join(args)
+    command = captured["input"]
+    assert isinstance(command, str)
+    assert sample_value not in command
+    assert sample_value.encode("utf-8").hex() in command
+    assert captured["text"] is True
