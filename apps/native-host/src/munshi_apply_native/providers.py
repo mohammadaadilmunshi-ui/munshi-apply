@@ -226,9 +226,7 @@ class OpenAIResponsesProvider:
         self._transport = transport
         self._timeout_seconds = timeout_seconds
 
-    def generate_structured(
-        self, request: ProviderGenerationRequest
-    ) -> ProviderGenerationResult:
+    def generate_structured(self, request: ProviderGenerationRequest) -> ProviderGenerationResult:
         if not request.model.strip():
             raise ValueError("OpenAI model is required")
         if not request.question.strip():

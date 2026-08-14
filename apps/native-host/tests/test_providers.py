@@ -148,9 +148,7 @@ def test_provider_rejects_missing_verified_context_before_network() -> None:
 
 
 def test_provider_rejects_unstructured_or_unsupported_output() -> None:
-    def no_claim_transport(
-        request: urllib_request.Request, timeout: float
-    ) -> dict[str, object]:
+    def no_claim_transport(request: urllib_request.Request, timeout: float) -> dict[str, object]:
         del request, timeout
         payload = successful_payload()
         payload["output"] = [
@@ -161,17 +159,13 @@ def test_provider_rejects_unstructured_or_unsupported_output() -> None:
         ]
         return payload
 
-    provider = OpenAIResponsesProvider(
-        "sk-proj-test_" + ("x" * 40), transport=no_claim_transport
-    )
+    provider = OpenAIResponsesProvider("sk-proj-test_" + ("x" * 40), transport=no_claim_transport)
     with pytest.raises(ValueError, match="does not include claims"):
         provider.generate_structured(generation_request())
 
 
 def test_provider_requires_usage_for_budget_accounting() -> None:
-    def missing_usage(
-        request: urllib_request.Request, timeout: float
-    ) -> dict[str, object]:
+    def missing_usage(request: urllib_request.Request, timeout: float) -> dict[str, object]:
         del request, timeout
         payload = successful_payload()
         payload.pop("usage")
@@ -183,9 +177,7 @@ def test_provider_requires_usage_for_budget_accounting() -> None:
 
 
 def test_provider_rejects_incomplete_response_before_parsing_draft() -> None:
-    def incomplete(
-        request: urllib_request.Request, timeout: float
-    ) -> dict[str, object]:
+    def incomplete(request: urllib_request.Request, timeout: float) -> dict[str, object]:
         del request, timeout
         payload = successful_payload()
         payload["status"] = "incomplete"

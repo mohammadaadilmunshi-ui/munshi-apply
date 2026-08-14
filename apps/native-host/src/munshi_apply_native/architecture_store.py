@@ -60,9 +60,7 @@ class ArchitectureStore:
                     ),
                 )
 
-    def profile_records(
-        self, profile_id: str, *, kind: str | None = None
-    ) -> list[dict[str, Any]]:
+    def profile_records(self, profile_id: str, *, kind: str | None = None) -> list[dict[str, Any]]:
         with self.database.connect() as connection:
             if kind is None:
                 rows = connection.execute(
@@ -186,12 +184,8 @@ class ArchitectureStore:
                     checkpoint["state"],
                     checkpoint.get("page_id"),
                     checkpoint["page_fingerprint"],
-                    canonical_json(
-                        {"items": checkpoint.get("completed_control_ids", [])}
-                    ),
-                    canonical_json(
-                        {"items": checkpoint.get("pending_control_ids", [])}
-                    ),
+                    canonical_json({"items": checkpoint.get("completed_control_ids", [])}),
+                    canonical_json({"items": checkpoint.get("pending_control_ids", [])}),
                     checkpoint.get("selected_resume_id"),
                     checkpoint.get("selected_resume_sha256"),
                     checkpoint["created_at"],
@@ -213,12 +207,8 @@ class ArchitectureStore:
         if row is None:
             return None
         item = dict(row)
-        item["completed_control_ids"] = json.loads(
-            item.pop("completed_control_ids_json")
-        )["items"]
-        item["pending_control_ids"] = json.loads(item.pop("pending_control_ids_json"))[
-            "items"
-        ]
+        item["completed_control_ids"] = json.loads(item.pop("completed_control_ids_json"))["items"]
+        item["pending_control_ids"] = json.loads(item.pop("pending_control_ids_json"))["items"]
         return item
 
     def upsert_evidence_node(self, node: dict[str, Any]) -> None:

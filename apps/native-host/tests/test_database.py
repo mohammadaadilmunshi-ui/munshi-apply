@@ -80,10 +80,7 @@ def test_architecture_tables_are_created_with_integrity_constraints(tmp_path: Pa
             """,
             (now, now),
         )
-        assert (
-            connection.execute("SELECT COUNT(*) FROM profile_record_facts").fetchone()[0]
-            == 1
-        )
+        assert connection.execute("SELECT COUNT(*) FROM profile_record_facts").fetchone()[0] == 1
 
 
 def event_record() -> dict[str, object]:

@@ -125,9 +125,7 @@ class LearningAnalyticsStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def create_attribution_token(
-        self, token: str, application_id: str, created_at: str
-    ) -> None:
+    def create_attribution_token(self, token: str, application_id: str, created_at: str) -> None:
         if not _OPAQUE_TOKEN.fullmatch(token):
             raise ValueError("Attribution token must be an opaque 8-64 character token")
         with self.database.connect() as connection:
