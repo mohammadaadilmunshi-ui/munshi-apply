@@ -172,7 +172,10 @@ export function resolveProfileAnswer(
     trustLevel: fact.trustLevel,
     sensitive: question.sensitive || fact.protected,
     protected: fact.protected,
-    confidence: Math.min(question.confidence, fact.trustLevel === "VERIFIED" ? 1 : 0.96),
+    confidence: Math.min(
+      question.confidence,
+      fact.trustLevel === "VERIFIED" ? 1 : 0.96,
+    ),
     reasons,
   };
 }
