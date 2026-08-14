@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   integrate-and-certify:
-    if: "${{ github.event.head_commit.message == 'chore: rerun autopilot review certification' }}"
+    if: "${{ github.event.head_commit.message == 'chore: finalize autopilot review certification' }}"
     runs-on: ubuntu-24.04
     steps:
       - name: Check out guarded PR branch
@@ -21,7 +21,7 @@ jobs:
 
       - name: Guard exact tranche parent
         run: |
-          test "$(git rev-parse HEAD^)" = "03f657bee07d65f1093d59bb625a185617b55504"
+          test "$(git rev-parse HEAD^)" = "4cc433777f1034b379b9997eb5072b17f8d80bac"
           test "$(git branch --show-current)" = "feat/v3-foundation-alignment"
           test -f scripts/autopilot-review-integration.py
           test -f scripts/autopilot-review-hook-fix.py
@@ -79,9 +79,9 @@ jobs:
 
       - name: Remove temporary helpers
         run: |
-          git rm -- .github/workflows/autopilot-review-integration-helper.yml
-          git rm -- scripts/autopilot-review-integration.py
-          git rm -- scripts/autopilot-review-hook-fix.py
+          git rm -f -- .github/workflows/autopilot-review-integration-helper.yml
+          git rm -f -- scripts/autopilot-review-integration.py
+          git rm -f -- scripts/autopilot-review-hook-fix.py
 
       - name: Commit exact certified tree
         run: |
