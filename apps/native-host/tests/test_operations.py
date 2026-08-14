@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -91,6 +92,15 @@ def test_operational_scripts_support_safe_dry_runs(tmp_path: Path) -> None:
 
 def test_release_packaging_creates_required_verified_artifacts(tmp_path: Path) -> None:
     output = tmp_path / "release"
+    fixture_repository = tmp_path / "repository"
+    extension_dist = fixture_repository / "apps/extension/dist"
+    extension_dist.mkdir(parents=True)
+    (extension_dist / "manifest.json").write_text(
+        '{"manifest_version": 3, "name": "MUNSHI Apply"}\n', encoding="utf-8"
+    )
+    (extension_dist / "service-worker.js").write_text("export {};\n", encoding="utf-8")
+    fixture_migrations = fixture_repository / "migrations"
+    shutil.copytree(MIGRATIONS, fixture_migrations)
     subprocess.run(  # noqa: S603 - fixed interpreter and repository script.
         [
             sys.executable,
@@ -100,7 +110,7 @@ def test_release_packaging_creates_required_verified_artifacts(tmp_path: Path) -
             "--output",
             str(output),
             "--repository",
-            str(REPOSITORY_ROOT),
+            str(fixture_repository),
         ],
         check=True,
         capture_output=True,

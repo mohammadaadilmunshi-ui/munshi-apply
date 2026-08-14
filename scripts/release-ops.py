@@ -100,7 +100,9 @@ def package(version: str, root: Path, output: Path) -> list[Path]:
 
     try:
         commit = subprocess.check_output(
-            ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            text=True,
+            stderr=subprocess.DEVNULL,
         ).strip()
     except subprocess.CalledProcessError:
         commit = "unknown"
