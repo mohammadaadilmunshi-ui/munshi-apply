@@ -57,6 +57,27 @@ export function protectedProfileConflictKeys(
     .sort();
 }
 
+function chooseProtectedFact(
+  baseFact: ProfileFact | undefined,
+  localFact: ProfileFact | undefined,
+  remoteFact: ProfileFact | undefined,
+): ProfileFact | undefined {
+  if (localFact && remoteFact) {
+    const sameValue =
+      factValueFingerprint(localFact.value) ===
+      factValueFingerprint(remoteFact.value);
+    if (sameValue) {
+      if (isConfirmedProtectedFact(baseFact)) return baseFact;
+      if (isConfirmedProtectedFact(localFact)) return localFact;
+      if (isConfirmedProtectedFact(remoteFact)) return remoteFact;
+      return baseFact ?? laterFact(localFact, remoteFact);
+    }
+  }
+  if (isConfirmedProtectedFact(localFact)) return localFact;
+  if (isConfirmedProtectedFact(remoteFact)) return remoteFact;
+  return baseFact ?? laterFact(localFact, remoteFact);
+}
+
 export function reconcileProtectedProfile(
   localProfile: MasterProfile,
   remoteProfile: MasterProfile,
@@ -76,6 +97,7 @@ export function reconcileProtectedProfile(
   const remoteByKey = new Map(
     remoteProfile.facts.map((fact) => [fact.key, fact] as const),
   );
+  const baseByKey = new Map(base.facts.map((fact) => [fact.key, fact] as const));
   const protectedKeys = new Set(
     [...localProfile.facts, ...remoteProfile.facts]
       .filter((fact) => fact.protected)
@@ -84,20 +106,23 @@ export function reconcileProtectedProfile(
   const selectedProtected = new Map<string, ProfileFact>();
 
   for (const key of protectedKeys) {
-    const localFact = localByKey.get(key);
-    const remoteFact = remoteByKey.get(key);
-    const selected = isConfirmedProtectedFact(localFact)
-      ? localFact
-      : isConfirmedProtectedFact(remoteFact)
-        ? remoteFact
-        : laterFact(localFact, remoteFact);
+    const selected = chooseProtectedFact(
+      baseByKey.get(key),
+      localByKey.get(key),
+      remoteByKey.get(key),
+    );
     if (selected) selectedProtected.set(key, selected);
   }
 
-  const facts = base.facts
-    .filter((fact) => !protectedKeys.has(fact.key))
-    .concat([...selectedProtected.values()])
-    .sort((left, right) => left.key.localeCompare(right.key));
+  const seenProtected = new Set<string>();
+  const facts = base.facts.map((fact) => {
+    if (!protectedKeys.has(fact.key)) return fact;
+    seenProtected.add(fact.key);
+    return selectedProtected.get(fact.key) ?? fact;
+  });
+  for (const key of [...selectedProtected.keys()].sort()) {
+    if (!seenProtected.has(key)) facts.push(selectedProtected.get(key)!);
+  }
 
   return {
     ...base,
