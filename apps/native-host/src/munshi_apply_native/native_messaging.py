@@ -5,6 +5,7 @@ import struct
 import sys
 from typing import BinaryIO
 
+from .ai_settings import AIConfiguration, AISettingsStore
 from .database import Database
 from .models import EventEnvelope
 from .settings import Settings
@@ -35,7 +36,11 @@ def write_message(stream: BinaryIO, payload: dict[str, object]) -> None:
     stream.flush()
 
 
-def handle(message: dict[str, object], database: Database) -> dict[str, object]:
+def handle(
+    message: dict[str, object],
+    database: Database,
+    ai_store: AISettingsStore | None = None,
+) -> dict[str, object]:
     message_type = message.get("type")
     if message_type == "PING":
         return {"ok": True, "data": database.health()}
@@ -43,6 +48,38 @@ def handle(message: dict[str, object], database: Database) -> dict[str, object]:
         event = EventEnvelope.model_validate(message.get("payload"))
         database.append_event(event.database_record())
         return {"ok": True}
+
+    if message_type in {
+        "GET_AI_SETTINGS",
+        "SAVE_AI_SETTINGS",
+        "SET_OPENAI_API_KEY",
+        "DELETE_OPENAI_API_KEY",
+        "TEST_OPENAI_CONNECTION",
+        "LIST_OPENAI_MODELS",
+    }:
+        if ai_store is None:
+            return {"ok": False, "error": "AI settings store is unavailable"}
+        if message_type == "GET_AI_SETTINGS":
+            return {"ok": True, "data": ai_store.status()}
+        if message_type == "SAVE_AI_SETTINGS":
+            config = AIConfiguration.from_payload(message.get("payload"))
+            ai_store.save(config)
+            return {"ok": True, "data": ai_store.status()}
+        if message_type == "SET_OPENAI_API_KEY":
+            payload = message.get("payload")
+            if not isinstance(payload, dict):
+                raise ValueError("API key payload must be an object")
+            ai_store.set_api_key(payload.get("apiKey"))
+            return {"ok": True, "data": ai_store.status()}
+        if message_type == "DELETE_OPENAI_API_KEY":
+            ai_store.delete_api_key()
+            return {"ok": True, "data": ai_store.status()}
+        if message_type == "TEST_OPENAI_CONNECTION":
+            models = ai_store.list_models()
+            return {"ok": True, "data": {"modelCount": len(models)}}
+        if message_type == "LIST_OPENAI_MODELS":
+            return {"ok": True, "data": {"models": ai_store.list_models()}}
+
     return {"ok": False, "error": "Unsupported native message"}
 
 
@@ -50,9 +87,10 @@ def main() -> None:
     settings = Settings.from_environment()
     database = Database(settings.database_path, settings.migrations_path)
     database.migrate()
+    ai_store = AISettingsStore(settings.runtime_root)
     while message := read_message(sys.stdin.buffer):
         try:
-            write_message(sys.stdout.buffer, handle(message, database))
+            write_message(sys.stdout.buffer, handle(message, database, ai_store))
         except Exception as error:  # The protocol must return structured failures.
             write_message(sys.stdout.buffer, {"ok": False, "error": str(error)})
 
