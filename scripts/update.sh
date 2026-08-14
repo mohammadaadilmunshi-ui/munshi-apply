@@ -42,10 +42,10 @@ fi
   --database "${runtime_root}/database/munshi-apply.sqlite" \
   --migrations "${REPOSITORY_ROOT}/migrations"
 
-verify_args=()
 if [[ -n "${extension_id}" ]]; then
   "${REPOSITORY_ROOT}/scripts/install-native-host.sh" --extension-id "${extension_id}"
-  verify_args+=(--extension-id "${extension_id}")
+  "${REPOSITORY_ROOT}/scripts/verify.sh" --extension-id "${extension_id}"
+else
+  "${REPOSITORY_ROOT}/scripts/verify.sh"
 fi
-"${REPOSITORY_ROOT}/scripts/verify.sh" "${verify_args[@]}"
 printf 'Update completed successfully.\n'
