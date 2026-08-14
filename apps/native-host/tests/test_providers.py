@@ -26,6 +26,7 @@ def generation_request() -> ProviderGenerationRequest:
             ),
         ),
         max_words=80,
+        max_output_tokens=256,
     )
 
 
@@ -86,6 +87,7 @@ def test_openai_provider_uses_private_structured_responses_request() -> None:
     body = captured["body"]
     assert isinstance(body, dict)
     assert body["store"] is False
+    assert body["max_output_tokens"] == 256
     assert "tools" not in body
     assert body["text"]["format"]["type"] == "json_schema"
     assert body["text"]["format"]["strict"] is True
@@ -137,6 +139,7 @@ def test_provider_rejects_missing_verified_context_before_network() -> None:
         semantic_type=request.semantic_type,
         context=(),
         max_words=request.max_words,
+        max_output_tokens=request.max_output_tokens,
     )
 
     with pytest.raises(ValueError, match="Verified evidence context is required"):
@@ -209,3 +212,27 @@ def test_provider_rejects_refusal_content() -> None:
     provider = OpenAIResponsesProvider("sk-proj-test_" + ("x" * 40), transport=refusal)
     with pytest.raises(ValueError, match="refused"):
         provider.generate_structured(generation_request())
+
+
+def test_provider_rejects_unbounded_output_token_request_before_network() -> None:
+    called = False
+
+    def transport(request: urllib_request.Request, timeout: float) -> dict[str, object]:
+        nonlocal called
+        del request, timeout
+        called = True
+        return successful_payload()
+
+    provider = OpenAIResponsesProvider("sk-proj-test_" + ("x" * 40), transport=transport)
+    request = generation_request()
+    invalid = ProviderGenerationRequest(
+        model=request.model,
+        question=request.question,
+        semantic_type=request.semantic_type,
+        context=request.context,
+        max_words=request.max_words,
+        max_output_tokens=5000,
+    )
+    with pytest.raises(ValueError, match="max_output_tokens"):
+        provider.generate_structured(invalid)
+    assert called is False
