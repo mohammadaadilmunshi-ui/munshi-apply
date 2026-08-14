@@ -25,6 +25,7 @@ class ProviderGenerationRequest:
     semantic_type: str
     context: tuple[ProviderContextItem, ...]
     max_words: int | None = None
+    max_output_tokens: int = 512
 
 
 @dataclass(frozen=True)
@@ -124,16 +125,11 @@ def _validate_response_status(payload: dict[str, object]) -> None:
     if status == "completed":
         return
     if status == "failed":
-        error = payload.get("error")
-        if isinstance(error, dict) and isinstance(error.get("message"), str):
-            raise ValueError("OpenAI generation failed: response status is failed")
         raise ValueError("OpenAI generation failed: response status is failed")
     if status == "incomplete":
         details = payload.get("incomplete_details")
         if isinstance(details, dict) and isinstance(details.get("reason"), str):
-            raise ValueError(
-                f"OpenAI generation is incomplete ({details['reason']})"
-            )
+            raise ValueError(f"OpenAI generation is incomplete ({details['reason']})")
         raise ValueError("OpenAI generation is incomplete")
     raise ValueError("OpenAI response is not completed")
 
@@ -241,10 +237,13 @@ class OpenAIResponsesProvider:
             raise ValueError("Verified evidence context is required")
         if request.max_words is not None and request.max_words < 1:
             raise ValueError("max_words must be positive")
+        if not 1 <= request.max_output_tokens <= 4096:
+            raise ValueError("max_output_tokens must be between 1 and 4096")
 
         body = {
             "model": request.model,
             "store": False,
+            "max_output_tokens": request.max_output_tokens,
             "instructions": (
                 "You draft one job-application answer using only the supplied evidence. "
                 "Do not add facts, metrics, employers, dates, credentials, immigration facts, "
