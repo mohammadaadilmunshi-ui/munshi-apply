@@ -124,4 +124,50 @@ describe("guarded field filling", () => {
     expect(radios[1]?.checked).toBe(true);
     expect(result[0]?.status).toBe("FILLED");
   });
+
+  it("fills a checkbox only for an explicit boolean answer", () => {
+    document.body.innerHTML = `
+      <label><input id="agree" type="checkbox" checked> I agree</label>
+    `;
+    const question = scanDocument().questions[0];
+    expect(question).toBeDefined();
+
+    const result = applyFillInstructions([
+      {
+        controlId: question!.controlId,
+        frameId: 0,
+        value: "No",
+        sensitive: false,
+        approved: true,
+      },
+    ]);
+
+    expect((document.getElementById("agree") as HTMLInputElement).checked).toBe(
+      false,
+    );
+    expect(result[0]?.status).toBe("FILLED");
+  });
+
+  it("does not mutate a checkbox for an ambiguous value", () => {
+    document.body.innerHTML = `
+      <label><input id="agree" type="checkbox" checked> I agree</label>
+    `;
+    const question = scanDocument().questions[0];
+    expect(question).toBeDefined();
+
+    const result = applyFillInstructions([
+      {
+        controlId: question!.controlId,
+        frameId: 0,
+        value: "I agree",
+        sensitive: false,
+        approved: true,
+      },
+    ]);
+
+    expect((document.getElementById("agree") as HTMLInputElement).checked).toBe(
+      true,
+    );
+    expect(result[0]?.status).toBe("FAILED");
+  });
 });
