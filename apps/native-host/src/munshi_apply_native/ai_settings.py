@@ -5,11 +5,11 @@ import os
 import subprocess  # noqa: S404
 import sys
 import tempfile
-import urllib.error
-import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib import error as urllib_error
+from urllib import request as urllib_request
 
 
 _KEYCHAIN_SERVICE = "systems.munshi.apply.openai"
@@ -27,7 +27,7 @@ class AIConfiguration:
     hard_stop: bool = True
 
     @classmethod
-    def from_payload(cls, payload: object) -> "AIConfiguration":
+    def from_payload(cls, payload: object) -> AIConfiguration:
         if not isinstance(payload, dict):
             raise ValueError("AI settings payload must be an object")
         provider = str(payload.get("provider", "openai"))
@@ -183,7 +183,9 @@ class AISettingsStore:
         }
 
     def _openai_request(self, url: str) -> dict[str, Any]:
-        request = urllib.request.Request(
+        if url != _OPENAI_MODELS_URL:
+            raise ValueError("Unapproved OpenAI endpoint")
+        request = urllib_request.Request(  # noqa: S310
             url,
             headers={
                 "Authorization": f"Bearer {self.get_api_key()}",
@@ -192,11 +194,11 @@ class AISettingsStore:
             },
         )
         try:
-            with urllib.request.urlopen(request, timeout=10) as response:  # noqa: S310
+            with urllib_request.urlopen(request, timeout=10) as response:  # noqa: S310
                 payload = json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as error:
+        except urllib_error.HTTPError as error:
             raise ValueError(f"OpenAI connection failed (HTTP {error.code})") from error
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+        except (urllib_error.URLError, TimeoutError, json.JSONDecodeError) as error:
             raise ValueError("OpenAI connection failed") from error
         if not isinstance(payload, dict):
             raise ValueError("OpenAI returned an invalid response")
