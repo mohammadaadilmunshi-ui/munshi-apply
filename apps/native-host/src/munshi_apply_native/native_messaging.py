@@ -8,6 +8,7 @@ from typing import BinaryIO
 from .ai_settings import AIConfiguration, AISettingsStore
 from .database import Database
 from .models import EventEnvelope
+from .profile_store import ProfileStore
 from .settings import Settings
 
 
@@ -47,6 +48,14 @@ def handle(
     if message_type == "APPEND_EVENT":
         event = EventEnvelope.model_validate(message.get("payload"))
         database.append_event(event.database_record())
+        return {"ok": True}
+    if message_type == "GET_PROFILE_SNAPSHOT":
+        return {"ok": True, "data": ProfileStore(database).latest()}
+    if message_type == "SAVE_PROFILE_SNAPSHOT":
+        payload = message.get("payload")
+        if not isinstance(payload, dict):
+            raise ValueError("Profile snapshot payload must be an object")
+        ProfileStore(database).save(payload)
         return {"ok": True}
 
     if message_type in {
