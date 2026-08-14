@@ -26,12 +26,47 @@ export type NativeRuntimeHealth = {
   outbox: Record<string, number>;
 };
 
+type ProfileSaveWaiter = {
+  resolve: () => void;
+  reject: (error: unknown) => void;
+};
+
+let queuedProfile: MasterProfile | null = null;
+let profileSaveRunning = false;
+let profileSaveWaiters: ProfileSaveWaiter[] = [];
+
 async function send(request: ExtensionRequest): Promise<unknown> {
   const response = (await chrome.runtime.sendMessage(
     request,
   )) as ExtensionResponse;
   if (!response.ok) throw new Error(response.error);
   return response.data;
+}
+
+async function drainProfileSaveQueue(): Promise<void> {
+  let failure: unknown = null;
+  try {
+    while (queuedProfile) {
+      const profile = queuedProfile;
+      queuedProfile = null;
+      await send({ type: "SAVE_PROFILE", payload: profile });
+    }
+  } catch (error) {
+    failure = error;
+    queuedProfile = null;
+  } finally {
+    profileSaveRunning = false;
+    const waiters = profileSaveWaiters;
+    profileSaveWaiters = [];
+    for (const waiter of waiters) {
+      if (failure) waiter.reject(failure);
+      else waiter.resolve();
+    }
+    if (queuedProfile && !profileSaveRunning) {
+      profileSaveRunning = true;
+      void drainProfileSaveQueue();
+    }
+  }
 }
 
 export async function getActivePage(): Promise<ApplicationPage | null> {
@@ -42,8 +77,14 @@ export async function getProfile(): Promise<MasterProfile | null> {
   return (await send({ type: "GET_PROFILE" })) as MasterProfile | null;
 }
 
-export async function saveProfile(profile: MasterProfile): Promise<void> {
-  await send({ type: "SAVE_PROFILE", payload: profile });
+export function saveProfile(profile: MasterProfile): Promise<void> {
+  queuedProfile = profile;
+  return new Promise((resolve, reject) => {
+    profileSaveWaiters.push({ resolve, reject });
+    if (profileSaveRunning) return;
+    profileSaveRunning = true;
+    void drainProfileSaveQueue();
+  });
 }
 
 export async function getHealth(): Promise<ExtensionRuntimeHealth> {

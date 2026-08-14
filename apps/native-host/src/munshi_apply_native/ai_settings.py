@@ -60,16 +60,33 @@ class AIConfiguration:
 
 class AISettingsStore:
     def __init__(self, runtime_root: Path) -> None:
-        self.config_path = runtime_root / "config" / "ai.json"
+        self.config_path = runtime_root / "settings" / "ai.json"
+        self.legacy_config_path = runtime_root / "config" / "ai.json"
 
-    def load(self) -> AIConfiguration:
-        if not self.config_path.exists():
-            return AIConfiguration()
+    @staticmethod
+    def _read_configuration(path: Path) -> AIConfiguration:
         try:
-            payload = json.loads(self.config_path.read_text(encoding="utf-8"))
+            payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
             raise ValueError("Local AI settings are unreadable") from error
         return AIConfiguration.from_payload(payload)
+
+    def load(self) -> AIConfiguration:
+        if self.config_path.exists():
+            return self._read_configuration(self.config_path)
+        if not self.legacy_config_path.exists():
+            return AIConfiguration()
+
+        config = self._read_configuration(self.legacy_config_path)
+        self.save(config)
+        try:
+            self.legacy_config_path.unlink()
+            self.legacy_config_path.parent.rmdir()
+        except OSError:
+            # Migration has already succeeded; leaving an old copy is safer than
+            # failing configuration loading because another legacy file exists.
+            pass
+        return config
 
     def save(self, config: AIConfiguration) -> None:
         self.config_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)

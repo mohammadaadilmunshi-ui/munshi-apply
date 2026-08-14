@@ -18,7 +18,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 runtime_root="$(resolve_runtime_root)"
-"${REPOSITORY_ROOT}/scripts/verify.sh" --skip-tests
+"${REPOSITORY_ROOT}/scripts/verify.sh" --runtime-only
 backup_output="$("${REPOSITORY_ROOT}/scripts/backup.sh")"
 printf '%s\n' "${backup_output}"
 
@@ -44,8 +44,8 @@ fi
 
 if [[ -n "${extension_id}" ]]; then
   "${REPOSITORY_ROOT}/scripts/install-native-host.sh" --extension-id "${extension_id}"
-  "${REPOSITORY_ROOT}/scripts/verify.sh" --extension-id "${extension_id}"
+  "${REPOSITORY_ROOT}/scripts/verify.sh" --runtime-only --extension-id "${extension_id}"
 else
-  "${REPOSITORY_ROOT}/scripts/verify.sh"
+  "${REPOSITORY_ROOT}/scripts/verify.sh" --runtime-only
 fi
 printf 'Update completed successfully.\n'

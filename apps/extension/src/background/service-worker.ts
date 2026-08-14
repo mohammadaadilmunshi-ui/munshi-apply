@@ -153,16 +153,21 @@ async function routeMessage(
         }
         return { ok: true, data: localProfile };
       }
-      case "SAVE_PROFILE":
-        {
-          const parsed = MasterProfileSchema.parse(request.payload);
-          await saveProfile(parsed);
-          const connection = await getCloudConnection();
-          if (connection && (await isCloudEncryptionReady())) {
-            await synchronizeProfile(connection, parsed);
+      case "SAVE_PROFILE": {
+        const parsed = MasterProfileSchema.parse(request.payload);
+        await saveProfile(parsed);
+        const connection = await getCloudConnection();
+        if (connection && (await isCloudEncryptionReady())) {
+          const synchronized = await synchronizeProfile(connection, parsed);
+          if (JSON.stringify(synchronized) !== JSON.stringify(parsed)) {
+            throw new Error(
+              "Profile changed on another device. Refresh before saving again.",
+            );
           }
+          await saveProfile(synchronized);
         }
         return { ok: true };
+      }
       case "APPLY_FILL_PLAN":
         return { ok: true, data: await applyFillPlan(request.payload) };
       case "GET_ACTIVE_PAGE":

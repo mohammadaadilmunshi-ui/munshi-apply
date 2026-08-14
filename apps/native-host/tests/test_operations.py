@@ -91,6 +91,15 @@ def test_operational_scripts_support_safe_dry_runs(tmp_path: Path) -> None:
     assert "preserve the database" in rollback.stdout
 
 
+def test_updater_uses_installed_runtime_verification() -> None:
+    update_script = (REPOSITORY_ROOT / "scripts/update.sh").read_text(encoding="utf-8")
+    verify_script = (REPOSITORY_ROOT / "scripts/verify.sh").read_text(encoding="utf-8")
+
+    assert 'verify.sh" --runtime-only' in update_script
+    assert "runtime_only=false" in verify_script
+    assert '"${runtime_only}" == false && "${skip_tests}" == false' in verify_script
+
+
 def test_release_packaging_creates_required_verified_artifacts(tmp_path: Path) -> None:
     output = tmp_path / "release"
     fixture_repository = tmp_path / "repository"

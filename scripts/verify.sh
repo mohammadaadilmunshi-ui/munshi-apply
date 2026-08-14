@@ -5,23 +5,30 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
 
 skip_tests=false
 source_only=false
+runtime_only=false
 extension_id=""
 manifest_directory=""
 
 usage() {
-  printf 'Usage: %s [--skip-tests] [--source-only] [--extension-id <id>] [--manifest-dir <path>]\n' "$0"
+  printf 'Usage: %s [--skip-tests] [--source-only] [--runtime-only] [--extension-id <id>] [--manifest-dir <path>]\n' "$0"
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --skip-tests) skip_tests=true; shift ;;
     --source-only) source_only=true; shift ;;
+    --runtime-only) runtime_only=true; shift ;;
     --extension-id) extension_id="${2:-}"; shift 2 ;;
     --manifest-dir) manifest_directory="${2:-}"; shift 2 ;;
     --help) usage; exit 0 ;;
     *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+if [[ "${source_only}" == true && "${runtime_only}" == true ]]; then
+  printf '%s\n' '--source-only and --runtime-only cannot be combined.' >&2
+  exit 2
+fi
 
 runtime_root="$(resolve_runtime_root)"
 database_path="${MUNSHI_DATABASE_PATH:-${runtime_root}/database/munshi-apply.sqlite}"
@@ -33,7 +40,10 @@ if [[ -n "${extension_id}" ]]; then
   manifest_path="${manifest_directory}/systems.munshi.apply.json"
 fi
 
-if [[ "${skip_tests}" == false ]]; then
+# Source/development quality belongs to CI or an explicitly requested source
+# verification. Installed production runtimes intentionally do not carry
+# ruff/pytest and must not fail verification because developer tools are absent.
+if [[ "${runtime_only}" == false && "${skip_tests}" == false ]]; then
   npm --offline run format:check --prefix "${REPOSITORY_ROOT}"
   npm --offline run lint --prefix "${REPOSITORY_ROOT}"
   npm --offline run typecheck --prefix "${REPOSITORY_ROOT}"

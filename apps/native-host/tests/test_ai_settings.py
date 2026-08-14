@@ -26,7 +26,34 @@ def test_ai_settings_round_trip(tmp_path: Path) -> None:
     assert loaded.model == "gpt-test"
     assert loaded.monthly_budget_usd == 25
     assert loaded.warning_budget_usd == 20
-    assert (tmp_path / "config" / "ai.json").exists()
+    assert (tmp_path / "settings" / "ai.json").exists()
+    assert not (tmp_path / "config" / "ai.json").exists()
+
+
+def test_legacy_ai_settings_are_migrated_into_backed_up_settings(tmp_path: Path) -> None:
+    legacy_path = tmp_path / "config" / "ai.json"
+    legacy_path.parent.mkdir(parents=True)
+    legacy_path.write_text(
+        json.dumps(
+            {
+                "provider": "openai",
+                "enabled": False,
+                "model": "gpt-legacy",
+                "monthlyBudgetUsd": 12,
+                "warningBudgetUsd": 8,
+                "hardStop": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    store = AISettingsStore(tmp_path)
+    loaded = store.load()
+
+    assert loaded.model == "gpt-legacy"
+    assert loaded.monthly_budget_usd == 12
+    assert (tmp_path / "settings" / "ai.json").exists()
+    assert not legacy_path.exists()
 
 
 def test_budget_validation_rejects_warning_above_budget() -> None:
