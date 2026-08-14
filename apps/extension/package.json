@@ -9,6 +9,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@munshi-apply/application-model": "0.1.0",
     "@munshi-apply/contracts": "0.1.0",
     "@munshi-apply/semantic-engine": "0.1.0",
     "@munshi-apply/shared": "0.1.0",
