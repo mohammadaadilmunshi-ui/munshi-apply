@@ -137,7 +137,7 @@ const rules: readonly Rule[] = [
   {
     id: "sponsorship",
     pattern: /\b(sponsor|sponsorship|visa assistance)\b/i,
-    semanticType: "SPONSORSHIP_CURRENT",
+    semanticType: "UNKNOWN",
     sensitive: true,
     highRisk: true,
   },
