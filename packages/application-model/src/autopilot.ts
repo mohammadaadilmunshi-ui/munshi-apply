@@ -90,7 +90,10 @@ export function parseAutoPilotCheckpoint(value: unknown): AutoPilotCheckpoint {
   }
 
   const candidate = value as Record<string, unknown>;
-  if (!Number.isSafeInteger(candidate.sequence) || Number(candidate.sequence) < 0) {
+  if (
+    !Number.isSafeInteger(candidate.sequence) ||
+    Number(candidate.sequence) < 0
+  ) {
     throw new Error("Checkpoint sequence must be a non-negative integer");
   }
   if (
@@ -110,7 +113,9 @@ export function parseAutoPilotCheckpoint(value: unknown): AutoPilotCheckpoint {
   );
   const completed = new Set(completedControlIds);
   if (pendingControlIds.some((controlId) => completed.has(controlId))) {
-    throw new Error("Completed and pending checkpoint controls must not overlap");
+    throw new Error(
+      "Completed and pending checkpoint controls must not overlap",
+    );
   }
 
   const selectedResumeId = nullableString(
@@ -122,7 +127,9 @@ export function parseAutoPilotCheckpoint(value: unknown): AutoPilotCheckpoint {
     "selectedResumeSha256",
   );
   if ((selectedResumeId === null) !== (selectedResumeSha256 === null)) {
-    throw new Error("Résumé checkpoint identity and digest must be stored together");
+    throw new Error(
+      "Résumé checkpoint identity and digest must be stored together",
+    );
   }
   if (
     selectedResumeSha256 !== null &&

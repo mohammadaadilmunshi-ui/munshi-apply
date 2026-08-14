@@ -10,8 +10,7 @@ import {
 const nativeHostName = "systems.munshi.apply";
 
 type NativeResponse =
-  | { ok: true; data?: unknown }
-  | { ok: false; error: string };
+  { ok: true; data?: unknown } | { ok: false; error: string };
 
 export type AISettings = {
   provider: "openai";
@@ -69,7 +68,9 @@ function parseCheckpointSaveResult(value: unknown): NativeCheckpointSaveResult {
   }
   const candidate = value as Record<string, unknown>;
   if (typeof candidate.created !== "boolean") {
-    throw new Error("Native checkpoint save response is missing created status");
+    throw new Error(
+      "Native checkpoint save response is missing created status",
+    );
   }
   return {
     created: candidate.created,

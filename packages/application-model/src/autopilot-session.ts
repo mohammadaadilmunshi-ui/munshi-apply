@@ -218,7 +218,9 @@ export function parseAutoPilotSession(value: unknown): AutoPilotSession {
     !Number.isSafeInteger(candidate.lastCheckpointSequence) ||
     Number(candidate.lastCheckpointSequence) < -1
   ) {
-    throw new Error("lastCheckpointSequence must be an integer of -1 or greater");
+    throw new Error(
+      "lastCheckpointSequence must be an integer of -1 or greater",
+    );
   }
 
   const completedControlIds = uniqueStrings(
