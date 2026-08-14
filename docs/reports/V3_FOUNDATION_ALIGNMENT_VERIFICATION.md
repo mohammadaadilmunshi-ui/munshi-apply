@@ -8,7 +8,7 @@ Implementation branch: `feat/v3-foundation-alignment`
 
 ## Result
 
-The Stage A source tree passes all locally executable gates. The tree is intentionally uncommitted and unpublished pending explicit authorization. GitHub CI, dependency audits, the immutable baseline tag, and a real Edge-to-native connection remain release gates and are not represented as complete.
+The Stage A source tree passes all local and GitHub gates. The feature branch is published in a draft pull request and remains unmerged. The immutable baseline tag and a real Edge-to-native connection remain release gates and are not represented as complete.
 
 No autofill, automatic résumé upload, automatic navigation, AutoPilot execution, final submission, AI-generated answers, progressive learning recipes, portfolio attribution, or experiments were implemented.
 
@@ -20,22 +20,26 @@ No autofill, automatic résumé upload, automatic navigation, AutoPilot executio
 | Visibility    | Private                                                                                               |
 | Branch        | `main`                                                                                                |
 | Remote commit | `bcb6caf4e43eaa235cbd77cca468a3d72c58d7c9`                                                            |
-| Baseline tag  | Not present; `v0.1.0` requires authorized creation                                                    |
+| Baseline tag  | Not present; the connected GitHub interface does not expose tag creation                              |
 | CI run        | [CI run 31767520254](https://github.com/mohammadaadilmunshi-ui/munshi-apply/actions/runs/31767520254) |
 | CI conclusion | Success                                                                                               |
 
-The baseline CI run covered formatting, lint, TypeScript type checking/tests/build, Python lint/tests, migration execution, and repository-data safety as implemented at that commit. The expanded dependency, secret, migration, and browser workflow set is part of this Stage A candidate and therefore awaits feature-branch CI.
+The baseline CI run covered formatting, lint, TypeScript type checking/tests/build, Python lint/tests, migration execution, and repository-data safety as implemented at that commit. The expanded dependency, secret, migration, and browser workflow set passed on the Stage A feature branch.
 
 ## Implementation identity
 
-| Field                 | Value                                                                                        |
-| --------------------- | -------------------------------------------------------------------------------------------- |
-| Local branch          | `feat/v3-foundation-alignment`                                                               |
-| Local parent          | `31f446e` (tree-equivalent publication of remote `bcb6caf4e43eaa235cbd77cca468a3d72c58d7c9`) |
-| Stage A commit        | Pending explicit stage/commit authorization                                                  |
-| Stage A GitHub branch | Pending explicit push authorization                                                          |
-| Pull request          | Pending explicit authorization                                                               |
-| Stage A CI URLs       | Pending branch publication                                                                   |
+| Field                         | Value                                                                                                                   |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Local branch                  | `feat/v3-foundation-alignment`                                                                                          |
+| Local parent                  | `31f446e` (tree-equivalent publication of remote `bcb6caf4e43eaa235cbd77cca468a3d72c58d7c9`)                            |
+| Stage A implementation commit | `83fd963b032813c1b943384d00286911979d2324`                                                                              |
+| CI-environment fix commit     | `7b2fe024ebfbfad9a95d7b76e160e309091b9a8b`                                                                              |
+| Stage A GitHub branch         | `feat/v3-foundation-alignment`                                                                                          |
+| Pull request                  | [Draft PR #11](https://github.com/mohammadaadilmunshi-ui/munshi-apply/pull/11)                                          |
+| CI                            | [Success](https://github.com/mohammadaadilmunshi-ui/munshi-apply/actions/runs/31769533390)                              |
+| Browser tests                 | [Success](https://github.com/mohammadaadilmunshi-ui/munshi-apply/actions/runs/31769533404)                              |
+| Migration tests               | [Success](https://github.com/mohammadaadilmunshi-ui/munshi-apply/actions/runs/31769533443)                              |
+| Security                      | [Success, including dependency audits](https://github.com/mohammadaadilmunshi-ui/munshi-apply/actions/runs/31769533392) |
 
 ## Schema and persistence changes
 
@@ -123,16 +127,14 @@ Application status transitions can commit the state update, application event, a
 - The repository safety gate rejects common private/credential file classes.
 - The secret scan checks tracked and non-ignored worktree files for private keys and common API/token/secret patterns.
 - n8n secrets remain local and are never logged or written into release artifacts.
-- Dependency audit is configured in `.github/workflows/security.yml`; its pass/fail result awaits GitHub CI because registry access is unavailable in this local execution environment.
+- JavaScript and Python dependency audits passed in the GitHub Security workflow.
 
 ## Required external verification before merge
 
 1. Create the immutable `v0.1.0` tag on remote baseline commit `bcb6caf4e43eaa235cbd77cca468a3d72c58d7c9`.
-2. Publish this feature branch and open a pull request.
-3. Require successful CI, Browser tests, Migration tests, and Security workflows, including dependency audits.
-4. Supply the unpacked Edge extension ID from `edge://extensions` and run the installer on macOS to verify the real Edge-to-native connection.
-5. Optionally supply an n8n webhook URL and webhook secret only if external orchestration is desired; core operation does not require them.
-6. Merge only after all gates pass and separate merge authorization is provided.
+2. Supply the unpacked Edge extension ID from `edge://extensions` and run the installer on macOS to verify the real Edge-to-native connection.
+3. Optionally supply an n8n webhook URL and webhook secret only if external orchestration is desired; core operation does not require them.
+4. Merge only after all gates pass and separate merge authorization is provided.
 
 ## Known limitations and deferred work
 
