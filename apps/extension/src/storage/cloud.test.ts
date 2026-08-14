@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { normalizeBaseUrl, parsePairingBundle } from "./cloud";
+import {
+  normalizeBaseUrl,
+  parsePairingBundle,
+  validateResumeFile,
+} from "./cloud";
 
 describe("cloud enrollment inputs", () => {
   it("normalizes an HTTPS workspace origin", () => {
@@ -37,5 +41,46 @@ describe("cloud enrollment inputs", () => {
       encryptionVersion: 1,
     };
     expect(parsePairingBundle(JSON.stringify(bundle))).toEqual(bundle);
+  });
+});
+
+describe("resume upload validation", () => {
+  it("accepts supported resume formats", () => {
+    expect(() =>
+      validateResumeFile({
+        name: "resume.pdf",
+        size: 1024,
+        type: "application/pdf",
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateResumeFile({
+        name: "resume.docx",
+        size: 2048,
+        type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects unsupported extensions and MIME types", () => {
+    expect(() =>
+      validateResumeFile({ name: "resume.txt", size: 100, type: "text/plain" }),
+    ).toThrow("PDF, DOC, or DOCX");
+    expect(() =>
+      validateResumeFile({ name: "resume.pdf", size: 100, type: "text/plain" }),
+    ).toThrow("file type");
+  });
+
+  it("rejects empty and oversized files", () => {
+    expect(() =>
+      validateResumeFile({ name: "resume.pdf", size: 0, type: "application/pdf" }),
+    ).toThrow("between 1 byte and 12 MB");
+    expect(() =>
+      validateResumeFile({
+        name: "resume.pdf",
+        size: 12 * 1024 * 1024 + 1,
+        type: "application/pdf",
+      }),
+    ).toThrow("between 1 byte and 12 MB");
   });
 });
