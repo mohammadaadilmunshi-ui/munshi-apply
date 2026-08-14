@@ -1,0 +1,82 @@
+name: AutoPilot semantic hardening helper
+
+on:
+  push:
+    branches:
+      - feat/v3-foundation-alignment
+
+permissions:
+  contents: write
+
+jobs:
+  integrate-and-certify:
+    if: "${{ github.event.head_commit.message == 'chore: run autopilot semantic hardening' }}"
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out guarded PR branch
+        uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
+          fetch-depth: 2
+
+      - name: Guard exact semantic-hardening parent
+        run: |
+          test "$(git rev-parse HEAD^)" = "39bf7b3765797d1f41bdb652051ccb7921f318b6"
+          test "$(git branch --show-current)" = "feat/v3-foundation-alignment"
+          test -f scripts/autopilot-semantic-hardening.py
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      - name: Install locked dependencies
+        run: |
+          npm ci
+          python -m pip install -e './apps/native-host[dev]'
+
+      - name: Apply semantic hardening
+        run: python scripts/autopilot-semantic-hardening.py
+
+      - name: Apply authoritative formatting
+        run: |
+          npx prettier --write \
+            packages/contracts/src/index.ts \
+            apps/extension/src/sidepanel/autopilot-plan.ts \
+            apps/extension/src/sidepanel/autopilot-plan.test.ts \
+            apps/extension/src/background/autopilot-controller.ts \
+            apps/extension/src/background/autopilot-controller.test.ts \
+            apps/extension/src/background/service-worker.ts \
+            apps/extension/src/messaging/client.ts \
+            apps/extension/src/sidepanel/AutoPilotControlCenter.tsx \
+            apps/extension/src/sidepanel/App.tsx \
+            .github/workflows/autopilot-semantic-hardening-helper.yml
+          python -m ruff format apps/native-host
+          python -m ruff check --fix apps/native-host
+          python -m ruff check apps/native-host
+
+      - name: Verify complete extension tranche
+        run: npm run check
+
+      - name: Verify complete native tranche
+        run: python -m pytest apps/native-host
+
+      - name: Remove temporary semantic helper
+        run: |
+          git rm -f -- .github/workflows/autopilot-semantic-hardening-helper.yml
+          git rm -f -- scripts/autopilot-semantic-hardening.py
+
+      - name: Commit exact certified tree
+        run: |
+          git config user.name "Aadil Munshi"
+          git config user.email "mohammadaadilmunshi@gmail.com"
+          git add -u
+          git diff --cached --check
+          git commit -m "fix: harden autopilot pause and AI usage attribution"
+          git push origin HEAD:feat/v3-foundation-alignment
