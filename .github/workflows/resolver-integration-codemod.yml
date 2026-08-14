@@ -1,0 +1,86 @@
+name: Resolver integration codemod
+
+on:
+  push:
+    branches:
+      - feat/v3-foundation-alignment
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Add application-model workspace dependency
+        run: npm install --workspace @munshi-apply/extension @munshi-apply/application-model@0.1.0 --save-exact
+      - name: Integrate central resolver in the side panel
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("apps/extension/src/sidepanel/App.tsx")
+          text = path.read_text()
+
+          import_line = 'import { resolveProfileAnswer } from "@munshi-apply/application-model";\n'
+          if import_line not in text:
+              anchor = 'import type {\n  ApplicationPage,\n  FillInstruction,\n  MasterProfile,\n  ProfileFact,\n} from "@munshi-apply/contracts";\n'
+              if anchor not in text:
+                  raise SystemExit("Unable to find contracts import anchor")
+              text = text.replace(anchor, anchor + import_line, 1)
+
+          start = text.find('const semanticFactKey: Readonly<Record<string, string>> = {')
+          end_marker = '\n\nconst defaultAISettings: AISettings = {'
+          if start != -1:
+              end = text.find(end_marker, start)
+              if end == -1:
+                  raise SystemExit("Unable to find semantic fact map end")
+              text = text[:start] + text[end + 2:]
+
+          old = '''      const approved = review?.answers.find((answer) => answer.questionId === question.questionId);
+      const factKey = semanticFactKey[question.semanticType];
+      const fact = factKey ? profile.facts.find((candidate) => candidate.key === factKey) : undefined;
+      const suggested = fact && fact.trustLevel !== "UNKNOWN" && factKey ? valueOf(profile, factKey) : "";
+      return [question.questionId, approved ?? { value: suggested, approved: Boolean(suggested) && !question.sensitive, sensitive: question.sensitive }];
+'''
+          new = '''      const approved = review?.answers.find((answer) => answer.questionId === question.questionId);
+      const resolution = resolveProfileAnswer(question, profile);
+      const suggested = resolution.value ?? "";
+      return [
+        question.questionId,
+        approved ?? {
+          value: suggested,
+          approved: resolution.state === "READY",
+          sensitive: resolution.sensitive,
+        },
+      ];
+'''
+          if old not in text:
+              if 'const resolution = resolveProfileAnswer(question, profile);' not in text:
+                  raise SystemExit("Unable to find answer suggestion block")
+          else:
+              text = text.replace(old, new, 1)
+
+          path.write_text(text)
+      - run: npx prettier --write apps/extension/package.json package-lock.json apps/extension/src/sidepanel/App.tsx
+      - run: npm run typecheck --workspace @munshi-apply/extension
+      - name: Commit integration if needed
+        run: |
+          if git diff --quiet; then
+            echo "No integration changes required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/extension/package.json package-lock.json apps/extension/src/sidepanel/App.tsx
+          git commit -m "feat: use central preflight resolver in side panel"
+          git push origin HEAD:feat/v3-foundation-alignment
