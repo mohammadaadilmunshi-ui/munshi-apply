@@ -350,7 +350,11 @@ async function fillCombobox(
     Math.min(options.optionTimeoutMs, 500),
     options.pollIntervalMs,
   );
-  if (!verified && element instanceof HTMLInputElement && originalValue !== null) {
+  if (
+    !verified &&
+    element instanceof HTMLInputElement &&
+    originalValue !== null
+  ) {
     setNativeValue(element, originalValue);
     dispatchValueEvents(element);
   }

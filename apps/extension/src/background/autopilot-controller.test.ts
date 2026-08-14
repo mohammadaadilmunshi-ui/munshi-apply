@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type {
-  ApplicationPage,
-  FillInstruction,
-} from "@munshi-apply/contracts";
+import type { ApplicationPage, FillInstruction } from "@munshi-apply/contracts";
 import type { PreflightGateSummary } from "@munshi-apply/application-model";
 import {
   AutoPilotController,
@@ -160,10 +157,7 @@ function harness(initialPage: ApplicationPage, options: HarnessOptions = {}) {
       if (options.checkpointMode === "fail") {
         throw new Error("native unavailable");
       }
-      if (
-        options.checkpointMode === "lost-first" &&
-        checkpointAttempts === 1
-      ) {
+      if (options.checkpointMode === "lost-first" && checkpointAttempts === 1) {
         latestCheckpoint = checkpoint;
         throw new Error("response lost");
       }
@@ -235,10 +229,7 @@ describe("persistent AutoPilot controller", () => {
     const afterRescan = await test.controller.onPageSnapshot(7, fresh);
 
     expect(afterRescan?.session.status).toBe("WAITING_RESCAN");
-    expect(afterRescan?.session.completedControlIds).toEqual([
-      "first",
-      "last",
-    ]);
+    expect(afterRescan?.session.completedControlIds).toEqual(["first", "last"]);
     expect(test.counts().fillCount).toBe(2);
   });
 

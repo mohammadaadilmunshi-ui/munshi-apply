@@ -10,8 +10,7 @@ import {
 const nativeHostName = "systems.munshi.apply";
 
 type NativeResponse =
-  | { ok: true; data?: unknown }
-  | { ok: false; error: string };
+  { ok: true; data?: unknown } | { ok: false; error: string };
 
 export type AISettings = {
   provider: "openai";
@@ -79,7 +78,10 @@ function parseCheckpointSaveResult(value: unknown): NativeCheckpointSaveResult {
   };
 }
 
-function parseCreatedResult(value: unknown, label: string): { created: boolean } {
+function parseCreatedResult(
+  value: unknown,
+  label: string,
+): { created: boolean } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`${label} response must be an object`);
   }

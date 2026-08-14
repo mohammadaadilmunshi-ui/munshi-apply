@@ -240,7 +240,9 @@ async function applyFillPlan(payload: unknown): Promise<unknown> {
   return { pageId: plan.pageId, results };
 }
 
-async function autoPilotStart(payload: AutoPilotStartPayload): Promise<unknown> {
+async function autoPilotStart(
+  payload: AutoPilotStartPayload,
+): Promise<unknown> {
   const tabId =
     payload.tabId ??
     (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id;

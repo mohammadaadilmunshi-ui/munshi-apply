@@ -171,7 +171,10 @@ function parseFillInstructions(value: unknown): FillInstruction[] {
       throw new Error("AutoPilot fill instruction must be an object");
     }
     const candidate = item as Record<string, unknown>;
-    if (!Number.isSafeInteger(candidate.frameId) || Number(candidate.frameId) < 0) {
+    if (
+      !Number.isSafeInteger(candidate.frameId) ||
+      Number(candidate.frameId) < 0
+    ) {
       throw new Error("AutoPilot fill frameId must be non-negative");
     }
     if (typeof candidate.value !== "string") {
@@ -208,7 +211,10 @@ function parseObservation(value: unknown): AutoPilotObservation | null {
     applicationId: requiredString(candidate.applicationId, "applicationId"),
     state: candidate.state as AutoPilotObservation["state"],
     pageId: requiredString(candidate.pageId, "pageId"),
-    pageFingerprint: requiredString(candidate.pageFingerprint, "pageFingerprint"),
+    pageFingerprint: requiredString(
+      candidate.pageFingerprint,
+      "pageFingerprint",
+    ),
     visibleControlIds: visibleControlIds.map((item) =>
       requiredString(item, "visibleControlId"),
     ),
@@ -225,7 +231,9 @@ function parseObservation(value: unknown): AutoPilotObservation | null {
   };
 }
 
-export function parseAutoPilotRuntimeState(value: unknown): AutoPilotRuntimeState {
+export function parseAutoPilotRuntimeState(
+  value: unknown,
+): AutoPilotRuntimeState {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("AutoPilot runtime state must be an object");
   }
@@ -338,7 +346,9 @@ function navigationChanged(
   );
 }
 
-function safeForwardCandidate(page: ApplicationPage): NavigationCandidate | null {
+function safeForwardCandidate(
+  page: ApplicationPage,
+): NavigationCandidate | null {
   const candidates = page.navigationCandidates.filter(
     (candidate) =>
       !candidate.disabled &&
@@ -1015,7 +1025,9 @@ export class AutoPilotController {
 
     if (runtime.session.status === "WAITING_RESCAN") {
       if (runtime.waitingFor === "FILL") {
-        if (Date.parse(page.observedAt) <= Date.parse(runtime.session.updatedAt)) {
+        if (
+          Date.parse(page.observedAt) <= Date.parse(runtime.session.updatedAt)
+        ) {
           if (
             runtime.actionDeadlineAt &&
             Date.parse(this.now()) >= Date.parse(runtime.actionDeadlineAt)
