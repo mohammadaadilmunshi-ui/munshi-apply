@@ -20,14 +20,12 @@ describe("profile save queue", () => {
 
   it("coalesces rapid edits and resolves only after the newest save finishes", async () => {
     const responders: Array<(value: unknown) => void> = [];
-    const sendMessage = vi.fn(
-      (request: unknown) => {
-        void request;
-        return new Promise<unknown>((resolve) => {
-          responders.push(resolve);
-        });
-      },
-    );
+    const sendMessage = vi.fn((request: unknown) => {
+      void request;
+      return new Promise<unknown>((resolve) => {
+        responders.push(resolve);
+      });
+    });
     vi.stubGlobal("chrome", { runtime: { sendMessage } });
 
     const first = saveProfile(profile("first", "2026-08-14T12:00:00.000Z"));
