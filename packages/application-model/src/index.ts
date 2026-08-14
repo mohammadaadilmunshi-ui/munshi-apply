@@ -2,6 +2,7 @@ export * from "./autopilot";
 export * from "./budget";
 export * from "./context";
 export * from "./evidence";
+export * from "./learning";
 export * from "./policies";
 export * from "./pricing";
 export * from "./resolver";
