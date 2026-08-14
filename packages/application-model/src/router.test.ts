@@ -131,9 +131,8 @@ describe("routeIntelligence", () => {
   it("fails closed when the required model lane is not configured", () => {
     expect(routeIntelligence(input({ cheapModel: "" })).route).toBe("MANUAL");
     expect(
-      routeIntelligence(
-        input({ task: "COMPLEX_REASONING", strongModel: "" }),
-      ).route,
+      routeIntelligence(input({ task: "COMPLEX_REASONING", strongModel: "" }))
+        .route,
     ).toBe("MANUAL");
   });
 });

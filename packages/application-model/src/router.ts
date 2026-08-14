@@ -69,7 +69,8 @@ export function routeIntelligence(input: RouterInput): RouterDecision {
       model: null,
       requiresBudgetAcknowledgement: false,
       generatedOutputRequiresValidation: false,
-      reason: "Authoritative saved knowledge can answer without model inference",
+      reason:
+        "Authoritative saved knowledge can answer without model inference",
     };
   }
 
@@ -89,7 +90,8 @@ export function routeIntelligence(input: RouterInput): RouterDecision {
       model: null,
       requiresBudgetAcknowledgement: false,
       generatedOutputRequiresValidation: false,
-      reason: "Model inference is unavailable because AI is disabled or unconfigured",
+      reason:
+        "Model inference is unavailable because AI is disabled or unconfigured",
     };
   }
 
