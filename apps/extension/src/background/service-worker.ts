@@ -20,8 +20,11 @@ import {
   getCloudConnection,
   isCloudEncryptionReady,
   publishApplicationSnapshot,
-  synchronizeProfile,
 } from "../storage/cloud";
+import {
+  ProtectedProfileConflictError,
+  synchronizeProtectedProfile,
+} from "../storage/profile-sync";
 
 const supportsSidePanel =
   typeof chrome.sidePanel?.setPanelBehavior === "function";
@@ -141,13 +144,14 @@ async function routeMessage(
         const connection = await getCloudConnection();
         if (localProfile && connection && (await isCloudEncryptionReady())) {
           try {
-            const synchronized = await synchronizeProfile(
+            const synchronized = await synchronizeProtectedProfile(
               connection,
               localProfile,
             );
             await saveProfile(synchronized);
             return { ok: true, data: synchronized };
-          } catch {
+          } catch (error) {
+            if (error instanceof ProtectedProfileConflictError) throw error;
             // Local-first operation continues when cloud is temporarily unavailable.
           }
         }
@@ -158,7 +162,10 @@ async function routeMessage(
         await saveProfile(parsed);
         const connection = await getCloudConnection();
         if (connection && (await isCloudEncryptionReady())) {
-          const synchronized = await synchronizeProfile(connection, parsed);
+          const synchronized = await synchronizeProtectedProfile(
+            connection,
+            parsed,
+          );
           if (JSON.stringify(synchronized) !== JSON.stringify(parsed)) {
             throw new Error(
               "Profile changed on another device. Refresh before saving again.",
