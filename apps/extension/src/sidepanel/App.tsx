@@ -4,6 +4,7 @@ import type {
   MasterProfile,
   ProfileFact,
 } from "@munshi-apply/contracts";
+import { resolveProfileAnswer } from "@munshi-apply/application-model";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getActivePage,
@@ -146,54 +147,6 @@ type AnswerDraft = {
   sensitive: boolean;
 };
 
-const semanticFactKey: Readonly<Record<string, string>> = {
-  PERSONAL: "legal_name",
-  FIRST_NAME: "first_name",
-  MIDDLE_NAME: "middle_name",
-  LAST_NAME: "last_name",
-  PREFERRED_NAME: "preferred_name",
-  CONTACT: "email",
-  ADDRESS: "street_address",
-  STREET_ADDRESS: "street_address",
-  ADDRESS_LINE_2: "address_line_2",
-  CITY: "city",
-  STATE_PROVINCE: "state",
-  POSTAL_CODE: "postal_code",
-  COUNTRY: "country",
-  EMAIL: "email",
-  PHONE: "phone",
-  LINKEDIN: "linkedin",
-  PORTFOLIO: "portfolio",
-  WEBSITE: "portfolio",
-  SCHOOL_NAME: "school_name",
-  DEGREE: "highest_degree",
-  FIELD_OF_STUDY: "field_of_study",
-  GRADUATION_DATE: "graduation_date",
-  GPA: "gpa",
-  EMPLOYER_NAME: "current_employer",
-  JOB_TITLE: "current_title",
-  RELEVANT_EXPERIENCE: "employment_summary",
-  WORK_AUTHORIZATION_CURRENT: "work_authorization",
-  SPONSORSHIP_CURRENT: "current_sponsorship",
-  SPONSORSHIP_FUTURE: "future_sponsorship",
-  IMMIGRATION_ASSISTANCE: "immigration_assistance",
-  SALARY_EXPECTATION: "salary_expectation",
-  START_DATE: "earliest_start_date",
-  NOTICE_PERIOD: "notice_period",
-  RELOCATION: "relocation_willingness",
-  TRAVEL: "travel_willingness",
-  SKILLS: "skills",
-  CERTIFICATIONS: "certifications",
-  LANGUAGES: "languages",
-  VETERAN_STATUS: "veteran_status",
-  DISABILITY_STATUS: "disability_status",
-  GENDER: "gender",
-  RACE_ETHNICITY: "race_ethnicity",
-  REFERRAL: "referral_source",
-  PREVIOUS_EMPLOYEE: "previous_employee",
-  PREVIOUS_APPLICATION: "previous_application",
-};
-
 const defaultAISettings: AISettings = {
   provider: "openai",
   enabled: false,
@@ -332,10 +285,16 @@ export function App() {
     const review = cloudSnapshot?.reviews.find((candidate: ApplicationReview) => candidate.pageId === page.pageId);
     const next = Object.fromEntries(page.questions.map((question) => {
       const approved = review?.answers.find((answer) => answer.questionId === question.questionId);
-      const factKey = semanticFactKey[question.semanticType];
-      const fact = factKey ? profile.facts.find((candidate) => candidate.key === factKey) : undefined;
-      const suggested = fact && fact.trustLevel !== "UNKNOWN" && factKey ? valueOf(profile, factKey) : "";
-      return [question.questionId, approved ?? { value: suggested, approved: Boolean(suggested) && !question.sensitive, sensitive: question.sensitive }];
+      const resolution = resolveProfileAnswer(question, profile);
+      const suggested = resolution.value ?? "";
+      return [
+        question.questionId,
+        approved ?? {
+          value: suggested,
+          approved: resolution.state === "READY",
+          sensitive: resolution.sensitive,
+        },
+      ];
     }));
     setAnswers(next);
     setSelectedResumeId((current) => {
