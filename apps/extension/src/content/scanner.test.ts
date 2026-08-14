@@ -82,4 +82,19 @@ describe("universal page scanner", () => {
       requiresReview: true,
     });
   });
+
+  it("discovers controls inside open shadow roots", () => {
+    const host = document.createElement("job-application");
+    document.body.append(host);
+    const root = host.attachShadow({ mode: "open" });
+    root.innerHTML = `
+      <label for="portfolio">Portfolio URL</label>
+      <input id="portfolio" type="url">
+    `;
+
+    expect(scanDocument().questions[0]).toMatchObject({
+      rawText: "Portfolio URL",
+      semanticType: "PORTFOLIO",
+    });
+  });
 });

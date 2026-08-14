@@ -94,6 +94,38 @@ export async function getPage(
   return ApplicationPageSchema.parse(candidate);
 }
 
+export async function getPagesForTab(
+  tabId: number,
+): Promise<ApplicationPage[]> {
+  return (await readAll(pagesStore))
+    .map((candidate) => ApplicationPageSchema.parse(candidate))
+    .filter((page) => page.tabId === tabId)
+    .sort((left, right) => left.frameId - right.frameId);
+}
+
+export async function clearPagesForTab(tabId: number): Promise<void> {
+  const database = await openVault();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(pagesStore, "readwrite");
+    const request = transaction.objectStore(pagesStore).openCursor();
+    request.onerror = () =>
+      reject(request.error ?? new Error("Vault page cleanup failed"));
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) return;
+      const page = ApplicationPageSchema.parse(cursor.value);
+      if (page.tabId === tabId) cursor.delete();
+      cursor.continue();
+    };
+    transaction.onerror = () =>
+      reject(transaction.error ?? new Error("Vault page cleanup failed"));
+    transaction.oncomplete = () => {
+      database.close();
+      resolve();
+    };
+  });
+}
+
 export async function getLatestPage(): Promise<ApplicationPage | null> {
   const pages = (await readAll(pagesStore)).map((candidate) =>
     ApplicationPageSchema.parse(candidate),

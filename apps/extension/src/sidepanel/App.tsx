@@ -1,11 +1,13 @@
 import type {
   ApplicationPage,
+  FillInstruction,
   MasterProfile,
   ProfileFact,
 } from "@munshi-apply/contracts";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   getActivePage,
+  applyFillPlan,
   getHealth,
   getNativeHealth,
   getProfile,
@@ -14,11 +16,18 @@ import {
   type NativeRuntimeHealth,
 } from "../messaging/client";
 import {
+  activateCloudEncryption,
   disconnectCloud,
   enrollCloudDevice,
   getCloudConnection,
   getCloudHealth,
+  getCloudSnapshot,
+  publishApplicationReview,
+  publishApplicationSnapshot,
+  uploadEncryptedResume,
+  type ApplicationReview,
   type CloudHealth,
+  type CloudSnapshot,
 } from "../storage/cloud";
 
 type View = "application" | "profile" | "diagnostics";
@@ -74,6 +83,24 @@ function valueOf(profile: MasterProfile, key: string): string {
   return typeof value === "string" ? value : "";
 }
 
+type AnswerDraft = {
+  value: string;
+  approved: boolean;
+  sensitive: boolean;
+};
+
+const semanticFactKey: Readonly<Record<string, string>> = {
+  PERSONAL: "legal_name",
+  EMAIL: "email",
+  PHONE: "phone",
+  LINKEDIN: "linkedin",
+  PORTFOLIO: "portfolio",
+  WEBSITE: "portfolio",
+  WORK_AUTHORIZATION_CURRENT: "work_authorization",
+  SPONSORSHIP_CURRENT: "work_authorization",
+  SPONSORSHIP_FUTURE: "future_sponsorship",
+};
+
 export function App() {
   const [view, setView] = useState<View>("application");
   const [page, setPage] = useState<ApplicationPage | null>(null);
@@ -84,7 +111,14 @@ export function App() {
   const [cloud, setCloud] = useState<CloudState>({ status: "checking" });
   const [workspaceUrl, setWorkspaceUrl] = useState(defaultWorkspaceUrl);
   const [pairingBundle, setPairingBundle] = useState("");
+  const [activationBundle, setActivationBundle] = useState("");
   const [pairing, setPairing] = useState(false);
+  const [cloudSnapshot, setCloudSnapshot] = useState<CloudSnapshot | null>(
+    null,
+  );
+  const [answers, setAnswers] = useState<Record<string, AnswerDraft>>({});
+  const [selectedResumeId, setSelectedResumeId] = useState("");
+  const [filling, setFilling] = useState(false);
   const [notice, setNotice] = useState("");
 
   const refresh = useCallback(async () => {
@@ -105,10 +139,24 @@ export function App() {
         setCloud({ status: "disconnected" });
       } else {
         setWorkspaceUrl(connection.baseUrl);
+        const cloudHealth = await getCloudHealth(connection);
         setCloud({
           status: "connected",
-          data: await getCloudHealth(connection),
+          data: cloudHealth,
         });
+        if (cloudHealth.encryptionReady) {
+          if (activePage) {
+            await publishApplicationSnapshot(connection, activePage);
+          }
+          const snapshot = await getCloudSnapshot(connection);
+          setCloudSnapshot(snapshot);
+          if (snapshot.profile) setProfile(snapshot.profile);
+          setSelectedResumeId(
+            (current) => current || snapshot.resumes[0]?.resumeId || "",
+          );
+        } else {
+          setCloudSnapshot(null);
+        }
       }
     } catch (error) {
       setCloud({
@@ -156,10 +204,58 @@ export function App() {
     return () => chrome.runtime.onMessage.removeListener(listener);
   }, [refresh]);
 
+  useEffect(() => {
+    if (!page) {
+      setAnswers({});
+      return;
+    }
+    const review = cloudSnapshot?.reviews.find(
+      (candidate: ApplicationReview) => candidate.pageId === page.pageId,
+    );
+    const next = Object.fromEntries(
+      page.questions.map((question) => {
+        const approved = review?.answers.find(
+          (answer) => answer.questionId === question.questionId,
+        );
+        const factKey = semanticFactKey[question.semanticType];
+        const suggested = factKey ? valueOf(profile, factKey) : "";
+        return [
+          question.questionId,
+          approved ?? {
+            value: suggested,
+            approved: Boolean(suggested) && !question.sensitive,
+            sensitive: question.sensitive,
+          },
+        ];
+      }),
+    );
+    setAnswers(next);
+    setSelectedResumeId((current) => {
+      const reviewedResume = review?.resumeId;
+      if (
+        reviewedResume &&
+        cloudSnapshot?.resumes.some(
+          (resume) => resume.resumeId === reviewedResume,
+        )
+      ) {
+        return reviewedResume;
+      }
+      if (
+        current &&
+        cloudSnapshot?.resumes.some((resume) => resume.resumeId === current)
+      ) {
+        return current;
+      }
+      return cloudSnapshot?.resumes[0]?.resumeId ?? "";
+    });
+  }, [cloudSnapshot, page, profile]);
+
   const reviewCount = useMemo(
     () =>
-      page?.questions.filter((question) => question.requiresReview).length ?? 0,
-    [page],
+      page?.questions.filter(
+        (question) => !answers[question.questionId]?.approved,
+      ).length ?? 0,
+    [answers, page],
   );
 
   const connectionLabel =
@@ -206,13 +302,17 @@ export function App() {
   }
 
   async function persistProfile(): Promise<void> {
-    await saveProfile(profile);
-    setNotice(
-      cloud.status === "connected"
-        ? "Profile saved to this device. Encrypted profile sync is not enabled yet."
-        : "Profile saved to this device.",
-    );
-    window.setTimeout(() => setNotice(""), 2500);
+    try {
+      await saveProfile(profile);
+      setNotice(
+        cloud.status === "connected" && cloud.data.encryptionReady
+          ? "Profile encrypted and synchronized."
+          : "Profile saved locally.",
+      );
+      await refresh();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Profile save failed");
+    }
   }
 
   async function pairCloud(): Promise<void> {
@@ -244,6 +344,126 @@ export function App() {
     setNotice(
       "Local cloud credential removed. Revoke the device in the workspace too.",
     );
+  }
+
+  async function enableEncryptedSync(): Promise<void> {
+    const connection = await getCloudConnection();
+    if (!connection) return;
+    setPairing(true);
+    setNotice("");
+    try {
+      await activateCloudEncryption(connection, activationBundle);
+      setActivationBundle("");
+      setNotice("End-to-end encrypted synchronization is active.");
+      await refresh();
+    } catch (error) {
+      setNotice(
+        error instanceof Error ? error.message : "Encryption activation failed",
+      );
+    } finally {
+      setPairing(false);
+    }
+  }
+
+  async function addResume(file: File | null): Promise<void> {
+    if (!file) return;
+    const connection = await getCloudConnection();
+    if (
+      !connection ||
+      cloud.status !== "connected" ||
+      !cloud.data.encryptionReady
+    ) {
+      setNotice("Enable encrypted synchronization before adding a résumé.");
+      return;
+    }
+    setPairing(true);
+    try {
+      const resume = await uploadEncryptedResume(connection, file);
+      setSelectedResumeId(resume.resumeId);
+      setNotice(`${resume.name} encrypted and synchronized.`);
+      await refresh();
+    } catch (error) {
+      setNotice(
+        error instanceof Error ? error.message : "Résumé upload failed",
+      );
+    } finally {
+      setPairing(false);
+    }
+  }
+
+  async function fillApprovedFields(): Promise<void> {
+    if (!page) return;
+    const controls = new Map(
+      page.controls.map((control) => [control.controlId, control]),
+    );
+    const instructions: FillInstruction[] = page.questions
+      .map((question) => {
+        const answer = answers[question.questionId];
+        const control = controls.get(question.controlId);
+        if (!answer || !control || !answer.value.trim()) return null;
+        return {
+          controlId: question.controlId,
+          frameId: control.frameId,
+          value: answer.value,
+          sensitive: question.sensitive,
+          approved: answer.approved,
+        };
+      })
+      .filter(
+        (instruction): instruction is FillInstruction => instruction !== null,
+      );
+    if (instructions.length === 0) {
+      setNotice("No approved answers are ready to fill.");
+      return;
+    }
+    setFilling(true);
+    try {
+      const connection = await getCloudConnection();
+      if (
+        connection &&
+        cloud.status === "connected" &&
+        cloud.data.encryptionReady
+      ) {
+        const review: ApplicationReview = {
+          reviewId: `review-${page.pageId}`,
+          pageId: page.pageId,
+          resumeId: selectedResumeId || null,
+          approvedAt: now(),
+          answers: page.questions.map((question) => {
+            const answer = answers[question.questionId] ?? {
+              value: "",
+              approved: false,
+              sensitive: question.sensitive,
+            };
+            return {
+              questionId: question.questionId,
+              controlId: question.controlId,
+              value: answer.value,
+              approved: answer.approved,
+              sensitive: question.sensitive,
+            };
+          }),
+        };
+        await publishApplicationReview(connection, review);
+      }
+      const results = await applyFillPlan({
+        pageId: page.pageId,
+        instructions,
+      });
+      const filled = results.filter(
+        (result) => result.status === "FILLED",
+      ).length;
+      const skipped = results.length - filled;
+      setNotice(
+        `${filled} field${filled === 1 ? "" : "s"} filled and verified${skipped ? `; ${skipped} require manual interaction` : ""}. Final submission remains manual.`,
+      );
+    } catch (error) {
+      setNotice(
+        error instanceof Error ? error.message : "Verified fill failed",
+      );
+    } finally {
+      setFilling(false);
+    }
   }
 
   return (
@@ -303,32 +523,107 @@ export function App() {
                   <span>review</span>
                 </article>
               </div>
-              <h3>Question map</h3>
-              <div className="question-list">
+              <h3>Pre-flight answers</h3>
+              <div className="answer-list">
                 {page.questions.length === 0 && (
                   <p>No visible questions found on this page.</p>
                 )}
-                {page.questions.map((question) => (
-                  <article className="question" key={question.questionId}>
-                    <div>
-                      <strong>{question.rawText}</strong>
-                      <span>{question.semanticType.replaceAll("_", " ")}</span>
-                    </div>
-                    <span
-                      className={
-                        question.requiresReview ? "badge review" : "badge"
-                      }
-                    >
-                      {question.requiresReview
-                        ? "review"
-                        : `${Math.round(question.confidence * 100)}%`}
-                    </span>
-                  </article>
-                ))}
+                {page.questions.map((question) => {
+                  const answer = answers[question.questionId] ?? {
+                    value: "",
+                    approved: false,
+                    sensitive: question.sensitive,
+                  };
+                  return (
+                    <article className="answer-card" key={question.questionId}>
+                      <div className="answer-heading">
+                        <div>
+                          <strong>{question.rawText}</strong>
+                          <span>
+                            {question.semanticType.replaceAll("_", " ")}
+                          </span>
+                        </div>
+                        <span
+                          className={
+                            question.sensitive ? "badge review" : "badge"
+                          }
+                        >
+                          {question.sensitive
+                            ? "sensitive"
+                            : `${Math.round(question.confidence * 100)}%`}
+                        </span>
+                      </div>
+                      <input
+                        type="text"
+                        value={answer.value}
+                        placeholder="Enter or confirm the answer"
+                        onChange={(event) =>
+                          setAnswers((current) => ({
+                            ...current,
+                            [question.questionId]: {
+                              ...answer,
+                              value: event.target.value,
+                              approved: false,
+                            },
+                          }))
+                        }
+                      />
+                      <label className="answer-approval">
+                        <input
+                          type="checkbox"
+                          checked={answer.approved}
+                          disabled={!answer.value.trim()}
+                          onChange={(event) =>
+                            setAnswers((current) => ({
+                              ...current,
+                              [question.questionId]: {
+                                ...answer,
+                                approved: event.target.checked,
+                              },
+                            }))
+                          }
+                        />
+                        Approved for this application
+                      </label>
+                    </article>
+                  );
+                })}
               </div>
+              {cloudSnapshot?.resumes.length ? (
+                <label className="resume-select">
+                  <span>Résumé selected for this application</span>
+                  <select
+                    value={selectedResumeId}
+                    onChange={(event) =>
+                      setSelectedResumeId(event.target.value)
+                    }
+                  >
+                    {cloudSnapshot.resumes.map((resume) => (
+                      <option key={resume.resumeId} value={resume.resumeId}>
+                        {resume.name}
+                      </option>
+                    ))}
+                  </select>
+                  <small>
+                    Browser security requires you to choose the file in the
+                    employer’s upload control manually.
+                  </small>
+                </label>
+              ) : null}
+              <button
+                className="primary fill-button"
+                type="button"
+                disabled={filling || page.questions.length === 0}
+                onClick={() => void fillApprovedFields()}
+              >
+                {filling ? "Filling and verifying…" : "Fill approved fields"}
+              </button>
               <div className="safety-callout">
-                <strong>Observe mode</strong>
-                <span>Nothing is filled or submitted in this milestone.</span>
+                <strong>Guarded action</strong>
+                <span>
+                  Only approved answers are filled. CAPTCHA, MFA, file
+                  selection, and final submission stay manual.
+                </span>
               </div>
             </>
           ) : (
@@ -342,9 +637,13 @@ export function App() {
 
       {view === "profile" && (
         <section>
-          <p className="eyebrow">Local profile vault</p>
+          <p className="eyebrow">Encrypted profile vault</p>
           <h2>Verified application facts</h2>
-          <p>Protected answers are stored locally and are never inferred.</p>
+          <p>
+            Protected answers are never inferred. When encrypted sync is active,
+            confirmed facts are available on your iPhone and paired Edge
+            installation.
+          </p>
           <div className="form-grid">
             {starterFacts.map((fact) => (
               <label key={fact.key}>
@@ -365,8 +664,37 @@ export function App() {
             type="button"
             onClick={() => void persistProfile()}
           >
-            Save locally
+            {cloud.status === "connected" && cloud.data.encryptionReady
+              ? "Encrypt and synchronize"
+              : "Save locally"}
           </button>
+          {cloud.status === "connected" && cloud.data.encryptionReady && (
+            <div className="resume-vault">
+              <h3>Résumé vault</h3>
+              <label className="resume-upload">
+                <span>{pairing ? "Uploading…" : "Add encrypted résumé"}</span>
+                <input
+                  type="file"
+                  accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  disabled={pairing}
+                  onChange={(event) => {
+                    void addResume(event.target.files?.[0] ?? null);
+                    event.currentTarget.value = "";
+                  }}
+                />
+              </label>
+              <div className="resume-list">
+                {cloudSnapshot?.resumes.map((resume) => (
+                  <div key={resume.resumeId}>
+                    <strong>{resume.name}</strong>
+                    <span>
+                      {Math.ceil(resume.sizeBytes / 1024)} KB · encrypted
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </section>
       )}
 
@@ -423,7 +751,7 @@ export function App() {
             </div>
             <div>
               <dt>Automation</dt>
-              <dd>observe only</dd>
+              <dd>guarded fill</dd>
             </div>
             <div>
               <dt>AI provider</dt>
@@ -431,7 +759,13 @@ export function App() {
             </div>
             <div>
               <dt>Cloud synchronization</dt>
-              <dd>{cloud.status}</dd>
+              <dd>
+                {cloud.status === "connected"
+                  ? cloud.data.encryptionReady
+                    ? "encrypted"
+                    : "paired only"
+                  : cloud.status}
+              </dd>
             </div>
           </dl>
           {native.status === "unavailable" && (
@@ -448,6 +782,47 @@ export function App() {
             <div className="cloud-connection">
               <strong>Private workspace paired</strong>
               <span>{new URL(cloud.data.baseUrl).hostname}</span>
+              {cloud.data.encryptionReady ? (
+                <span className="encryption-active">
+                  End-to-end encrypted synchronization active
+                </span>
+              ) : (
+                <div className="encryption-upgrade">
+                  <strong>Enable encrypted synchronization</strong>
+                  <p>
+                    Create a new one-time code in the updated private workspace,
+                    paste it below, then activate encryption. Your existing
+                    pairing remains intact.
+                  </p>
+                  <textarea
+                    rows={4}
+                    value={activationBundle}
+                    onChange={(event) =>
+                      setActivationBundle(event.target.value)
+                    }
+                    placeholder="Paste the new one-time code"
+                  />
+                  <button
+                    className="primary"
+                    type="button"
+                    disabled={pairing || !activationBundle.trim()}
+                    onClick={() => void enableEncryptedSync()}
+                  >
+                    {pairing ? "Activating…" : "Activate encrypted sync"}
+                  </button>
+                </div>
+              )}
+              <button
+                type="button"
+                className="quiet"
+                onClick={() =>
+                  void chrome.tabs.create({
+                    url: cloud.data.baseUrl + "/workspace",
+                  })
+                }
+              >
+                Open private workspace
+              </button>
               <button
                 type="button"
                 className="quiet"

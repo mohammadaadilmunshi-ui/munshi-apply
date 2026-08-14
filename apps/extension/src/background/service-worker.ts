@@ -1,17 +1,27 @@
 import {
   ApplicationPageSchema,
+  FillPlanSchema,
   MasterProfileSchema,
+  type ApplicationPage,
   type ExtensionRequest,
   type ExtensionResponse,
 } from "@munshi-apply/contracts";
 import {
+  clearPagesForTab,
   getLatestPage,
   getPage,
+  getPagesForTab,
   getProfile,
   savePage,
   saveProfile,
 } from "../storage/vault";
 import { getNativeHealth } from "../messaging/native";
+import {
+  getCloudConnection,
+  isCloudEncryptionReady,
+  publishApplicationSnapshot,
+  synchronizeProfile,
+} from "../storage/cloud";
 
 const supportsSidePanel =
   typeof chrome.sidePanel?.setPanelBehavior === "function";
@@ -41,10 +51,33 @@ chrome.runtime.onStartup.addListener(() => {
 async function getActivePage(): Promise<unknown> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (tab?.id !== undefined && /^https?:\/\//.test(tab.url ?? "")) {
-    const activePage = await getPage(tab.id);
+    const activePage = await getMergedPageForTab(tab.id);
     if (activePage) return activePage;
   }
   return getLatestPage();
+}
+
+async function getMergedPageForTab(
+  tabId: number,
+): Promise<ApplicationPage | null> {
+  const pages = await getPagesForTab(tabId);
+  if (pages.length === 0) return null;
+  const topLevel = pages.find((page) => page.frameId === 0);
+  const base = topLevel ?? pages.at(0);
+  if (!base) return null;
+  const controls = pages.flatMap((page) => page.controls);
+  const controlIds = new Set(controls.map((control) => control.controlId));
+  return {
+    ...base,
+    controls,
+    questions: pages
+      .flatMap((page) => page.questions)
+      .filter((question) => controlIds.has(question.controlId)),
+    observedAt:
+      pages
+        .map((page) => page.observedAt)
+        .sort((left, right) => right.localeCompare(left))[0] ?? base.observedAt,
+  };
 }
 
 async function extensionHealth(): Promise<unknown> {
@@ -63,6 +96,36 @@ async function extensionHealth(): Promise<unknown> {
   };
 }
 
+async function applyFillPlan(payload: unknown): Promise<unknown> {
+  const plan = FillPlanSchema.parse(payload);
+  const page = await getActivePage();
+  if (!page || typeof page !== "object" || !("pageId" in page)) {
+    throw new Error("No active application page is available");
+  }
+  if (page.pageId !== plan.pageId) {
+    throw new Error("The active application changed; refresh before filling");
+  }
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id === undefined) throw new Error("No active application tab found");
+
+  const frameIds = new Set(plan.instructions.map((item) => item.frameId));
+  const results: unknown[] = [];
+  for (const frameId of frameIds) {
+    const instructions = plan.instructions.filter(
+      (instruction) => instruction.frameId === frameId,
+    );
+    const response = await chrome.tabs.sendMessage(
+      tab.id,
+      { type: "APPLY_FILL_INSTRUCTIONS", instructions },
+      { frameId },
+    );
+    if (response && typeof response === "object" && "results" in response) {
+      results.push(...(response.results as unknown[]));
+    }
+  }
+  return { pageId: plan.pageId, results };
+}
+
 async function routeMessage(
   request: ExtensionRequest,
   sender: chrome.runtime.MessageSender,
@@ -73,11 +136,35 @@ async function routeMessage(
         return { ok: true, data: await extensionHealth() };
       case "NATIVE_HEALTH":
         return { ok: true, data: await getNativeHealth() };
-      case "GET_PROFILE":
-        return { ok: true, data: await getProfile() };
+      case "GET_PROFILE": {
+        const localProfile = await getProfile();
+        const connection = await getCloudConnection();
+        if (localProfile && connection && (await isCloudEncryptionReady())) {
+          try {
+            const synchronized = await synchronizeProfile(
+              connection,
+              localProfile,
+            );
+            await saveProfile(synchronized);
+            return { ok: true, data: synchronized };
+          } catch {
+            // Local-first operation continues when cloud is temporarily unavailable.
+          }
+        }
+        return { ok: true, data: localProfile };
+      }
       case "SAVE_PROFILE":
-        await saveProfile(MasterProfileSchema.parse(request.payload));
+        {
+          const parsed = MasterProfileSchema.parse(request.payload);
+          await saveProfile(parsed);
+          const connection = await getCloudConnection();
+          if (connection && (await isCloudEncryptionReady())) {
+            await synchronizeProfile(connection, parsed);
+          }
+        }
         return { ok: true };
+      case "APPLY_FILL_PLAN":
+        return { ok: true, data: await applyFillPlan(request.payload) };
       case "GET_ACTIVE_PAGE":
         return { ok: true, data: await getActivePage() };
       case "PAGE_SNAPSHOT": {
@@ -99,11 +186,29 @@ async function routeMessage(
             frameId,
           })),
         });
+        if (frameId === 0) {
+          const previousTopLevel = await getPage(tabId, 0);
+          if (
+            previousTopLevel &&
+            previousTopLevel.documentId !== page.documentId
+          ) {
+            await clearPagesForTab(tabId);
+          }
+        }
         await savePage(page);
+        const mergedPage = await getMergedPageForTab(tabId);
+        const connection = await getCloudConnection();
+        if (mergedPage && connection && (await isCloudEncryptionReady())) {
+          try {
+            await publishApplicationSnapshot(connection, mergedPage);
+          } catch {
+            // Page discovery remains local-first and retries on the next scan.
+          }
+        }
         try {
           await chrome.runtime.sendMessage({
             type: "ACTIVE_PAGE_UPDATED",
-            payload: page,
+            payload: mergedPage ?? page,
           });
         } catch {
           // The side panel is optional and may be closed while the sensor is active.

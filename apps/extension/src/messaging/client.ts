@@ -1,5 +1,7 @@
 import type {
   ApplicationPage,
+  FillPlan,
+  FillResult,
   ExtensionRequest,
   ExtensionResponse,
   MasterProfile,
@@ -50,4 +52,12 @@ export async function getHealth(): Promise<ExtensionRuntimeHealth> {
 
 export async function getNativeHealth(): Promise<NativeRuntimeHealth> {
   return (await send({ type: "NATIVE_HEALTH" })) as NativeRuntimeHealth;
+}
+
+export async function applyFillPlan(plan: FillPlan): Promise<FillResult[]> {
+  const result = (await send({
+    type: "APPLY_FILL_PLAN",
+    payload: plan,
+  })) as { results?: FillResult[] };
+  return result.results ?? [];
 }

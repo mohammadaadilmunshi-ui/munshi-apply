@@ -15,6 +15,26 @@ const selector = [
   "[contenteditable='true']",
 ].join(",");
 
+function collectInteractiveElements(root: Document | ShadowRoot): Element[] {
+  const collected: Element[] = [];
+  for (const element of Array.from(root.querySelectorAll(selector))) {
+    collected.push(element);
+    if (element.shadowRoot) {
+      collected.push(...collectInteractiveElements(element.shadowRoot));
+    }
+  }
+
+  for (const host of Array.from(root.querySelectorAll("*"))) {
+    if (
+      host.shadowRoot &&
+      !collected.some((element) => element.getRootNode() === host.shadowRoot)
+    ) {
+      collected.push(...collectInteractiveElements(host.shadowRoot));
+    }
+  }
+  return collected;
+}
+
 function compactText(value: string | null | undefined): string {
   return (value ?? "").replace(/\s+/g, " ").trim();
 }
@@ -54,9 +74,18 @@ function labelFor(element: Element): string {
 
   const labelledBy = element.getAttribute("aria-labelledby");
   if (labelledBy) {
+    const root = element.getRootNode();
     const value = labelledBy
       .split(/\s+/)
-      .map((id) => compactText(document.getElementById(id)?.textContent))
+      .map((id) => {
+        const labelledElement =
+          root instanceof Document
+            ? root.getElementById(id)
+            : root instanceof ShadowRoot
+              ? root.querySelector(`#${CSS.escape(id)}`)
+              : null;
+        return compactText(labelledElement?.textContent);
+      })
       .filter(Boolean)
       .join(" ");
     if (value) return value;
@@ -132,6 +161,7 @@ function createControl(element: Element, index: number): Control | null {
   const placeholder = compactText(element.getAttribute("placeholder"));
   const ariaLabel = compactText(element.getAttribute("aria-label"));
   const signature = [
+    window.location.href,
     element.tagName,
     element.id,
     name,
@@ -179,7 +209,7 @@ function createQuestion(control: Control): Question | null {
 }
 
 export function scanDocument(): ApplicationPage {
-  const controls = Array.from(document.querySelectorAll(selector))
+  const controls = collectInteractiveElements(document)
     .map(createControl)
     .filter((control): control is Control => control !== null);
   const questions = controls
@@ -199,6 +229,15 @@ export function scanDocument(): ApplicationPage {
     controls,
     questions,
   };
+}
+
+export function controlElementMap(): Map<string, Element> {
+  const result = new Map<string, Element>();
+  collectInteractiveElements(document).forEach((element, index) => {
+    const control = createControl(element, index);
+    if (control) result.set(control.controlId, element);
+  });
+  return result;
 }
 
 export function snapshotFingerprint(page: ApplicationPage): string {

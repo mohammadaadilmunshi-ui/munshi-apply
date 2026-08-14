@@ -11,7 +11,7 @@
 
 ## Permission budget
 
-The `0.1.0` extension requests only:
+The `0.2.0` extension requests only:
 
 | Permission             | Reason                                                  |
 | ---------------------- | ------------------------------------------------------- |

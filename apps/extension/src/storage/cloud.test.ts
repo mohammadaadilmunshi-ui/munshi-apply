@@ -19,9 +19,23 @@ describe("cloud enrollment inputs", () => {
       challengeId: "challenge-1234",
       secret: "a".repeat(43),
     };
-    expect(parsePairingBundle(JSON.stringify(bundle))).toEqual(bundle);
+    expect(parsePairingBundle(JSON.stringify(bundle))).toEqual({
+      ...bundle,
+      workspaceKey: null,
+      encryptionVersion: null,
+    });
     expect(() => parsePairingBundle('{"challengeId":"short"}')).toThrow(
       "incomplete",
     );
+  });
+
+  it("accepts the owner workspace encryption key", () => {
+    const bundle = {
+      challengeId: "challenge-1234",
+      secret: "a".repeat(43),
+      workspaceKey: "b".repeat(43),
+      encryptionVersion: 1,
+    };
+    expect(parsePairingBundle(JSON.stringify(bundle))).toEqual(bundle);
   });
 });

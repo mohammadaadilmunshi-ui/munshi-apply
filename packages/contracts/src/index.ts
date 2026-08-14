@@ -58,6 +58,27 @@ export const MasterProfileSchema = z.object({
 });
 export type MasterProfile = z.infer<typeof MasterProfileSchema>;
 
+export const FillInstructionSchema = z.object({
+  controlId: z.string().min(1),
+  frameId: z.number().int().nonnegative(),
+  value: z.string(),
+  sensitive: z.boolean(),
+  approved: z.boolean(),
+});
+export type FillInstruction = z.infer<typeof FillInstructionSchema>;
+
+export const FillPlanSchema = z.object({
+  pageId: z.string().min(1),
+  instructions: z.array(FillInstructionSchema),
+});
+export type FillPlan = z.infer<typeof FillPlanSchema>;
+
+export type FillResult = {
+  controlId: string;
+  status: "FILLED" | "SKIPPED" | "FAILED";
+  reason: string;
+};
+
 export const semanticTypes = [
   "PERSONAL",
   "CONTACT",
@@ -248,6 +269,7 @@ export type ExtensionRequest =
   | { type: "GET_ACTIVE_PAGE" }
   | { type: "GET_PROFILE" }
   | { type: "SAVE_PROFILE"; payload: MasterProfile }
+  | { type: "APPLY_FILL_PLAN"; payload: FillPlan }
   | { type: "PAGE_SNAPSHOT"; payload: ApplicationPage }
   | { type: "NATIVE_HEALTH" }
   | { type: "PING" };

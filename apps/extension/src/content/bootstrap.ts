@@ -1,4 +1,8 @@
-import type { ExtensionRequest } from "@munshi-apply/contracts";
+import type {
+  ExtensionRequest,
+  FillInstruction,
+} from "@munshi-apply/contracts";
+import { applyFillInstructions } from "./fill";
 import { scanDocument, snapshotFingerprint } from "./scanner";
 
 let previousFingerprint = "";
@@ -43,3 +47,18 @@ observer.observe(document.documentElement, {
 window.addEventListener("popstate", scheduleScan);
 window.addEventListener("hashchange", scheduleScan);
 void publishSnapshot();
+
+chrome.runtime.onMessage.addListener(
+  (
+    message: { type?: string; instructions?: FillInstruction[] },
+    _sender,
+    sendResponse,
+  ) => {
+    if (message.type !== "APPLY_FILL_INSTRUCTIONS" || !message.instructions) {
+      return false;
+    }
+    sendResponse({ results: applyFillInstructions(message.instructions) });
+    scheduleScan();
+    return false;
+  },
+);

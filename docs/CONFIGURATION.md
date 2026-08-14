@@ -49,7 +49,7 @@ At least one of:
 - `GEMINI_API_KEY`
 - local Ollama at `OLLAMA_BASE_URL`
 
-Provider integration is not active in `0.1.0`. Keys will be requested only when the provider router and budget engine are implemented. Do not supply them early.
+Provider integration is not active in `0.2.0`. Keys will be requested only when the provider router and budget engine are implemented. Do not supply them early.
 
 ## GitHub settings to decide before publication
 

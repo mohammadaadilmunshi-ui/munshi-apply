@@ -8,9 +8,9 @@ Microsoft Edge Add-ons is the official extension distribution catalog for Micros
 
 Microsoft currently documents developer registration and extension submission as free. Hosting, storage, email, observability, AI providers, and usage beyond free allowances are separate and can incur charges. No paid plan or billable add-on may be enabled for MUNSHI Apply without explicit owner approval.
 
-## First hidden feasibility submission
+## First hidden desktop submission
 
-Microsoft documents desktop sideloading, but the current public documentation does not provide an equivalent personal iOS unpacked-extension path. The first hidden submission may therefore be required to obtain the physical-iPhone installation evidence. Treat it as a feasibility candidate, not as the fully functional release.
+The hidden listing distributes the desktop Edge extension. Current Edge on iOS does not expose the general extension runtime required for MUNSHI's employer-page sensors, so the iPhone workflow is the authenticated hosted workspace rather than an iOS extension listing.
 
 Do not make the first hidden submission until all of these are complete:
 
@@ -19,25 +19,22 @@ Do not make the first hidden submission until all of these are complete:
 - privacy policy and support page on stable HTTPS URLs;
 - accurate data-use disclosure covering résumés, protected facts, application content, device credentials, and diagnostics;
 - permission rationale for broad HTTP/HTTPS page access, tabs, storage, Native Messaging on desktop, and any mobile-specific permission set;
-- accessibility and responsive-layout evidence on current Edge desktop and Edge on iOS;
+- accessibility evidence on current Edge desktop and responsive-layout evidence for the hosted workspace on Edge on iOS;
 - no secret, real résumé, profile, database, backup, diagnostic, or source map in either submission ZIP;
 - a deliberate final-submission checkpoint remains enforced.
 
-The feasibility listing must describe only the features already verified. It must not claim universal iPhone autofill, résumé synchronization, or full desktop parity.
-
-After Microsoft makes the hidden candidate installable, complete every physical-iPhone gate in `MOBILE_AND_CROSS_DEVICE_ARCHITECTURE.md`, plus the authenticated D1/R2, pairing, revocation, recovery, and conflict tests. Only then prepare the fully functional hidden update.
+The listing must describe only verified desktop-extension features. It must not claim iPhone page injection or autofill. The separate hosted workspace description may accurately cover encrypted profile, résumé, review, device, and recovery functions after their release gates pass.
 
 ## Package set
 
 Release operations produce:
 
 - `munshi-apply-edge-vX.Y.Z.zip` for the desktop permission set;
-- `munshi-apply-edge-mobile-vX.Y.Z.zip` for the reduced mobile permission set;
 - the private macOS native companion archive;
 - release and migration manifests;
 - SHA-256 checksums.
 
-The store's accepted package strategy for one listing across desktop Edge and Edge on iOS must be confirmed in Partner Center before upload. Do not assume that a separate mobile ZIP can be attached to the same listing. If Microsoft requires one cross-platform manifest, consolidate only after physical testing proves the conditional runtime behavior and the permission review remains honest.
+The store package is desktop-only. Do not add unsupported iOS-extension claims to the listing or package metadata.
 
 ## Listing content
 
@@ -57,8 +54,8 @@ Required visual assets should show the real product state. Do not use a “Healt
 3. Inspect both ZIP manifests and file inventories; confirm no source maps or private files.
 4. Install the exact ZIP candidate on a clean desktop Edge profile.
 5. Record checksums, screenshots, privacy/support URLs, and the permission rationale.
-6. Ask the owner for explicit authorization to upload the feasibility package.
-7. Submit as hidden with strictly accurate foundation/feasibility wording and respond to Microsoft review.
-8. Install the approved hidden candidate on the physical iPhone and run injection, storage, UI, cloud, file, navigation, background recovery, accessibility, and manual-checkpoint tests.
+6. Ask the owner for explicit authorization to upload the desktop package.
+7. Submit as hidden with strictly accurate verified-feature wording and respond to Microsoft review.
+8. Run the paired iPhone-workspace-to-desktop-extension handoff tests with synthetic data.
 9. Complete encrypted sync, conflict, revocation, backup, and recovery tests before migrating real private data.
-10. Ask separately before uploading a functional update, changing visibility, or publishing a replacement.
+10. Ask separately before uploading an update, changing visibility, or publishing a replacement.

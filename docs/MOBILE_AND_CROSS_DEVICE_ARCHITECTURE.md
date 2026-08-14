@@ -15,15 +15,15 @@ Status: implementation contract for the first private iPhone release.
 
 ## Runtime model
 
-| Runtime                      | Role                                                                           | Authority while online                           | Offline behavior                                                   |
-| ---------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------ | ------------------------------------------------------------------ |
-| Edge extension on macOS      | Page discovery, preview, verified interactions, desktop UI                     | Cloud workspace plus native companion            | Uses IndexedDB session cache and the Mac SQLite journal            |
-| Native companion on macOS    | Local durable journal, Native Messaging, backups, local file access            | Mac replica; submits idempotent changes to cloud | Continues locally and queues an outbox                             |
-| Edge extension on iOS        | Page discovery and supported interactions through mobile-safe extension APIs   | Cloud workspace                                  | Keeps only bounded, encrypted session/cache state                  |
-| Responsive private workspace | Profile, résumé, application, pre-flight, review, and device-management UI     | Cloud workspace                                  | Read-only cached shell where supported; no false completion claims |
-| Cloud control plane          | Cross-device state, encrypted object references, convergence, and audit events | Durable cross-device authority                   | Always available independently of the Mac                          |
+| Runtime                      | Role                                                                              | Authority while online                           | Offline behavior                                        |
+| ---------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------- |
+| Edge extension on macOS      | Page discovery, preview, verified interactions, desktop UI                        | Cloud workspace plus native companion            | Uses IndexedDB session cache and the Mac SQLite journal |
+| Native companion on macOS    | Local durable journal, Native Messaging, backups, local file access               | Mac replica; submits idempotent changes to cloud | Continues locally and queues an outbox                  |
+| Edge on iOS                  | Hosts the authenticated responsive owner workspace; no general extension runtime  | Cloud workspace                                  | No unsupported employer-page injection claim            |
+| Responsive private workspace | Profile, résumé, application, pre-flight, review, recovery, and device management | Cloud workspace                                  | Remains available while the Mac is off                  |
+| Cloud control plane          | Cross-device state, encrypted object references, convergence, and audit events    | Durable cross-device authority                   | Always available independently of the Mac               |
 
-The iPhone must never depend on the Python native host. Microsoft Native Messaging is a desktop integration, so the mobile build removes `nativeMessaging` and `sidePanel` and uses the existing responsive UI as its action popup or tab surface.
+The iPhone never depends on the Python native host. Current Edge on iOS does not support the general desktop-extension runtime required to inject MUNSHI into arbitrary employer pages. The supported mobile architecture is therefore an authenticated hosted workspace in Edge on iOS plus an encrypted handoff to a paired desktop Edge installation for page-bound discovery and filling.
 
 ## Data plane
 
@@ -84,23 +84,23 @@ The normal workflow is:
 5. Fill only supported controls and verify each result.
 6. Present a final review and wait for deliberate submit approval.
 
-## iPhone feasibility gates
+## iPhone verification gates
 
-Full mobile release is blocked until all gates pass on a physical iPhone using the current Edge App Store build:
+The supported hosted workflow uses these physical-iPhone gates:
 
-| Gate         | Required evidence                                                                                        |
-| ------------ | -------------------------------------------------------------------------------------------------------- |
-| Installation | Hidden Edge Add-ons listing can be installed or otherwise enabled through Microsoft's supported iOS flow |
-| Injection    | Content scripts run on normal HTTPS application pages and report the expected origin/frame data          |
-| Storage      | Required extension storage persists across browser restart without exposing secrets                      |
-| UI           | Popup/tab workspace is usable at supported iPhone viewport sizes and with VoiceOver/text scaling         |
-| Messaging    | Extension-to-cloud requests authenticate, retry safely, and reject replayed or expired credentials       |
-| Files        | A résumé can be selected through supported iOS controls, uploaded with user awareness, and verified      |
-| Navigation   | Multi-step pages preserve workflow identity and recover after Edge backgrounding                         |
-| Safety       | CAPTCHA/MFA/OTP and final submission always remain manual checkpoints                                    |
-| Parity       | Unsupported Edge APIs produce an honest guided fallback instead of a silent failure                      |
+| Gate       | Required evidence                                                                                       |
+| ---------- | ------------------------------------------------------------------------------------------------------- |
+| Access     | Authenticated workspace opens in current Edge on iOS and remains available while the Mac is off         |
+| Boundary   | UI clearly explains that employer-page discovery and filling require the paired desktop Edge runtime    |
+| Storage    | Owner encryption key persists in browser storage without appearing in server records or logs            |
+| UI         | Popup/tab workspace is usable at supported iPhone viewport sizes and with VoiceOver/text scaling        |
+| Messaging  | Workspace and paired extension authenticate, retry safely, and reject replayed or expired credentials   |
+| Files      | A résumé can be encrypted, uploaded, listed, downloaded, and locked to an application review            |
+| Navigation | Workspace sections preserve state and recover after Edge backgrounding                                  |
+| Safety     | CAPTCHA/MFA/OTP and final submission always remain manual checkpoints                                   |
+| Handoff    | Approved answers and résumé selection appear on the paired desktop without exposing plaintext to server |
 
-Passing a desktop build or an iOS simulator is not enough. Until these gates pass, the mobile artifact is a foundation candidate, not a promise of universal iPhone autofill.
+Employer-page autofill on iPhone is not claimed because Edge on iOS does not expose the required general extension APIs. The hosted workspace provides cross-device control; the paired desktop extension provides guarded page interaction.
 
 ## Release and cost policy
 
@@ -111,10 +111,10 @@ Developer registration and submission are currently documented by Microsoft as f
 ## Delivery sequence
 
 1. Keep the verified desktop/native foundation stable.
-2. Ship and test the reduced-permission mobile artifact on a physical iPhone.
+2. Ship and test the authenticated hosted workspace on a physical iPhone.
 3. Build owner-only cloud records and encrypted object upload with synthetic data.
 4. Add device pairing, revocation, idempotent sync, and conflict review.
 5. Migrate a copy of private data only after backup and recovery drills pass.
-6. Complete end-to-end desktop and iPhone application tests without final submission.
+6. Complete end-to-end iPhone-review-to-desktop-fill tests without final submission.
 7. Prepare privacy disclosures, support material, release ZIPs, and the hidden listing.
 8. Submit or publish only after separate owner authorization.
