@@ -39,6 +39,7 @@ export type KnockoutEvaluation = {
 export type PreflightItem = {
   questionId: string;
   controlId: string;
+  semanticType: SemanticType;
   required: boolean;
   resolution: AnswerResolution;
 };
@@ -70,58 +71,25 @@ function normalize(value: string): string {
     .trim();
 }
 
-function evaluateKnockoutRule(
-  rule: KnockoutRule,
-  items: readonly PreflightItem[],
-): KnockoutEvaluation {
-  const item = items.find(
-    (candidate) => candidate.resolution.sourceKey !== null &&
-      candidate.resolution.value !== null &&
-      candidate.resolution.value !== undefined &&
-      candidate.resolution.state !== "UNRESOLVED" &&
-      candidate.resolution,
-  );
-
-  const semanticItem = items.find((candidate) => {
-    const question = candidate.questionId;
-    return Boolean(question);
-  });
-
-  void item;
-  void semanticItem;
-
-  const matching = items.find(
-    (candidate) => candidate.resolution.value !== null &&
-      candidate.resolution.value !== undefined &&
-      candidate.resolution.sourceKey !== null,
-  );
-
-  void matching;
-
-  return {
-    ruleId: rule.ruleId,
-    semanticType: rule.semanticType,
-    state: "NOT_APPLICABLE",
-    value: null,
-    reason: "No matching question was found for this explicit knockout rule",
-  };
-}
-
 function evaluateKnockoutRules(
   rules: readonly KnockoutRule[],
-  page: ApplicationPage,
   items: readonly PreflightItem[],
 ): KnockoutEvaluation[] {
   return rules.map((rule) => {
-    const question = page.questions.find(
+    const item = items.find(
       (candidate) => candidate.semanticType === rule.semanticType,
     );
-    if (!question) return evaluateKnockoutRule(rule, items);
+    if (!item) {
+      return {
+        ruleId: rule.ruleId,
+        semanticType: rule.semanticType,
+        state: "NOT_APPLICABLE",
+        value: null,
+        reason: "No matching question was found for this explicit knockout rule",
+      };
+    }
 
-    const item = items.find(
-      (candidate) => candidate.questionId === question.questionId,
-    );
-    if (!item || item.resolution.value === null) {
+    if (item.resolution.value === null) {
       return {
         ruleId: rule.ruleId,
         semanticType: rule.semanticType,
@@ -166,6 +134,7 @@ export function buildPreflightAssessment(
   const items: PreflightItem[] = input.page.questions.map((question) => ({
     questionId: question.questionId,
     controlId: question.controlId,
+    semanticType: question.semanticType,
     required: controls.get(question.controlId)?.required ?? false,
     resolution: resolveProfileAnswer(question, input.profile),
   }));
@@ -178,7 +147,6 @@ export function buildPreflightAssessment(
     );
   const knockoutEvaluations = evaluateKnockoutRules(
     input.knockoutRules ?? [],
-    input.page,
     items,
   );
   const requiredUnresolvedCount = items.filter(
