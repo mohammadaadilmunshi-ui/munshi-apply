@@ -21,7 +21,7 @@
     }
   ],
   "host_permissions": ["http://*/*", "https://*/*"],
-  "permissions": ["sidePanel", "storage", "tabs"],
+  "permissions": ["nativeMessaging", "sidePanel", "storage", "tabs"],
   "side_panel": {
     "default_path": "sidepanel/index.html"
   }

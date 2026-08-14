@@ -10,13 +10,14 @@ Version `0.1.0` implements the Phase 0 engineering foundation and the first safe
 
 - a Manifest V3 Edge extension;
 - a persistent side panel;
-- an ephemeral service worker backed by durable IndexedDB state;
+- an ephemeral service worker backed by an IndexedDB browser cache;
 - generic DOM and ARIA control discovery across top-level pages and injectable frames;
 - deterministic classification for common application questions;
 - mandatory review flags for sensitive and consequential questions;
 - a local Master Profile vault with protected facts;
 - shared TypeScript contracts validated with Zod;
-- a Python native companion with SQLite migrations, a health API, native-messaging framing, and an optional n8n event bridge;
+- a Python native companion with authoritative SQLite persistence, transactional outbox delivery, a health API, Native Messaging, and an optional signed n8n event bridge;
+- private-runtime installation, verification, backup, update, rollback, and release-packaging operations;
 - synthetic application fixtures, unit tests, CI, and security documentation.
 
 This milestone is intentionally **observe only**. It does not fill fields, upload files, bypass security checkpoints, or submit applications.
@@ -64,9 +65,17 @@ apps/extension/dist
 
 Open a normal `http://` or `https://` application page and select the MUNSHI Apply toolbar action. The side panel will show the visible controls and the inferred question map.
 
+To connect the local companion, copy the unpacked extension ID shown on `edge://extensions` and run:
+
+```bash
+./scripts/install.sh --extension-id <EDGE_EXTENSION_ID>
+```
+
+The macOS runtime defaults to `~/Library/Application Support/MUNSHI Apply/`; no private database, résumé, evidence, backup, diagnostic, or secret belongs in this repository.
+
 ## Configuration
 
-No API key is required for the current milestone. Provider keys, n8n, and the native-host installation are deliberately optional. See [Configuration](docs/CONFIGURATION.md) before adding any secret.
+No API key is required for the current milestone. Provider keys and n8n are deliberately optional. See [Configuration](docs/CONFIGURATION.md) before adding any secret.
 
 ## Safety boundary
 

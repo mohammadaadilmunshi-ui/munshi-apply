@@ -198,35 +198,49 @@ export type ApplicationState = z.infer<typeof ApplicationStateSchema>;
 export const eventTypes = [
   "PAGE_DETECTED",
   "APPLICATION_DETECTED",
+  "APPLICATION_PREPARED",
+  "AUTOPILOT_STARTED",
   "FIELD_DISCOVERED",
   "QUESTION_CLASSIFIED",
   "ANSWER_RESOLVED",
   "ANSWER_REVIEW_REQUIRED",
+  "QUESTION_REVIEW_REQUIRED",
   "RESUME_SELECTED",
   "RESUME_UPLOADED",
+  "RESUME_VERIFIED",
   "UPLOAD_VERIFIED",
   "ACCOUNT_REQUIRED",
   "ACCOUNT_CREATED",
   "APPLICATION_STATE_CHANGED",
   "CHECKPOINT_REQUIRED",
+  "SECURITY_CHECKPOINT",
   "INTERACTION_FAILED",
   "RECOVERY_SUCCEEDED",
   "APPLICATION_READY",
   "APPLICATION_SUBMITTED",
+  "APPLICATION_CONFIRMED",
   "APPLICATION_COMPLETED",
+  "PORTFOLIO_VISIT_OBSERVED",
+  "FOLLOWUP_DUE",
+  "ASSESSMENT_RECEIVED",
+  "INTERVIEW_RECEIVED",
+  "REJECTION_RECEIVED",
+  "OFFER_RECEIVED",
+  "STATUS_CHANGED",
   "LEARNING_EVENT_CREATED",
 ] as const;
 export const EventTypeSchema = z.enum(eventTypes);
 export type EventType = z.infer<typeof EventTypeSchema>;
 
 export const EventEnvelopeSchema = z.object({
-  eventId: z.string().min(1),
-  eventType: EventTypeSchema,
-  occurredAt: z.string().datetime(),
-  source: z.enum(["EXTENSION", "NATIVE_HOST", "USER", "N8N"]),
-  applicationId: z.string().nullable(),
+  schema_version: z.literal("1.0"),
+  event_id: z.string().min(1).max(128),
+  correlation_id: z.string().min(1).max(128),
+  event_type: EventTypeSchema,
+  occurred_at: z.string().datetime({ offset: true }),
+  application_id: z.string().nullable(),
+  source: z.literal("munshi-apply"),
   payload: z.record(z.string(), z.unknown()),
-  schemaVersion: z.literal(1),
 });
 export type EventEnvelope = z.infer<typeof EventEnvelopeSchema>;
 
@@ -235,6 +249,7 @@ export type ExtensionRequest =
   | { type: "GET_PROFILE" }
   | { type: "SAVE_PROFILE"; payload: MasterProfile }
   | { type: "PAGE_SNAPSHOT"; payload: ApplicationPage }
+  | { type: "NATIVE_HEALTH" }
   | { type: "PING" };
 
 export type ExtensionResponse =

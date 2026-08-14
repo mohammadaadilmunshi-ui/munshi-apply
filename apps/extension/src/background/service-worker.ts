@@ -5,6 +5,7 @@ import {
   type ExtensionResponse,
 } from "@munshi-apply/contracts";
 import { getPage, getProfile, savePage, saveProfile } from "../storage/vault";
+import { getNativeHealth } from "../messaging/native";
 
 async function initialize(): Promise<void> {
   await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
@@ -32,6 +33,8 @@ async function routeMessage(
     switch (request.type) {
       case "PING":
         return { ok: true, data: { status: "healthy", version: "0.1.0" } };
+      case "NATIVE_HEALTH":
+        return { ok: true, data: await getNativeHealth() };
       case "GET_PROFILE":
         return { ok: true, data: await getProfile() };
       case "SAVE_PROFILE":

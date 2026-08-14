@@ -2,7 +2,7 @@
 
 ## Required now
 
-None. Version `0.1.0` builds and runs without a cloud API, n8n, a database service, or a paid account.
+No cloud API, n8n instance, database service, or paid account is required. SQLite runs locally.
 
 The Master Profile is intentionally blank. Confirm recurring facts through the extension UI after local installation; do not place personal values in source code.
 
@@ -13,12 +13,32 @@ The Master Profile is intentionally blank. Confirm recurring facts through the e
 
 These values produce the machine-local native-host manifest and are not portable repository settings.
 
+After building and loading the unpacked extension, copy its ID from `edge://extensions` and run:
+
+```bash
+./scripts/install.sh --extension-id <EDGE_EXTENSION_ID>
+```
+
+This Edge extension ID is the only user-controlled value needed to finish Native Messaging registration. The installer keeps the generated manifest and all runtime data outside the repository.
+
+## Private runtime
+
+The macOS default is:
+
+```text
+~/Library/Application Support/MUNSHI Apply/
+```
+
+Override it for development or testing with `MUNSHI_RUNTIME_ROOT`. Override only the database with `MUNSHI_DATABASE_PATH`.
+
 ## Optional when n8n integration is enabled
 
 - `MUNSHI_N8N_WEBHOOK_URL`
 - `MUNSHI_N8N_WEBHOOK_SECRET`
 
 The webhook should accept signed MUNSHI event envelopes. n8n is an external action consumer; SQLite remains the application ledger of record.
+
+Both variables must be configured together. A failed delivery remains in the transactional outbox and retries later; it never blocks the ledger.
 
 ## Optional when AI routing is enabled
 

@@ -1,0 +1,29 @@
+name: Browser tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Run synthetic application scanner tests
+        run: ./node_modules/.bin/vitest run apps/extension/src/content/scanner.test.ts
+      - run: npm run build
+      - run: npm run verify
+      - uses: actions/upload-artifact@v7
+        with:
+          name: browser-test-extension
+          path: apps/extension/dist
+          if-no-files-found: error
