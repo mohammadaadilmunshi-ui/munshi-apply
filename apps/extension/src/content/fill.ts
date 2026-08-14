@@ -7,6 +7,10 @@ function dispatchValueEvents(element: HTMLElement): void {
   element.dispatchEvent(new Event("blur", { bubbles: true, composed: true }));
 }
 
+function dispatchInputEvent(element: HTMLElement): void {
+  element.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+}
+
 function setNativeValue(
   element: HTMLInputElement | HTMLTextAreaElement,
   value: string,
@@ -107,7 +111,86 @@ function fillCheckbox(element: HTMLInputElement, value: string): boolean {
   return element.checked === shouldCheck;
 }
 
+function controlledComboboxOptions(element: Element): HTMLElement[] {
+  const root = element.getRootNode();
+  if (!(root instanceof Document || root instanceof ShadowRoot)) return [];
+  const ids = [
+    element.getAttribute("aria-controls"),
+    element.getAttribute("aria-owns"),
+  ]
+    .filter((value): value is string => Boolean(value))
+    .flatMap((value) => value.split(/\s+/))
+    .filter(Boolean);
+  const options: HTMLElement[] = [];
+  for (const id of ids) {
+    const container =
+      root instanceof Document
+        ? root.getElementById(id)
+        : root.querySelector(`#${CSS.escape(id)}`);
+    if (!container) continue;
+    if (container instanceof HTMLElement && container.getAttribute("role") === "option") {
+      options.push(container);
+    }
+    for (const option of Array.from(container.querySelectorAll("[role='option']"))) {
+      if (option instanceof HTMLElement) options.push(option);
+    }
+  }
+  return [...new Set(options)];
+}
+
+function comboboxOptionValues(option: HTMLElement): string[] {
+  return [
+    normalized(option.textContent ?? ""),
+    normalized(option.getAttribute("aria-label") ?? ""),
+    normalized(option.getAttribute("data-value") ?? ""),
+  ].filter(Boolean);
+}
+
+function comboboxVerified(element: HTMLElement, option: HTMLElement, requested: string): boolean {
+  if (element instanceof HTMLInputElement && normalized(element.value) === requested) {
+    return true;
+  }
+  if (normalized(element.textContent ?? "") === requested) return true;
+  if (option.getAttribute("aria-selected") === "true") return true;
+  return element.getAttribute("aria-activedescendant") === option.id && Boolean(option.id);
+}
+
+function fillCombobox(element: HTMLElement, value: string): boolean {
+  const requested = normalized(value);
+  if (!requested) return false;
+  const originalValue = element instanceof HTMLInputElement ? element.value : null;
+  element.focus();
+  element.click();
+  if (element instanceof HTMLInputElement) {
+    setNativeValue(element, value);
+    dispatchInputEvent(element);
+  }
+
+  const match = controlledComboboxOptions(element).find((option) =>
+    comboboxOptionValues(option).includes(requested),
+  );
+  if (!match) {
+    if (element instanceof HTMLInputElement && originalValue !== null) {
+      setNativeValue(element, originalValue);
+      dispatchInputEvent(element);
+    }
+    return false;
+  }
+
+  match.click();
+  element.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+  const verified = comboboxVerified(element, match, requested);
+  if (!verified && element instanceof HTMLInputElement && originalValue !== null) {
+    setNativeValue(element, originalValue);
+    dispatchInputEvent(element);
+  }
+  return verified;
+}
+
 function fillElement(element: Element, value: string): boolean {
+  if (element instanceof HTMLElement && element.getAttribute("role") === "combobox") {
+    return fillCombobox(element, value);
+  }
   if (element instanceof HTMLInputElement) {
     if (
       ["file", "password", "hidden", "submit", "button"].includes(element.type)
