@@ -23,7 +23,7 @@ jobs:
 
       - name: Guard exact tranche parent
         run: |
-          test "$(git rev-parse HEAD^)" = "dbf4b0a14903f7be148345b9be36e72dcda512e9"
+          test "$(git rev-parse HEAD^)" = "a7e32eb2d3c258b944eed1a6c01d1bdb47565c63"
           test "$(git branch --show-current)" = "feat/v3-foundation-alignment"
 
       - name: Set up Node

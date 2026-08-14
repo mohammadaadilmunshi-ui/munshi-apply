@@ -287,13 +287,13 @@ async function waitForExactComboboxOption(
   pollIntervalMilliseconds: number,
 ): Promise<HTMLElement | null> {
   const deadline = Date.now() + timeoutMilliseconds;
-  do {
+  while (Date.now() <= deadline) {
     const result = exactComboboxOption(element, requested);
     if (result.status === "FOUND") return result.option;
     if (result.status === "AMBIGUOUS") return null;
-    if (Date.now() >= deadline) return null;
     await delay(pollIntervalMilliseconds);
-  } while (true);
+  }
+  return null;
 }
 
 async function waitForComboboxVerification(
@@ -304,11 +304,11 @@ async function waitForComboboxVerification(
   pollIntervalMilliseconds: number,
 ): Promise<boolean> {
   const deadline = Date.now() + timeoutMilliseconds;
-  do {
+  while (Date.now() <= deadline) {
     if (comboboxVerified(element, option, requested)) return true;
-    if (Date.now() >= deadline) return false;
     await delay(pollIntervalMilliseconds);
-  } while (true);
+  }
+  return false;
 }
 
 async function fillCombobox(
