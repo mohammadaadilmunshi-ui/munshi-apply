@@ -1,5 +1,7 @@
 import type { ApplicationState } from "@munshi-apply/contracts";
 
+export * from "./evidence";
+
 const transitions: Readonly<
   Record<ApplicationState, readonly ApplicationState[]>
 > = {
