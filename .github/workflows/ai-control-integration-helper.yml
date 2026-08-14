@@ -23,7 +23,7 @@ jobs:
 
       - name: Guard exact AI tranche parent
         run: |
-          test "$(git rev-parse HEAD^)" = "b7f00575e1401a9467dffea85aaa2b3c6bceecc2"
+          test "$(git rev-parse HEAD^)" = "0943acb1395e5368482f30abcc29445edd87392d"
           test "$(git branch --show-current)" = "feat/v3-foundation-alignment"
 
       - name: Set up Node
@@ -42,7 +42,7 @@ jobs:
           npm ci
           python -m pip install -e './apps/native-host[dev]'
 
-      - name: Integrate AI view and migration expectations
+      - name: Integrate AI view and certification repairs
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -140,6 +140,24 @@ jobs:
               '        "006_ai_budget_reservations.sql",\n'
               '    ]\n'
               '    assert json.loads(second.stdout)["applied"] == []\n',
+          )
+
+          api_test = Path('apps/native-host/tests/test_api.py')
+          replace_once(
+              api_test,
+              '        assert health.json()["schema_version"] == "005_profile_snapshot_ordering.sql"\n',
+              '        assert health.json()["schema_version"] == "006_ai_budget_reservations.sql"\n',
+          )
+
+          governance_test = Path('apps/native-host/tests/test_ai_governance.py')
+          governance_text = governance_test.read_text(encoding='utf-8')
+          target = '0.001'
+          if governance_text.count(target) != 3:
+              raise SystemExit(
+                  f'expected exactly three race-test budget values, found {governance_text.count(target)}'
+              )
+          governance_test.write_text(
+              governance_text.replace(target, '0.005'), encoding='utf-8'
           )
           PY
 
