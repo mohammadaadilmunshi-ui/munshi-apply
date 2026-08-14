@@ -33,6 +33,7 @@ def successful_payload() -> dict[str, object]:
     return {
         "id": "resp-1",
         "model": "gpt-test-2026-08-01",
+        "status": "completed",
         "output": [
             {
                 "type": "message",
@@ -175,4 +176,36 @@ def test_provider_requires_usage_for_budget_accounting() -> None:
 
     provider = OpenAIResponsesProvider("sk-proj-test_" + ("x" * 40), transport=missing_usage)
     with pytest.raises(ValueError, match="does not include token usage"):
+        provider.generate_structured(generation_request())
+
+
+def test_provider_rejects_incomplete_response_before_parsing_draft() -> None:
+    def incomplete(
+        request: urllib_request.Request, timeout: float
+    ) -> dict[str, object]:
+        del request, timeout
+        payload = successful_payload()
+        payload["status"] = "incomplete"
+        payload["incomplete_details"] = {"reason": "max_output_tokens"}
+        return payload
+
+    provider = OpenAIResponsesProvider("sk-proj-test_" + ("x" * 40), transport=incomplete)
+    with pytest.raises(ValueError, match="incomplete .*max_output_tokens"):
+        provider.generate_structured(generation_request())
+
+
+def test_provider_rejects_refusal_content() -> None:
+    def refusal(request: urllib_request.Request, timeout: float) -> dict[str, object]:
+        del request, timeout
+        payload = successful_payload()
+        payload["output"] = [
+            {
+                "type": "message",
+                "content": [{"type": "refusal", "refusal": "cannot comply"}],
+            }
+        ]
+        return payload
+
+    provider = OpenAIResponsesProvider("sk-proj-test_" + ("x" * 40), transport=refusal)
+    with pytest.raises(ValueError, match="refused"):
         provider.generate_structured(generation_request())
