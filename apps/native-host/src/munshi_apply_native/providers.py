@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Protocol
+from typing import Protocol
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
@@ -148,7 +149,8 @@ def _parse_usage(payload: dict[str, object]) -> ProviderUsage:
     input_tokens = usage.get("input_tokens")
     output_tokens = usage.get("output_tokens")
     total_tokens = usage.get("total_tokens")
-    if not all(isinstance(value, int) and value >= 0 for value in (input_tokens, output_tokens, total_tokens)):
+    token_values = (input_tokens, output_tokens, total_tokens)
+    if not all(isinstance(value, int) and value >= 0 for value in token_values):
         raise ValueError("OpenAI response includes invalid token usage")
     return ProviderUsage(
         input_tokens=input_tokens,
