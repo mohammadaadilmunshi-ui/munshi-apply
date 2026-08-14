@@ -11,7 +11,6 @@ from typing import Any
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
-
 _KEYCHAIN_SERVICE = "systems.munshi.apply.openai"
 _KEYCHAIN_ACCOUNT = "OPENAI_API_KEY"
 _OPENAI_MODELS_URL = "https://api.openai.com/v1/models"

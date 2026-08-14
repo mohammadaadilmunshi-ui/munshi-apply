@@ -40,13 +40,7 @@ import {
 } from "../storage/cloud";
 
 type View = "application" | "profile" | "diagnostics";
-type SaveState =
-  | "idle"
-  | "editing"
-  | "saving"
-  | "synced"
-  | "local"
-  | "error";
+type SaveState = "idle" | "editing" | "saving" | "synced" | "local" | "error";
 
 type NativeState =
   | { status: "checking" }
