@@ -159,18 +159,20 @@ def test_release_packaging_creates_required_verified_artifacts(tmp_path: Path) -
     )
 
     required = {
-        "edge-extension-v0.2.0.zip",
-        "mobile-extension-v0.2.0.zip",
-        "native-host-v0.2.0.tar.gz",
-        "migrations-v0.2.0.zip",
-        "checksums-v0.2.0.txt",
+        "munshi-apply-edge-v0.2.0.zip",
+        "munshi-apply-edge-mobile-v0.2.0.zip",
+        "munshi-apply-native-macos-v0.2.0.tar.gz",
+        "release-manifest.json",
+        "migration-manifest.json",
+        "checksums.sha256",
     }
-    assert required.issubset({path.name for path in output.iterdir()})
-
-    checksums = (output / "checksums-v0.2.0.txt").read_text(encoding="utf-8")
-    for name in required - {"checksums-v0.2.0.txt"}:
-        digest = hashlib.sha256((output / name).read_bytes()).hexdigest()
-        assert f"{digest}  {name}" in checksums
-
-    with zipfile.ZipFile(output / "migrations-v0.2.0.zip") as archive:
-        assert "migrations/003_profile_evidence_checkpoints.sql" in archive.namelist()
+    assert {path.name for path in output.iterdir()} == required
+    for archive_name in (
+        "munshi-apply-edge-v0.2.0.zip",
+        "munshi-apply-edge-mobile-v0.2.0.zip",
+    ):
+        with zipfile.ZipFile(output / archive_name) as archive:
+            assert not any(name.endswith(".map") for name in archive.namelist())
+    for line in (output / "checksums.sha256").read_text(encoding="utf-8").splitlines():
+        expected, filename = line.split("  ", 1)
+        assert hashlib.sha256((output / filename).read_bytes()).hexdigest() == expected
