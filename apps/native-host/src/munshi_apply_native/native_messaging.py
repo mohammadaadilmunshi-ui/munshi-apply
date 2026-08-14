@@ -6,8 +6,9 @@ import sys
 from typing import BinaryIO
 
 from .ai_settings import AIConfiguration, AISettingsStore
+from .checkpoint_store import ApplicationCheckpointStore
 from .database import Database
-from .models import EventEnvelope
+from .models import ApplicationCheckpointPayload, EventEnvelope
 from .profile_store import ProfileStore
 from .settings import Settings
 
@@ -37,6 +38,16 @@ def write_message(stream: BinaryIO, payload: dict[str, object]) -> None:
     stream.flush()
 
 
+def checkpoint_lookup_application_id(message: dict[str, object]) -> str:
+    payload = message.get("payload")
+    if not isinstance(payload, dict):
+        raise ValueError("Checkpoint lookup payload must be an object")
+    application_id = payload.get("applicationId")
+    if not isinstance(application_id, str) or not application_id.strip():
+        raise ValueError("Checkpoint lookup requires applicationId")
+    return application_id.strip()
+
+
 def handle(
     message: dict[str, object],
     database: Database,
@@ -57,6 +68,25 @@ def handle(
             raise ValueError("Profile snapshot payload must be an object")
         ProfileStore(database).save(payload)
         return {"ok": True}
+    if message_type == "SAVE_APPLICATION_CHECKPOINT":
+        checkpoint = ApplicationCheckpointPayload.model_validate(message.get("payload"))
+        created = ApplicationCheckpointStore(database).save(
+            checkpoint.database_record()
+        )
+        return {
+            "ok": True,
+            "data": {
+                "created": created,
+                "checkpoint": checkpoint.wire_payload(),
+            },
+        }
+    if message_type == "GET_LATEST_APPLICATION_CHECKPOINT":
+        application_id = checkpoint_lookup_application_id(message)
+        stored = ApplicationCheckpointStore(database).latest(application_id)
+        if stored is None:
+            return {"ok": True, "data": None}
+        checkpoint = ApplicationCheckpointPayload.model_validate(stored)
+        return {"ok": True, "data": checkpoint.wire_payload()}
 
     if message_type in {
         "GET_AI_SETTINGS",

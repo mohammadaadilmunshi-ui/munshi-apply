@@ -1,4 +1,8 @@
 import {
+  parseAutoPilotCheckpoint,
+  type AutoPilotCheckpoint,
+} from "@munshi-apply/application-model";
+import {
   parseProfileSnapshot,
   type ProfileSnapshot,
 } from "@munshi-apply/contracts/profile-vault";
@@ -6,7 +10,8 @@ import {
 const nativeHostName = "systems.munshi.apply";
 
 type NativeResponse =
-  { ok: true; data?: unknown } | { ok: false; error: string };
+  | { ok: true; data?: unknown }
+  | { ok: false; error: string };
 
 export type AISettings = {
   provider: "openai";
@@ -17,6 +22,11 @@ export type AISettings = {
   hardStop: boolean;
   keyConfigured: boolean;
   keySource: "keychain" | "environment" | "none";
+};
+
+export type NativeCheckpointSaveResult = {
+  created: boolean;
+  checkpoint: AutoPilotCheckpoint;
 };
 
 async function sendNative<T>(
@@ -53,6 +63,20 @@ async function sendNative<T>(
   });
 }
 
+function parseCheckpointSaveResult(value: unknown): NativeCheckpointSaveResult {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Native checkpoint save response must be an object");
+  }
+  const candidate = value as Record<string, unknown>;
+  if (typeof candidate.created !== "boolean") {
+    throw new Error("Native checkpoint save response is missing created status");
+  }
+  return {
+    created: candidate.created,
+    checkpoint: parseAutoPilotCheckpoint(candidate.checkpoint),
+  };
+}
+
 export async function getNativeHealth(
   timeoutMilliseconds = 3_000,
 ): Promise<unknown> {
@@ -73,6 +97,31 @@ export async function saveNativeProfileSnapshot(
     type: "SAVE_PROFILE_SNAPSHOT",
     payload: parseProfileSnapshot(snapshot),
   });
+}
+
+export async function saveNativeApplicationCheckpoint(
+  checkpoint: AutoPilotCheckpoint,
+): Promise<NativeCheckpointSaveResult> {
+  const canonical = parseAutoPilotCheckpoint(checkpoint);
+  const result = await sendNative<unknown>({
+    type: "SAVE_APPLICATION_CHECKPOINT",
+    payload: canonical,
+  });
+  return parseCheckpointSaveResult(result);
+}
+
+export async function getLatestNativeApplicationCheckpoint(
+  applicationId: string,
+): Promise<AutoPilotCheckpoint | null> {
+  const normalizedApplicationId = applicationId.trim();
+  if (!normalizedApplicationId) {
+    throw new Error("applicationId must be a non-empty string");
+  }
+  const result = await sendNative<unknown>({
+    type: "GET_LATEST_APPLICATION_CHECKPOINT",
+    payload: { applicationId: normalizedApplicationId },
+  });
+  return result === null ? null : parseAutoPilotCheckpoint(result);
 }
 
 export async function getAISettings(): Promise<AISettings> {

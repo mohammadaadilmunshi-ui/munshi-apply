@@ -1,13 +1,12 @@
-import type {
-  ApplicationState,
-  FillInstruction,
-  FillResult,
+import {
+  applicationStates,
+  type ApplicationState,
+  type FillInstruction,
+  type FillResult,
+  type SecurityCheckpointKind,
 } from "@munshi-apply/contracts";
 import type { PreflightGateSummary } from "./policies";
 import { canTransition } from "./transitions";
-
-export type SecurityCheckpointKind =
-  "CAPTCHA" | "MFA" | "OTP" | "IDENTITY_VERIFICATION" | "AUTHENTICATION";
 
 export type AutoPilotObservation = {
   applicationId: string;
@@ -53,6 +52,105 @@ export type ActionVerification = {
   success: boolean;
   reason: string;
 };
+
+const applicationStateSet = new Set<string>(applicationStates);
+
+function requiredString(value: unknown, name: string): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`${name} must be a non-empty string`);
+  }
+  return value.trim();
+}
+
+function nullableString(value: unknown, name: string): string | null {
+  if (value === null) return null;
+  return requiredString(value, name);
+}
+
+function uniqueStringArray(value: unknown, name: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`${name} must be an array`);
+  }
+  const items = value.map((item) => requiredString(item, name));
+  if (new Set(items).size !== items.length) {
+    throw new Error(`${name} must not contain duplicates`);
+  }
+  return items;
+}
+
+function assertIsoTimestamp(value: string, name: string): void {
+  if (!/^\d{4}-\d{2}-\d{2}T/.test(value) || Number.isNaN(Date.parse(value))) {
+    throw new Error(`${name} must be an ISO timestamp`);
+  }
+}
+
+export function parseAutoPilotCheckpoint(value: unknown): AutoPilotCheckpoint {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Checkpoint payload must be an object");
+  }
+
+  const candidate = value as Record<string, unknown>;
+  if (!Number.isSafeInteger(candidate.sequence) || Number(candidate.sequence) < 0) {
+    throw new Error("Checkpoint sequence must be a non-negative integer");
+  }
+  if (
+    typeof candidate.state !== "string" ||
+    !applicationStateSet.has(candidate.state)
+  ) {
+    throw new Error("Checkpoint state is invalid");
+  }
+
+  const completedControlIds = uniqueStringArray(
+    candidate.completedControlIds,
+    "completedControlIds",
+  );
+  const pendingControlIds = uniqueStringArray(
+    candidate.pendingControlIds,
+    "pendingControlIds",
+  );
+  const completed = new Set(completedControlIds);
+  if (pendingControlIds.some((controlId) => completed.has(controlId))) {
+    throw new Error("Completed and pending checkpoint controls must not overlap");
+  }
+
+  const selectedResumeId = nullableString(
+    candidate.selectedResumeId,
+    "selectedResumeId",
+  );
+  const selectedResumeSha256 = nullableString(
+    candidate.selectedResumeSha256,
+    "selectedResumeSha256",
+  );
+  if ((selectedResumeId === null) !== (selectedResumeSha256 === null)) {
+    throw new Error("Résumé checkpoint identity and digest must be stored together");
+  }
+  if (
+    selectedResumeSha256 !== null &&
+    !/^[a-f0-9]{64}$/.test(selectedResumeSha256)
+  ) {
+    throw new Error("selectedResumeSha256 must be a lowercase SHA-256 digest");
+  }
+
+  const createdAt = requiredString(candidate.createdAt, "createdAt");
+  assertIsoTimestamp(createdAt, "createdAt");
+
+  return {
+    checkpointId: requiredString(candidate.checkpointId, "checkpointId"),
+    applicationId: requiredString(candidate.applicationId, "applicationId"),
+    sequence: Number(candidate.sequence),
+    state: candidate.state as ApplicationState,
+    pageId: requiredString(candidate.pageId, "pageId"),
+    pageFingerprint: requiredString(
+      candidate.pageFingerprint,
+      "pageFingerprint",
+    ),
+    completedControlIds,
+    pendingControlIds,
+    selectedResumeId,
+    selectedResumeSha256,
+    createdAt,
+  };
+}
 
 function nextApprovedInstruction(
   instructions: readonly FillInstruction[],
@@ -160,10 +258,7 @@ export function createAutoPilotCheckpoint(input: {
   selectedResumeSha256: string | null;
   createdAt: string;
 }): AutoPilotCheckpoint {
-  if (!Number.isSafeInteger(input.sequence) || input.sequence < 0) {
-    throw new Error("Checkpoint sequence must be a non-negative integer");
-  }
-  return {
+  return parseAutoPilotCheckpoint({
     checkpointId: input.checkpointId,
     applicationId: input.observation.applicationId,
     sequence: input.sequence,
@@ -175,7 +270,7 @@ export function createAutoPilotCheckpoint(input: {
     selectedResumeId: input.selectedResumeId,
     selectedResumeSha256: input.selectedResumeSha256,
     createdAt: input.createdAt,
-  };
+  });
 }
 
 export function canResumeFromCheckpoint(

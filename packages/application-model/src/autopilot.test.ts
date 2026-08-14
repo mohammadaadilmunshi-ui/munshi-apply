@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   canResumeFromCheckpoint,
   createAutoPilotCheckpoint,
+  parseAutoPilotCheckpoint,
   planAutoPilotStep,
   verifyFillAction,
   verifyNavigationAction,
@@ -113,6 +114,44 @@ describe("AutoPilot checkpoints", () => {
     });
     expect(checkpoint.completedControlIds).toEqual(["a", "b"]);
     expect(checkpoint.pendingControlIds).toEqual(["c"]);
+  });
+
+  it("validates checkpoint state, timestamp, controls, and resume digest", () => {
+    const valid = {
+      checkpointId: "cp-1",
+      applicationId: "app-1",
+      sequence: 1,
+      state: "PERSONAL",
+      pageId: "page-1",
+      pageFingerprint: "fingerprint-1",
+      completedControlIds: ["a"],
+      pendingControlIds: ["b"],
+      selectedResumeId: "resume-1",
+      selectedResumeSha256: "a".repeat(64),
+      createdAt: "2026-08-14T18:00:00.000Z",
+    };
+    expect(parseAutoPilotCheckpoint(valid).sequence).toBe(1);
+    expect(() =>
+      parseAutoPilotCheckpoint({
+        ...valid,
+        completedControlIds: ["a", "a"],
+      }),
+    ).toThrow(/duplicates/);
+    expect(() =>
+      parseAutoPilotCheckpoint({
+        ...valid,
+        pendingControlIds: ["a"],
+      }),
+    ).toThrow(/must not overlap/);
+    expect(() =>
+      parseAutoPilotCheckpoint({
+        ...valid,
+        selectedResumeSha256: null,
+      }),
+    ).toThrow(/stored together/);
+    expect(() =>
+      parseAutoPilotCheckpoint({ ...valid, createdAt: "not-a-date" }),
+    ).toThrow(/ISO timestamp/);
   });
 
   it("resumes only the same application at the same or valid forward state", () => {
