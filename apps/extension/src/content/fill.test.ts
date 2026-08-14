@@ -16,6 +16,11 @@ const visibleRectangle: DOMRect = {
   toJSON: () => ({}),
 };
 
+const quickInteraction = {
+  optionTimeoutMs: 80,
+  pollIntervalMs: 5,
+};
+
 describe("guarded field filling", () => {
   beforeEach(() => {
     document.body.innerHTML = `
@@ -31,7 +36,7 @@ describe("guarded field filling", () => {
     );
   });
 
-  it("fills only explicitly approved instructions", () => {
+  it("fills only explicitly approved instructions", async () => {
     const page = scanDocument();
     const email = page.questions.find(
       (question) => question.semanticType === "EMAIL",
@@ -42,7 +47,7 @@ describe("guarded field filling", () => {
     expect(email).toBeDefined();
     expect(sponsorship).toBeDefined();
 
-    const results = applyFillInstructions([
+    const results = await applyFillInstructions([
       {
         controlId: email!.controlId,
         frameId: 0,
@@ -71,7 +76,7 @@ describe("guarded field filling", () => {
     ]);
   });
 
-  it("fills and verifies a control inside an open shadow root", () => {
+  it("fills and verifies a control inside an open shadow root", async () => {
     document.body.innerHTML = "";
     const host = document.createElement("candidate-profile");
     document.body.append(host);
@@ -80,7 +85,7 @@ describe("guarded field filling", () => {
     const question = scanDocument().questions[0];
     expect(question).toBeDefined();
 
-    const result = applyFillInstructions([
+    const result = await applyFillInstructions([
       {
         controlId: question!.controlId,
         frameId: 0,
@@ -96,7 +101,7 @@ describe("guarded field filling", () => {
     expect(result[0]?.status).toBe("FILLED");
   });
 
-  it("selects the requested option in a radio group", () => {
+  it("selects the requested option in a radio group", async () => {
     document.body.innerHTML = `
       <fieldset>
         <legend>Will you now or in the future require sponsorship?</legend>
@@ -107,7 +112,7 @@ describe("guarded field filling", () => {
     const question = scanDocument().questions[0];
     expect(question).toBeDefined();
 
-    const result = applyFillInstructions([
+    const result = await applyFillInstructions([
       {
         controlId: question!.controlId,
         frameId: 0,
@@ -125,14 +130,14 @@ describe("guarded field filling", () => {
     expect(result[0]?.status).toBe("FILLED");
   });
 
-  it("fills a checkbox only for an explicit boolean answer", () => {
+  it("fills a checkbox only for an explicit boolean answer", async () => {
     document.body.innerHTML = `
       <label><input id="agree" type="checkbox" checked> I agree</label>
     `;
     const question = scanDocument().questions[0];
     expect(question).toBeDefined();
 
-    const result = applyFillInstructions([
+    const result = await applyFillInstructions([
       {
         controlId: question!.controlId,
         frameId: 0,
@@ -148,14 +153,14 @@ describe("guarded field filling", () => {
     expect(result[0]?.status).toBe("FILLED");
   });
 
-  it("does not mutate a checkbox for an ambiguous value", () => {
+  it("does not mutate a checkbox for an ambiguous value", async () => {
     document.body.innerHTML = `
       <label><input id="agree" type="checkbox" checked> I agree</label>
     `;
     const question = scanDocument().questions[0];
     expect(question).toBeDefined();
 
-    const result = applyFillInstructions([
+    const result = await applyFillInstructions([
       {
         controlId: question!.controlId,
         frameId: 0,
@@ -171,7 +176,7 @@ describe("guarded field filling", () => {
     expect(result[0]?.status).toBe("FAILED");
   });
 
-  it("selects and verifies an exact option in an ARIA combobox", () => {
+  it("selects and verifies an exact option in an ARIA combobox", async () => {
     document.body.innerHTML = `
       <label for="country">Country</label>
       <input id="country" role="combobox" aria-controls="country-options" value="">
@@ -189,22 +194,132 @@ describe("guarded field filling", () => {
     const question = scanDocument().questions[0];
     expect(question).toBeDefined();
 
-    const result = applyFillInstructions([
-      {
-        controlId: question!.controlId,
-        frameId: 0,
-        value: "United States",
-        sensitive: false,
-        approved: true,
-      },
-    ]);
+    const result = await applyFillInstructions(
+      [
+        {
+          controlId: question!.controlId,
+          frameId: 0,
+          value: "United States",
+          sensitive: false,
+          approved: true,
+        },
+      ],
+      quickInteraction,
+    );
 
     expect(input.value).toBe("United States");
     expect(option.getAttribute("aria-selected")).toBe("true");
     expect(result[0]?.status).toBe("FILLED");
   });
 
-  it("restores an ARIA combobox when no exact option can be verified", () => {
+  it("waits for an exact async autocomplete option before selecting", async () => {
+    document.body.innerHTML = `
+      <label for="city">City</label>
+      <input id="city" role="combobox" aria-controls="city-options" value="">
+      <div id="city-options" role="listbox"></div>
+    `;
+    const input = document.getElementById("city") as HTMLInputElement;
+    const container = document.getElementById("city-options") as HTMLElement;
+    input.addEventListener(
+      "input",
+      () => {
+        setTimeout(() => {
+          const option = document.createElement("div");
+          option.id = "city-phl";
+          option.setAttribute("role", "option");
+          option.textContent = "Philadelphia";
+          option.addEventListener("click", () => {
+            input.value = "Philadelphia";
+            option.setAttribute("aria-selected", "true");
+          });
+          container.append(option);
+        }, 10);
+      },
+      { once: true },
+    );
+    const question = scanDocument().questions[0];
+    expect(question).toBeDefined();
+
+    const result = await applyFillInstructions(
+      [
+        {
+          controlId: question!.controlId,
+          frameId: 0,
+          value: "Philadelphia",
+          sensitive: false,
+          approved: true,
+        },
+      ],
+      quickInteraction,
+    );
+
+    expect(input.value).toBe("Philadelphia");
+    expect(result[0]?.status).toBe("FILLED");
+  });
+
+  it("supports one exact portaled option without fuzzy matching", async () => {
+    document.body.innerHTML = `
+      <label for="state">State</label>
+      <input id="state" role="combobox" value="">
+      <div id="portal-root">
+        <div id="state-nj" role="option">New Jersey</div>
+      </div>
+    `;
+    const input = document.getElementById("state") as HTMLInputElement;
+    const option = document.getElementById("state-nj") as HTMLElement;
+    option.addEventListener("click", () => {
+      input.value = "New Jersey";
+      option.setAttribute("aria-selected", "true");
+    });
+    const question = scanDocument().questions[0];
+    expect(question).toBeDefined();
+
+    const result = await applyFillInstructions(
+      [
+        {
+          controlId: question!.controlId,
+          frameId: 0,
+          value: "New Jersey",
+          sensitive: false,
+          approved: true,
+        },
+      ],
+      quickInteraction,
+    );
+
+    expect(input.value).toBe("New Jersey");
+    expect(result[0]?.status).toBe("FILLED");
+  });
+
+  it("fails closed when multiple portaled options have the same exact value", async () => {
+    document.body.innerHTML = `
+      <label for="country">Country</label>
+      <input id="country" role="combobox" value="Canada">
+      <div role="option">United States</div>
+      <div role="option">United States</div>
+    `;
+    const input = document.getElementById("country") as HTMLInputElement;
+    const question = scanDocument().questions[0];
+    expect(question).toBeDefined();
+
+    const result = await applyFillInstructions(
+      [
+        {
+          controlId: question!.controlId,
+          frameId: 0,
+          value: "United States",
+          sensitive: false,
+          approved: true,
+        },
+      ],
+      quickInteraction,
+    );
+
+    expect(input.value).toBe("Canada");
+    expect(result[0]?.status).toBe("FAILED");
+  });
+
+  it("restores an ARIA combobox when no exact option can be verified", async () => {
     document.body.innerHTML = `
       <label for="country">Country</label>
       <input id="country" role="combobox" aria-controls="country-options" value="Canada">
@@ -216,17 +331,56 @@ describe("guarded field filling", () => {
     const question = scanDocument().questions[0];
     expect(question).toBeDefined();
 
-    const result = applyFillInstructions([
+    const result = await applyFillInstructions(
+      [
+        {
+          controlId: question!.controlId,
+          frameId: 0,
+          value: "United States",
+          sensitive: false,
+          approved: true,
+        },
+      ],
+      quickInteraction,
+    );
+
+    expect(input.value).toBe("Canada");
+    expect(result[0]?.status).toBe("FAILED");
+  });
+
+  it("fills only a canonical valid native date and verifies it exactly", async () => {
+    document.body.innerHTML = `
+      <label for="start-date">Start date</label>
+      <input id="start-date" type="date">
+    `;
+    const input = document.getElementById("start-date") as HTMLInputElement;
+    const control = scanDocument().controls.find(
+      (candidate) => candidate.kind === "DATE",
+    );
+    expect(control).toBeDefined();
+
+    const valid = await applyFillInstructions([
       {
-        controlId: question!.controlId,
+        controlId: control!.controlId,
         frameId: 0,
-        value: "United States",
+        value: "2026-12-17",
         sensitive: false,
         approved: true,
       },
     ]);
+    expect(valid[0]?.status).toBe("FILLED");
+    expect(input.value).toBe("2026-12-17");
 
-    expect(input.value).toBe("Canada");
-    expect(result[0]?.status).toBe("FAILED");
+    const invalid = await applyFillInstructions([
+      {
+        controlId: control!.controlId,
+        frameId: 0,
+        value: "12/17/2026",
+        sensitive: false,
+        approved: true,
+      },
+    ]);
+    expect(invalid[0]?.status).toBe("FAILED");
+    expect(input.value).toBe("2026-12-17");
   });
 });

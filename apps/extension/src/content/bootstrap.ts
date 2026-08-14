@@ -83,9 +83,25 @@ chrome.runtime.onMessage.addListener(
     sendResponse,
   ) => {
     if (message.type === "APPLY_FILL_INSTRUCTIONS" && message.instructions) {
-      sendResponse({ results: applyFillInstructions(message.instructions) });
-      scheduleScan(true);
-      return false;
+      void applyFillInstructions(message.instructions)
+        .then((results) => {
+          sendResponse({ results });
+          scheduleScan(true);
+        })
+        .catch((error: unknown) => {
+          sendResponse({
+            results: message.instructions!.map((instruction) => ({
+              controlId: instruction.controlId,
+              status: "FAILED",
+              reason:
+                error instanceof Error
+                  ? error.message
+                  : "Guarded fill failed unexpectedly",
+            })),
+          });
+          scheduleScan(true);
+        });
+      return true;
     }
     if (message.type === "APPLY_NAVIGATION_ACTION" && message.controlId) {
       sendResponse({ result: applyNavigationAction(message.controlId) });
