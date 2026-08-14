@@ -2,9 +2,9 @@
 
 ## Required now
 
-No cloud API, n8n instance, database service, or paid account is required. SQLite runs locally.
+No n8n instance, paid AI plan, or separate database service is required for the core workflow. SQLite runs locally and the private workspace uses the existing encrypted cross-device control plane.
 
-The Master Profile is intentionally blank. Confirm recurring facts through the extension UI after local installation; do not place personal values in source code.
+The Master Profile starts blank. Confirm recurring facts through the MUNSHI Apply Profile UI after local installation; do not place personal values in source code. The desktop profile editor auto-saves ordinary facts and confirms protected facts only after the owner completes the field.
 
 ## Required when the native host is connected
 
@@ -31,6 +31,29 @@ The macOS default is:
 
 Override it for development or testing with `MUNSHI_RUNTIME_ROOT`. Override only the database with `MUNSHI_DATABASE_PATH`.
 
+Non-secret AI preferences are stored locally under the private runtime. The OpenAI API key is not stored there.
+
+## OpenAI desktop configuration
+
+The desktop Diagnostics view now includes an **AI & API control center**. The owner can:
+
+- paste or replace an OpenAI API key;
+- remove the stored key;
+- test the OpenAI connection;
+- load models visible to that key;
+- choose a model;
+- enable or disable AI features;
+- set a monthly budget and warning threshold; and
+- keep a hard budget stop enabled.
+
+On macOS, a key entered through the UI is stored by the native companion in **macOS Keychain** under the MUNSHI Apply service. The key is never written to GitHub, extension storage, synchronized profile records, cloud workspace data, diagnostics output, or logs.
+
+`OPENAI_API_KEY` remains supported as a machine-local environment fallback for development/headless use. Do not commit it to `.env`, source files, fixtures, documentation examples, or CI configuration.
+
+The provider-configuration foundation is active, but generated application answers are still gated. Connecting a key does **not** authorize MUNSHI to generate or fill unverified claims. Evidence retrieval, contradiction checks, generated-response validation, usage metering, and budget enforcement must pass the M6 gates before inference is used for application answers.
+
+The default monthly budget is `0`, which represents no approved paid inference usage until the owner deliberately changes it.
+
 ## Optional when n8n integration is enabled
 
 - `MUNSHI_N8N_WEBHOOK_URL`
@@ -40,16 +63,15 @@ The webhook should accept signed MUNSHI event envelopes. n8n is an external acti
 
 Both variables must be configured together. A failed delivery remains in the transactional outbox and retries later; it never blocks the ledger.
 
-## Optional when AI routing is enabled
+## Future provider routing
 
-At least one of:
+The master architecture remains provider-agnostic. Later M6 work may add:
 
-- `OPENAI_API_KEY`
-- `ANTHROPIC_API_KEY`
-- `GEMINI_API_KEY`
-- local Ollama at `OLLAMA_BASE_URL`
+- Anthropic;
+- Gemini; and
+- local Ollama.
 
-Provider integration is not active in `0.2.0`. Keys will be requested only when the provider router and budget engine are implemented. Do not supply them early.
+Those providers are not enabled by this release. Adding a paid provider or enabling billable generation still requires deliberate owner approval and the budget/truth-validation gates.
 
 ## GitHub settings to decide before publication
 
