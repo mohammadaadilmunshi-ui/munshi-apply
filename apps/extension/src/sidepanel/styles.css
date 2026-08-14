@@ -65,6 +65,14 @@ main {
   border-color: #4f8a6b;
   color: #b7e3c9;
 }
+.status.partial {
+  border-color: #b98551;
+  color: #f1c99d;
+}
+.status.unavailable {
+  border-color: #a55b5b;
+  color: #efb3b3;
+}
 nav {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -249,7 +257,64 @@ p {
 .diagnostics dd {
   font-weight: 700;
   margin: 0;
+  max-width: 58%;
+  overflow-wrap: anywhere;
+  text-align: right;
   text-transform: capitalize;
+}
+.diagnostic-error {
+  background: #f5e6df;
+  border: 1px solid #e3c0b2;
+  border-radius: 10px;
+  color: #8b3f24;
+  font-size: 12px;
+  padding: 12px;
+}
+
+.cloud-pairing,
+.cloud-connection {
+  background: #f7f3ef;
+  border: 1px solid #ded4ca;
+  border-radius: 14px;
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+  padding: 16px;
+}
+
+.cloud-pairing h3,
+.cloud-pairing p,
+.cloud-connection strong,
+.cloud-connection span {
+  margin: 0;
+}
+
+.cloud-pairing p,
+.cloud-connection span {
+  color: #626872;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.cloud-pairing label {
+  display: grid;
+  gap: 6px;
+}
+
+.cloud-pairing label span {
+  color: #4e5560;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.cloud-pairing textarea {
+  min-height: 82px;
+  resize: vertical;
+}
+
+.cloud-pairing button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 .notice {
   background: #e3eee8;

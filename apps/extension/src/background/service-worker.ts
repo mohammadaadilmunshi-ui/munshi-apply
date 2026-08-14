@@ -4,11 +4,30 @@ import {
   type ExtensionRequest,
   type ExtensionResponse,
 } from "@munshi-apply/contracts";
-import { getPage, getProfile, savePage, saveProfile } from "../storage/vault";
+import {
+  getLatestPage,
+  getPage,
+  getProfile,
+  savePage,
+  saveProfile,
+} from "../storage/vault";
 import { getNativeHealth } from "../messaging/native";
 
+const supportsSidePanel =
+  typeof chrome.sidePanel?.setPanelBehavior === "function";
+
 async function initialize(): Promise<void> {
-  await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  if (supportsSidePanel) {
+    await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  }
+}
+
+if (!supportsSidePanel) {
+  chrome.action.onClicked.addListener(() => {
+    void chrome.tabs.create({
+      url: chrome.runtime.getURL("sidepanel/index.html"),
+    });
+  });
 }
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -21,8 +40,27 @@ chrome.runtime.onStartup.addListener(() => {
 
 async function getActivePage(): Promise<unknown> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (tab?.id === undefined) return null;
-  return getPage(tab.id);
+  if (tab?.id !== undefined && /^https?:\/\//.test(tab.url ?? "")) {
+    const activePage = await getPage(tab.id);
+    if (activePage) return activePage;
+  }
+  return getLatestPage();
+}
+
+async function extensionHealth(): Promise<unknown> {
+  const platform = await chrome.runtime.getPlatformInfo();
+  const platformName = String(platform.os);
+  const declaredPermissions = chrome.runtime.getManifest().permissions ?? [];
+  return {
+    status: "healthy",
+    version: chrome.runtime.getManifest().version,
+    platform: platformName,
+    mobile: ["android", "ios"].includes(platformName),
+    capabilities: {
+      nativeMessaging: declaredPermissions.includes("nativeMessaging"),
+      sidePanel: supportsSidePanel,
+    },
+  };
 }
 
 async function routeMessage(
@@ -32,7 +70,7 @@ async function routeMessage(
   try {
     switch (request.type) {
       case "PING":
-        return { ok: true, data: { status: "healthy", version: "0.1.0" } };
+        return { ok: true, data: await extensionHealth() };
       case "NATIVE_HEALTH":
         return { ok: true, data: await getNativeHealth() };
       case "GET_PROFILE":

@@ -41,6 +41,18 @@ async function read(storeName: string, key: IDBValidKey): Promise<unknown> {
   });
 }
 
+async function readAll(storeName: string): Promise<unknown[]> {
+  const database = await openVault();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(storeName, "readonly");
+    const request = transaction.objectStore(storeName).getAll();
+    request.onerror = () =>
+      reject(request.error ?? new Error("Vault read failed"));
+    request.onsuccess = () => resolve(request.result);
+    transaction.oncomplete = () => database.close();
+  });
+}
+
 async function write(
   storeName: string,
   key: IDBValidKey,
@@ -80,6 +92,19 @@ export async function getPage(
   const candidate = await read(pagesStore, `${tabId}:${frameId}`);
   if (candidate === undefined) return null;
   return ApplicationPageSchema.parse(candidate);
+}
+
+export async function getLatestPage(): Promise<ApplicationPage | null> {
+  const pages = (await readAll(pagesStore)).map((candidate) =>
+    ApplicationPageSchema.parse(candidate),
+  );
+  const topLevelPages = pages.filter((page) => page.frameId === 0);
+  const candidates = topLevelPages.length > 0 ? topLevelPages : pages;
+  return (
+    candidates.sort((left, right) =>
+      right.observedAt.localeCompare(left.observedAt),
+    )[0] ?? null
+  );
 }
 
 export async function savePage(page: ApplicationPage): Promise<void> {

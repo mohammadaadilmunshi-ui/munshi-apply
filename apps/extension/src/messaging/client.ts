@@ -5,6 +5,25 @@ import type {
   MasterProfile,
 } from "@munshi-apply/contracts";
 
+export type ExtensionRuntimeHealth = {
+  status: string;
+  version: string;
+  platform: string;
+  mobile: boolean;
+  capabilities: {
+    nativeMessaging: boolean;
+    sidePanel: boolean;
+  };
+};
+
+export type NativeRuntimeHealth = {
+  status: string;
+  database: string;
+  migration_count: number;
+  schema_version: string;
+  outbox: Record<string, number>;
+};
+
 async function send(request: ExtensionRequest): Promise<unknown> {
   const response = (await chrome.runtime.sendMessage(
     request,
@@ -25,9 +44,10 @@ export async function saveProfile(profile: MasterProfile): Promise<void> {
   await send({ type: "SAVE_PROFILE", payload: profile });
 }
 
-export async function getHealth(): Promise<{
-  status: string;
-  version: string;
-}> {
-  return (await send({ type: "PING" })) as { status: string; version: string };
+export async function getHealth(): Promise<ExtensionRuntimeHealth> {
+  return (await send({ type: "PING" })) as ExtensionRuntimeHealth;
+}
+
+export async function getNativeHealth(): Promise<NativeRuntimeHealth> {
+  return (await send({ type: "NATIVE_HEALTH" })) as NativeRuntimeHealth;
 }

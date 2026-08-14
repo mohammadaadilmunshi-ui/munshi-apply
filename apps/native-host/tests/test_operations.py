@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
@@ -99,6 +100,14 @@ def test_release_packaging_creates_required_verified_artifacts(tmp_path: Path) -
         '{"manifest_version": 3, "name": "MUNSHI Apply"}\n', encoding="utf-8"
     )
     (extension_dist / "service-worker.js").write_text("export {};\n", encoding="utf-8")
+    (extension_dist / "service-worker.js.map").write_text("{}\n", encoding="utf-8")
+    mobile_extension_dist = fixture_repository / "apps/extension/dist-mobile"
+    mobile_extension_dist.mkdir(parents=True)
+    (mobile_extension_dist / "manifest.json").write_text(
+        '{"manifest_version": 3, "name": "MUNSHI Apply Mobile"}\n', encoding="utf-8"
+    )
+    (mobile_extension_dist / "service-worker.js").write_text("export {};\n", encoding="utf-8")
+    (mobile_extension_dist / "service-worker.js.map").write_text("{}\n", encoding="utf-8")
     fixture_migrations = fixture_repository / "migrations"
     shutil.copytree(MIGRATIONS, fixture_migrations)
     subprocess.run(  # noqa: S603 - fixed interpreter and repository script.
@@ -119,12 +128,19 @@ def test_release_packaging_creates_required_verified_artifacts(tmp_path: Path) -
 
     required = {
         "munshi-apply-edge-v0.2.0.zip",
+        "munshi-apply-edge-mobile-v0.2.0.zip",
         "munshi-apply-native-macos-v0.2.0.tar.gz",
         "release-manifest.json",
         "migration-manifest.json",
         "checksums.sha256",
     }
     assert {path.name for path in output.iterdir()} == required
+    for archive_name in (
+        "munshi-apply-edge-v0.2.0.zip",
+        "munshi-apply-edge-mobile-v0.2.0.zip",
+    ):
+        with zipfile.ZipFile(output / archive_name) as archive:
+            assert not any(name.endswith(".map") for name in archive.namelist())
     for line in (output / "checksums.sha256").read_text(encoding="utf-8").splitlines():
         expected, filename = line.split("  ", 1)
         assert hashlib.sha256((output / filename).read_bytes()).hexdigest() == expected

@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 
 const roots = [
   "apps/extension/dist",
+  "apps/extension/dist-mobile",
   "coverage",
   "packages/contracts/dist",
   "packages/semantic-engine/dist",

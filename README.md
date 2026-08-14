@@ -9,6 +9,7 @@ The project is built around one compatibility rule: an unfamiliar application pl
 Version `0.1.0` implements the Phase 0 engineering foundation and the first safe slices of Phases 1 and 2:
 
 - a Manifest V3 Edge extension;
+- separate desktop and reduced-permission mobile Edge artifacts;
 - a persistent side panel;
 - an ephemeral service worker backed by an IndexedDB browser cache;
 - generic DOM and ARIA control discovery across top-level pages and injectable frames;
@@ -63,6 +64,14 @@ Then open `edge://extensions`, enable **Developer mode**, choose **Load unpacked
 apps/extension/dist
 ```
 
+The same build also produces a mobile foundation artifact at:
+
+```text
+apps/extension/dist-mobile
+```
+
+The mobile manifest removes desktop-only Native Messaging and side-panel dependencies and opens the responsive extension UI as its action popup. It is intended for physical testing through Microsoft's supported Edge on iOS distribution path; a successful local build is not proof of iPhone API parity. See [Mobile and cross-device architecture](docs/MOBILE_AND_CROSS_DEVICE_ARCHITECTURE.md).
+
 Open a normal `http://` or `https://` application page and select the MUNSHI Apply toolbar action. The side panel will show the visible controls and the inferred question map.
 
 To connect the local companion, copy the unpacked extension ID shown on `edge://extensions` and run:
@@ -77,8 +86,12 @@ The macOS runtime defaults to `~/Library/Application Support/MUNSHI Apply/`; no 
 
 No API key is required for the current milestone. Provider keys and n8n are deliberately optional. See [Configuration](docs/CONFIGURATION.md) before adding any secret.
 
+No chargeable cloud, storage, AI, email, observability, or distribution option may be enabled without explicit owner approval. The planned private cloud workspace begins on available free allowances and must warn before any paid upgrade is required.
+
 ## Safety boundary
 
 MUNSHI Apply does not defeat CAPTCHA, MFA, OTP, identity verification, authentication protections, or anti-abuse systems. It pauses for user-controlled security checkpoints. It also does not change protected facts or high-risk answers without explicit user confirmation.
 
 The complete design baseline is preserved in [Master Architecture](docs/MASTER_ARCHITECTURE.md).
+
+Private distribution preparation is tracked in [Hidden Edge Add-ons release](docs/EDGE_ADDONS_HIDDEN_RELEASE.md). The first listing will remain hidden; package upload or publication requires separate authorization.

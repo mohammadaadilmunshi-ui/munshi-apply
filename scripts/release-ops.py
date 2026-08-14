@@ -44,12 +44,16 @@ def package(version: str, root: Path, output: Path) -> list[Path]:
         raise ValueError("Release version must look like v1.2.3 or 1.2.3")
     tag_version = version if version.startswith("v") else f"v{version}"
     extension_root = root / "apps/extension/dist"
+    mobile_extension_root = root / "apps/extension/dist-mobile"
     if not (extension_root / "manifest.json").is_file():
         raise FileNotFoundError("Build the extension before packaging a release")
+    if not (mobile_extension_root / "manifest.json").is_file():
+        raise FileNotFoundError("Build the mobile extension before packaging a release")
     output.mkdir(parents=True, exist_ok=True)
     edge_archive = output / f"munshi-apply-edge-{tag_version}.zip"
+    edge_mobile_archive = output / f"munshi-apply-edge-mobile-{tag_version}.zip"
     native_archive = output / f"munshi-apply-native-macos-{tag_version}.tar.gz"
-    for target in (edge_archive, native_archive):
+    for target in (edge_archive, edge_mobile_archive, native_archive):
         if target.exists():
             raise FileExistsError(f"Release artifact already exists: {target}")
 
@@ -57,8 +61,15 @@ def package(version: str, root: Path, output: Path) -> list[Path]:
         edge_archive, "w", compression=zipfile.ZIP_DEFLATED
     ) as archive:
         for path in sorted(extension_root.rglob("*")):
-            if path.is_file():
+            if path.is_file() and path.suffix != ".map":
                 archive.write(path, path.relative_to(extension_root))
+
+    with zipfile.ZipFile(
+        edge_mobile_archive, "w", compression=zipfile.ZIP_DEFLATED
+    ) as archive:
+        for path in sorted(mobile_extension_root.rglob("*")):
+            if path.is_file() and path.suffix != ".map":
+                archive.write(path, path.relative_to(mobile_extension_root))
 
     native_files = repository_files(
         root,
@@ -116,6 +127,7 @@ def package(version: str, root: Path, output: Path) -> list[Path]:
                 "created_at": datetime.now(UTC).isoformat(),
                 "artifacts": [
                     edge_archive.name,
+                    edge_mobile_archive.name,
                     native_archive.name,
                     migration_manifest.name,
                 ],
@@ -126,7 +138,13 @@ def package(version: str, root: Path, output: Path) -> list[Path]:
         encoding="utf-8",
     )
 
-    checksummed = [edge_archive, native_archive, migration_manifest, release_manifest]
+    checksummed = [
+        edge_archive,
+        edge_mobile_archive,
+        native_archive,
+        migration_manifest,
+        release_manifest,
+    ]
     checksums = output / "checksums.sha256"
     checksums.write_text(
         "\n".join(f"{sha256_file(path)}  {path.name}" for path in checksummed) + "\n",
