@@ -17,6 +17,46 @@ describe("classifyQuestion", () => {
     expect(classifyQuestion("Mobile phone").semanticType).toBe("PHONE");
   });
 
+  it("distinguishes recurring identity and address fields", () => {
+    expect(classifyQuestion("First name").semanticType).toBe("FIRST_NAME");
+    expect(classifyQuestion("Middle initial").semanticType).toBe("MIDDLE_NAME");
+    expect(classifyQuestion("Last name").semanticType).toBe("LAST_NAME");
+    expect(classifyQuestion("Preferred name").semanticType).toBe(
+      "PREFERRED_NAME",
+    );
+    expect(classifyQuestion("Street address").semanticType).toBe(
+      "STREET_ADDRESS",
+    );
+    expect(classifyQuestion("ZIP code").semanticType).toBe("POSTAL_CODE");
+    expect(classifyQuestion("Country").semanticType).toBe("COUNTRY");
+  });
+
+  it("recognizes recurring education and employment identity fields", () => {
+    expect(classifyQuestion("University name").semanticType).toBe(
+      "SCHOOL_NAME",
+    );
+    expect(classifyQuestion("Current employer").semanticType).toBe(
+      "EMPLOYER_NAME",
+    );
+    expect(classifyQuestion("Job title").semanticType).toBe("JOB_TITLE");
+  });
+
+  it("recognizes reusable preference and credential fields", () => {
+    expect(classifyQuestion("Notice period").semanticType).toBe(
+      "NOTICE_PERIOD",
+    );
+    expect(classifyQuestion("Relevant skills").semanticType).toBe("SKILLS");
+    expect(classifyQuestion("Certifications").semanticType).toBe(
+      "CERTIFICATIONS",
+    );
+    expect(classifyQuestion("Languages spoken").semanticType).toBe(
+      "LANGUAGES",
+    );
+    expect(classifyQuestion("How did you hear about us?").semanticType).toBe(
+      "REFERRAL",
+    );
+  });
+
   it("leaves novel questions unknown instead of inventing a meaning", () => {
     expect(classifyQuestion("Name your favorite constellation")).toEqual({
       semanticType: "UNKNOWN",
