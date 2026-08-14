@@ -17,7 +17,10 @@ const pricing: ModelPricing = {
 describe("explicit model pricing", () => {
   it("calculates actual usage cost from configured rates", () => {
     expect(
-      calculateUsageCost(pricing, { inputTokens: 500_000, outputTokens: 250_000 }),
+      calculateUsageCost(pricing, {
+        inputTokens: 500_000,
+        outputTokens: 250_000,
+      }),
     ).toBe(3);
   });
 

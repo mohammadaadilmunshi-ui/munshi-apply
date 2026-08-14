@@ -128,10 +128,15 @@ function controlledComboboxOptions(element: Element): HTMLElement[] {
         ? root.getElementById(id)
         : root.querySelector(`#${CSS.escape(id)}`);
     if (!container) continue;
-    if (container instanceof HTMLElement && container.getAttribute("role") === "option") {
+    if (
+      container instanceof HTMLElement &&
+      container.getAttribute("role") === "option"
+    ) {
       options.push(container);
     }
-    for (const option of Array.from(container.querySelectorAll("[role='option']"))) {
+    for (const option of Array.from(
+      container.querySelectorAll("[role='option']"),
+    )) {
       if (option instanceof HTMLElement) options.push(option);
     }
   }
@@ -146,19 +151,30 @@ function comboboxOptionValues(option: HTMLElement): string[] {
   ].filter(Boolean);
 }
 
-function comboboxVerified(element: HTMLElement, option: HTMLElement, requested: string): boolean {
-  if (element instanceof HTMLInputElement && normalized(element.value) === requested) {
+function comboboxVerified(
+  element: HTMLElement,
+  option: HTMLElement,
+  requested: string,
+): boolean {
+  if (
+    element instanceof HTMLInputElement &&
+    normalized(element.value) === requested
+  ) {
     return true;
   }
   if (normalized(element.textContent ?? "") === requested) return true;
   if (option.getAttribute("aria-selected") === "true") return true;
-  return element.getAttribute("aria-activedescendant") === option.id && Boolean(option.id);
+  return (
+    element.getAttribute("aria-activedescendant") === option.id &&
+    Boolean(option.id)
+  );
 }
 
 function fillCombobox(element: HTMLElement, value: string): boolean {
   const requested = normalized(value);
   if (!requested) return false;
-  const originalValue = element instanceof HTMLInputElement ? element.value : null;
+  const originalValue =
+    element instanceof HTMLInputElement ? element.value : null;
   element.focus();
   element.click();
   if (element instanceof HTMLInputElement) {
@@ -180,7 +196,11 @@ function fillCombobox(element: HTMLElement, value: string): boolean {
   match.click();
   element.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
   const verified = comboboxVerified(element, match, requested);
-  if (!verified && element instanceof HTMLInputElement && originalValue !== null) {
+  if (
+    !verified &&
+    element instanceof HTMLInputElement &&
+    originalValue !== null
+  ) {
     setNativeValue(element, originalValue);
     dispatchInputEvent(element);
   }
@@ -188,7 +208,10 @@ function fillCombobox(element: HTMLElement, value: string): boolean {
 }
 
 function fillElement(element: Element, value: string): boolean {
-  if (element instanceof HTMLElement && element.getAttribute("role") === "combobox") {
+  if (
+    element instanceof HTMLElement &&
+    element.getAttribute("role") === "combobox"
+  ) {
     return fillCombobox(element, value);
   }
   if (element instanceof HTMLInputElement) {
