@@ -322,7 +322,10 @@ export function scanDocument(): ApplicationPage {
 
 export function controlElementMap(): Map<string, Element> {
   return new Map(
-    scanControlEntries().map((entry) => [entry.control.controlId, entry.element]),
+    scanControlEntries().map((entry) => [
+      entry.control.controlId,
+      entry.element,
+    ]),
   );
 }
 
