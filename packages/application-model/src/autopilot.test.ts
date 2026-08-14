@@ -53,7 +53,12 @@ describe("planAutoPilotStep", () => {
   it("pauses before any action when pre-flight is not ready", () => {
     const plan = planAutoPilotStep({
       observation,
-      preflight: { ...readyGate, state: "REVIEW", reviewCount: 1, canAct: false },
+      preflight: {
+        ...readyGate,
+        state: "REVIEW",
+        reviewCount: 1,
+        canAct: false,
+      },
       fillInstructions: [instruction],
     });
     expect(plan.action.type).toBe("PAUSE_REVIEW");
@@ -122,7 +127,9 @@ describe("AutoPilot checkpoints", () => {
       createdAt: "2026-08-14T18:00:00.000Z",
     });
 
-    expect(canResumeFromCheckpoint(checkpoint, observation).resumable).toBe(true);
+    expect(canResumeFromCheckpoint(checkpoint, observation).resumable).toBe(
+      true,
+    );
     expect(
       canResumeFromCheckpoint(checkpoint, {
         ...observation,
@@ -150,7 +157,9 @@ describe("AutoPilot action verification", () => {
   });
 
   it("rejects navigation that produces no observable change", () => {
-    expect(verifyNavigationAction(observation, observation).success).toBe(false);
+    expect(verifyNavigationAction(observation, observation).success).toBe(
+      false,
+    );
   });
 
   it("accepts a valid forward navigation change", () => {

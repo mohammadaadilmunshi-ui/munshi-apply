@@ -7,11 +7,7 @@ import type { PreflightGateSummary } from "./policies";
 import { canTransition } from "./transitions";
 
 export type SecurityCheckpointKind =
-  | "CAPTCHA"
-  | "MFA"
-  | "OTP"
-  | "IDENTITY_VERIFICATION"
-  | "AUTHENTICATION";
+  "CAPTCHA" | "MFA" | "OTP" | "IDENTITY_VERIFICATION" | "AUTHENTICATION";
 
 export type AutoPilotObservation = {
   applicationId: string;
@@ -106,7 +102,8 @@ export function planAutoPilotStep(input: {
         reason: `Pre-flight gate is ${preflight.state}`,
       },
       checkpointRequired: true,
-      reason: "Unresolved or review-required items must be resolved before action",
+      reason:
+        "Unresolved or review-required items must be resolved before action",
     };
   }
 
@@ -130,7 +127,8 @@ export function planAutoPilotStep(input: {
     return {
       action: { type: "FILL", instruction },
       checkpointRequired: false,
-      reason: "Apply one approved visible instruction and verify before continuing",
+      reason:
+        "Apply one approved visible instruction and verify before continuing",
     };
   }
 
@@ -143,7 +141,10 @@ export function planAutoPilotStep(input: {
   }
 
   return {
-    action: { type: "WAIT", reason: "No verified action is currently available" },
+    action: {
+      type: "WAIT",
+      reason: "No verified action is currently available",
+    },
     checkpointRequired: false,
     reason: "Observe again before taking another action",
   };
@@ -236,7 +237,10 @@ export function verifyNavigationAction(
       reason: "Navigation produced no verified page or state change",
     };
   }
-  if (before.state !== after.state && !canTransition(before.state, after.state)) {
+  if (
+    before.state !== after.state &&
+    !canTransition(before.state, after.state)
+  ) {
     return {
       success: false,
       reason: "Navigation produced an invalid application-state transition",
