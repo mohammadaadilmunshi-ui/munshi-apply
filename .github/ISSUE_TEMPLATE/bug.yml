@@ -1,0 +1,25 @@
+name: Bug report
+description: Report a reproducible defect using synthetic or redacted data.
+title: "bug: "
+body:
+  - type: markdown
+    attributes:
+      value: Do not include credentials, real résumés, protected answers, cookies, tokens, or private application URLs.
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Synthetic reproduction
+    validations:
+      required: true

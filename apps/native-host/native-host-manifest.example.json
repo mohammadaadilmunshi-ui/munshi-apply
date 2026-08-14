@@ -1,0 +1,7 @@
+{
+  "name": "systems.munshi.apply",
+  "description": "MUNSHI Apply local companion",
+  "path": "/ABSOLUTE/PATH/TO/munshi-apply-native",
+  "type": "stdio",
+  "allowed_origins": ["chrome-extension://REPLACE_WITH_EXTENSION_ID/"]
+}

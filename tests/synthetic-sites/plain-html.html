@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Synthetic Plain HTML Application</title>
+  </head>
+  <body>
+    <main>
+      <h1>People Analytics Associate</h1>
+      <form>
+        <fieldset>
+          <legend>Personal information</legend>
+          <label for="name">Legal name</label>
+          <input id="name" name="legal_name" autocomplete="name" required />
+          <label for="email">Email address</label>
+          <input
+            id="email"
+            name="email"
+            type="email"
+            autocomplete="email"
+            required
+          />
+          <label for="resume">Résumé</label>
+          <input
+            id="resume"
+            name="resume"
+            type="file"
+            accept=".pdf,.doc,.docx"
+            required
+          />
+        </fieldset>
+        <fieldset>
+          <legend>Eligibility</legend>
+          <label for="authorization"
+            >Are you legally authorized to work in the United States?</label
+          >
+          <select id="authorization" required>
+            <option value="">Choose one</option>
+            <option>Yes</option>
+            <option>No</option>
+          </select>
+          <label for="sponsorship"
+            >Will you now or in the future require sponsorship?</label
+          >
+          <select id="sponsorship" required>
+            <option value="">Choose one</option>
+            <option>Yes</option>
+            <option>No</option>
+          </select>
+        </fieldset>
+        <button type="submit">Continue</button>
+      </form>
+    </main>
+  </body>
+</html>

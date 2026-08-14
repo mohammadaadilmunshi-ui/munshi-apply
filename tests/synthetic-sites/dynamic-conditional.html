@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Synthetic Dynamic Application</title>
+  </head>
+  <body>
+    <form id="application">
+      <label for="relocation">Are you willing to relocate?</label>
+      <select id="relocation">
+        <option value="">Choose one</option>
+        <option value="yes">Yes</option>
+        <option value="no">No</option>
+      </select>
+    </form>
+    <script>
+      document
+        .querySelector("#relocation")
+        .addEventListener("change", (event) => {
+          document.querySelector("#preferred-location")?.remove();
+          if (event.target.value !== "yes") return;
+          const label = document.createElement("label");
+          label.id = "preferred-location";
+          label.textContent = "Preferred relocation location";
+          const input = document.createElement("input");
+          input.setAttribute("aria-label", "Preferred relocation location");
+          label.append(input);
+          document.querySelector("#application").append(label);
+        });
+    </script>
+  </body>
+</html>

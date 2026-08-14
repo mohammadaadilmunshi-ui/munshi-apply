@@ -1,0 +1,45 @@
+import type { ExtensionRequest } from "@munshi-apply/contracts";
+import { scanDocument, snapshotFingerprint } from "./scanner";
+
+let previousFingerprint = "";
+let pending: number | undefined;
+
+async function publishSnapshot(): Promise<void> {
+  const page = scanDocument();
+  const fingerprint = snapshotFingerprint(page);
+  if (fingerprint === previousFingerprint) return;
+  previousFingerprint = fingerprint;
+  const request: ExtensionRequest = { type: "PAGE_SNAPSHOT", payload: page };
+  try {
+    await chrome.runtime.sendMessage(request);
+  } catch {
+    // The extension may have reloaded while the page remained open.
+  }
+}
+
+function scheduleScan(): void {
+  if (pending !== undefined) window.clearTimeout(pending);
+  pending = window.setTimeout(() => {
+    pending = undefined;
+    void publishSnapshot();
+  }, 150);
+}
+
+const observer = new MutationObserver(scheduleScan);
+observer.observe(document.documentElement, {
+  attributes: true,
+  childList: true,
+  subtree: true,
+  attributeFilter: [
+    "aria-expanded",
+    "aria-hidden",
+    "aria-invalid",
+    "disabled",
+    "hidden",
+    "style",
+  ],
+});
+
+window.addEventListener("popstate", scheduleScan);
+window.addEventListener("hashchange", scheduleScan);
+void publishSnapshot();

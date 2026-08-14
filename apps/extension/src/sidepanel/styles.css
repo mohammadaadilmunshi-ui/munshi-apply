@@ -1,0 +1,268 @@
+:root {
+  color: #0f1115;
+  background: #ededed;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  min-width: 320px;
+}
+button,
+input {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+}
+main {
+  min-height: 100vh;
+  padding-bottom: 32px;
+}
+.brand {
+  background: #1c2331;
+  color: #fff;
+  padding: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.brand h1 {
+  margin: 2px 0 0;
+  font-size: 24px;
+  letter-spacing: -0.04em;
+}
+.eyebrow {
+  margin: 0;
+  color: #b85c38;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+.status {
+  border: 1px solid #536074;
+  border-radius: 999px;
+  color: #d5dbe5;
+  font-size: 11px;
+  padding: 5px 9px;
+  text-transform: capitalize;
+}
+.status.healthy {
+  border-color: #4f8a6b;
+  color: #b7e3c9;
+}
+nav {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  background: #fff;
+  border-bottom: 1px solid #d3d5d8;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+nav button {
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: transparent;
+  color: #5c616a;
+  padding: 13px 6px 10px;
+  text-transform: capitalize;
+}
+nav button.active {
+  border-bottom-color: #b85c38;
+  color: #0f1115;
+  font-weight: 700;
+}
+section {
+  padding: 22px 20px;
+}
+h2 {
+  margin: 5px 0 8px;
+  font-size: 20px;
+  letter-spacing: -0.02em;
+}
+h3 {
+  margin: 24px 0 10px;
+  font-size: 14px;
+}
+p {
+  color: #555b63;
+  line-height: 1.55;
+}
+.section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.quiet {
+  background: transparent;
+  border: 1px solid #c7c9cd;
+  border-radius: 8px;
+  color: #30343b;
+  padding: 7px 10px;
+}
+.url {
+  margin-top: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 18px 0;
+}
+.metrics article {
+  background: #fff;
+  border: 1px solid #d8dade;
+  border-radius: 10px;
+  padding: 13px;
+}
+.metrics strong {
+  display: block;
+  font-size: 22px;
+}
+.metrics span {
+  color: #696e76;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+.question-list {
+  display: grid;
+  gap: 8px;
+}
+.question {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #d8dade;
+  border-radius: 10px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 12px;
+}
+.question strong {
+  display: block;
+  font-size: 13px;
+  line-height: 1.35;
+}
+.question div > span {
+  color: #777c84;
+  display: block;
+  font-size: 10px;
+  margin-top: 4px;
+  text-transform: uppercase;
+}
+.badge {
+  background: #e3eee8;
+  border-radius: 999px;
+  color: #276346;
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 5px 7px;
+  text-transform: uppercase;
+}
+.badge.review {
+  background: #f5e6df;
+  color: #8b3f24;
+}
+.safety-callout {
+  background: #1c2331;
+  border-radius: 10px;
+  color: #fff;
+  display: grid;
+  gap: 3px;
+  margin-top: 18px;
+  padding: 14px;
+}
+.safety-callout span {
+  color: #c7cfda;
+  font-size: 12px;
+}
+.form-grid {
+  display: grid;
+  gap: 12px;
+  margin: 18px 0;
+}
+.form-grid label span {
+  color: #555b63;
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 5px;
+  text-transform: capitalize;
+}
+.form-grid input {
+  background: #fff;
+  border: 1px solid #bfc2c7;
+  border-radius: 8px;
+  padding: 10px;
+  width: 100%;
+}
+.form-grid input:focus {
+  border-color: #b85c38;
+  outline: 2px solid #edd1c5;
+}
+.primary {
+  background: #b85c38;
+  border: 0;
+  border-radius: 8px;
+  color: #fff;
+  font-weight: 700;
+  padding: 10px 14px;
+}
+.diagnostics {
+  background: #fff;
+  border: 1px solid #d8dade;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.diagnostics div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px;
+}
+.diagnostics div + div {
+  border-top: 1px solid #e5e6e8;
+}
+.diagnostics dt {
+  color: #555b63;
+}
+.diagnostics dd {
+  font-weight: 700;
+  margin: 0;
+  text-transform: capitalize;
+}
+.notice {
+  background: #e3eee8;
+  color: #276346;
+  font-size: 12px;
+  padding: 9px 20px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  button {
+    transition:
+      background-color 120ms ease,
+      border-color 120ms ease,
+      color 120ms ease;
+  }
+}
