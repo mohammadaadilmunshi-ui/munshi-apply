@@ -1,4 +1,8 @@
-import type { MasterProfile, ProfileFact, Question } from "@munshi-apply/contracts";
+import type {
+  MasterProfile,
+  ProfileFact,
+  Question,
+} from "@munshi-apply/contracts";
 import { describe, expect, it } from "vitest";
 import { factKeyForSemanticType, resolveProfileAnswer } from "./resolver";
 
@@ -103,7 +107,9 @@ describe("resolveProfileAnswer", () => {
     );
 
     expect(result.state).toBe("REVIEW");
-    expect(result.reasons[0]).toContain("non-authoritative trust level GENERATED");
+    expect(result.reasons[0]).toContain(
+      "non-authoritative trust level GENERATED",
+    );
   });
 
   it("leaves unmapped written questions unresolved", () => {
