@@ -70,8 +70,8 @@ describe("AutoPilot page-state scanner", () => {
       <button type="button">Continue</button>
       <button type="button">Review application</button>
     `;
-    const actions = scanDocument().navigationCandidates.map((candidate) =>
-      candidate.action,
+    const actions = scanDocument().navigationCandidates.map(
+      (candidate) => candidate.action,
     );
     expect(actions).toEqual(["NEXT", "REVIEW"]);
   });

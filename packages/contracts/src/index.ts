@@ -197,7 +197,9 @@ export const securityCheckpointKinds = [
   "AUTHENTICATION",
 ] as const;
 export const SecurityCheckpointKindSchema = z.enum(securityCheckpointKinds);
-export type SecurityCheckpointKind = z.infer<typeof SecurityCheckpointKindSchema>;
+export type SecurityCheckpointKind = z.infer<
+  typeof SecurityCheckpointKindSchema
+>;
 
 export const navigationActions = [
   "NEXT",
@@ -326,5 +328,4 @@ export type ExtensionRequest =
   | { type: "PING" };
 
 export type ExtensionResponse =
-  | { ok: true; data?: unknown }
-  | { ok: false; error: string };
+  { ok: true; data?: unknown } | { ok: false; error: string };

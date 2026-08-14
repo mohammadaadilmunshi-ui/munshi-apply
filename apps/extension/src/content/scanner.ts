@@ -237,7 +237,9 @@ function controlledComboboxOptions(element: Element): string[] {
 
 function optionsFor(element: Element): string[] {
   if (element instanceof HTMLSelectElement) {
-    return Array.from(element.options).map((option) => compactText(option.text));
+    return Array.from(element.options).map((option) =>
+      compactText(option.text),
+    );
   }
   if (element instanceof HTMLInputElement && element.type === "radio") {
     return radioGroup(element).map(radioOptionLabel).filter(Boolean);
@@ -263,7 +265,10 @@ function validationState(element: Element): {
   if (ariaInvalid) {
     const describedBy = element.getAttribute("aria-describedby");
     const root = element.getRootNode();
-    if (describedBy && (root instanceof Document || root instanceof ShadowRoot)) {
+    if (
+      describedBy &&
+      (root instanceof Document || root instanceof ShadowRoot)
+    ) {
       ariaMessage = describedBy
         .split(/\s+/)
         .map((id) => {
@@ -423,7 +428,9 @@ function navigationActionFor(label: string): NavigationAction | null {
   return null;
 }
 
-function navigationCandidates(entries: readonly ControlEntry[]): NavigationCandidate[] {
+function navigationCandidates(
+  entries: readonly ControlEntry[],
+): NavigationCandidate[] {
   return entries.flatMap((entry) => {
     if (entry.control.kind !== "BUTTON") return [];
     const action = navigationActionFor(entry.control.label);
@@ -452,11 +459,17 @@ function detectSecurityCheckpoint(): SecurityCheckpointKind | null {
     document.querySelector(
       "iframe[src*='recaptcha'], iframe[src*='hcaptcha'], iframe[src*='challenges.cloudflare.com'], [class*='captcha' i], [id*='captcha' i]",
     ) ||
-    /\b(recaptcha|hcaptcha|captcha|verify you are human|human verification)\b/.test(body)
+    /\b(recaptcha|hcaptcha|captcha|verify you are human|human verification)\b/.test(
+      body,
+    )
   ) {
     return "CAPTCHA";
   }
-  if (/\b(identity verification|verify your identity|proof of identity)\b/.test(body)) {
+  if (
+    /\b(identity verification|verify your identity|proof of identity)\b/.test(
+      body,
+    )
+  ) {
     return "IDENTITY_VERIFICATION";
   }
   if (/\b(multi[- ]factor|two[- ]factor|2fa|authenticator app)\b/.test(body)) {
@@ -565,9 +578,10 @@ function inferApplicationState(input: {
   if (
     input.controls.some(
       (control) =>
-        control.kind === "FILE" && /\b(resume|résumé|cv)\b/i.test(control.label),
+        control.kind === "FILE" &&
+        /\b(resume|résumé|cv)\b/i.test(control.label),
     ) ||
-    /\b(upload (your )?(resume|résumé|cv)\b/.test(context)
+    /\b(upload (your )?(resume|résumé|cv))\b/.test(context)
   ) {
     return "RESUME";
   }
