@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   integrate-and-certify:
-    if: "${{ github.event.head_commit.message == 'chore: run autopilot review integration' }}"
+    if: "${{ github.event.head_commit.message == 'chore: rerun autopilot review certification' }}"
     runs-on: ubuntu-24.04
     steps:
       - name: Check out guarded PR branch
@@ -21,9 +21,10 @@ jobs:
 
       - name: Guard exact tranche parent
         run: |
-          test "$(git rev-parse HEAD^)" = "1a2425f4964646baddec4fe49608c281e4baf7b5"
+          test "$(git rev-parse HEAD^)" = "03f657bee07d65f1093d59bb625a185617b55504"
           test "$(git branch --show-current)" = "feat/v3-foundation-alignment"
           test -f scripts/autopilot-review-integration.py
+          test -f scripts/autopilot-review-hook-fix.py
 
       - name: Set up Node
         uses: actions/setup-node@v7
@@ -42,7 +43,9 @@ jobs:
           python -m pip install -e './apps/native-host[dev]'
 
       - name: Integrate runtime, review pipeline, and fill hardening
-        run: python scripts/autopilot-review-integration.py
+        run: |
+          python scripts/autopilot-review-integration.py
+          python scripts/autopilot-review-hook-fix.py
 
       - name: Apply authoritative formatting
         run: |
@@ -74,10 +77,11 @@ jobs:
       - name: Verify complete native tranche
         run: python -m pytest apps/native-host
 
-      - name: Remove temporary helper and integration script
+      - name: Remove temporary helpers
         run: |
           git rm -- .github/workflows/autopilot-review-integration-helper.yml
           git rm -- scripts/autopilot-review-integration.py
+          git rm -- scripts/autopilot-review-hook-fix.py
 
       - name: Commit exact certified tree
         run: |
