@@ -10,6 +10,153 @@ class ArchitectureStore:
     def __init__(self, database: Database) -> None:
         self.database = database
 
+    def save_profile_record(self, record: dict[str, Any]) -> None:
+        """Replace one repeatable profile record and its facts atomically."""
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                """
+                INSERT INTO profile_records (
+                    record_id, profile_id, kind, label, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(record_id) DO UPDATE SET
+                    profile_id = excluded.profile_id,
+                    kind = excluded.kind,
+                    label = excluded.label,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    record["record_id"],
+                    record["profile_id"],
+                    record["kind"],
+                    record["label"],
+                    record["created_at"],
+                    record["updated_at"],
+                ),
+            )
+            connection.execute(
+                "DELETE FROM profile_record_facts WHERE record_id = ?",
+                (record["record_id"],),
+            )
+            for fact in record.get("facts", []):
+                connection.execute(
+                    """
+                    INSERT INTO profile_record_facts (
+                        fact_id, record_id, key, value_json, category,
+                        trust_level, source, confirmed_at, updated_at, protected
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        fact["fact_id"],
+                        record["record_id"],
+                        fact["key"],
+                        canonical_json({"value": fact.get("value")}),
+                        fact["category"],
+                        fact["trust_level"],
+                        fact["source"],
+                        fact.get("confirmed_at"),
+                        fact["updated_at"],
+                        1 if fact.get("protected", False) else 0,
+                    ),
+                )
+
+    def profile_records(
+        self, profile_id: str, *, kind: str | None = None
+    ) -> list[dict[str, Any]]:
+        with self.database.connect() as connection:
+            if kind is None:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM profile_records
+                    WHERE profile_id = ?
+                    ORDER BY kind, updated_at DESC, record_id
+                    """,
+                    (profile_id,),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM profile_records
+                    WHERE profile_id = ? AND kind = ?
+                    ORDER BY updated_at DESC, record_id
+                    """,
+                    (profile_id, kind),
+                ).fetchall()
+
+            result: list[dict[str, Any]] = []
+            for row in rows:
+                item = dict(row)
+                fact_rows = connection.execute(
+                    """
+                    SELECT * FROM profile_record_facts
+                    WHERE record_id = ?
+                    ORDER BY key, fact_id
+                    """,
+                    (row["record_id"],),
+                ).fetchall()
+                facts: list[dict[str, Any]] = []
+                for fact_row in fact_rows:
+                    fact = dict(fact_row)
+                    fact["value"] = json.loads(fact.pop("value_json"))["value"]
+                    fact["protected"] = bool(fact["protected"])
+                    facts.append(fact)
+                item["facts"] = facts
+                result.append(item)
+        return result
+
+    def lock_resume_selection(self, selection: dict[str, Any]) -> bool:
+        """Freeze the exact résumé bytes selected for one application."""
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                """
+                SELECT * FROM application_resume_selections
+                WHERE application_id = ?
+                ORDER BY locked_at, selection_id
+                LIMIT 1
+                """,
+                (selection["application_id"],),
+            ).fetchone()
+            if existing is not None:
+                same_selection = (
+                    existing["resume_id"] == selection["resume_id"]
+                    and existing["resume_sha256"] == selection["resume_sha256"]
+                )
+                if same_selection:
+                    return False
+                raise ValueError(
+                    "Application résumé selection is already locked to different bytes"
+                )
+
+            connection.execute(
+                """
+                INSERT INTO application_resume_selections (
+                    selection_id, application_id, resume_id, resume_sha256, locked_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    selection["selection_id"],
+                    selection["application_id"],
+                    selection["resume_id"],
+                    selection["resume_sha256"],
+                    selection["locked_at"],
+                ),
+            )
+        return True
+
+    def locked_resume_selection(self, application_id: str) -> dict[str, Any] | None:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM application_resume_selections
+                WHERE application_id = ?
+                ORDER BY locked_at, selection_id
+                LIMIT 1
+                """,
+                (application_id,),
+            ).fetchone()
+        return None if row is None else dict(row)
+
     def save_checkpoint(self, checkpoint: dict[str, Any]) -> None:
         with self.database.connect() as connection:
             connection.execute(
@@ -28,8 +175,12 @@ class ArchitectureStore:
                     checkpoint["state"],
                     checkpoint.get("page_id"),
                     checkpoint["page_fingerprint"],
-                    canonical_json({"items": checkpoint.get("completed_control_ids", [])}),
-                    canonical_json({"items": checkpoint.get("pending_control_ids", [])}),
+                    canonical_json(
+                        {"items": checkpoint.get("completed_control_ids", [])}
+                    ),
+                    canonical_json(
+                        {"items": checkpoint.get("pending_control_ids", [])}
+                    ),
                     checkpoint.get("selected_resume_id"),
                     checkpoint.get("selected_resume_sha256"),
                     checkpoint["created_at"],
