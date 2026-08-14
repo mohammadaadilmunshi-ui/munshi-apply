@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  assembleEvidenceContext,
-  validateGeneratedDraft,
-} from "./context";
+import { assembleEvidenceContext, validateGeneratedDraft } from "./context";
 import type { EvidenceContext, EvidenceGraph } from "./evidence";
 
 const evidence: EvidenceContext = {
@@ -147,9 +144,7 @@ describe("validateGeneratedDraft", () => {
     const result = validateGeneratedDraft(
       {
         text: "one two three four",
-        claims: [
-          { claimId: "claim-1", text: "claim", evidenceIds: ["e-1"] },
-        ],
+        claims: [{ claimId: "claim-1", text: "claim", evidenceIds: ["e-1"] }],
       },
       context,
       { ...graph, edges: [] },

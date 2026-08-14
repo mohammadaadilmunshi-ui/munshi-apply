@@ -146,7 +146,8 @@ export function evaluateSalaryRanges(
     return {
       state: "UNRESOLVED",
       overlaps: null,
-      reason: "Candidate and employer salary ranges are both required for comparison",
+      reason:
+        "Candidate and employer salary ranges are both required for comparison",
     };
   }
   if (
@@ -157,7 +158,10 @@ export function evaluateSalaryRanges(
   ) {
     throw new Error("Salary ranges must contain non-negative finite values");
   }
-  if (candidate.currency !== employer.currency || candidate.period !== employer.period) {
+  if (
+    candidate.currency !== employer.currency ||
+    candidate.period !== employer.period
+  ) {
     return {
       state: "REVIEW",
       overlaps: null,

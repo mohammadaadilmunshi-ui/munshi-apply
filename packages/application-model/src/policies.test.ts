@@ -137,9 +137,7 @@ describe("summarizePreflightGate", () => {
     ).toMatchObject({ state: "REVIEW", canAct: false });
 
     expect(
-      summarizePreflightGate([
-        { id: "a", state: "UNRESOLVED" },
-      ]),
+      summarizePreflightGate([{ id: "a", state: "UNRESOLVED" }]),
     ).toMatchObject({ state: "BLOCKED", canAct: false });
   });
 });
