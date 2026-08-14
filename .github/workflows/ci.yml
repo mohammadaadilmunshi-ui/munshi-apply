@@ -12,14 +12,14 @@ jobs:
   extension:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
       - run: npm ci
       - run: npm run check
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: munshi-apply-edge-unpacked
           path: apps/extension/dist
@@ -28,8 +28,8 @@ jobs:
   native-host:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -40,13 +40,13 @@ jobs:
   repository-safety:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Reject committed local data
         shell: bash
         run: |
-          forbidden="$(git ls-files '*.sqlite' '*.db' '*.env' '*.pdf' 'backups/**' 'reports/generated/**')"
+          forbidden="$(git ls-files '*.sqlite' '*.db' '*.env' '*.pdf' 'backups/**' 'reports/generated/**' | grep -v '^backups/\.gitkeep$' || true)"
           if [ -n "$forbidden" ]; then
             echo "Forbidden local or personal artifacts are tracked:"
             echo "$forbidden"
