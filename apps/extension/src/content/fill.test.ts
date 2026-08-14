@@ -95,4 +95,33 @@ describe("guarded field filling", () => {
     );
     expect(result[0]?.status).toBe("FILLED");
   });
+
+  it("selects the requested option in a radio group", () => {
+    document.body.innerHTML = `
+      <fieldset>
+        <legend>Will you now or in the future require sponsorship?</legend>
+        <label><input type="radio" name="sponsor" value="Yes"> Yes</label>
+        <label><input type="radio" name="sponsor" value="No"> No</label>
+      </fieldset>
+    `;
+    const question = scanDocument().questions[0];
+    expect(question).toBeDefined();
+
+    const result = applyFillInstructions([
+      {
+        controlId: question!.controlId,
+        frameId: 0,
+        value: "No",
+        sensitive: true,
+        approved: true,
+      },
+    ]);
+
+    const radios = Array.from(
+      document.querySelectorAll<HTMLInputElement>("input[type='radio']"),
+    );
+    expect(radios[0]?.checked).toBe(false);
+    expect(radios[1]?.checked).toBe(true);
+    expect(result[0]?.status).toBe("FILLED");
+  });
 });

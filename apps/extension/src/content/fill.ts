@@ -10,13 +10,86 @@ function dispatchValueEvents(element: HTMLElement): void {
 function setNativeValue(
   element: HTMLInputElement | HTMLTextAreaElement,
   value: string,
-) {
+): void {
   const prototype =
     element instanceof HTMLInputElement
       ? HTMLInputElement.prototype
       : HTMLTextAreaElement.prototype;
   const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
   descriptor?.set?.call(element, value);
+}
+
+function setNativeChecked(element: HTMLInputElement, checked: boolean): void {
+  const descriptor = Object.getOwnPropertyDescriptor(
+    HTMLInputElement.prototype,
+    "checked",
+  );
+  descriptor?.set?.call(element, checked);
+}
+
+function compactText(value: string | null | undefined): string {
+  return (value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function normalized(value: string): string {
+  return compactText(value).toLowerCase();
+}
+
+function inputLabel(element: HTMLInputElement): string {
+  return Array.from(element.labels ?? [])
+    .map((label) => compactText(label.textContent))
+    .filter(Boolean)
+    .join(" ");
+}
+
+function radioCandidates(element: HTMLInputElement): HTMLInputElement[] {
+  const root = element.getRootNode();
+  const candidates =
+    root instanceof Document || root instanceof ShadowRoot
+      ? Array.from(root.querySelectorAll("input[type='radio']"))
+      : [];
+  if (!element.name) return [element];
+  return candidates.filter(
+    (candidate): candidate is HTMLInputElement =>
+      candidate instanceof HTMLInputElement && candidate.name === element.name,
+  );
+}
+
+function radioCandidateValues(element: HTMLInputElement): string[] {
+  return [
+    normalized(element.value),
+    normalized(inputLabel(element)),
+    normalized(element.getAttribute("aria-label") ?? ""),
+  ].filter(Boolean);
+}
+
+function fillRadio(element: HTMLInputElement, value: string): boolean {
+  const requested = normalized(value);
+  const candidates = radioCandidates(element);
+  let match = candidates.find((candidate) =>
+    radioCandidateValues(candidate).includes(requested),
+  );
+
+  if (!match && ["true", "yes", "1", "checked"].includes(requested)) {
+    match = candidates.find((candidate) =>
+      radioCandidateValues(candidate).some((candidateValue) =>
+        ["true", "yes", "1"].includes(candidateValue),
+      ),
+    );
+  }
+  if (!match && ["false", "no", "0", "unchecked"].includes(requested)) {
+    match = candidates.find((candidate) =>
+      radioCandidateValues(candidate).some((candidateValue) =>
+        ["false", "no", "0"].includes(candidateValue),
+      ),
+    );
+  }
+  if (!match) return false;
+
+  match.focus();
+  setNativeChecked(match, true);
+  dispatchValueEvents(match);
+  return match.checked;
 }
 
 function fillElement(element: Element, value: string): boolean {
@@ -26,41 +99,44 @@ function fillElement(element: Element, value: string): boolean {
     ) {
       return false;
     }
-    if (element.type === "checkbox" || element.type === "radio") {
+    if (element.type === "radio") {
+      return fillRadio(element, value);
+    }
+    if (element.type === "checkbox") {
       const shouldCheck = ["true", "yes", "1", "checked"].includes(
-        value.trim().toLowerCase(),
+        normalized(value),
       );
-      const descriptor = Object.getOwnPropertyDescriptor(
-        HTMLInputElement.prototype,
-        "checked",
-      );
-      descriptor?.set?.call(element, shouldCheck);
+      element.focus();
+      setNativeChecked(element, shouldCheck);
       dispatchValueEvents(element);
       return element.checked === shouldCheck;
-    } else {
-      setNativeValue(element, value);
-      dispatchValueEvents(element);
-      return element.value === value;
     }
+    element.focus();
+    setNativeValue(element, value);
+    dispatchValueEvents(element);
+    return element.value === value;
   }
   if (element instanceof HTMLTextAreaElement) {
+    element.focus();
     setNativeValue(element, value);
     dispatchValueEvents(element);
     return element.value === value;
   }
   if (element instanceof HTMLSelectElement) {
-    const normalized = value.trim().toLowerCase();
+    const requested = normalized(value);
     const option = Array.from(element.options).find(
       (candidate) =>
-        candidate.value.trim().toLowerCase() === normalized ||
-        candidate.text.trim().toLowerCase() === normalized,
+        normalized(candidate.value) === requested ||
+        normalized(candidate.text) === requested,
     );
     if (!option) return false;
+    element.focus();
     element.value = option.value;
     dispatchValueEvents(element);
     return element.value === option.value;
   }
   if (element instanceof HTMLElement && element.isContentEditable) {
+    element.focus();
     element.textContent = value;
     dispatchValueEvents(element);
     return element.textContent === value;
@@ -77,7 +153,9 @@ export function applyFillInstructions(
       return {
         controlId: instruction.controlId,
         status: "SKIPPED",
-        reason: "Answer was not approved",
+        reason: instruction.sensitive
+          ? "Sensitive answer requires explicit approval"
+          : "Answer was not approved",
       };
     }
     const element = elements.get(instruction.controlId);
@@ -86,13 +164,6 @@ export function applyFillInstructions(
         controlId: instruction.controlId,
         status: "FAILED",
         reason: "Visible control changed or is no longer available",
-      };
-    }
-    if (instruction.sensitive && !instruction.approved) {
-      return {
-        controlId: instruction.controlId,
-        status: "SKIPPED",
-        reason: "Sensitive answer requires explicit approval",
       };
     }
     const filled = fillElement(element, instruction.value);

@@ -29,6 +29,14 @@ function scheduleScan(): void {
   }, 150);
 }
 
+function wrapHistoryMethod(method: "pushState" | "replaceState"): void {
+  const original = history[method].bind(history);
+  history[method] = ((...args: Parameters<History["pushState"]>) => {
+    original(...args);
+    scheduleScan();
+  }) as History["pushState"];
+}
+
 const observer = new MutationObserver(scheduleScan);
 observer.observe(document.documentElement, {
   attributes: true,
@@ -38,14 +46,25 @@ observer.observe(document.documentElement, {
     "aria-expanded",
     "aria-hidden",
     "aria-invalid",
+    "aria-label",
+    "aria-labelledby",
+    "aria-required",
+    "class",
     "disabled",
     "hidden",
+    "name",
+    "placeholder",
+    "required",
     "style",
   ],
 });
 
+document.addEventListener("input", scheduleScan, true);
+document.addEventListener("change", scheduleScan, true);
 window.addEventListener("popstate", scheduleScan);
 window.addEventListener("hashchange", scheduleScan);
+wrapHistoryMethod("pushState");
+wrapHistoryMethod("replaceState");
 void publishSnapshot();
 
 chrome.runtime.onMessage.addListener(

@@ -68,6 +68,39 @@ function hash(value: string): string {
   return (result >>> 0).toString(36);
 }
 
+function inputLabel(element: HTMLInputElement): string {
+  return Array.from(element.labels ?? [])
+    .map((label) => compactText(label.textContent))
+    .filter(Boolean)
+    .join(" ");
+}
+
+function radioGroup(element: HTMLInputElement): HTMLInputElement[] {
+  const root = element.getRootNode();
+  const candidates =
+    root instanceof Document || root instanceof ShadowRoot
+      ? Array.from(root.querySelectorAll("input[type='radio']"))
+      : [];
+  if (!element.name) return [element];
+  return candidates.filter(
+    (candidate): candidate is HTMLInputElement =>
+      candidate instanceof HTMLInputElement && candidate.name === element.name,
+  );
+}
+
+function radioOptionLabel(element: HTMLInputElement): string {
+  return (
+    inputLabel(element) ||
+    compactText(element.getAttribute("aria-label")) ||
+    compactText(element.value)
+  );
+}
+
+function groupLegend(element: Element): string {
+  const fieldset = element.closest("fieldset");
+  return compactText(fieldset?.querySelector(":scope > legend")?.textContent);
+}
+
 function labelFor(element: Element): string {
   const ariaLabel = compactText(element.getAttribute("aria-label"));
   if (ariaLabel) return ariaLabel;
@@ -92,10 +125,11 @@ function labelFor(element: Element): string {
   }
 
   if (element instanceof HTMLInputElement) {
-    const labels = Array.from(element.labels ?? [])
-      .map((label) => compactText(label.textContent))
-      .filter(Boolean)
-      .join(" ");
+    if (element.type === "radio") {
+      const legend = groupLegend(element);
+      if (legend) return legend;
+    }
+    const labels = inputLabel(element);
     if (labels) return labels;
   }
 
@@ -144,10 +178,36 @@ function optionsFor(element: Element): string[] {
       compactText(option.text),
     );
   }
+  if (element instanceof HTMLInputElement && element.type === "radio") {
+    return radioGroup(element).map(radioOptionLabel).filter(Boolean);
+  }
   return [];
 }
 
-function createControl(element: Element, index: number): Control | null {
+function stableControlSignature(element: Element): string {
+  const url = new URL(window.location.href);
+  const type = element instanceof HTMLInputElement ? element.type : "";
+  const optionValue =
+    element instanceof HTMLInputElement &&
+    (element.type === "radio" || element.type === "checkbox")
+      ? element.value
+      : "";
+  return [
+    url.origin,
+    url.pathname,
+    element.tagName,
+    element.id,
+    compactText(element.getAttribute("name")),
+    type,
+    labelFor(element),
+    compactText(element.getAttribute("placeholder")),
+    compactText(element.getAttribute("aria-label")),
+    compactText(element.getAttribute("autocomplete")),
+    compactText(optionValue),
+  ].join("|");
+}
+
+function createControl(element: Element): Control | null {
   if (!isVisible(element)) return null;
   if (
     element instanceof HTMLInputElement &&
@@ -160,18 +220,9 @@ function createControl(element: Element, index: number): Control | null {
   const label = labelFor(element);
   const placeholder = compactText(element.getAttribute("placeholder"));
   const ariaLabel = compactText(element.getAttribute("aria-label"));
-  const signature = [
-    window.location.href,
-    element.tagName,
-    element.id,
-    name,
-    label,
-    placeholder,
-    index,
-  ].join("|");
 
   return {
-    controlId: `ctl-${hash(signature)}`,
+    controlId: `ctl-${hash(stableControlSignature(element))}`,
     frameId: 0,
     kind: kindFor(element),
     tagName: element.tagName.toLowerCase(),
@@ -191,6 +242,27 @@ function createControl(element: Element, index: number): Control | null {
   };
 }
 
+type ControlEntry = { element: Element; control: Control };
+
+function scanControlEntries(): ControlEntry[] {
+  const duplicateCounts = new Map<string, number>();
+  const entries: ControlEntry[] = [];
+  for (const element of collectInteractiveElements(document)) {
+    const control = createControl(element);
+    if (!control) continue;
+    const count = duplicateCounts.get(control.controlId) ?? 0;
+    duplicateCounts.set(control.controlId, count + 1);
+    entries.push({
+      element,
+      control:
+        count === 0
+          ? control
+          : { ...control, controlId: `${control.controlId}-${count + 1}` },
+    });
+  }
+  return entries;
+}
+
 function createQuestion(control: Control): Question | null {
   if (control.kind === "BUTTON") return null;
   const rawText =
@@ -208,13 +280,30 @@ function createQuestion(control: Control): Question | null {
   };
 }
 
+function questionIdentity(entry: ControlEntry, question: Question): string {
+  if (
+    entry.control.kind === "RADIO" &&
+    entry.element instanceof HTMLInputElement &&
+    entry.element.name
+  ) {
+    return `radio|${entry.element.name}|${question.rawText}`;
+  }
+  return entry.control.controlId;
+}
+
 export function scanDocument(): ApplicationPage {
-  const controls = collectInteractiveElements(document)
-    .map(createControl)
-    .filter((control): control is Control => control !== null);
-  const questions = controls
-    .map(createQuestion)
-    .filter((question): question is Question => question !== null);
+  const entries = scanControlEntries();
+  const controls = entries.map((entry) => entry.control);
+  const questions: Question[] = [];
+  const seenQuestions = new Set<string>();
+  for (const entry of entries) {
+    const question = createQuestion(entry.control);
+    if (!question) continue;
+    const identity = questionIdentity(entry, question);
+    if (seenQuestions.has(identity)) continue;
+    seenQuestions.add(identity);
+    questions.push(question);
+  }
   const url = new URL(window.location.href);
   const pageSignature = `${url.origin}${url.pathname}|${document.title}`;
 
@@ -232,12 +321,9 @@ export function scanDocument(): ApplicationPage {
 }
 
 export function controlElementMap(): Map<string, Element> {
-  const result = new Map<string, Element>();
-  collectInteractiveElements(document).forEach((element, index) => {
-    const control = createControl(element, index);
-    if (control) result.set(control.controlId, element);
-  });
-  return result;
+  return new Map(
+    scanControlEntries().map((entry) => [entry.control.controlId, entry.element]),
+  );
 }
 
 export function snapshotFingerprint(page: ApplicationPage): string {

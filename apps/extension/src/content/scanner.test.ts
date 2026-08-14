@@ -97,4 +97,42 @@ describe("universal page scanner", () => {
       semanticType: "PORTFOLIO",
     });
   });
+
+  it("keeps control identity stable when an unrelated field is inserted", () => {
+    document.body.innerHTML = `
+      <label for="email">Email address</label>
+      <input id="email" name="email" type="email">
+    `;
+    const firstId = scanDocument().controls[0]?.controlId;
+
+    document.body.insertAdjacentHTML(
+      "afterbegin",
+      `<label for="phone">Phone</label><input id="phone" name="phone" type="tel">`,
+    );
+    const email = scanDocument().controls.find(
+      (control) => control.name === "email",
+    );
+
+    expect(email?.controlId).toBe(firstId);
+  });
+
+  it("models a radio group as one question with visible options", () => {
+    document.body.innerHTML = `
+      <fieldset>
+        <legend>Will you now or in the future require sponsorship?</legend>
+        <label><input type="radio" name="sponsor" value="Yes"> Yes</label>
+        <label><input type="radio" name="sponsor" value="No"> No</label>
+      </fieldset>
+    `;
+
+    const result = scanDocument();
+    expect(result.controls).toHaveLength(2);
+    expect(result.questions).toHaveLength(1);
+    expect(result.questions[0]).toMatchObject({
+      semanticType: "SPONSORSHIP_FUTURE",
+      sensitive: true,
+      requiresReview: true,
+    });
+    expect(result.controls[0]?.options).toEqual(["Yes", "No"]);
+  });
 });
