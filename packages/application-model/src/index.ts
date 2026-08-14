@@ -4,4 +4,5 @@ export * from "./context";
 export * from "./evidence";
 export * from "./policies";
 export * from "./resolver";
+export * from "./router";
 export * from "./transitions";
