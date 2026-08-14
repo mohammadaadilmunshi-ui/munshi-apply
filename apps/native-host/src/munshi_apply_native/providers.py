@@ -119,6 +119,25 @@ def _input_text(request: ProviderGenerationRequest) -> str:
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
+def _validate_response_status(payload: dict[str, object]) -> None:
+    status = payload.get("status")
+    if status == "completed":
+        return
+    if status == "failed":
+        error = payload.get("error")
+        if isinstance(error, dict) and isinstance(error.get("message"), str):
+            raise ValueError("OpenAI generation failed: response status is failed")
+        raise ValueError("OpenAI generation failed: response status is failed")
+    if status == "incomplete":
+        details = payload.get("incomplete_details")
+        if isinstance(details, dict) and isinstance(details.get("reason"), str):
+            raise ValueError(
+                f"OpenAI generation is incomplete ({details['reason']})"
+            )
+        raise ValueError("OpenAI generation is incomplete")
+    raise ValueError("OpenAI response is not completed")
+
+
 def _extract_output_text(payload: dict[str, object]) -> str:
     output = payload.get("output")
     if not isinstance(output, list):
@@ -131,11 +150,11 @@ def _extract_output_text(payload: dict[str, object]) -> str:
         if not isinstance(content, list):
             continue
         for part in content:
-            if (
-                isinstance(part, dict)
-                and part.get("type") == "output_text"
-                and isinstance(part.get("text"), str)
-            ):
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") == "refusal":
+                raise ValueError("OpenAI refused the generation request")
+            if part.get("type") == "output_text" and isinstance(part.get("text"), str):
                 texts.append(part["text"])
     if not texts:
         raise ValueError("OpenAI response does not contain structured output text")
@@ -254,6 +273,7 @@ class OpenAIResponsesProvider:
             },
         )
         payload = self._transport(http_request, self._timeout_seconds)
+        _validate_response_status(payload)
         response_id = payload.get("id")
         response_model = payload.get("model")
         if not isinstance(response_id, str) or not response_id:
