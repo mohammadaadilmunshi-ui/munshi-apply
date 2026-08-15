@@ -34,6 +34,8 @@ jobs:
         run: npm ci
       - name: Apply profile save acknowledgement repair
         run: python3 scripts/fix-profile-save-ack.py
+      - name: Format patched product files
+        run: npx prettier --write apps/extension/src/background/service-worker.ts apps/extension/src/background/profile-save-ack.test.ts
       - name: Verify extension
         run: npm run check
       - name: Verify production artifact
