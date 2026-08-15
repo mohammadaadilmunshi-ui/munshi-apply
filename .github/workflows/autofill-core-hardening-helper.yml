@@ -96,13 +96,13 @@ jobs:
           if fill_block.count(anchor) != 1:
               raise SystemExit("fill block anchor changed unexpectedly")
           fill_block = fill_block.replace(
-              anchor,
-              '      case "FILL": {\n        const fillControlId = plan.action.instruction.controlId;\n        const armed =',
-              1,
+              "plan.action.instruction",
+              "fillInstruction",
           )
           fill_block = fill_block.replace(
-              "plan.action.instruction.controlId",
-              "fillControlId",
+              anchor,
+              '      case "FILL": {\n        const fillInstruction = plan.action.instruction;\n        const armed =',
+              1,
           )
           controller_path.write_text(controller[:start] + fill_block + controller[end:])
 
