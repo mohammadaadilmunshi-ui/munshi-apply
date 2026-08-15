@@ -127,7 +127,7 @@ const rules: readonly Rule[] = [
   {
     id: "future-sponsorship",
     pattern:
-      /\b(now or in the future|in the future).{0,50}\b(sponsor|sponsorship)\b/i,
+      /(?:\b(?:now or in the future|in the future)\b.{0,90}\b(?:sponsor|sponsorship)\b|\b(?:sponsor|sponsorship)\b.{0,90}\b(?:now or in the future|in the future)\b)/i,
     semanticType: "SPONSORSHIP_FUTURE",
     sensitive: true,
     highRisk: true,
@@ -162,7 +162,8 @@ const rules: readonly Rule[] = [
   },
   {
     id: "start-date",
-    pattern: /\b(start|available) date\b/i,
+    pattern:
+      /\b(start date|available date|earliest (?:possible )?start date|available to start|when (?:would|can|could|are) you (?:be )?available to start)\b/i,
     semanticType: "START_DATE",
   },
   {
@@ -246,6 +247,24 @@ const rules: readonly Rule[] = [
     id: "why-company",
     pattern: /\bwhy (this|our) (company|organization)\b/i,
     semanticType: "WHY_COMPANY",
+  },
+  {
+    id: "role-understanding",
+    pattern:
+      /(?:\bhow would you describe\b.{0,80}\b(?:role|position|recruitment|sales)\b.{0,80}\b(?:responsibilit|duties)\w*\b|\bwhat are the key responsibilit\w*\b.{0,80}\b(?:role|position|recruitment|sales)\b)/i,
+    semanticType: "WHY_ROLE",
+  },
+  {
+    id: "career-motivation",
+    pattern:
+      /\bwhat motivates you\b.{0,100}\b(?:career|recruitment|recruiting|sales|talent acquisition)\b/i,
+    semanticType: "CAREER_GOALS",
+  },
+  {
+    id: "first-recruitment-role",
+    pattern:
+      /(?:\bfirst experience\b.{0,100}\b(?:professional )?(?:recruitment|recruiting|recruiter|talent acquisition)\b|\bfirst\b.{0,80}\bprofessional recruitment role\b)/i,
+    semanticType: "RELEVANT_EXPERIENCE",
   },
   {
     id: "why-role",

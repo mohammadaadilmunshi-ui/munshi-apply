@@ -107,9 +107,63 @@ const trustedFactLevels = new Set<TrustLevel>([
   "DOCUMENT_CONFIRMED",
 ]);
 
+const confirmedProtectedAutofillTypes = new Set<SemanticType>([
+  "WORK_AUTHORIZATION_CURRENT",
+  "SPONSORSHIP_CURRENT",
+  "SPONSORSHIP_FUTURE",
+  "IMMIGRATION_ASSISTANCE",
+]);
+
+const recruitmentEvidencePattern =
+  /\b(recruit(?:er|ing|ment)?|talent acquisition|candidate sourcing|candidate screening|sourcing|interview(?:ing|s)?)\b/i;
+
 function stringifyFactValue(value: ProfileFact["value"]): string {
   if (Array.isArray(value)) return value.join(", ");
   return String(value);
+}
+
+function factIsAuthoritative(fact: ProfileFact): boolean {
+  return trustedFactLevels.has(fact.trustLevel);
+}
+
+function factIsExplicitlyUsable(fact: ProfileFact): boolean {
+  return factIsAuthoritative(fact) && (!fact.protected || Boolean(fact.confirmedAt));
+}
+
+function unresolved(
+  question: Question,
+  sourceKey: string | null,
+  reason: string,
+): AnswerResolution {
+  return {
+    state: "UNRESOLVED",
+    value: null,
+    sourceFactId: null,
+    sourceKey,
+    trustLevel: null,
+    sensitive: question.sensitive,
+    protected: false,
+    confidence: question.confidence,
+    reasons: [reason],
+  };
+}
+
+function reviewWithoutFill(
+  question: Question,
+  fact: ProfileFact,
+  reason: string,
+): AnswerResolution {
+  return {
+    state: "REVIEW",
+    value: null,
+    sourceFactId: fact.factId,
+    sourceKey: fact.key,
+    trustLevel: fact.trustLevel,
+    sensitive: question.sensitive || fact.protected,
+    protected: fact.protected,
+    confidence: question.confidence,
+    reasons: [reason],
+  };
 }
 
 export function factKeyForSemanticType(
@@ -135,24 +189,171 @@ function recordFactForSemanticType(
     .find((fact): fact is ProfileFact => fact !== undefined);
 }
 
+function startAvailabilityDateFromQuestion(rawText: string): number | null {
+  const match = rawText.match(/\bavailable to start on\s+(.+?)(?:\?|\*|$)/i);
+  if (!match?.[1]) return null;
+  const timestamp = Date.parse(match[1].trim());
+  return Number.isNaN(timestamp) ? null : timestamp;
+}
+
+function resolveBooleanAvailabilityDate(
+  question: Question,
+  profile: MasterProfile | ProfileSnapshot,
+): AnswerResolution | null {
+  if (question.semanticType !== "START_DATE") return null;
+  const requestedDate = startAvailabilityDateFromQuestion(question.rawText);
+  if (requestedDate === null) return null;
+
+  const fact = profile.facts.find(
+    (candidate) => candidate.key === "earliest_start_date",
+  );
+  if (!fact) {
+    return unresolved(
+      question,
+      "earliest_start_date",
+      "Profile fact earliest_start_date is not available",
+    );
+  }
+  if (!factIsAuthoritative(fact)) {
+    return reviewWithoutFill(
+      question,
+      fact,
+      `Profile fact ${fact.key} has non-authoritative trust level ${fact.trustLevel}`,
+    );
+  }
+  if (fact.protected && !fact.confirmedAt) {
+    return reviewWithoutFill(
+      question,
+      fact,
+      "Protected start-date fact has not been explicitly confirmed",
+    );
+  }
+
+  const earliestDate = Date.parse(stringifyFactValue(fact.value).trim());
+  if (Number.isNaN(earliestDate)) {
+    return unresolved(
+      question,
+      fact.key,
+      "Earliest start date is not a parseable date",
+    );
+  }
+
+  return {
+    state: "READY",
+    value: earliestDate <= requestedDate ? "Yes" : "No",
+    sourceFactId: fact.factId,
+    sourceKey: fact.key,
+    trustLevel: fact.trustLevel,
+    sensitive: false,
+    protected: fact.protected,
+    confidence: Math.min(
+      question.confidence,
+      fact.trustLevel === "VERIFIED" ? 1 : 0.96,
+    ),
+    reasons: [
+      "Answer derived deterministically from the explicitly saved earliest start date",
+    ],
+  };
+}
+
+function isFirstRecruitmentRoleQuestion(rawText: string): boolean {
+  return /(?:\bfirst experience\b.{0,100}\b(?:professional )?(?:recruitment|recruiting|recruiter|talent acquisition)\b|\bfirst\b.{0,80}\bprofessional recruitment role\b)/i.test(
+    rawText,
+  );
+}
+
+function recruitmentEvidence(
+  profile: MasterProfile | ProfileSnapshot,
+): ProfileFact | undefined {
+  const legacyCandidates = profile.facts.filter((fact) =>
+    ["current_title", "employment_summary", "job_title", "responsibilities"].includes(
+      fact.key,
+    ),
+  );
+  const recordCandidates =
+    "records" in profile
+      ? [...profile.records]
+          .filter((record) => record.kind === "EMPLOYMENT")
+          .sort(
+            (left, right) =>
+              left.sortOrder - right.sortOrder ||
+              left.recordId.localeCompare(right.recordId),
+          )
+          .flatMap((record) =>
+            record.facts.filter((fact) =>
+              ["job_title", "responsibilities", "achievements"].includes(
+                fact.key,
+              ),
+            ),
+          )
+      : [];
+
+  return [...recordCandidates, ...legacyCandidates].find(
+    (fact) =>
+      factIsExplicitlyUsable(fact) &&
+      recruitmentEvidencePattern.test(stringifyFactValue(fact.value)),
+  );
+}
+
+function resolveFirstRecruitmentRole(
+  question: Question,
+  profile: MasterProfile | ProfileSnapshot,
+): AnswerResolution | null {
+  if (
+    question.semanticType !== "RELEVANT_EXPERIENCE" ||
+    !isFirstRecruitmentRoleQuestion(question.rawText)
+  ) {
+    return null;
+  }
+
+  const evidence = recruitmentEvidence(profile);
+  if (!evidence) {
+    return unresolved(
+      question,
+      "employment_history",
+      "No authoritative prior recruitment-work evidence is available; MUNSHI will not assume this is the first recruitment role",
+    );
+  }
+
+  return {
+    state: "READY",
+    value: "No",
+    sourceFactId: evidence.factId,
+    sourceKey: evidence.key,
+    trustLevel: evidence.trustLevel,
+    sensitive: false,
+    protected: evidence.protected,
+    confidence: Math.min(
+      question.confidence,
+      evidence.trustLevel === "VERIFIED" ? 1 : 0.96,
+    ),
+    reasons: [
+      "Confirmed prior recruitment experience exists in the employment profile",
+    ],
+  };
+}
+
 export function resolveProfileAnswer(
   question: Question,
   profile: MasterProfile | ProfileSnapshot,
 ): AnswerResolution {
+  const availabilityResolution = resolveBooleanAvailabilityDate(
+    question,
+    profile,
+  );
+  if (availabilityResolution) return availabilityResolution;
+
+  const recruitmentResolution = resolveFirstRecruitmentRole(question, profile);
+  if (recruitmentResolution) return recruitmentResolution;
+
   const key = factKeyForSemanticType(question.semanticType);
   const recordMapping = semanticRecordFact[question.semanticType];
   if (!key && !recordMapping) {
-    return {
-      state: "UNRESOLVED",
-      value: null,
-      sourceFactId: null,
-      sourceKey: null,
-      trustLevel: null,
-      sensitive: question.sensitive,
-      protected: false,
-      confidence: question.confidence,
-      reasons: ["No deterministic profile fact is mapped to this question"],
-    };
+    return unresolved(
+      question,
+      null,
+      "No deterministic profile fact is mapped to this question",
+    );
   }
 
   const fact =
@@ -160,17 +361,11 @@ export function resolveProfileAnswer(
     profile.facts.find((candidate) => candidate.key === key);
   const sourceKey = fact?.key ?? recordMapping?.key ?? key;
   if (!fact) {
-    return {
-      state: "UNRESOLVED",
-      value: null,
-      sourceFactId: null,
+    return unresolved(
+      question,
       sourceKey,
-      trustLevel: null,
-      sensitive: question.sensitive,
-      protected: false,
-      confidence: question.confidence,
-      reasons: [`Profile fact ${sourceKey} is not available`],
-    };
+      `Profile fact ${sourceKey} is not available`,
+    );
   }
 
   const value = stringifyFactValue(fact.value).trim();
@@ -188,7 +383,7 @@ export function resolveProfileAnswer(
     };
   }
 
-  if (!trustedFactLevels.has(fact.trustLevel)) {
+  if (!factIsAuthoritative(fact)) {
     return {
       state: "REVIEW",
       value,
@@ -204,17 +399,31 @@ export function resolveProfileAnswer(
     };
   }
 
+  const confirmedProtectedAutofill =
+    fact.protected &&
+    Boolean(fact.confirmedAt) &&
+    confirmedProtectedAutofillTypes.has(question.semanticType);
+
   const reasons: string[] = [];
-  if (question.requiresReview) reasons.push("Question policy requires review");
-  if (question.sensitive) reasons.push("Question is sensitive");
+  if (question.requiresReview && !confirmedProtectedAutofill) {
+    reasons.push("Question policy requires review");
+  }
+  if (question.sensitive && !confirmedProtectedAutofill) {
+    reasons.push("Question is sensitive");
+  }
   if (fact.protected) reasons.push("Source fact is protected");
   if (fact.protected && !fact.confirmedAt) {
     reasons.push("Protected source fact has not been explicitly confirmed");
   }
+  if (confirmedProtectedAutofill) {
+    reasons.push(
+      "Explicit owner confirmation permits deterministic protected-fact autofill for this authorization/sponsorship question",
+    );
+  }
 
   const requiresReview =
-    question.requiresReview ||
-    question.sensitive ||
+    (!confirmedProtectedAutofill &&
+      (question.requiresReview || question.sensitive)) ||
     (fact.protected && !fact.confirmedAt);
 
   return {

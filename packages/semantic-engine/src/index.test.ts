@@ -18,6 +18,16 @@ describe("classifyQuestion", () => {
       sensitive: true,
       requiresReview: true,
     });
+    expect(
+      classifyQuestion(
+        "Would you require any Visa sponsorship now or in the future (this includes OPT for F1 students, J1 visas, or M1 visas)?",
+      ),
+    ).toMatchObject({
+      semanticType: "SPONSORSHIP_FUTURE",
+      sensitive: true,
+      requiresReview: true,
+      matchedRule: "future-sponsorship",
+    });
   });
 
   it("classifies explicit current sponsorship as a dedicated protected concept", () => {
@@ -94,6 +104,39 @@ describe("classifyQuestion", () => {
     expect(classifyQuestion("How did you hear about us?").semanticType).toBe(
       "REFERRAL",
     );
+  });
+
+  it("recognizes live ATS availability wording", () => {
+    expect(
+      classifyQuestion("Are you available to start on September 29, 2026 *"),
+    ).toMatchObject({ semanticType: "START_DATE", matchedRule: "start-date" });
+    expect(
+      classifyQuestion("When are you available to start this role? *"),
+    ).toMatchObject({ semanticType: "START_DATE", matchedRule: "start-date" });
+  });
+
+  it("recognizes recruitment-role screening and written prompts", () => {
+    expect(
+      classifyQuestion(
+        "Would this be your first experience working in a professional recruitment role? *",
+      ),
+    ).toMatchObject({
+      semanticType: "RELEVANT_EXPERIENCE",
+      matchedRule: "first-recruitment-role",
+    });
+    expect(
+      classifyQuestion(
+        "How would you describe 360° recruitment and what are the key responsibilities of the position? *",
+      ),
+    ).toMatchObject({ semanticType: "WHY_ROLE", matchedRule: "role-understanding" });
+    expect(
+      classifyQuestion(
+        "What motivates you to pursue a career in recruitment or sales? *",
+      ),
+    ).toMatchObject({
+      semanticType: "CAREER_GOALS",
+      matchedRule: "career-motivation",
+    });
   });
 
   it("leaves novel questions unknown instead of inventing a meaning", () => {

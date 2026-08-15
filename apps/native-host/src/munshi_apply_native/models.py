@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from pydantic import (
@@ -163,7 +163,15 @@ class ApplicationCheckpointPayload(BaseModel):
         }
 
     def wire_payload(self) -> dict[str, Any]:
-        return self.model_dump(mode="json", by_alias=True)
+        payload = self.model_dump(mode="json", by_alias=True)
+        created_at = self.created_at
+        if created_at.tzinfo is not None:
+            payload["createdAt"] = (
+                created_at.astimezone(UTC)
+                .isoformat(timespec="milliseconds")
+                .replace("+00:00", "Z")
+            )
+        return payload
 
 
 class HealthResponse(BaseModel):

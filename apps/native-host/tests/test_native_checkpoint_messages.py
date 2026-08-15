@@ -39,7 +39,7 @@ def checkpoint_payload(*, checkpoint_id: str = "cp-1", sequence: int = 1) -> dic
         "pendingControlIds": ["control-2"],
         "selectedResumeId": None,
         "selectedResumeSha256": None,
-        "createdAt": "2026-08-14T21:00:00Z",
+        "createdAt": "2026-08-14T21:00:00.123Z",
     }
 
 
@@ -53,6 +53,7 @@ def test_checkpoint_save_is_idempotent_and_readable(tmp_path: Path) -> None:
     assert first["ok"] is True
     assert first["data"]["created"] is True  # type: ignore[index]
     assert second["data"]["created"] is False  # type: ignore[index]
+    assert first["data"]["checkpoint"]["createdAt"] == "2026-08-14T21:00:00.123Z"  # type: ignore[index]
 
     latest = handle(
         {
@@ -64,6 +65,7 @@ def test_checkpoint_save_is_idempotent_and_readable(tmp_path: Path) -> None:
     assert latest["ok"] is True
     assert latest["data"]["checkpointId"] == "cp-1"  # type: ignore[index]
     assert latest["data"]["sequence"] == 1  # type: ignore[index]
+    assert latest["data"]["createdAt"] == "2026-08-14T21:00:00.123Z"  # type: ignore[index]
 
 
 def test_checkpoint_sequence_reuse_with_different_content_is_rejected(

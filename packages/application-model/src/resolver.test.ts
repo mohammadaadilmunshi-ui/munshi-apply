@@ -111,7 +111,35 @@ describe("resolveProfileAnswer", () => {
     );
   });
 
-  it("forces protected facts through review even when confirmed", () => {
+  it("allows explicitly confirmed deterministic sponsorship facts", () => {
+    const result = resolveProfileAnswer(
+      question({
+        rawText:
+          "Would you require any Visa sponsorship now or in the future?",
+        semanticType: "SPONSORSHIP_FUTURE",
+        sensitive: true,
+        requiresReview: true,
+      }),
+      profile([
+        fact({
+          key: "future_sponsorship",
+          value: "Yes",
+          category: "SPONSORSHIP",
+          protected: true,
+          confirmedAt: now,
+        }),
+      ]),
+    );
+
+    expect(result.state).toBe("READY");
+    expect(result.value).toBe("Yes");
+    expect(result.sourceKey).toBe("future_sponsorship");
+    expect(result.reasons).toContain(
+      "Explicit owner confirmation permits deterministic protected-fact autofill for this authorization/sponsorship question",
+    );
+  });
+
+  it("keeps unconfirmed sponsorship facts in review", () => {
     const result = resolveProfileAnswer(
       question({
         rawText: "Do you currently require sponsorship?",
@@ -125,13 +153,117 @@ describe("resolveProfileAnswer", () => {
           value: "No",
           category: "SPONSORSHIP",
           protected: true,
+          confirmedAt: null,
         }),
       ]),
     );
 
     expect(result.state).toBe("REVIEW");
     expect(result.sourceKey).toBe("current_sponsorship");
-    expect(result.reasons).toContain("Source fact is protected");
+    expect(result.reasons).toContain(
+      "Protected source fact has not been explicitly confirmed",
+    );
+  });
+
+  it("derives yes/no availability from the saved earliest start date", () => {
+    const available = resolveProfileAnswer(
+      question({
+        rawText: "Are you available to start on December 17, 2026? *",
+        semanticType: "START_DATE",
+      }),
+      profile([
+        fact({
+          key: "earliest_start_date",
+          value: "2026-12-17",
+          category: "AVAILABILITY",
+        }),
+      ]),
+    );
+    const tooEarly = resolveProfileAnswer(
+      question({
+        rawText: "Are you available to start on September 29, 2026? *",
+        semanticType: "START_DATE",
+      }),
+      profile([
+        fact({
+          key: "earliest_start_date",
+          value: "2026-12-17",
+          category: "AVAILABILITY",
+        }),
+      ]),
+    );
+
+    expect(available).toMatchObject({ state: "READY", value: "Yes" });
+    expect(tooEarly).toMatchObject({ state: "READY", value: "No" });
+  });
+
+  it("keeps normal start-date fields as the exact saved date", () => {
+    const result = resolveProfileAnswer(
+      question({
+        rawText: "When are you available to start this role? *",
+        semanticType: "START_DATE",
+      }),
+      profile([
+        fact({
+          key: "earliest_start_date",
+          value: "2026-12-17",
+          category: "AVAILABILITY",
+        }),
+      ]),
+    );
+
+    expect(result).toMatchObject({ state: "READY", value: "2026-12-17" });
+  });
+
+  it("derives that a recruitment role is not the first when confirmed employment evidence exists", () => {
+    const result = resolveProfileAnswer(
+      question({
+        rawText:
+          "Would this be your first experience working in a professional recruitment role? *",
+        semanticType: "RELEVANT_EXPERIENCE",
+      }),
+      snapshot([
+        {
+          recordId: "employment-1",
+          kind: "EMPLOYMENT",
+          label: "HR Recruitment and Operations Intern",
+          facts: [
+            fact({
+              factId: "title-1",
+              key: "job_title",
+              value: "HR Recruitment and Operations Intern",
+              category: "EMPLOYMENT",
+              protected: true,
+              confirmedAt: now,
+            }),
+          ],
+          sortOrder: 0,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ]),
+    );
+
+    expect(result).toMatchObject({
+      state: "READY",
+      value: "No",
+      sourceFactId: "title-1",
+      sourceKey: "job_title",
+    });
+  });
+
+  it("does not assume a first recruitment role when prior evidence is absent", () => {
+    const result = resolveProfileAnswer(
+      question({
+        rawText:
+          "Would this be your first experience working in a professional recruitment role? *",
+        semanticType: "RELEVANT_EXPERIENCE",
+      }),
+      snapshot([]),
+    );
+
+    expect(result.state).toBe("UNRESOLVED");
+    expect(result.value).toBeNull();
   });
 
   it("does not promote generated facts to ready answers", () => {
