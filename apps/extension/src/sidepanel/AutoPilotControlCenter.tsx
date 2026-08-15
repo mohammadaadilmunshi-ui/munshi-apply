@@ -264,9 +264,7 @@ export function AutoPilotControlCenter({
             <button
               className="primary"
               type="button"
-              disabled={
-                busy || !nativeAvailable || !canProgress || Boolean(active)
-              }
+              disabled={busy || !nativeAvailable || !canProgress || Boolean(active)}
               onClick={() =>
                 void run(
                   () =>
