@@ -1,0 +1,93 @@
+name: Autofill final hardening helper
+
+on:
+  push:
+    branches: [feat/v3-foundation-alignment]
+
+permissions:
+  contents: write
+
+jobs:
+  integrate-and-certify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out guarded PR branch
+        uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
+          fetch-depth: 0
+
+      - name: Guard exact final-autofill staging
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=97c7f9f4094642d432daa9553df5ea269b6f3dab
+          git merge-base --is-ancestor "$BASE" HEAD
+          mapfile -t changed < <(git diff --name-only "$BASE"..HEAD | sort)
+          printf '%s\n' "${changed[@]}"
+          test "${#changed[@]}" -eq 5
+          test "${changed[0]}" = ".github/workflows/autofill-final-hardening-helper.yml"
+          test "${changed[1]}" = "apps/extension/src/content/advanced-controls.ts"
+          test "${changed[2]}" = "apps/native-host/src/munshi_apply_native/interaction_recipe_service.py"
+          test "${changed[3]}" = "apps/native-host/tests/test_interaction_recipe_service.py"
+          test "${changed[4]}" = "scripts/apply-autofill-final-hardening.py"
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: apps/native-host/pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          python -m pip install -e './apps/native-host[dev]'
+
+      - name: Apply final autofill hardening
+        run: python scripts/apply-autofill-final-hardening.py
+
+      - name: Apply authoritative formatting
+        run: |
+          npx prettier --write \
+            apps/extension/src/content/advanced-controls.ts \
+            apps/extension/src/content/advanced-controls.test.ts \
+            apps/extension/src/content/fill.ts \
+            apps/extension/src/background/service-worker.ts \
+            apps/extension/src/messaging/native.ts
+          python -m ruff format \
+            apps/native-host/src/munshi_apply_native/interaction_recipe_service.py \
+            apps/native-host/src/munshi_apply_native/native_messaging.py \
+            apps/native-host/tests/test_interaction_recipe_service.py \
+            apps/native-host/tests/test_native_interaction_recipe_messages.py
+
+      - name: Verify complete extension tranche
+        run: npm run check
+
+      - name: Verify complete native tranche
+        run: |
+          python -m ruff check apps/native-host
+          python -m pytest apps/native-host
+
+      - name: Remove temporary final-autofill helper
+        run: |
+          git rm -f scripts/apply-autofill-final-hardening.py
+          git rm -f .github/workflows/autofill-final-hardening-helper.yml
+
+      - name: Commit exact certified tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git config user.name "Aadil Munshi"
+          git config user.email "mohammadaadilmunshi@gmail.com"
+          git add -A
+          git commit -m "feat: complete advanced autofill hardening"
+          git push origin HEAD:feat/v3-foundation-alignment
