@@ -59,6 +59,7 @@ jobs:
       - name: Apply authoritative formatting
         run: |
           npx prettier --write \
+            .github/workflows/autofill-final-hardening-helper.yml \
             apps/extension/src/content/advanced-controls.ts \
             apps/extension/src/content/advanced-controls.test.ts \
             apps/extension/src/content/fill.ts \
