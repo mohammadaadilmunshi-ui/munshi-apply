@@ -76,6 +76,18 @@ describe("AutoPilot page-state scanner", () => {
     expect(actions).toEqual(["NEXT", "REVIEW"]);
   });
 
+  it("does not treat an application-entry Apply Now control as final submission", () => {
+    document.body.innerHTML = `
+      <button type="button">Apply Now</button>
+      <button type="button">Next</button>
+    `;
+    const result = scanDocument();
+    expect(result.navigationCandidates.map((candidate) => candidate.action)).toEqual([
+      "NEXT",
+    ]);
+    expect(result.finalSubmissionBoundary).toBe(false);
+  });
+
   it("treats Review and submit as a final manual boundary", () => {
     document.body.innerHTML = `<button type="submit">Review and submit</button>`;
     const result = scanDocument();
