@@ -81,6 +81,40 @@ jobs:
       - name: Apply autofill core hardening
         run: python scripts/apply-autofill-core-hardening.py
 
+      - name: Repair typed autofill integration
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          controller_path = Path("apps/extension/src/background/autopilot-controller.ts")
+          controller = controller_path.read_text()
+          start = controller.index('      case "FILL": {')
+          end = controller.index('      case "NAVIGATE_NEXT": {', start)
+          fill_block = controller[start:end]
+          anchor = '      case "FILL": {\n        const armed ='
+          if fill_block.count(anchor) != 1:
+              raise SystemExit("fill block anchor changed unexpectedly")
+          fill_block = fill_block.replace(
+              anchor,
+              '      case "FILL": {\n        const fillControlId = plan.action.instruction.controlId;\n        const armed =',
+              1,
+          )
+          fill_block = fill_block.replace(
+              "plan.action.instruction.controlId",
+              "fillControlId",
+          )
+          controller_path.write_text(controller[:start] + fill_block + controller[end:])
+
+          client_path = Path("apps/extension/src/messaging/client.ts")
+          client = client_path.read_text()
+          old = "  pendingDraftUsageId: string | null;\n};"
+          new = "  pendingDraftUsageId: string | null;\n  lastFillResult: FillResult | null;\n};"
+          if client.count(old) != 1:
+              raise SystemExit("AutoPilot client status anchor changed unexpectedly")
+          client_path.write_text(client.replace(old, new, 1))
+          PY
+
       - name: Apply authoritative formatting
         run: |
           npx prettier --write \
@@ -96,6 +130,7 @@ jobs:
             apps/extension/src/storage/vault.ts \
             apps/extension/src/background/autopilot-controller.ts \
             apps/extension/src/background/service-worker.ts \
+            apps/extension/src/messaging/client.ts \
             apps/extension/src/sidepanel/autopilot-plan.ts \
             apps/extension/src/sidepanel/AutoPilotControlCenter.tsx \
             apps/extension/public/manifest.json
@@ -128,6 +163,7 @@ jobs:
             apps/extension/src/storage/vault.ts \
             apps/extension/src/background/autopilot-controller.ts \
             apps/extension/src/background/service-worker.ts \
+            apps/extension/src/messaging/client.ts \
             apps/extension/src/sidepanel/autopilot-plan.ts \
             apps/extension/src/sidepanel/AutoPilotControlCenter.tsx \
             apps/extension/public/manifest.json \
