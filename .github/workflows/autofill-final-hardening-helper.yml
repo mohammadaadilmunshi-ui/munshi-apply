@@ -1,3 +1,4 @@
+# Temporary guarded workflow; removed after successful certification.
 name: Autofill final hardening helper
 
 on:
