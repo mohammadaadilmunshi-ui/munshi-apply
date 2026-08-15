@@ -1254,6 +1254,14 @@ a {
   margin-top: 4px;
 }
 
+.resume-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
 .record-list article button,
 .recovery-secret button,
 .text-button {
@@ -1264,6 +1272,15 @@ a {
   font: inherit;
   font-size: 12px;
   font-weight: 750;
+}
+
+.record-list article button.destructive {
+  color: #8b3f24;
+}
+
+.record-list article button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .review-list article {

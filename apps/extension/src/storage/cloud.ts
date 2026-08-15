@@ -60,6 +60,7 @@ export type ResumeRecord = {
   source?: "MASTER" | "TAILORED" | "IMPORTED";
   roleFamily?: string | null;
   active?: boolean;
+  deletedAt?: string;
 };
 
 export type ApplicationReview = {
@@ -639,9 +640,11 @@ export async function getCloudSnapshot(
         await decryptJson<ApplicationReview>(rawKey, event.payloadCiphertext),
       );
     } else if (event.entityType === "RESUME.V1") {
-      resumes.push(
-        await decryptJson<ResumeRecord>(rawKey, event.payloadCiphertext),
+      const resume = await decryptJson<ResumeRecord>(
+        rawKey,
+        event.payloadCiphertext,
       );
+      if (!resume.deletedAt) resumes.push(resume);
     }
   }
   applications.sort((left, right) =>
@@ -746,11 +749,18 @@ export async function uploadEncryptedResume(
   validateResumeFile(file);
 
   const family = options.family?.trim() || "master";
-  const snapshot = await getCloudSnapshot(connection);
+  const { events: resumeEvents } = await fetchCloudEvents(connection, 0);
+  const resumeHistory: ResumeRecord[] = [];
+  for (const event of latestEvents(resumeEvents).values()) {
+    if (event.entityType !== "RESUME.V1") continue;
+    resumeHistory.push(
+      await decryptJson<ResumeRecord>(rawKey, event.payloadCiphertext),
+    );
+  }
   const version =
     Math.max(
       0,
-      ...snapshot.resumes
+      ...resumeHistory
         .filter((resume) => (resume.family ?? "master") === family)
         .map((resume) => resume.version ?? 1),
     ) + 1;

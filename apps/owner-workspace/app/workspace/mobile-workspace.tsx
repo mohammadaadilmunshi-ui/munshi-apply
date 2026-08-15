@@ -11,6 +11,7 @@ import {
 import Link from "next/link";
 import {
   decryptLatestEntities,
+  deleteEncryptedResume,
   downloadEncryptedResume,
   encryptedHistoryNeedsRecovery,
   ensureWorkspaceKey,
@@ -889,6 +890,34 @@ export function MobileWorkspace({ ownerName }: { ownerName: string }) {
     }
   }
 
+  async function deleteResume(record: ResumeRecord) {
+    if (!rawKey) return;
+    if (
+      !window.confirm(
+        `Delete ${record.name}? This permanently removes the encrypted file from your synced résumé vault. Existing application records may still reference this résumé version.`,
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await deleteEncryptedResume(record);
+      const existing = entities.get(`RESUME.V1:${record.resumeId}`);
+      await putEncryptedEntity({
+        rawKey,
+        entityType: "RESUME.V1",
+        entityId: record.resumeId,
+        baseVersion: existing?.version ?? 0,
+        value: { ...record, deletedAt: new Date().toISOString() },
+      });
+      setStatus(`${record.name} deleted from the encrypted résumé vault`);
+      await loadWorkspace();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Résumé deletion failed");
+    } finally {
+      setBusy(false);
+    }
+  }
   function beginReview(application: ApplicationSnapshot) {
     const previous = entities.get(
       `APPLICATION.REVIEW.V1:review-${application.pageId}`,
@@ -1394,14 +1423,25 @@ export function MobileWorkspace({ ownerName }: { ownerName: string }) {
                         {Math.ceil(resume.sizeBytes / 1024)} KB · encrypted
                       </span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        rawKey && void downloadEncryptedResume(rawKey, resume)
-                      }
-                    >
-                      Download
-                    </button>
+                    <div className="resume-actions">
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() =>
+                          rawKey && void downloadEncryptedResume(rawKey, resume)
+                        }
+                      >
+                        Download
+                      </button>
+                      <button
+                        className="destructive"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void deleteResume(resume)}
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </article>
                 ))}
               </div>

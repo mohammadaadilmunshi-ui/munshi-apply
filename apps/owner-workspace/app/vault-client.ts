@@ -674,6 +674,7 @@ export type ResumeRecord = {
   contentType: string;
   sizeBytes: number;
   addedAt: string;
+  deletedAt?: string;
 };
 
 export type ApplicationSnapshot = {
@@ -1085,6 +1086,19 @@ export async function listEncryptedResumes(
   return records.sort((left, right) =>
     right.addedAt.localeCompare(left.addedAt),
   );
+}
+
+export async function deleteEncryptedResume(
+  record: ResumeRecord,
+): Promise<void> {
+  const response = await fetch(
+    `/api/objects/${encodeURIComponent(record.objectId)}`,
+    { method: "DELETE", headers: { accept: "application/json" } },
+  );
+  const payload = (await response.json().catch(() => ({}))) as { error?: string };
+  if (!response.ok) {
+    throw new Error(payload.error ?? "Encrypted résumé deletion failed.");
+  }
 }
 
 export async function downloadEncryptedResume(
