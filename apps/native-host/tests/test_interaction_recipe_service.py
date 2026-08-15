@@ -112,5 +112,5 @@ def test_requires_origin_not_full_application_url(tmp_path: Path) -> None:
     insert_application(database)
     request = payload("bad-origin")
     request["siteOrigin"] = "https://jobs.example.test/apply/123?token=x"
-    with pytest.raises(ValueError, match="origin"):
+    with pytest.raises(ValueError, match="siteOrigin"):
         service.record(request)
