@@ -11,6 +11,8 @@ import {
 } from "../messaging/client";
 import {
   buildAutoPilotLaunchPlan,
+  canAutoPilotMakeProgress,
+  remainingApprovedFillCount,
   type AutoPilotAnswer,
 } from "./autopilot-plan";
 
@@ -87,19 +89,18 @@ export function AutoPilotControlCenter({
     status?.session.status === "WAITING_RESCAN" ||
     status?.session.status === "WAITING_NAVIGATION";
   const pauseQueued = status?.ownerPauseRequested === true;
-  const completedControlIds = new Set(
-    status?.session.completedControlIds ?? [],
-  );
-  const remainingApprovedFillCount =
-    plan?.fillInstructions.filter(
-      (instruction) => !completedControlIds.has(instruction.controlId),
-    ).length ?? 0;
+  const completedControlIds = status?.session.completedControlIds ?? [];
+  const remainingApprovedFillCountValue = plan
+    ? remainingApprovedFillCount(plan, completedControlIds)
+    : 0;
   const safeProgressAvailable = Boolean(
     plan &&
-      plan.preflight.blockedCount === 0 &&
-      remainingApprovedFillCount > 0,
+      !plan.preflight.canAct &&
+      canAutoPilotMakeProgress(plan, completedControlIds),
   );
-  const canProgress = Boolean(plan?.preflight.canAct || safeProgressAvailable);
+  const canProgress = Boolean(
+    plan && canAutoPilotMakeProgress(plan, completedControlIds),
+  );
 
   return (
     <section>
@@ -200,11 +201,12 @@ export function AutoPilotControlCenter({
               <span>
                 {plan.preflight.unresolvedCount} required answers unresolved
               </span>
-              {safeProgressAvailable && !plan.preflight.canAct && (
+              {safeProgressAvailable && (
                 <span>
-                  Safe-progress mode: MUNSHI can fill {remainingApprovedFillCount}{" "}
-                  approved field{remainingApprovedFillCount === 1 ? "" : "s"},
-                  then it will pause before navigation for the remaining review.
+                  Safe-progress mode: MUNSHI can fill{" "}
+                  {remainingApprovedFillCountValue} approved field
+                  {remainingApprovedFillCountValue === 1 ? "" : "s"}, then it
+                  will pause before navigation for the remaining review.
                 </span>
               )}
               {plan.optionalUnansweredCount > 0 && (
