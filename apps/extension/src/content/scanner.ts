@@ -615,13 +615,43 @@ function hasActiveCaptchaFrame(): boolean {
   );
   return frames.some((frame) => {
     if (!isVisible(frame)) return false;
-    const descriptor = normalized(
-      `${frame.getAttribute("src")} ${frame.getAttribute("title")}`,
-    );
+    const src = frame.getAttribute("src") ?? "";
+    const descriptor = normalized(`${src} ${frame.getAttribute("title")}`);
     if (/\b(bframe|challenge|checkbox)\b/.test(descriptor)) return true;
+
+    let captchaSize = "";
+    try {
+      captchaSize =
+        new URL(src, window.location.href).searchParams.get("size") ?? "";
+    } catch {
+      captchaSize = "";
+    }
+    if (normalized(captchaSize) === "invisible") return false;
+    if (frame.closest(".grecaptcha-badge")) return false;
+
+    if (/recaptcha/.test(descriptor) && /\/anchor\b/.test(src)) {
+      if (/^(normal|compact)$/i.test(captchaSize)) return true;
+      const rect = frame.getBoundingClientRect();
+      return rect.width >= 250 && rect.height >= 60;
+    }
+
     const rect = frame.getBoundingClientRect();
     return rect.width >= 180 && rect.height >= 50;
   });
+}
+
+function hasVisibleCaptchaPrompt(body: string): boolean {
+  return (
+    /\b(verify you are human|human verification|i(?:'| a)m not a robot)\b/.test(
+      body,
+    ) ||
+    /\b(complete|solve|enter|verify|pass)\b.{0,48}\b(captcha|recaptcha|hcaptcha)\b/.test(
+      body,
+    ) ||
+    /\b(captcha|recaptcha|hcaptcha)\b.{0,48}\b(challenge|required|verification|verify|complete|solve)\b/.test(
+      body,
+    )
+  );
 }
 
 function detectSecurityCheckpoint(): SecurityCheckpointKind | null {
@@ -631,9 +661,7 @@ function detectSecurityCheckpoint(): SecurityCheckpointKind | null {
     hasVisibleSecurityElement(
       "[role='dialog'][class*='captcha' i], [role='dialog'][id*='captcha' i]",
     ) ||
-    /\b(recaptcha|hcaptcha|captcha|verify you are human|human verification|i(?:'| a)m not a robot)\b/.test(
-      body,
-    )
+    hasVisibleCaptchaPrompt(body)
   ) {
     return "CAPTCHA";
   }

@@ -89,6 +89,33 @@ describe("AutoPilot page-state scanner", () => {
     expect(result.applicationState).toBe("RESUME");
   });
 
+  it("ignores a large invisible reCAPTCHA badge and passive branding", () => {
+    document.body.innerHTML = `
+      <label for="resume">Upload CV</label>
+      <input id="resume" type="file" required>
+      <p>This site is protected by reCAPTCHA and the Google Privacy Policy applies.</p>
+      <div class="grecaptcha-badge">
+        <iframe title="reCAPTCHA" src="https://www.google.com/recaptcha/api2/anchor?size=invisible"></iframe>
+      </div>
+    `;
+    const frame = document.querySelector("iframe") as HTMLIFrameElement;
+    vi.spyOn(frame, "getBoundingClientRect").mockReturnValue({
+      ...visibleRectangle,
+      bottom: 90,
+      height: 80,
+      right: 310,
+      width: 300,
+    });
+    const result = scanDocument();
+    expect(result.securityCheckpoint).toBeNull();
+    expect(result.applicationState).toBe("RESUME");
+  });
+
+  it("detects a visible CAPTCHA prompt even without a challenge iframe", () => {
+    document.body.innerHTML = `<p>Please complete the CAPTCHA verification to continue.</p>`;
+    expect(scanDocument().securityCheckpoint).toBe("CAPTCHA");
+  });
+
   it("detects a visible active CAPTCHA challenge", () => {
     document.body.innerHTML = `
       <iframe title="recaptcha challenge" src="https://www.google.com/recaptcha/api2/bframe"></iframe>
