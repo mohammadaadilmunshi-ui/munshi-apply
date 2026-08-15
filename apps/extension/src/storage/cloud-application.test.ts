@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { ApplicationPage } from "@munshi-apply/contracts";
-import { shouldPublishApplicationSnapshot } from "./cloud";
+import {
+  parseCloudApplicationPage,
+  shouldPublishApplicationSnapshot,
+} from "./cloud";
 
 function applicationPage(url: string, title = "Application"): ApplicationPage {
   return {
@@ -104,5 +107,22 @@ describe("cloud application publication boundary", () => {
         applicationPage("https://careers.example.test/apply/123"),
       ),
     ).toBe(true);
+  });
+  it("normalizes valid legacy application snapshots and skips malformed ones", () => {
+    const legacy: Partial<ApplicationPage> = {
+      ...applicationPage("https://careers.example.test/apply/legacy"),
+    };
+    delete legacy.navigationCandidates;
+    const normalized = parseCloudApplicationPage(legacy);
+
+    expect(normalized).not.toBeNull();
+    expect(normalized?.navigationCandidates).toEqual([]);
+    expect(shouldPublishApplicationSnapshot(connection, normalized!)).toBe(
+      true,
+    );
+
+    const malformed: Partial<ApplicationPage> = { ...legacy };
+    delete malformed.controls;
+    expect(parseCloudApplicationPage(malformed)).toBeNull();
   });
 });

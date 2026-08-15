@@ -198,4 +198,18 @@ describe("application page eligibility", () => {
       ).eligible,
     ).toBe(true);
   });
+  it("does not crash on legacy snapshots that omit newer array fields", () => {
+    const legacy = page({
+      url: "https://help.openai.com/en/articles/legacy-help",
+      title: "Legacy help page",
+      semantics: ["UNKNOWN", "UNKNOWN"],
+    }) as Partial<ApplicationPage>;
+    delete legacy.controls;
+    delete legacy.navigationCandidates;
+
+    expect(applicationPageEligibility(legacy as ApplicationPage)).toEqual({
+      eligible: false,
+      reasons: [],
+    });
+  });
 });

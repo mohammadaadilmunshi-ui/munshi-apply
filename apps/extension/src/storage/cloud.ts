@@ -1,4 +1,7 @@
-import type { ApplicationPage } from "@munshi-apply/contracts";
+import {
+  ApplicationPageSchema,
+  type ApplicationPage,
+} from "@munshi-apply/contracts";
 import { isEligibleApplicationPage } from "@munshi-apply/application-model";
 import {
   parseProfileSnapshot,
@@ -241,6 +244,13 @@ function sameOrigin(left: string, right: string): boolean {
   } catch {
     return false;
   }
+}
+
+export function parseCloudApplicationPage(
+  value: unknown,
+): ApplicationPage | null {
+  const parsed = ApplicationPageSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
 }
 
 export function shouldPublishApplicationSnapshot(
@@ -575,11 +585,13 @@ export async function getCloudSnapshot(
       );
       profileVersion = event.baseVersion + 1;
     } else if (event.entityType === "APPLICATION.V1") {
-      const application = await decryptJson<ApplicationPage>(
-        rawKey,
-        event.payloadCiphertext,
+      const application = parseCloudApplicationPage(
+        await decryptJson<unknown>(rawKey, event.payloadCiphertext),
       );
-      if (shouldPublishApplicationSnapshot(connection, application)) {
+      if (
+        application &&
+        shouldPublishApplicationSnapshot(connection, application)
+      ) {
         applications.push(application);
       }
     } else if (event.entityType === "APPLICATION.REVIEW.V1") {

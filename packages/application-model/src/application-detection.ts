@@ -67,19 +67,21 @@ function hasExplicitIntent(page: ApplicationPage): boolean {
 }
 
 function meaningfulQuestionCount(page: ApplicationPage): number {
-  return page.questions.filter(
-    (question) => question.semanticType !== "UNKNOWN",
-  ).length;
+  const questions = Array.isArray(page.questions) ? page.questions : [];
+  return questions.filter((question) => question.semanticType !== "UNKNOWN")
+    .length;
 }
 
 function applicationSpecificQuestionCount(page: ApplicationPage): number {
-  return page.questions.filter((question) =>
+  const questions = Array.isArray(page.questions) ? page.questions : [];
+  return questions.filter((question) =>
     applicationSpecificSemantics.has(question.semanticType),
   ).length;
 }
 
 function hasResumeControl(page: ApplicationPage): boolean {
-  return page.controls.some(
+  const controls = Array.isArray(page.controls) ? page.controls : [];
+  return controls.some(
     (control) =>
       control.kind === "FILE" &&
       resumeLabel.test(
@@ -89,7 +91,10 @@ function hasResumeControl(page: ApplicationPage): boolean {
 }
 
 function hasApplicationNavigation(page: ApplicationPage): boolean {
-  return page.navigationCandidates.some(
+  const navigationCandidates = Array.isArray(page.navigationCandidates)
+    ? page.navigationCandidates
+    : [];
+  return navigationCandidates.some(
     (candidate) =>
       candidate.action !== "BACK" &&
       applicationNavigation.test(candidate.label),
