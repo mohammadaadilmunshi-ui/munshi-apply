@@ -95,8 +95,8 @@ export function AutoPilotControlCenter({
     : 0;
   const safeProgressAvailable = Boolean(
     plan &&
-      !plan.preflight.canAct &&
-      canAutoPilotMakeProgress(plan, completedControlIds),
+    !plan.preflight.canAct &&
+    canAutoPilotMakeProgress(plan, completedControlIds),
   );
   const canProgress = Boolean(
     plan && canAutoPilotMakeProgress(plan, completedControlIds),
@@ -265,10 +265,7 @@ export function AutoPilotControlCenter({
               className="primary"
               type="button"
               disabled={
-                busy ||
-                !nativeAvailable ||
-                !canProgress ||
-                Boolean(active)
+                busy || !nativeAvailable || !canProgress || Boolean(active)
               }
               onClick={() =>
                 void run(
