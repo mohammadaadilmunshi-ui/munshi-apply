@@ -1,7 +1,7 @@
 import type { ApplicationPage, SemanticType } from "@munshi-apply/contracts";
 
 const explicitApplicationIntent =
-  /(?:^|[\s/_?=&#.-])(apply|application|candidate|requisition)(?:$|[\s/_?=&#.-])/i;
+  /(?:^|[\s/_?=&#.-])(apply|application|requisition)(?:$|[\s/_?=&#.-])/i;
 const resumeLabel = /\b(resume|résumé|cv)\b/i;
 const applicationNavigation = /\b(apply|application)\b/i;
 
