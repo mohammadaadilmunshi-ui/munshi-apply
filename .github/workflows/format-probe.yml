@@ -5,13 +5,15 @@ on:
     branches: [feat/v3-foundation-alignment]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   prettier:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -23,16 +25,22 @@ jobs:
           packages/application-model/src/resolver.ts
           packages/application-model/src/resolver.test.ts
           packages/semantic-engine/src/index.test.ts
-      - name: Emit formatted files
+      - name: Publish canonical formatting when needed
         shell: bash
         run: |
-          for file in \
+          if git diff --quiet -- \
             packages/application-model/src/resolver.ts \
             packages/application-model/src/resolver.test.ts \
             packages/semantic-engine/src/index.test.ts
-          do
-            echo "BEGIN_FILE:${file}"
-            base64 -w0 "${file}"
-            echo
-            echo "END_FILE:${file}"
-          done
+          then
+            echo "Formatting already canonical."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            packages/application-model/src/resolver.ts \
+            packages/application-model/src/resolver.test.ts \
+            packages/semantic-engine/src/index.test.ts
+          git commit -m "style: normalize live ATS repair"
+          git push origin HEAD:feat/v3-foundation-alignment
