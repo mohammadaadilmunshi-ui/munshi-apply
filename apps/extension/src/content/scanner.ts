@@ -529,7 +529,7 @@ function navigationActionFor(label: string): NavigationAction | null {
   const value = normalized(label);
   if (!value) return null;
   if (
-    /^(submit|submit application|send application|complete application|finish application|apply now|review and submit)$/.test(
+    /^(submit|submit application|send application|complete application|finish application|review and submit)$/.test(
       value,
     ) ||
     /\bsubmit (my |this )?application\b/.test(value)
