@@ -38,6 +38,9 @@ jobs:
         run: |
           chmod +x scripts/update-local-runtime.sh
           npm run format
+          python -m ruff check --fix \
+            apps/native-host/src/munshi_apply_native/native_messaging.py \
+            apps/native-host/tests/test_native_messaging.py
           python -m ruff format \
             apps/native-host/src/munshi_apply_native/native_messaging.py \
             apps/native-host/tests/test_native_messaging.py
