@@ -18,7 +18,7 @@ const readyPreflight: PreflightGateSummary = {
 
 const reviewPreflight: PreflightGateSummary = {
   state: "REVIEW",
-  readyCount: 0,
+  readyCount: 1,
   reviewCount: 1,
   unresolvedCount: 0,
   blockedCount: 0,
@@ -276,7 +276,7 @@ describe("persistent AutoPilot controller", () => {
     expect(test.counts().navigateCount).toBe(1);
   });
 
-  it("pauses at security, final submission, and pre-flight review boundaries", async () => {
+  it("pauses at security/final boundaries and fills safely before a review pause", async () => {
     const security = harness(page({ securityCheckpoint: "MFA" }));
     const securityStatus = await security.controller.start(startInput());
     expect(securityStatus.session.status).toBe("PAUSED_SECURITY");
@@ -286,14 +286,31 @@ describe("persistent AutoPilot controller", () => {
     const final = harness(page({ final: true, navigation: true }));
     const finalStatus = await final.controller.start(startInput());
     expect(finalStatus.session.status).toBe("PAUSED_FINAL");
+    expect(final.counts().fillCount).toBe(0);
     expect(final.counts().navigateCount).toBe(0);
 
     const review = harness(page({ controls: ["first"] }));
     const reviewStatus = await review.controller.start(
       startInput([instruction("first")], reviewPreflight),
     );
-    expect(reviewStatus.session.status).toBe("PAUSED_REVIEW");
-    expect(review.counts().fillCount).toBe(0);
+    expect(reviewStatus.session.status).toBe("WAITING_RESCAN");
+    expect(reviewStatus.waitingFor).toBe("FILL");
+    expect(reviewStatus.session.completedControlIds).toEqual(["first"]);
+    expect(review.counts().fillCount).toBe(1);
+    expect(review.counts().navigateCount).toBe(0);
+
+    const freshReviewPage = page({
+      controls: ["first"],
+      observedAt: "2026-08-14T22:00:00.000Z",
+    });
+    review.setPage(freshReviewPage);
+    const afterReviewRescan = await review.controller.onPageSnapshot(
+      7,
+      freshReviewPage,
+    );
+    expect(afterReviewRescan?.session.status).toBe("PAUSED_REVIEW");
+    expect(review.counts().fillCount).toBe(1);
+    expect(review.counts().navigateCount).toBe(0);
   });
 
   it("recovers a post-fill wait only from a fresh page observation", async () => {
