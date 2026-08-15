@@ -13,6 +13,12 @@ A physical Edge smoke test on a Levin application exposed independent failures n
 - A protected ordinary fact can be ready after explicit owner confirmation. Unconfirmed protected data and sensitive/high-risk questions remain review-gated. Sponsorship/authorization safety policy remains unchanged.
 - Hosted deterministic profile lookup was aligned with desktop identity, address, availability, and referral keys.
 
+## Verification
+
+The verified source repair was published as commit `f3a4371f3923e3c1939729e1317a299c4ad02172` by one-time repair run `31870303370` after every repair gate passed. The extension/shared gate completed formatting, ESLint, workspace TypeScript checks, **39 test files / 234 tests**, production builds, desktop/mobile artifact verification, and secret scanning. The hosted owner workspace completed linting, build/artifact validation, and **15 tests**. The native companion completed Ruff and **89 Pytest tests**, followed by repository private-data and secret-scan boundaries.
+
+This owner-authenticated documentation update exists to re-trigger the repository's normal pull-request workflow suite against the repaired branch head. The repair remains in draft PR #11 and is not merged.
+
 ## Security boundary
 
 This change does not solve, bypass, suppress, or evade CAPTCHA or other anti-bot controls. Final submission, CAPTCHA, MFA, OTP, identity verification, authentication, security challenges, and operating-system file selection remain owner actions.
