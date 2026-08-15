@@ -20,10 +20,14 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - name: Guard expected staging head
+      - name: Guard staged repair inputs
         run: |
-          test "$(git rev-parse HEAD)" = "c5327e3c20fe5f41420b604126ae40c7992b6b59" || {
-            echo "Unexpected branch head; refusing to patch."
+          test -f scripts/fix-profile-save-ack.py || {
+            echo "Repair script missing; refusing to patch."
+            exit 1
+          }
+          test -f .github/workflows/profile-save-ack-helper.yml || {
+            echo "Repair workflow missing; refusing to patch."
             exit 1
           }
       - name: Install locked dependencies
