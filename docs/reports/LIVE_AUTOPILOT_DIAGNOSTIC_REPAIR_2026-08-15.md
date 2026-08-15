@@ -28,6 +28,8 @@ Automated coverage now verifies passive reCAPTCHA does not create a checkpoint, 
 
 ## Verification
 
-Before publication this workflow runs locked dependency installation, Prettier, ESLint, workspace TypeScript checks, the complete Vitest suite, production builds, desktop/mobile artifact verification, secret scanning, native companion installation, Ruff, the complete native Pytest suite, and the repository private-data boundary.
+The isolated repair workflow completed successfully as GitHub Actions run `31867984482`. Before publishing source commit `7837912680e8342369efeaee12a31d5f082ccb3a`, it completed locked dependency installation, Prettier, ESLint, workspace TypeScript checks, the complete Vitest suite, production builds, desktop/mobile artifact verification, secret scanning, native companion installation, Ruff, the complete native Pytest suite, and the repository private-data boundary.
+
+A follow-up owner-authenticated documentation commit is used only to re-trigger the repository's normal pull-request workflow suite against the repaired branch head, because GitHub suppresses or marks PR workflows as action-required when the preceding branch update is made by `github-actions[bot]`.
 
 Automated verification cannot substitute for a physical Edge smoke test on the exact employer page, especially for browser user-activation and third-party anti-bot behavior.
