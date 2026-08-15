@@ -37,16 +37,7 @@ jobs:
       - name: Format patched files
         run: |
           chmod +x scripts/update-local-runtime.sh
-          npx prettier --write \
-            packages/contracts/src/index.ts \
-            apps/extension/src/messaging/client.ts \
-            apps/extension/src/messaging/native-runtime.test.ts \
-            apps/extension/src/storage/profile-sync.ts \
-            apps/extension/src/storage/profile-sync.test.ts \
-            apps/extension/src/background/service-worker.ts \
-            apps/extension/src/sidepanel/App.tsx \
-            apps/extension/src/sidepanel/AIControlCenter.tsx \
-            apps/extension/src/sidepanel/styles.css
+          npm run format
           python -m ruff format \
             apps/native-host/src/munshi_apply_native/native_messaging.py \
             apps/native-host/tests/test_native_messaging.py
