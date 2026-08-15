@@ -1,0 +1,151 @@
+import type { ApplicationPage, SemanticType } from "@munshi-apply/contracts";
+
+const explicitApplicationIntent =
+  /(?:^|[\s/_?=&.-])(apply|application|candidate|requisition)(?:$|[\s/_?=&.-])/i;
+const resumeLabel = /\b(resume|résumé|cv)\b/i;
+const applicationNavigation = /\b(apply|application)\b/i;
+
+const applicationSpecificSemantics = new Set<SemanticType>([
+  "EDUCATION",
+  "SCHOOL_NAME",
+  "DEGREE",
+  "FIELD_OF_STUDY",
+  "GRADUATION_DATE",
+  "GPA",
+  "EMPLOYMENT",
+  "EMPLOYER_NAME",
+  "JOB_TITLE",
+  "EMPLOYMENT_DATES",
+  "EMPLOYMENT_RESPONSIBILITIES",
+  "WORK_AUTHORIZATION_CURRENT",
+  "SPONSORSHIP_CURRENT",
+  "SPONSORSHIP_FUTURE",
+  "IMMIGRATION_ASSISTANCE",
+  "SALARY_EXPECTATION",
+  "START_DATE",
+  "NOTICE_PERIOD",
+  "RELOCATION",
+  "TRAVEL",
+  "SKILLS",
+  "CERTIFICATIONS",
+  "LICENSES",
+  "SECURITY_CLEARANCE",
+  "VETERAN_STATUS",
+  "PROTECTED_VETERAN_STATUS",
+  "DISABILITY_STATUS",
+  "GENDER",
+  "RACE_ETHNICITY",
+  "EEO_SELF_ID",
+  "REFERRAL",
+  "PREVIOUS_EMPLOYEE",
+  "PREVIOUS_APPLICATION",
+  "CONFLICT_OF_INTEREST",
+  "NON_COMPETE",
+  "BACKGROUND_CHECK",
+  "DRUG_SCREENING",
+  "WHY_COMPANY",
+  "WHY_ROLE",
+  "RELEVANT_EXPERIENCE",
+  "CAREER_GOALS",
+  "BEHAVIORAL_EXAMPLE",
+]);
+
+export type ApplicationEligibility = {
+  eligible: boolean;
+  reasons: string[];
+};
+
+function hasExplicitIntent(page: ApplicationPage): boolean {
+  try {
+    const url = new URL(page.url);
+    return explicitApplicationIntent.test(
+      `${url.pathname} ${url.search} ${page.title}`,
+    );
+  } catch {
+    return false;
+  }
+}
+
+function meaningfulQuestionCount(page: ApplicationPage): number {
+  return page.questions.filter(
+    (question) => question.semanticType !== "UNKNOWN",
+  ).length;
+}
+
+function applicationSpecificQuestionCount(page: ApplicationPage): number {
+  return page.questions.filter((question) =>
+    applicationSpecificSemantics.has(question.semanticType),
+  ).length;
+}
+
+function hasResumeControl(page: ApplicationPage): boolean {
+  return page.controls.some(
+    (control) =>
+      control.kind === "FILE" &&
+      resumeLabel.test(
+        `${control.label} ${control.name} ${control.ariaLabel} ${control.placeholder}`,
+      ),
+  );
+}
+
+function hasApplicationNavigation(page: ApplicationPage): boolean {
+  return page.navigationCandidates.some(
+    (candidate) =>
+      candidate.action !== "BACK" && applicationNavigation.test(candidate.label),
+  );
+}
+
+/**
+ * Decide whether an observed browser page has enough deterministic evidence to
+ * enter the application ledger. The scanner intentionally observes broadly;
+ * cloud/application persistence must be much stricter. False negatives are
+ * safer than turning arbitrary browsing history into job applications.
+ */
+export function applicationPageEligibility(
+  page: ApplicationPage,
+): ApplicationEligibility {
+  const reasons: string[] = [];
+  const knownAts = Boolean(page.atsFamily && page.atsFamily !== "GENERIC");
+  const explicitIntent = hasExplicitIntent(page);
+  const meaningfulQuestions = meaningfulQuestionCount(page);
+  const specificQuestions = applicationSpecificQuestionCount(page);
+  const resumeControl = hasResumeControl(page);
+  const applicationNav = hasApplicationNavigation(page);
+
+  if (page.finalSubmissionBoundary) {
+    reasons.push("verified final-application boundary");
+  }
+  if (resumeControl && (knownAts || explicitIntent)) {
+    reasons.push("résumé control inside application context");
+  }
+  if (
+    applicationNav &&
+    (knownAts || explicitIntent || specificQuestions > 0) &&
+    meaningfulQuestions > 0
+  ) {
+    reasons.push("application-specific navigation with form questions");
+  }
+  if (
+    page.applicationState !== "AUTH" &&
+    explicitIntent &&
+    meaningfulQuestions >= 2
+  ) {
+    reasons.push("explicit application context with multiple classified questions");
+  }
+  if (knownAts && specificQuestions > 0) {
+    reasons.push("known ATS with application-specific questions");
+  }
+  if (
+    knownAts &&
+    page.applicationState === "CONFIRMATION" &&
+    explicitIntent
+  ) {
+    reasons.push("known ATS application confirmation");
+  }
+
+  return { eligible: reasons.length > 0, reasons };
+}
+
+export function isEligibleApplicationPage(page: ApplicationPage): boolean {
+  return applicationPageEligibility(page).eligible;
+}
