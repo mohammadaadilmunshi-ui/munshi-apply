@@ -160,7 +160,7 @@ class Database:
             result = connection.execute(
                 """
                 UPDATE outbox_events
-                SET delivery_status = 'RETRY', next_retry_at = CURRENT_TIMESTAMP,
+                SET delivery_status = 'RETRY', next_retry_at = NULL,
                     last_error = 'Recovered stale in-flight delivery'
                 WHERE delivery_status = 'IN_FLIGHT'
                   AND last_attempt_at < ?
