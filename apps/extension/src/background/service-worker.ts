@@ -1,4 +1,7 @@
-import type { PreflightGateSummary } from "@munshi-apply/application-model";
+import {
+  isEligibleApplicationPage,
+  type PreflightGateSummary,
+} from "@munshi-apply/application-model";
 import {
   ApplicationPageSchema,
   FillPlanSchema,
@@ -20,7 +23,6 @@ import {
 import {
   clearPagesForTab,
   deletePage,
-  getLatestPage,
   getPage,
   getPagesForTab,
   savePage,
@@ -73,6 +75,14 @@ type AutoPilotRuntimeRequest =
 type RuntimeRequest = ExtensionRequest | AutoPilotRuntimeRequest;
 
 let initialized = false;
+let profileSyncConflict: { keys: string[]; detectedAt: string } | null = null;
+
+function rememberProfileConflict(error: ProtectedProfileConflictError): void {
+  profileSyncConflict = {
+    keys: [...error.keys],
+    detectedAt: new Date().toISOString(),
+  };
+}
 
 function sameProfileSaveContent(
   left: ProfileSnapshot,
@@ -324,11 +334,11 @@ void initialize();
 
 async function getActivePage(): Promise<unknown> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (tab?.id !== undefined && /^https?:\/\//.test(tab.url ?? "")) {
-    const activePage = await getMergedPageForTab(tab.id);
-    if (activePage) return activePage;
-  }
-  return getLatestPage();
+  if (tab?.id === undefined || !/^https?:\/\//.test(tab.url ?? "")) return null;
+  const activePage = await getMergedPageForTab(tab.id);
+  return activePage && isEligibleApplicationPage(activePage)
+    ? activePage
+    : null;
 }
 
 async function extensionHealth(): Promise<unknown> {
@@ -430,27 +440,40 @@ async function routeMessage(
             if (localProfile) {
               await persistAuthoritativeProfileSnapshot(localProfile);
             }
+            profileSyncConflict = null;
           } catch (error) {
-            if (error instanceof ProtectedProfileConflictError) throw error;
-            // Local-first operation continues when cloud is temporarily unavailable.
+            if (error instanceof ProtectedProfileConflictError) {
+              rememberProfileConflict(error);
+            }
+            // Local-first operation continues when cloud is unavailable or review is required.
           }
         }
         return { ok: true, data: localProfile };
       }
+      case "GET_PROFILE_SYNC_STATUS":
+        return { ok: true, data: { conflict: profileSyncConflict } };
       case "SAVE_PROFILE": {
         const parsed = parseProfileSnapshot(request.payload);
         await persistAuthoritativeProfileSnapshot(parsed);
         const connection = await getCloudConnection();
         if (connection && (await isCloudEncryptionReady())) {
-          const synchronized = await synchronizeProtectedProfile(
-            connection,
-            parsed,
-          );
-          await persistAuthoritativeProfileSnapshot(synchronized);
-          if (!sameProfileSaveContent(synchronized, parsed)) {
-            throw new Error(
-              "Profile content changed on another device. Refresh before saving again.",
+          try {
+            const synchronized = await synchronizeProtectedProfile(
+              connection,
+              parsed,
             );
+            await persistAuthoritativeProfileSnapshot(synchronized);
+            if (!sameProfileSaveContent(synchronized, parsed)) {
+              throw new Error(
+                "Profile content changed on another device. Refresh before saving again.",
+              );
+            }
+            profileSyncConflict = null;
+          } catch (error) {
+            if (error instanceof ProtectedProfileConflictError) {
+              rememberProfileConflict(error);
+            }
+            throw error;
           }
         }
         return { ok: true };
@@ -522,8 +545,9 @@ async function routeMessage(
         await savePage(page);
         const mergedPage = await getMergedPageForTab(tabId);
         const activePage = mergedPage ?? page;
+        const eligible = isEligibleApplicationPage(activePage);
         const connection = await getCloudConnection();
-        if (connection && (await isCloudEncryptionReady())) {
+        if (eligible && connection && (await isCloudEncryptionReady())) {
           try {
             await publishApplicationSnapshot(connection, activePage);
           } catch {
@@ -531,10 +555,11 @@ async function routeMessage(
           }
         }
         try {
-          await chrome.runtime.sendMessage({
-            type: "ACTIVE_PAGE_UPDATED",
-            payload: activePage,
-          });
+          await chrome.runtime.sendMessage(
+            eligible
+              ? { type: "ACTIVE_PAGE_UPDATED", payload: activePage }
+              : { type: "ACTIVE_PAGE_CLEARED" },
+          );
         } catch {
           // The side panel is optional and may be closed while the sensor is active.
         }

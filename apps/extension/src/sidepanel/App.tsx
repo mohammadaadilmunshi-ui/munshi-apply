@@ -23,10 +23,12 @@ import {
   getHealth,
   getNativeHealth,
   getProfile,
+  getProfileSyncStatus,
   saveProfile,
   type AutoPilotControllerStatus,
   type ExtensionRuntimeHealth,
   type NativeRuntimeHealth,
+  type ProfileSyncStatus,
 } from "../messaging/client";
 import {
   deleteOpenAIKey,
@@ -57,7 +59,8 @@ import { AIDraftReview } from "./AIDraftReview";
 import { AutoPilotControlCenter } from "./AutoPilotControlCenter";
 
 type View = "application" | "profile" | "autopilot" | "ai" | "diagnostics";
-type SaveState = "idle" | "editing" | "saving" | "synced" | "local" | "error";
+type SaveState =
+  "idle" | "editing" | "saving" | "synced" | "local" | "conflict" | "error";
 
 type NativeState =
   | { status: "checking" }
@@ -242,6 +245,15 @@ function sameOrigin(left: string, right: string): boolean {
   }
 }
 
+function profileConflictLabel(key: string): string {
+  const field = fieldDefinition(key);
+  if (field) return field.label;
+  if (key.startsWith("record:")) {
+    return key.split(":").at(-1)?.replaceAll("_", " ") ?? key;
+  }
+  return key.replaceAll("_", " ");
+}
+
 export function App() {
   const [view, setView] = useState<View>("application");
   const [page, setPage] = useState<ApplicationPage | null>(null);
@@ -259,6 +271,11 @@ export function App() {
   const [runtime, setRuntime] = useState<ExtensionRuntimeHealth | null>(null);
   const [native, setNative] = useState<NativeState>({ status: "checking" });
   const [cloud, setCloud] = useState<CloudState>({ status: "checking" });
+  const [profileSyncStatus, setProfileSyncStatus] = useState<ProfileSyncStatus>(
+    {
+      conflict: null,
+    },
+  );
   const [workspaceUrl, setWorkspaceUrl] = useState(defaultWorkspaceUrl);
   const [pairingBundle, setPairingBundle] = useState("");
   const [activationBundle, setActivationBundle] = useState("");
@@ -288,20 +305,32 @@ export function App() {
   }, []);
 
   const refresh = useCallback(async () => {
-    const [activePage, savedProfile, extensionRuntime] = await Promise.all([
+    const [activePage, extensionRuntime] = await Promise.all([
       getActivePage(),
-      getProfile(),
       getHealth(),
     ]);
     setPage(activePage);
+    setHealth(extensionRuntime.status);
+    setRuntime(extensionRuntime);
+
+    let savedProfile: ProfileSnapshot | null = null;
+    try {
+      savedProfile = await getProfile();
+    } catch (error) {
+      setNotice(
+        error instanceof Error ? error.message : "Unable to load profile",
+      );
+    }
+    const syncStatus = await getProfileSyncStatus().catch(() => ({
+      conflict: null,
+    }));
+    setProfileSyncStatus(syncStatus);
     if (savedProfile) setProfile(savedProfile);
     setProtectedDrafts({});
     profileRevision.current += 1;
     setProfileLoaded(true);
     setProfileDirty(false);
-    setSaveState("idle");
-    setHealth(extensionRuntime.status);
-    setRuntime(extensionRuntime);
+    setSaveState(syncStatus.conflict ? "conflict" : "idle");
 
     setCloud({ status: "checking" });
     try {
@@ -359,15 +388,15 @@ export function App() {
     const cloudHealth = await getCloudHealth(connection);
     setCloud({ status: "connected", data: cloudHealth });
     if (!cloudHealth.encryptionReady) return;
-    const [syncedProfile, snapshot] = await Promise.all([
-      getProfile(),
-      getCloudSnapshot(connection),
-    ]);
+    const syncedProfile = await getProfile();
+    const syncStatus = await getProfileSyncStatus();
+    const snapshot = await getCloudSnapshot(connection);
     setCloudSnapshot(snapshot);
+    setProfileSyncStatus(syncStatus);
     if (syncedProfile) {
       setProfile(syncedProfile);
       profileRevision.current += 1;
-      setSaveState("synced");
+      setSaveState(syncStatus.conflict ? "conflict" : "synced");
     }
     setLastCloudPullAt(now());
   }, [profileDirty, protectedDrafts]);
@@ -381,10 +410,13 @@ export function App() {
     });
     const listener = (message: {
       type?: string;
-      payload?: ApplicationPage;
+      payload?: ApplicationPage | null;
     }) => {
-      if (message.type === "ACTIVE_PAGE_UPDATED" && message.payload)
+      if (message.type === "ACTIVE_PAGE_UPDATED" && message.payload) {
         setPage(message.payload);
+      } else if (message.type === "ACTIVE_PAGE_CLEARED") {
+        setPage(null);
+      }
     };
     chrome.runtime.onMessage.addListener(listener);
     return () => {
@@ -438,7 +470,10 @@ export function App() {
             );
           })
           .catch(() => {
-            setSaveState("error");
+            void getProfileSyncStatus().then((status) => {
+              setProfileSyncStatus(status);
+              setSaveState(status.conflict ? "conflict" : "error");
+            });
             retryTimer.current = window.setTimeout(
               () => setRetryTick((value) => value + 1),
               5_000,
@@ -541,11 +576,13 @@ export function App() {
           ? "Encrypted & synced"
           : saveState === "local"
             ? "Saved locally"
-            : saveState === "error"
-              ? "Waiting to sync"
-              : cloud.status === "connected" && cloud.data.encryptionReady
-                ? "Auto-sync ready"
-                : "Auto-save ready";
+            : saveState === "conflict"
+              ? "Profile review required"
+              : saveState === "error"
+                ? "Waiting to sync"
+                : cloud.status === "connected" && cloud.data.encryptionReady
+                  ? "Auto-sync ready"
+                  : "Auto-save ready";
 
   function markProfileDirty(): void {
     profileRevision.current += 1;
@@ -754,17 +791,29 @@ export function App() {
     const revision = profileRevision.current;
     try {
       await saveProfile(profile);
+      const syncStatus = await getProfileSyncStatus();
+      setProfileSyncStatus(syncStatus);
       if (profileRevision.current === revision) {
         setProfileDirty(false);
         setSaveState(
-          cloud.status === "connected" && cloud.data.encryptionReady
-            ? "synced"
-            : "local",
+          syncStatus.conflict
+            ? "conflict"
+            : cloud.status === "connected" && cloud.data.encryptionReady
+              ? "synced"
+              : "local",
         );
       }
     } catch (error) {
-      setSaveState("error");
-      setNotice(error instanceof Error ? error.message : "Profile sync failed");
+      const syncStatus = await getProfileSyncStatus().catch(() => ({
+        conflict: null,
+      }));
+      setProfileSyncStatus(syncStatus);
+      setSaveState(syncStatus.conflict ? "conflict" : "error");
+      if (!syncStatus.conflict) {
+        setNotice(
+          error instanceof Error ? error.message : "Profile sync failed",
+        );
+      }
     }
   }
 
@@ -1029,6 +1078,18 @@ export function App() {
           </button>
         ))}
       </nav>
+      {profileSyncStatus.conflict && (
+        <div className="notice review">
+          <strong>Profile review required.</strong>{" "}
+          {profileSyncStatus.conflict.keys.map(profileConflictLabel).join(", ")}
+          {profileSyncStatus.conflict.keys.length === 1
+            ? " differs"
+            : " differ"}
+          {
+            " between this Mac and the encrypted workspace. Open Profile and confirm the intended value; application detection and extension health remain available."
+          }
+        </div>
+      )}
       {notice && <div className="notice">{notice}</div>}
 
       {view === "application" && (

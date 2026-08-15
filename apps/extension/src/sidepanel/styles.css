@@ -408,6 +408,10 @@ p {
   font-size: 12px;
   padding: 9px 20px;
 }
+.notice.review {
+  background: #f5e6df;
+  color: #8b3f24;
+}
 
 .answer-list {
   display: grid;

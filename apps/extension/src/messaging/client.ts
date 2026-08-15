@@ -59,6 +59,13 @@ export type AutoPilotResumePayload = {
   fillInstructions: readonly FillInstruction[];
 };
 
+export type ProfileSyncStatus = {
+  conflict: {
+    keys: string[];
+    detectedAt: string;
+  } | null;
+};
+
 type AutoPilotRuntimeRequest =
   | { type: "AUTOPILOT_START"; payload: AutoPilotStartPayload }
   | { type: "AUTOPILOT_PAUSE"; payload?: { reason?: string } }
@@ -122,6 +129,10 @@ export async function getActivePage(): Promise<ApplicationPage | null> {
 export async function getProfile(): Promise<ProfileSnapshot | null> {
   const candidate = await send({ type: "GET_PROFILE" });
   return candidate === null ? null : parseProfileSnapshot(candidate);
+}
+
+export async function getProfileSyncStatus(): Promise<ProfileSyncStatus> {
+  return (await send({ type: "GET_PROFILE_SYNC_STATUS" })) as ProfileSyncStatus;
 }
 
 export function saveProfile(profile: ProfileSnapshot): Promise<void> {

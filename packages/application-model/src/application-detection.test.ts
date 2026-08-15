@@ -104,6 +104,18 @@ describe("application page eligibility", () => {
     expect(result).toEqual({ eligible: false, reasons: [] });
   });
 
+  it("rejects a LinkedIn profile page even when the scanner sees a language selector", () => {
+    expect(
+      applicationPageEligibility(
+        page({
+          url: "https://www.linkedin.com/in/aadil-munshi/",
+          title: "Aadil Munshi | LinkedIn",
+          semantics: ["LANGUAGES"],
+        }),
+      ).eligible,
+    ).toBe(false);
+  });
+
   it("rejects ordinary portfolio pages", () => {
     expect(
       applicationPageEligibility(
