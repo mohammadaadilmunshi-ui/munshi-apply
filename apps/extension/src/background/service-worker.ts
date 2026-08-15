@@ -21,6 +21,11 @@ import {
   type AutoPilotStartInput,
 } from "./autopilot-controller";
 import {
+  ensureTabContentRuntime,
+  sendWithContentRecovery,
+  type ContentRuntimeApi,
+} from "./content-runtime";
+import {
   clearPagesForTab,
   deletePage,
   getPage,
@@ -57,6 +62,33 @@ import { migrateLegacyProfileSnapshot } from "../storage/profile-migration";
 const supportsSidePanel =
   typeof chrome.sidePanel?.setPanelBehavior === "function";
 const AUTO_PILOT_RUNTIME_STORAGE_KEY = "autopilot-runtime-v1";
+
+const contentRuntimeApi: ContentRuntimeApi = {
+  sendMessage: async <T>(
+    tabId: number,
+    message: unknown,
+    options: { frameId: number },
+  ): Promise<T> =>
+    (await chrome.tabs.sendMessage(tabId, message, options)) as T,
+  executeScript: async (details) => {
+    if (!chrome.scripting?.executeScript) {
+      throw new Error("Content runtime recovery is unavailable");
+    }
+    if (details.target.allFrames === true) {
+      return chrome.scripting.executeScript({
+        target: { tabId: details.target.tabId, allFrames: true },
+        files: details.files,
+      });
+    }
+    return chrome.scripting.executeScript({
+      target: {
+        tabId: details.target.tabId,
+        frameIds: details.target.frameIds ?? [0],
+      },
+      files: details.files,
+    });
+  },
+};
 
 type AutoPilotStartPayload = Omit<AutoPilotStartInput, "tabId"> & {
   tabId?: number;
@@ -167,14 +199,12 @@ async function sendFillInstruction(
     }
   }
 
-  const response = (await chrome.tabs.sendMessage(
-    tabId,
-    {
-      type: "APPLY_FILL_INSTRUCTIONS",
-      instructions: [instruction],
-    },
-    { frameId: instruction.frameId },
-  )) as { results?: FillResult[] } | undefined;
+  const response = await sendWithContentRecovery<
+    { results?: FillResult[] } | undefined
+  >(contentRuntimeApi, tabId, instruction.frameId, {
+    type: "APPLY_FILL_INSTRUCTIONS",
+    instructions: [instruction],
+  });
   const results = response?.results ?? [];
 
   return Promise.all(
@@ -228,18 +258,18 @@ async function sendNavigationAction(
   status: "NAVIGATED" | "REFUSED" | "FAILED";
   reason: string;
 }> {
-  const response = (await chrome.tabs.sendMessage(
-    tabId,
-    { type: "APPLY_NAVIGATION_ACTION", controlId },
-    { frameId },
-  )) as
+  const response = await sendWithContentRecovery<
     | {
         result?: {
           status: "NAVIGATED" | "REFUSED" | "FAILED";
           reason: string;
         };
       }
-    | undefined;
+    | undefined
+  >(contentRuntimeApi, tabId, frameId, {
+    type: "APPLY_NAVIGATION_ACTION",
+    controlId,
+  });
   if (!response?.result) {
     return {
       status: "FAILED",
@@ -254,11 +284,12 @@ async function sendFilePickerAssist(
   frameId: number,
   controlId: string,
 ): Promise<unknown> {
-  const response = (await chrome.tabs.sendMessage(
-    tabId,
-    { type: "APPLY_FILE_PICKER_ASSIST", controlId },
-    { frameId },
-  )) as { result?: unknown } | undefined;
+  const response = await sendWithContentRecovery<
+    { result?: unknown } | undefined
+  >(contentRuntimeApi, tabId, frameId, {
+    type: "APPLY_FILE_PICKER_ASSIST",
+    controlId,
+  });
   if (!response?.result) {
     throw new Error("File-picker handoff returned no verification result");
   }
@@ -341,6 +372,7 @@ void initialize();
 async function getActivePage(): Promise<unknown> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (tab?.id === undefined || !/^https?:\/\//.test(tab.url ?? "")) return null;
+  await ensureTabContentRuntime(contentRuntimeApi, tab.id);
   const activePage = await getMergedPageForTab(tab.id);
   return activePage && isEligibleApplicationPage(activePage)
     ? activePage
@@ -381,10 +413,11 @@ async function applyFillPlan(payload: unknown): Promise<unknown> {
     const instructions = plan.instructions.filter(
       (instruction) => instruction.frameId === frameId,
     );
-    const response = await chrome.tabs.sendMessage(
+    const response = await sendWithContentRecovery<{ results?: unknown[] }>(
+      contentRuntimeApi,
       tab.id,
+      frameId,
       { type: "APPLY_FILL_INSTRUCTIONS", instructions },
-      { frameId },
     );
     if (response && typeof response === "object" && "results" in response) {
       results.push(...(response.results as unknown[]));
@@ -402,6 +435,7 @@ async function autoPilotStart(
   if (tabId === undefined) {
     throw new Error("No active application tab found");
   }
+  await ensureTabContentRuntime(contentRuntimeApi, tabId);
   const input: AutoPilotStartInput = {
     tabId,
     applicationId: payload.applicationId,

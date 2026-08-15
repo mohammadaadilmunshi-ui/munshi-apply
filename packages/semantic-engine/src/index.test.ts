@@ -2,6 +2,14 @@ import { describe, expect, it } from "vitest";
 import { classifyQuestion } from "./index";
 
 describe("classifyQuestion", () => {
+  it("classifies required-marker identity labels from live ATS forms", () => {
+    expect(classifyQuestion("First Name *").semanticType).toBe("FIRST_NAME");
+    expect(classifyQuestion("Last Name*").semanticType).toBe("LAST_NAME");
+    expect(classifyQuestion("Preferred Pronouns *").semanticType).toBe(
+      "PRONOUNS",
+    );
+  });
+
   it("classifies future sponsorship as sensitive and reviewable", () => {
     expect(
       classifyQuestion("Will you now or in the future require sponsorship?"),

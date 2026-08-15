@@ -38,6 +38,11 @@ const rules: readonly Rule[] = [
     semanticType: "LAST_NAME",
   },
   {
+    id: "pronouns",
+    pattern: /^(preferred )?pronouns?$/i,
+    semanticType: "PRONOUNS",
+  },
+  {
     id: "full-name",
     pattern: /^(full legal name|legal name|full name)$/i,
     semanticType: "PERSONAL",
@@ -255,7 +260,13 @@ const rules: readonly Rule[] = [
 ];
 
 function normalize(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
+  return text
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\s*\*+\s*$/, "")
+    .replace(/\s*\(?required\)?\s*$/i, "")
+    .replace(/\s*:\s*$/, "")
+    .trim();
 }
 
 export function classifyQuestion(rawText: string): ClassificationResult {

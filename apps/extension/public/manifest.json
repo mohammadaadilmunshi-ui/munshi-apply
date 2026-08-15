@@ -24,6 +24,7 @@
   "permissions": [
     "nativeMessaging",
     "sidePanel",
+    "scripting",
     "storage",
     "tabs",
     "webNavigation"

@@ -90,6 +90,27 @@ describe("resolveProfileAnswer", () => {
     });
   });
 
+  it("allows explicitly confirmed ordinary protected identity facts", () => {
+    const result = resolveProfileAnswer(
+      question({ semanticType: "FIRST_NAME", rawText: "First Name *" }),
+      profile([fact({ protected: true, confirmedAt: now })]),
+    );
+    expect(result.state).toBe("READY");
+    expect(result.value).toBe("Aadil");
+    expect(result.protected).toBe(true);
+  });
+
+  it("still reviews an ordinary protected identity fact without confirmation", () => {
+    const result = resolveProfileAnswer(
+      question({ semanticType: "FIRST_NAME", rawText: "First Name *" }),
+      profile([fact({ protected: true, confirmedAt: null })]),
+    );
+    expect(result.state).toBe("REVIEW");
+    expect(result.reasons).toContain(
+      "Protected source fact has not been explicitly confirmed",
+    );
+  });
+
   it("forces protected facts through review even when confirmed", () => {
     const result = resolveProfileAnswer(
       question({

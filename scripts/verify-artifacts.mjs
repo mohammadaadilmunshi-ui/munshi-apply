@@ -18,6 +18,7 @@ if (manifest.manifest_version !== 3) {
 const expectedPermissions = [
   "nativeMessaging",
   "sidePanel",
+  "scripting",
   "storage",
   "tabs",
   "webNavigation",

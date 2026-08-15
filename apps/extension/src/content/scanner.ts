@@ -70,21 +70,32 @@ function normalized(value: string | null | undefined): string {
   return compactText(value).toLocaleLowerCase("en-US");
 }
 
+function hiddenBySelfOrAncestor(element: HTMLElement): boolean {
+  let current: HTMLElement | null = element;
+  while (current) {
+    const style = window.getComputedStyle(current);
+    const opacity = Number.parseFloat(style.opacity || "1");
+    if (
+      current.hidden ||
+      current.getAttribute("aria-hidden") === "true" ||
+      style.display === "none" ||
+      style.visibility === "hidden" ||
+      style.visibility === "collapse" ||
+      (Number.isFinite(opacity) && opacity <= 0.01)
+    ) {
+      return true;
+    }
+    current = current.parentElement;
+  }
+  return false;
+}
+
 function isVisible(element: Element): boolean {
   if (!(element instanceof HTMLElement)) return false;
+  if (hiddenBySelfOrAncestor(element)) return false;
   const style = window.getComputedStyle(element);
   const rect = element.getBoundingClientRect();
-  if (
-    element.hidden ||
-    element.getAttribute("aria-hidden") === "true" ||
-    style.display === "none" ||
-    style.visibility === "hidden" ||
-    style.opacity === "0" ||
-    rect.width <= 0 ||
-    rect.height <= 0
-  ) {
-    return false;
-  }
+  if (rect.width <= 0 || rect.height <= 0) return false;
   const explicitlyPositioned =
     style.position === "absolute" || style.position === "fixed";
   return !explicitlyPositioned || (rect.right > 0 && rect.bottom > 0);
@@ -617,7 +628,6 @@ function hasActiveCaptchaFrame(): boolean {
     if (!isVisible(frame)) return false;
     const src = frame.getAttribute("src") ?? "";
     const descriptor = normalized(`${src} ${frame.getAttribute("title")}`);
-    if (/\b(bframe|challenge|checkbox)\b/.test(descriptor)) return true;
 
     let captchaSize = "";
     try {
@@ -629,13 +639,16 @@ function hasActiveCaptchaFrame(): boolean {
     if (normalized(captchaSize) === "invisible") return false;
     if (frame.closest(".grecaptcha-badge")) return false;
 
+    const rect = frame.getBoundingClientRect();
     if (/recaptcha/.test(descriptor) && /\/anchor\b/.test(src)) {
-      if (/^(normal|compact)$/i.test(captchaSize)) return true;
-      const rect = frame.getBoundingClientRect();
+      if (/^(normal|compact)$/i.test(captchaSize)) {
+        return rect.width >= 180 && rect.height >= 50;
+      }
       return rect.width >= 250 && rect.height >= 60;
     }
-
-    const rect = frame.getBoundingClientRect();
+    if (/\b(bframe|challenge|checkbox)\b/.test(descriptor)) {
+      return rect.width >= 180 && rect.height >= 30;
+    }
     return rect.width >= 180 && rect.height >= 50;
   });
 }

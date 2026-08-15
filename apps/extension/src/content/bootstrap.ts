@@ -7,9 +7,12 @@ import { refreshFileFingerprint } from "./adaptive";
 import { applyNavigationAction } from "./navigation";
 import { scanDocument, snapshotFingerprint } from "./scanner";
 
+const SCAN_DEBOUNCE_MS = 150;
+const MAX_SCAN_DEBOUNCE_MS = 600;
 let previousFingerprint = "";
 let pending: number | undefined;
-let pendingForce = false;
+let debounceStartedAt = 0;
+let scanQueue: Promise<void> = Promise.resolve();
 
 async function publishSnapshot(force = false): Promise<void> {
   const page = scanDocument();
@@ -20,19 +23,50 @@ async function publishSnapshot(force = false): Promise<void> {
   try {
     await chrome.runtime.sendMessage(request);
   } catch {
-    // The extension may have reloaded while the page remained open.
+    // The extension may be restarting. The background runtime re-establishes
+    // the sensor before the next page read or owner action.
   }
 }
 
-function scheduleScan(force = false): void {
-  pendingForce ||= force;
+function enqueueSnapshot(force: boolean): Promise<void> {
+  scanQueue = scanQueue
+    .catch(() => undefined)
+    .then(() => publishSnapshot(force));
+  return scanQueue;
+}
+
+function clearPendingScan(): void {
   if (pending !== undefined) window.clearTimeout(pending);
-  pending = window.setTimeout(() => {
-    pending = undefined;
-    const forceThisScan = pendingForce;
-    pendingForce = false;
-    void publishSnapshot(forceThisScan);
-  }, 150);
+  pending = undefined;
+}
+
+function scheduleScan(force = false): void {
+  if (force) {
+    clearPendingScan();
+    debounceStartedAt = 0;
+    void enqueueSnapshot(true);
+    return;
+  }
+
+  const current = Date.now();
+  if (debounceStartedAt === 0) debounceStartedAt = current;
+  const elapsed = current - debounceStartedAt;
+  if (elapsed >= MAX_SCAN_DEBOUNCE_MS) {
+    clearPendingScan();
+    debounceStartedAt = 0;
+    void enqueueSnapshot(false);
+    return;
+  }
+
+  clearPendingScan();
+  pending = window.setTimeout(
+    () => {
+      pending = undefined;
+      debounceStartedAt = 0;
+      void enqueueSnapshot(false);
+    },
+    Math.min(SCAN_DEBOUNCE_MS, MAX_SCAN_DEBOUNCE_MS - elapsed),
+  );
 }
 
 function wrapHistoryMethod(method: "pushState" | "replaceState"): void {
@@ -94,7 +128,7 @@ window.addEventListener("popstate", () => scheduleScan());
 window.addEventListener("hashchange", () => scheduleScan());
 wrapHistoryMethod("pushState");
 wrapHistoryMethod("replaceState");
-void publishSnapshot();
+void enqueueSnapshot(false);
 
 chrome.runtime.onMessage.addListener(
   (
@@ -106,6 +140,21 @@ chrome.runtime.onMessage.addListener(
     _sender,
     sendResponse,
   ) => {
+    if (message.type === "CONTENT_PING") {
+      sendResponse({ ok: true });
+      return false;
+    }
+    if (message.type === "CONTENT_SCAN_NOW") {
+      void enqueueSnapshot(true)
+        .then(() => sendResponse({ ok: true }))
+        .catch((error: unknown) =>
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : "Scan failed",
+          }),
+        );
+      return true;
+    }
     if (message.type === "APPLY_FILL_INSTRUCTIONS" && message.instructions) {
       void applyFillInstructions(message.instructions)
         .then((results) => {

@@ -116,6 +116,42 @@ describe("AutoPilot page-state scanner", () => {
     expect(scanDocument().securityCheckpoint).toBe("CAPTCHA");
   });
 
+  it("ignores anti-bot challenge frames hidden by an ancestor", () => {
+    document.body.innerHTML = `
+      <label for="first">First Name *</label>
+      <input id="first" required>
+      <div style="opacity: 0">
+        <iframe title="recaptcha challenge" src="https://www.google.com/recaptcha/api2/bframe"></iframe>
+      </div>
+    `;
+    const frame = document.querySelector("iframe") as HTMLIFrameElement;
+    vi.spyOn(frame, "getBoundingClientRect").mockReturnValue({
+      ...visibleRectangle,
+      bottom: 500,
+      height: 400,
+      right: 500,
+      width: 400,
+    });
+    expect(scanDocument().securityCheckpoint).toBeNull();
+  });
+
+  it("ignores an explicitly invisible CAPTCHA frame with challenge tokens", () => {
+    document.body.innerHTML = `
+      <label for="email">Email Address *</label>
+      <input id="email" type="email" required>
+      <iframe title="recaptcha challenge" src="https://www.google.com/recaptcha/api2/bframe?size=invisible"></iframe>
+    `;
+    const frame = document.querySelector("iframe") as HTMLIFrameElement;
+    vi.spyOn(frame, "getBoundingClientRect").mockReturnValue({
+      ...visibleRectangle,
+      bottom: 500,
+      height: 400,
+      right: 500,
+      width: 400,
+    });
+    expect(scanDocument().securityCheckpoint).toBeNull();
+  });
+
   it("detects a visible active CAPTCHA challenge", () => {
     document.body.innerHTML = `
       <iframe title="recaptcha challenge" src="https://www.google.com/recaptcha/api2/bframe"></iframe>

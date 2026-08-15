@@ -39,7 +39,9 @@ mobileManifest.description =
 // Keep the mobile owner surface on its smaller storage + tabs permission budget.
 mobileManifest.permissions = mobileManifest.permissions.filter(
   (permission) =>
-    !["nativeMessaging", "sidePanel", "webNavigation"].includes(permission),
+    !["nativeMessaging", "sidePanel", "scripting", "webNavigation"].includes(
+      permission,
+    ),
 );
 mobileManifest.action = {
   ...mobileManifest.action,

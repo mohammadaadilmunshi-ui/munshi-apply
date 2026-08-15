@@ -30,6 +30,7 @@ const semanticFactKey: Readonly<Partial<Record<SemanticType, string>>> = {
   MIDDLE_NAME: "middle_name",
   LAST_NAME: "last_name",
   PREFERRED_NAME: "preferred_name",
+  PRONOUNS: "pronouns",
   CONTACT: "email",
   ADDRESS: "street_address",
   STREET_ADDRESS: "street_address",
@@ -214,7 +215,6 @@ export function resolveProfileAnswer(
   const requiresReview =
     question.requiresReview ||
     question.sensitive ||
-    fact.protected ||
     (fact.protected && !fact.confirmedAt);
 
   return {
