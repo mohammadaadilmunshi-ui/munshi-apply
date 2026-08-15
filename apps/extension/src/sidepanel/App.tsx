@@ -277,6 +277,7 @@ export function App() {
   const [aiMessage, setAiMessage] = useState("");
   const [autoPilotStatus, setAutoPilotStatus] =
     useState<AutoPilotControllerStatus | null>(null);
+  const [lastCloudPullAt, setLastCloudPullAt] = useState<string | null>(null);
 
   const refreshAI = useCallback(async () => {
     try {
@@ -316,7 +317,7 @@ export function App() {
             await publishApplicationSnapshot(connection, activePage);
           const snapshot = await getCloudSnapshot(connection);
           setCloudSnapshot(snapshot);
-          if (snapshot.profile) setProfile(snapshot.profile);
+          setLastCloudPullAt(now());
           setSelectedResumeId(
             (current) => current || snapshot.resumes[0]?.resumeId || "",
           );
@@ -351,6 +352,26 @@ export function App() {
     }
   }, [refreshAI]);
 
+  const pullCloudChanges = useCallback(async () => {
+    if (profileDirty || Object.keys(protectedDrafts).length > 0) return;
+    const connection = await getCloudConnection();
+    if (!connection) return;
+    const cloudHealth = await getCloudHealth(connection);
+    setCloud({ status: "connected", data: cloudHealth });
+    if (!cloudHealth.encryptionReady) return;
+    const [syncedProfile, snapshot] = await Promise.all([
+      getProfile(),
+      getCloudSnapshot(connection),
+    ]);
+    setCloudSnapshot(snapshot);
+    if (syncedProfile) {
+      setProfile(syncedProfile);
+      profileRevision.current += 1;
+      setSaveState("synced");
+    }
+    setLastCloudPullAt(now());
+  }, [profileDirty, protectedDrafts]);
+
   useEffect(() => {
     void refresh().catch((error: unknown) => {
       setHealth("unavailable");
@@ -371,6 +392,33 @@ export function App() {
       if (retryTimer.current !== null) window.clearTimeout(retryTimer.current);
     };
   }, [refresh]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const pull = () => {
+      if (cancelled || document.visibilityState !== "visible") return;
+      void pullCloudChanges().catch((error: unknown) => {
+        setNotice(
+          error instanceof Error
+            ? error.message
+            : "Cloud profile refresh failed",
+        );
+      });
+    };
+    const interval = window.setInterval(pull, 15_000);
+    const onFocus = () => pull();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") pull();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [pullCloudChanges]);
 
   useEffect(() => {
     if (!profileLoaded || !profileDirty) return;
@@ -1495,6 +1543,30 @@ export function App() {
                     ? "encrypted"
                     : "paired only"
                   : cloud.status}
+              </dd>
+            </div>
+            <div>
+              <dt>Cloud workspace</dt>
+              <dd>
+                {cloud.status === "connected"
+                  ? (cloud.data.workspaceId ?? "unknown")
+                  : "not connected"}
+              </dd>
+            </div>
+            <div>
+              <dt>Vault fingerprint</dt>
+              <dd>
+                {cloud.status === "connected"
+                  ? (cloud.data.vaultFingerprint ?? "not unlocked")
+                  : "not connected"}
+              </dd>
+            </div>
+            <div>
+              <dt>Last cloud pull</dt>
+              <dd>
+                {lastCloudPullAt
+                  ? new Date(lastCloudPullAt).toLocaleTimeString()
+                  : "not yet"}
               </dd>
             </div>
           </dl>

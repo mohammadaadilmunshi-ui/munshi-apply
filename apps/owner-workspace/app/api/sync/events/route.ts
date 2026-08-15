@@ -82,6 +82,7 @@ export async function GET(request: Request) {
       .orderBy(asc(syncEvents.sequence))
       .limit(250);
     return Response.json({
+      workspaceId: principal.workspaceId,
       events,
       nextCursor: events.at(-1)?.sequence ?? cursor,
       hasMore: events.length === 250,

@@ -881,22 +881,62 @@ export async function sha256Hex(value: string | ArrayBuffer): Promise<string> {
   ).join("");
 }
 
+export function encryptedHistoryNeedsRecovery(input: {
+  hasLocalKey: boolean;
+  eventCount: number;
+  encryptedObjectCount: number;
+}): boolean {
+  return (
+    !input.hasLocalKey &&
+    (input.eventCount > 0 || input.encryptedObjectCount > 0)
+  );
+}
+
+export async function workspaceKeyFingerprint(rawKey: string): Promise<string> {
+  return (await sha256Hex(validateWorkspaceKey(rawKey))).slice(0, 16);
+}
+
 export async function fetchSyncEvents(cursor = 0): Promise<{
   events: SyncEvent[];
   nextCursor: number;
+  workspaceId: string | null;
 }> {
-  const response = await fetch(`/api/sync/events?cursor=${cursor}`, {
-    headers: { accept: "application/json" },
-  });
-  const payload = (await response.json()) as {
-    events?: SyncEvent[];
-    nextCursor?: number;
-    error?: string;
-  };
-  if (!response.ok || !payload.events) {
-    throw new Error(payload.error ?? "Cloud synchronization failed.");
+  const events: SyncEvent[] = [];
+  let nextCursor = cursor;
+  let workspaceId: string | null = null;
+
+  for (let page = 0; page < 100; page += 1) {
+    const response = await fetch(`/api/sync/events?cursor=${nextCursor}`, {
+      headers: { accept: "application/json" },
+    });
+    const payload = (await response.json()) as {
+      workspaceId?: string;
+      events?: SyncEvent[];
+      nextCursor?: number;
+      hasMore?: boolean;
+      error?: string;
+    };
+    if (!response.ok || !payload.events) {
+      throw new Error(payload.error ?? "Cloud synchronization failed.");
+    }
+    if (payload.workspaceId) {
+      if (workspaceId && workspaceId !== payload.workspaceId) {
+        throw new Error("Cloud workspace identity changed during synchronization.");
+      }
+      workspaceId = payload.workspaceId;
+    }
+    events.push(...payload.events);
+    const candidateCursor = payload.nextCursor ?? nextCursor;
+    if (!payload.hasMore) {
+      return { events, nextCursor: candidateCursor, workspaceId };
+    }
+    if (candidateCursor <= nextCursor) {
+      throw new Error("Cloud synchronization cursor did not advance.");
+    }
+    nextCursor = candidateCursor;
   }
-  return { events: payload.events, nextCursor: payload.nextCursor ?? cursor };
+
+  throw new Error("Cloud synchronization exceeded the safe pagination limit.");
 }
 
 export async function decryptLatestEntities(

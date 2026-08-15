@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  fetchCloudEvents,
   normalizeBaseUrl,
   parsePairingBundle,
   validateResumeFile,
@@ -86,5 +87,48 @@ describe("resume upload validation", () => {
         type: "application/pdf",
       }),
     ).toThrow("between 1 byte and 12 MB");
+  });
+});
+
+describe("cloud event pagination", () => {
+  it("downloads every sync page and preserves workspace identity", async () => {
+    const originalFetch = globalThis.fetch;
+    const cursors: string[] = [];
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+      cursors.push(new URL(url).searchParams.get("cursor") ?? "");
+      if (url.endsWith("cursor=0")) {
+        return Response.json({
+          workspaceId: "workspace-test",
+          events: [{ sequence: 250 }],
+          nextCursor: 250,
+          hasMore: true,
+        });
+      }
+      return Response.json({
+        workspaceId: "workspace-test",
+        events: [{ sequence: 251 }],
+        nextCursor: 251,
+        hasMore: false,
+      });
+    };
+    try {
+      const result = await fetchCloudEvents(
+        {
+          baseUrl: "https://workspace.example",
+          deviceId: "device-test",
+          credential: "credential-test",
+          platform: "macos-edge",
+          connectedAt: "2026-08-15T00:00:00.000Z",
+        },
+        0,
+      );
+      expect(cursors).toEqual(["0", "250"]);
+      expect(result.events).toHaveLength(2);
+      expect(result.nextCursor).toBe(251);
+      expect(result.workspaceId).toBe("workspace-test");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });

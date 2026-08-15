@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   ProtectedProfileConflictError,
+  encryptedHistoryNeedsRecovery,
+  fetchSyncEvents,
   migrateLegacyProfileSnapshot,
   parseProfileSnapshot,
   putEncryptedEntity,
@@ -177,6 +179,69 @@ test("fails closed when the cloud omits the exact next version", async () => {
       }),
       /not acknowledged at the expected version/,
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+
+test("existing encrypted history requires recovery instead of minting a new key", () => {
+  assert.equal(
+    encryptedHistoryNeedsRecovery({
+      hasLocalKey: false,
+      eventCount: 1,
+      encryptedObjectCount: 0,
+    }),
+    true,
+  );
+  assert.equal(
+    encryptedHistoryNeedsRecovery({
+      hasLocalKey: false,
+      eventCount: 0,
+      encryptedObjectCount: 0,
+    }),
+    false,
+  );
+  assert.equal(
+    encryptedHistoryNeedsRecovery({
+      hasLocalKey: true,
+      eventCount: 20,
+      encryptedObjectCount: 4,
+    }),
+    false,
+  );
+});
+
+test("owner workspace downloads every sync event page", async () => {
+  const originalFetch = globalThis.fetch;
+  const cursors = [];
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    const cursor = new URL(url, "https://workspace.example").searchParams.get(
+      "cursor",
+    );
+    cursors.push(cursor);
+    if (cursor === "0") {
+      return Response.json({
+        workspaceId: "workspace-test",
+        events: [{ sequence: 250 }],
+        nextCursor: 250,
+        hasMore: true,
+      });
+    }
+    return Response.json({
+      workspaceId: "workspace-test",
+      events: [{ sequence: 251 }],
+      nextCursor: 251,
+      hasMore: false,
+    });
+  };
+  try {
+    const result = await fetchSyncEvents(0);
+    assert.deepEqual(cursors, ["0", "250"]);
+    assert.equal(result.events.length, 2);
+    assert.equal(result.nextCursor, 251);
+    assert.equal(result.workspaceId, "workspace-test");
   } finally {
     globalThis.fetch = originalFetch;
   }

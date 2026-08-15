@@ -101,10 +101,11 @@ export function isEligibleApplicationSnapshot(
 
   const knownAts = Boolean(page.atsFamily && page.atsFamily !== "GENERIC");
   const explicitIntent = hasExplicitIntent(page);
-  const meaningfulQuestions = page.questions.filter(
+  const questions = Array.isArray(page.questions) ? page.questions : [];
+  const meaningfulQuestions = questions.filter(
     (question) => question.semanticType !== "UNKNOWN",
   ).length;
-  const specificQuestions = page.questions.filter((question) =>
+  const specificQuestions = questions.filter((question) =>
     applicationSpecificSemantics.has(question.semanticType),
   ).length;
   const resumeControl = Boolean(
@@ -149,7 +150,10 @@ export function pendingReviewCount(
       .filter((answer) => answer.approved)
       .map((answer) => answer.questionId),
   );
-  return application.questions.filter(
+  const questions = Array.isArray(application.questions)
+    ? application.questions
+    : [];
+  return questions.filter(
     (question) =>
       question.requiresReview && !approvedQuestionIds.has(question.questionId),
   ).length;

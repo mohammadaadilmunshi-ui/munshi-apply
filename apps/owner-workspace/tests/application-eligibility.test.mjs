@@ -138,3 +138,11 @@ test("pending review count excludes questions already explicitly approved", () =
     1,
   );
 });
+
+
+test("legacy snapshots with missing questions fail closed instead of crashing sync", () => {
+  const legacy = snapshot({ url: "https://help.openai.com/legacy" });
+  delete legacy.questions;
+  assert.equal(isEligibleApplicationSnapshot(legacy), false);
+  assert.equal(pendingReviewCount(legacy), 0);
+});

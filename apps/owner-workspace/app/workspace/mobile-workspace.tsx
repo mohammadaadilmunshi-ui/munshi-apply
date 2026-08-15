@@ -12,6 +12,7 @@ import Link from "next/link";
 import {
   decryptLatestEntities,
   downloadEncryptedResume,
+  encryptedHistoryNeedsRecovery,
   ensureWorkspaceKey,
   fetchSyncEvents,
   getWorkspaceKey,
@@ -22,6 +23,7 @@ import {
   putEncryptedEntity,
   reconcileProfileSnapshots,
   uploadEncryptedResume,
+  workspaceKeyFingerprint,
   type ApplicationReview,
   type ApplicationSnapshot,
   type DecryptedEntity,
@@ -40,6 +42,7 @@ type View =
   "overview" | "profile" | "resumes" | "applications" | "devices" | "security";
 
 type WorkspaceStatus = {
+  id: string;
   devices: number;
   encryptedObjects: number;
   events: number;
@@ -286,17 +289,17 @@ export function MobileWorkspace({ ownerName }: { ownerName: string }) {
   const [showRecovery, setShowRecovery] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("Opening encrypted workspace…");
+  const [vaultFingerprint, setVaultFingerprint] = useState<string | null>(null);
+  const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
 
-  const loadWorkspace = useCallback(async () => {
-    setStatus("Synchronizing encrypted workspace…");
-    const key = (await getWorkspaceKey()) ?? (await ensureWorkspaceKey());
-    const [workspaceResponse, devicesResponse, sync, resumeRecords] =
-      await Promise.all([
-        fetch("/api/workspace", { headers: { accept: "application/json" } }),
-        fetch("/api/devices", { headers: { accept: "application/json" } }),
-        fetchSyncEvents(0),
-        listEncryptedResumes(key),
-      ]);
+  const loadWorkspace = useCallback(async (quiet = false) => {
+    if (!quiet) setStatus("Synchronizing encrypted workspace…");
+    const existingKey = await getWorkspaceKey();
+    const [workspaceResponse, devicesResponse, sync] = await Promise.all([
+      fetch("/api/workspace", { headers: { accept: "application/json" } }),
+      fetch("/api/devices", { headers: { accept: "application/json" } }),
+      fetchSyncEvents(0),
+    ]);
     const workspacePayload = (await workspaceResponse.json()) as {
       workspace?: WorkspaceStatus;
       error?: string;
@@ -313,10 +316,47 @@ export function MobileWorkspace({ ownerName }: { ownerName: string }) {
     if (!devicesResponse.ok || !devicesPayload.devices) {
       throw new Error(devicesPayload.error ?? "Device list is unavailable.");
     }
+    if (sync.workspaceId && sync.workspaceId !== workspacePayload.workspace.id) {
+      throw new Error(
+        "Workspace identity mismatch. Do not save until the Site and Edge pairing are reconciled.",
+      );
+    }
 
-    const nextEntities = await decryptLatestEntities(key, sync.events);
+    setWorkspace(workspacePayload.workspace);
+    setDevices(devicesPayload.devices);
+
+    if (
+      encryptedHistoryNeedsRecovery({
+        hasLocalKey: Boolean(existingKey),
+        eventCount: sync.events.length,
+        encryptedObjectCount: workspacePayload.workspace.encryptedObjects,
+      })
+    ) {
+      setRawKey(null);
+      setVaultFingerprint(null);
+      setView("security");
+      throw new Error(
+        "Existing encrypted workspace detected. Restore the recovery key used by your paired Edge installation; MUNSHI will not create a replacement key.",
+      );
+    }
+
+    const key = existingKey ?? (await ensureWorkspaceKey());
+    const fingerprint = await workspaceKeyFingerprint(key);
+    let nextEntities: Map<string, DecryptedEntity>;
+    try {
+      nextEntities = await decryptLatestEntities(key, sync.events);
+    } catch {
+      setRawKey(key);
+      setVaultFingerprint(fingerprint);
+      setView("security");
+      throw new Error(
+        `Encrypted history cannot be opened with vault ${fingerprint}. Restore the recovery key used by the paired Edge installation.`,
+      );
+    }
+    const resumeRecords = await listEncryptedResumes(key);
     const cloudProfile = nextEntities.get("PROFILE.V1:profile-master") as
-      DecryptedEntity<unknown> | undefined;
+      | DecryptedEntity<unknown>
+      | undefined;
     const snapshots = Array.from(nextEntities.entries())
       .filter(([entityKey]) => entityKey.startsWith("APPLICATION.V1:"))
       .map(([, entity]) => entity.value as ApplicationSnapshot)
@@ -326,11 +366,11 @@ export function MobileWorkspace({ ownerName }: { ownerName: string }) {
       .sort((left, right) => right.observedAt.localeCompare(left.observedAt));
 
     setRawKey(key);
+    setVaultFingerprint(fingerprint);
     setEntities(nextEntities);
-    setWorkspace(workspacePayload.workspace);
-    setDevices(devicesPayload.devices);
     setResumes(resumeRecords);
     setApplications(snapshots);
+    setLastSyncAt(new Date().toISOString());
     if (cloudProfile && !profileDirtyRef.current) {
       const migrated = migrateLegacyProfileSnapshot(cloudProfile.value);
       setProfile(migrated.snapshot);
@@ -350,7 +390,7 @@ export function MobileWorkspace({ ownerName }: { ownerName: string }) {
       setProfileVersion(0);
       profileVersionRef.current = 0;
       setStatus("Encrypted workspace synchronized");
-    } else {
+    } else if (!quiet) {
       setStatus(
         "Workspace refreshed; local profile edits are still waiting to synchronize",
       );
@@ -374,6 +414,51 @@ export function MobileWorkspace({ ownerName }: { ownerName: string }) {
     },
     [],
   );
+
+  useEffect(() => {
+    if (
+      !rawKey ||
+      profileDirty ||
+      Object.keys(protectedDrafts).length > 0 ||
+      protectedConflicts.length > 0
+    ) {
+      return;
+    }
+    let cancelled = false;
+    const pull = () => {
+      if (
+        cancelled ||
+        document.visibilityState !== "visible" ||
+        profileSaveInFlight.current
+      ) {
+        return;
+      }
+      void loadWorkspace(true).catch((error: unknown) => {
+        setStatus(
+          error instanceof Error ? error.message : "Workspace synchronization failed",
+        );
+      });
+    };
+    const interval = window.setInterval(pull, 15_000);
+    const onFocus = () => pull();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") pull();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [
+    loadWorkspace,
+    profileDirty,
+    protectedConflicts.length,
+    protectedDrafts,
+    rawKey,
+  ]);
 
   useEffect(() => {
     if (!rawKey || !profileDirty || protectedConflicts.length > 0) {
@@ -401,6 +486,7 @@ export function MobileWorkspace({ ownerName }: { ownerName: string }) {
               profileDirtyRef.current = false;
               setProfileDirty(false);
               setRetryTick(0);
+              setLastSyncAt(new Date().toISOString());
               setStatus("Profile encrypted and synchronized");
             }
           } catch (error) {
@@ -751,7 +837,7 @@ export function MobileWorkspace({ ownerName }: { ownerName: string }) {
       setStatus("Resolve the protected fact conflict before synchronizing.");
       return;
     }
-    if (profileDirty) {
+    if (profileDirtyRef.current) {
       setRetryTick((value) => value + 1);
       return;
     }
@@ -1010,6 +1096,11 @@ export function MobileWorkspace({ ownerName }: { ownerName: string }) {
                   <span>
                     Cloud version {profileVersion} ·{" "}
                     {profileDirty ? "changes pending" : "synchronized"}
+                  </span>
+                  <span>
+                    Workspace {workspace?.id.slice(0, 8) ?? "—"} · vault{" "}
+                    {vaultFingerprint ?? "locked"} · last sync{" "}
+                    {lastSyncAt ? new Date(lastSyncAt).toLocaleTimeString() : "never"}
                   </span>
                 </div>
                 <button
@@ -1470,6 +1561,10 @@ export function MobileWorkspace({ ownerName }: { ownerName: string }) {
               <p>
                 This recovery key decrypts your synchronized profile and
                 résumés. MUNSHI’s server cannot recover it for you.
+              </p>
+              <p>
+                Workspace {workspace?.id ?? "unknown"} · vault{" "}
+                {vaultFingerprint ?? "not unlocked"}
               </p>
               <button
                 className="button secondary"

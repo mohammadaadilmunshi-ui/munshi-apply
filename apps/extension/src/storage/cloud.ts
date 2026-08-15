@@ -20,6 +20,8 @@ export type CloudHealth = {
   connected: true;
   baseUrl: string;
   deviceId: string;
+  workspaceId: string | null;
+  vaultFingerprint: string | null;
   nextCursor: number;
   encryptionReady: boolean;
 };
@@ -82,6 +84,7 @@ export type CloudSnapshot = {
   reviews: ApplicationReview[];
   resumes: ResumeRecord[];
   nextCursor: number;
+  workspaceId: string | null;
 };
 
 type CipherEnvelope = {
@@ -357,18 +360,22 @@ export async function getCloudHealth(
       },
     );
     const payload = (await response.json()) as {
+      workspaceId?: string;
       nextCursor?: number;
       error?: string;
     };
     if (!response.ok) {
       throw new Error(payload.error ?? "Cloud health check failed");
     }
+    const rawKey = await getWorkspaceEncryptionKey();
     return {
       connected: true,
       baseUrl: connection.baseUrl,
       deviceId: connection.deviceId,
+      workspaceId: payload.workspaceId ?? null,
+      vaultFingerprint: rawKey ? (await sha256Hex(rawKey)).slice(0, 16) : null,
       nextCursor: payload.nextCursor ?? 0,
-      encryptionReady: await isCloudEncryptionReady(),
+      encryptionReady: rawKey !== null,
     };
   } finally {
     globalThis.clearTimeout(timeout);
@@ -487,25 +494,55 @@ export async function sha256Hex(value: string | ArrayBuffer): Promise<string> {
 export async function fetchCloudEvents(
   connection: CloudConnection,
   cursor = 0,
-): Promise<{ events: CloudSyncEvent[]; nextCursor: number }> {
-  const response = await fetch(
-    `${connection.baseUrl}/api/sync/events?cursor=${cursor}`,
-    {
-      headers: {
-        accept: "application/json",
-        authorization: `Bearer ${connection.credential}`,
+): Promise<{
+  events: CloudSyncEvent[];
+  nextCursor: number;
+  workspaceId: string | null;
+}> {
+  const events: CloudSyncEvent[] = [];
+  let nextCursor = cursor;
+  let workspaceId: string | null = null;
+
+  for (let page = 0; page < 100; page += 1) {
+    const response = await fetch(
+      `${connection.baseUrl}/api/sync/events?cursor=${nextCursor}`,
+      {
+        headers: {
+          accept: "application/json",
+          authorization: `Bearer ${connection.credential}`,
+        },
       },
-    },
-  );
-  const payload = (await response.json()) as {
-    events?: CloudSyncEvent[];
-    nextCursor?: number;
-    error?: string;
-  };
-  if (!response.ok || !payload.events) {
-    throw new Error(payload.error ?? "Cloud event download failed");
+    );
+    const payload = (await response.json()) as {
+      workspaceId?: string;
+      events?: CloudSyncEvent[];
+      nextCursor?: number;
+      hasMore?: boolean;
+      error?: string;
+    };
+    if (!response.ok || !payload.events) {
+      throw new Error(payload.error ?? "Cloud event download failed");
+    }
+    if (payload.workspaceId) {
+      if (workspaceId && workspaceId !== payload.workspaceId) {
+        throw new Error(
+          "Cloud workspace identity changed during synchronization",
+        );
+      }
+      workspaceId = payload.workspaceId;
+    }
+    events.push(...payload.events);
+    const candidateCursor = payload.nextCursor ?? nextCursor;
+    if (!payload.hasMore) {
+      return { events, nextCursor: candidateCursor, workspaceId };
+    }
+    if (candidateCursor <= nextCursor) {
+      throw new Error("Cloud synchronization cursor did not advance");
+    }
+    nextCursor = candidateCursor;
   }
-  return { events: payload.events, nextCursor: payload.nextCursor ?? cursor };
+
+  throw new Error("Cloud synchronization exceeded the safe pagination limit");
 }
 
 function latestEvents(events: CloudSyncEvent[]): Map<string, CloudSyncEvent> {
@@ -571,7 +608,10 @@ export async function getCloudSnapshot(
 ): Promise<CloudSnapshot> {
   const rawKey = await getWorkspaceEncryptionKey();
   if (!rawKey) throw new Error("Encrypted synchronization is not enabled");
-  const { events, nextCursor } = await fetchCloudEvents(connection, 0);
+  const { events, nextCursor, workspaceId } = await fetchCloudEvents(
+    connection,
+    0,
+  );
   const latest = latestEvents(events);
   let profile: ProfileSnapshot | null = null;
   let profileVersion = 0;
@@ -615,6 +655,7 @@ export async function getCloudSnapshot(
     reviews,
     resumes,
     nextCursor,
+    workspaceId,
   };
 }
 
