@@ -2,8 +2,7 @@ name: Autofill core hardening helper
 
 on:
   push:
-    branches:
-      - feat/v3-foundation-alignment
+    branches: [feat/v3-foundation-alignment]
 
 permissions:
   contents: write
@@ -40,7 +39,7 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
-      - name: Narrow ambiguous patch anchors
+      - name: Prepare guarded source patches
         shell: bash
         run: |
           python - <<'PY'
@@ -57,31 +56,25 @@ jobs:
           input_patch = '''replace_once(\n    "apps/extension/src/content/fill.ts",\n    \'\'\'    const original = element.value;\\n    element.focus();\\n    setNativeValue(element, value);\'\'\','''
           if content.count(input_patch) != 1:
               raise SystemExit("generic input patch marker is not unique")
-          content = content.replace(
-              input_patch,
-              input_patch.replace("replace_once", "replace_first", 1),
-              1,
-          )
+          content = content.replace(input_patch, input_patch.replace("replace_once", "replace_first", 1), 1)
 
           controller_old = '''replace_once(\n    "apps/extension/src/background/autopilot-controller.ts",\n    \'\'\'          actionDeadlineAt: this.deadline(FILL_TIMEOUT_MS),\\n        });\'\'\',\n    \'\'\'          actionDeadlineAt: this.deadline(FILL_TIMEOUT_MS),\\n          lastFillResult:\\n            results.find(\\n              (result) =>\\n                result.controlId === plan.action.instruction.controlId,\\n            ) ?? null,\\n        });\'\'\',\n)'''
           controller_new = '''replace_once(\n    "apps/extension/src/background/autopilot-controller.ts",\n    \'\'\'          waitingFor: "FILL",\\n          beforeNavigation: null,\\n          dispatchingFillControlId: null,\\n          actionDeadlineAt: this.deadline(FILL_TIMEOUT_MS),\\n        });\'\'\',\n    \'\'\'          waitingFor: "FILL",\\n          beforeNavigation: null,\\n          dispatchingFillControlId: null,\\n          actionDeadlineAt: this.deadline(FILL_TIMEOUT_MS),\\n          lastFillResult:\\n            results.find(\\n              (result) =>\\n                result.controlId === plan.action.instruction.controlId,\\n            ) ?? null,\\n        });\'\'\',\n)'''
           if content.count(controller_old) != 1:
-              raise SystemExit("verified-fill result patch marker is not unique")
+              raise SystemExit("verified-fill patch marker changed")
           content = content.replace(controller_old, controller_new, 1)
 
           initializer_old = '''replace_once(\n    "apps/extension/src/background/autopilot-controller.ts",\n    \'\'\'      pendingDraftUsageId: null,\\n    });\'\'\',\n    \'\'\'      pendingDraftUsageId: null,\\n      lastFillResult: null,\\n    });\'\'\',\n)'''
           initializer_new = '''replace_once(\n    "apps/extension/src/background/autopilot-controller.ts",\n    \'\'\'      ownerPauseRequested: false,\\n      ownerPauseReason: null,\\n      pendingDraftUsageId: null,\\n    });\'\'\',\n    \'\'\'      ownerPauseRequested: false,\\n      ownerPauseReason: null,\\n      pendingDraftUsageId: null,\\n      lastFillResult: null,\\n    });\'\'\',\n)'''
           if content.count(initializer_old) != 1:
-              raise SystemExit("runtime initializer patch marker is not unique")
-          content = content.replace(initializer_old, initializer_new, 1)
-
-          path.write_text(content)
+              raise SystemExit("runtime initializer patch marker changed")
+          path.write_text(content.replace(initializer_old, initializer_new, 1))
           PY
 
       - name: Apply autofill core hardening
         run: python scripts/apply-autofill-core-hardening.py
 
-      - name: Repair typed autofill integration
+      - name: Repair typed integration and radio fixture
         shell: bash
         run: |
           python - <<'PY'
@@ -91,49 +84,33 @@ jobs:
           controller = controller_path.read_text()
           start = controller.index('      case "FILL": {')
           end = controller.index('      case "NAVIGATE_NEXT": {', start)
-          fill_block = controller[start:end]
+          block = controller[start:end]
           anchor = '      case "FILL": {\n        const armed ='
-          if fill_block.count(anchor) != 1:
-              raise SystemExit("fill block anchor changed unexpectedly")
-          fill_block = fill_block.replace(
-              "plan.action.instruction",
-              "fillInstruction",
-          )
-          fill_block = fill_block.replace(
-              anchor,
-              '      case "FILL": {\n        const fillInstruction = plan.action.instruction;\n        const armed =',
-              1,
-          )
-          controller_path.write_text(controller[:start] + fill_block + controller[end:])
+          if block.count(anchor) != 1:
+              raise SystemExit("fill block anchor changed")
+          block = block.replace("plan.action.instruction", "fillInstruction")
+          block = block.replace(anchor, '      case "FILL": {\n        const fillInstruction = plan.action.instruction;\n        const armed =', 1)
+          controller_path.write_text(controller[:start] + block + controller[end:])
 
           client_path = Path("apps/extension/src/messaging/client.ts")
           client = client_path.read_text()
           old = "  pendingDraftUsageId: string | null;\n};"
-          new = "  pendingDraftUsageId: string | null;\n  lastFillResult: FillResult | null;\n};"
           if client.count(old) != 1:
-              raise SystemExit("AutoPilot client status anchor changed unexpectedly")
-          client_path.write_text(client.replace(old, new, 1))
+              raise SystemExit("client status anchor changed")
+          client_path.write_text(client.replace(old, "  pendingDraftUsageId: string | null;\n  lastFillResult: FillResult | null;\n};", 1))
+
+          test_path = Path("apps/extension/src/content/autofill-advanced.test.ts")
+          test = test_path.read_text()
+          old = '''    const question = scanDocument().questions[0]!;\n    const result = await applyFillInstructions(\n      [\n        {\n          controlId: question.controlId,\n          frameId: 0,\n          value: "NJ",\n          sensitive: false,\n          approved: true,\n        },\n      ],\n      quick,\n    );\n    expect(result[0]?.status).toBe("FILLED");\n    expect(document.getElementById("nj")?.getAttribute("aria-checked")).toBe(\n      "true",\n    );'''
+          new = '''    const radio = scanDocument().controls.find((control) => control.kind === "RADIO")!;\n    const result = await applyFillInstructions(\n      [\n        {\n          controlId: radio.controlId,\n          frameId: 0,\n          value: "NJ",\n          sensitive: false,\n          approved: true,\n        },\n      ],\n      quick,\n    );\n    expect(result[0]?.status).toBe("FILLED");\n    expect(document.getElementById("nj")?.getAttribute("aria-checked")).toBe(\n      "true",\n    );'''
+          if test.count(old) != 1:
+              raise SystemExit("radio fixture anchor changed")
+          test_path.write_text(test.replace(old, new, 1))
           PY
 
       - name: Apply authoritative formatting
         run: |
-          npx prettier --write \
-            packages/contracts/src/index.ts \
-            packages/application-model/src/autopilot.ts \
-            packages/application-model/src/autopilot-dependent.test.ts \
-            apps/extension/src/content/adaptive.ts \
-            apps/extension/src/content/autofill-advanced.test.ts \
-            apps/extension/src/content/bootstrap.ts \
-            apps/extension/src/content/fill.ts \
-            apps/extension/src/content/multi-select.ts \
-            apps/extension/src/content/scanner.ts \
-            apps/extension/src/storage/vault.ts \
-            apps/extension/src/background/autopilot-controller.ts \
-            apps/extension/src/background/service-worker.ts \
-            apps/extension/src/messaging/client.ts \
-            apps/extension/src/sidepanel/autopilot-plan.ts \
-            apps/extension/src/sidepanel/AutoPilotControlCenter.tsx \
-            apps/extension/public/manifest.json
+          npx prettier --write packages/contracts/src/index.ts packages/application-model/src/autopilot.ts packages/application-model/src/autopilot-dependent.test.ts apps/extension/src/content/adaptive.ts apps/extension/src/content/autofill-advanced.test.ts apps/extension/src/content/bootstrap.ts apps/extension/src/content/fill.ts apps/extension/src/content/multi-select.ts apps/extension/src/content/scanner.ts apps/extension/src/storage/vault.ts apps/extension/src/background/autopilot-controller.ts apps/extension/src/background/service-worker.ts apps/extension/src/messaging/client.ts apps/extension/src/sidepanel/autopilot-plan.ts apps/extension/src/sidepanel/AutoPilotControlCenter.tsx apps/extension/public/manifest.json
 
       - name: Verify complete extension tranche
         run: npm run check
@@ -150,25 +127,6 @@ jobs:
           git diff --check
           git config user.name "Aadil Munshi"
           git config user.email "mohammadaadilmunshi@gmail.com"
-          git add -- \
-            packages/contracts/src/index.ts \
-            packages/application-model/src/autopilot.ts \
-            packages/application-model/src/autopilot-dependent.test.ts \
-            apps/extension/src/content/adaptive.ts \
-            apps/extension/src/content/autofill-advanced.test.ts \
-            apps/extension/src/content/bootstrap.ts \
-            apps/extension/src/content/fill.ts \
-            apps/extension/src/content/multi-select.ts \
-            apps/extension/src/content/scanner.ts \
-            apps/extension/src/storage/vault.ts \
-            apps/extension/src/background/autopilot-controller.ts \
-            apps/extension/src/background/service-worker.ts \
-            apps/extension/src/messaging/client.ts \
-            apps/extension/src/sidepanel/autopilot-plan.ts \
-            apps/extension/src/sidepanel/AutoPilotControlCenter.tsx \
-            apps/extension/public/manifest.json \
-            scripts/apply-autofill-core-hardening.py \
-            .github/workflows/autofill-core-hardening-helper.yml
-          git diff --cached --stat
+          git add -A
           git commit -m "feat: harden universal autofill runtime"
           git push origin HEAD:feat/v3-foundation-alignment
