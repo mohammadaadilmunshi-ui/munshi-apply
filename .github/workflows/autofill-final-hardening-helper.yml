@@ -56,6 +56,31 @@ jobs:
       - name: Apply final autofill hardening
         run: python scripts/apply-autofill-final-hardening.py
 
+      - name: Keep recipe telemetry application-neutral
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          native_path = Path("apps/extension/src/messaging/native.ts")
+          native = native_path.read_text()
+          start = native.index("export async function recordInteractionRecipeAttempt")
+          end = native.index("}): Promise<InteractionRecipeStatus>", start)
+          block = native[start:end]
+          old = "  applicationId: string;"
+          if block.count(old) != 1:
+              raise SystemExit("recipe applicationId type anchor changed")
+          block = block.replace(old, "  applicationId?: string | null;", 1)
+          native_path.write_text(native[:start] + block + native[end:])
+
+          worker_path = Path("apps/extension/src/background/service-worker.ts")
+          worker = worker_path.read_text()
+          old = '          applicationId: before?.applicationId ?? "unknown-application",'
+          if worker.count(old) != 1:
+              raise SystemExit("recipe applicationId call anchor changed")
+          worker_path.write_text(worker.replace(old, "          applicationId: null,", 1))
+          PY
+
       - name: Apply authoritative formatting
         run: |
           npx prettier --write \
