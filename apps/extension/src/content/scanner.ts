@@ -9,7 +9,20 @@ import type {
   SecurityCheckpointKind,
   SemanticType,
 } from "@munshi-apply/contracts";
+import { componentFingerprint } from "@munshi-apply/application-model";
 import { classifyQuestion } from "@munshi-apply/semantic-engine";
+import {
+  classifyValidationMessage,
+  detectAtsFamily,
+  fileFingerprintFor,
+  interactionConfidenceFor,
+  isAriaBooleanControl,
+  isAriaRadioControl,
+  isCustomDateControl,
+  isPopupChoiceControl,
+  repeatMetadataFor,
+  validationMessageFor,
+} from "./adaptive";
 
 const selector = [
   "input",
@@ -18,6 +31,14 @@ const selector = [
   "button",
   "[role='button']",
   "[role='combobox']",
+  "[role='checkbox']",
+  "[role='switch']",
+  "[role='radio']",
+  "[role='spinbutton']",
+  "[aria-haspopup='listbox']",
+  "[aria-haspopup='tree']",
+  "[aria-haspopup='grid']",
+  "[aria-haspopup='dialog']",
   "[contenteditable='true']",
 ].join(",");
 
@@ -38,7 +59,7 @@ function collectInteractiveElements(root: Document | ShadowRoot): Element[] {
       collected.push(...collectInteractiveElements(host.shadowRoot));
     }
   }
-  return collected;
+  return [...new Set(collected)];
 }
 
 function compactText(value: string | null | undefined): string {
@@ -173,7 +194,12 @@ function labelFor(element: Element): string {
 }
 
 function kindFor(element: Element): ControlKind {
-  if (element.getAttribute("role") === "combobox") return "COMBOBOX";
+  if (isCustomDateControl(element) || isPopupChoiceControl(element)) {
+    return "COMBOBOX";
+  }
+  if (isAriaBooleanControl(element)) return "CHECKBOX";
+  if (isAriaRadioControl(element)) return "RADIO";
+  if (element.getAttribute("role") === "spinbutton") return "NUMBER";
   if (element instanceof HTMLTextAreaElement) return "TEXTAREA";
   if (element instanceof HTMLSelectElement) return "SELECT";
   if (
@@ -221,8 +247,16 @@ function controlledComboboxOptions(element: Element): string[] {
         : root.querySelector(`#${CSS.escape(id)}`);
     if (!container) continue;
     const candidates = [
-      ...(container.getAttribute("role") === "option" ? [container] : []),
-      ...Array.from(container.querySelectorAll("[role='option']")),
+      ...(["option", "treeitem", "gridcell"].includes(
+        container.getAttribute("role") ?? "",
+      )
+        ? [container]
+        : []),
+      ...Array.from(
+        container.querySelectorAll(
+          "[role='option'], [role='treeitem'], [role='gridcell']",
+        ),
+      ),
     ];
     for (const candidate of candidates) {
       const label =
@@ -313,6 +347,41 @@ function stableControlSignature(element: Element): string {
   ].join("|");
 }
 
+function controlSatisfied(element: Element): boolean {
+  if (
+    ("disabled" in element &&
+      Boolean((element as HTMLInputElement).disabled)) ||
+    element.getAttribute("aria-disabled") === "true"
+  ) {
+    return true;
+  }
+  if (element instanceof HTMLInputElement) {
+    if (element.type === "file") return Boolean(element.files?.length);
+    if (element.type === "checkbox") return element.checked;
+    if (element.type === "radio") {
+      return radioGroup(element).some((candidate) => candidate.checked);
+    }
+    return Boolean(compactText(element.value)) && element.validity.valid;
+  }
+  if (element instanceof HTMLSelectElement) {
+    return Boolean(compactText(element.value)) && element.validity.valid;
+  }
+  if (element instanceof HTMLTextAreaElement) {
+    return Boolean(compactText(element.value)) && element.validity.valid;
+  }
+  if (isAriaBooleanControl(element) || isAriaRadioControl(element)) {
+    return element.getAttribute("aria-checked") === "true";
+  }
+  if (element instanceof HTMLElement && element.isContentEditable) {
+    return Boolean(compactText(element.textContent));
+  }
+  return Boolean(
+    compactText(element.getAttribute("aria-valuetext")) ||
+    compactText(element.getAttribute("data-value")) ||
+    compactText(element.getAttribute("aria-activedescendant")),
+  );
+}
+
 function createControl(element: Element): Control | null {
   const visible = isVisible(element);
   const fileInput =
@@ -326,10 +395,19 @@ function createControl(element: Element): Control | null {
   }
 
   const validation = validationState(element);
+  const validationMessage =
+    validationMessageFor(element) || validation.validationMessage;
+  const repeat = repeatMetadataFor(element);
+  const fileFingerprint =
+    element instanceof HTMLInputElement && element.type === "file"
+      ? fileFingerprintFor(element)
+      : null;
+  const kind = kindFor(element);
+  const options = optionsFor(element);
   return {
     controlId: `ctl-${hash(stableControlSignature(element))}`,
     frameId: 0,
-    kind: kindFor(element),
+    kind,
     tagName: element.tagName.toLowerCase(),
     name: compactText(element.getAttribute("name")),
     label: labelFor(element),
@@ -343,21 +421,63 @@ function createControl(element: Element): Control | null {
         Boolean((element as HTMLInputElement).disabled)) ||
       element.getAttribute("aria-disabled") === "true",
     visible,
-    options: optionsFor(element),
+    options,
     multiple:
       (element instanceof HTMLSelectElement && element.multiple) ||
       (element instanceof HTMLInputElement && element.multiple),
     autocomplete: compactText(element.getAttribute("autocomplete")),
-    invalid: validation.invalid,
-    validationMessage: validation.validationMessage,
-    fileSelected:
-      element instanceof HTMLInputElement && element.type === "file"
-        ? Boolean(element.files?.length)
+    invalid:
+      validation.invalid || element.getAttribute("aria-invalid") === "true",
+    validationMessage,
+    fileSelected: fileFingerprint ? fileFingerprint.count > 0 : undefined,
+    role: compactText(element.getAttribute("role")),
+    inputType: element instanceof HTMLInputElement ? element.type : "",
+    hasPopup: compactText(element.getAttribute("aria-haspopup")),
+    readOnly:
+      element instanceof HTMLInputElement ||
+      element instanceof HTMLTextAreaElement
+        ? element.readOnly
+        : element.getAttribute("aria-readonly") === "true",
+    maxLength:
+      element instanceof HTMLInputElement ||
+      element instanceof HTMLTextAreaElement
+        ? element.maxLength
         : undefined,
+    minLength:
+      element instanceof HTMLInputElement ||
+      element instanceof HTMLTextAreaElement
+        ? element.minLength
+        : undefined,
+    pattern: element instanceof HTMLInputElement ? element.pattern : undefined,
+    accept:
+      element instanceof HTMLInputElement && element.type === "file"
+        ? element.accept
+        : undefined,
+    satisfied: controlSatisfied(element),
+    validationCode: classifyValidationMessage(validationMessage),
+    interactionConfidence: interactionConfidenceFor(element),
+    repeatGroupId: repeat.groupId,
+    repeatIndex: repeat.index,
+    componentFingerprint: componentFingerprint({
+      kind,
+      tagName: element.tagName.toLowerCase(),
+      role: element.getAttribute("role"),
+      inputType: element instanceof HTMLInputElement ? element.type : null,
+      optionCount: options.length,
+      ariaAutocomplete: element.getAttribute("aria-autocomplete"),
+      hasPopup: element.getAttribute("aria-haspopup"),
+    }),
+    fileFingerprintState: fileFingerprint?.state,
+    fileSha256: fileFingerprint?.sha256,
+    fileCount: fileFingerprint?.count,
+    fileSize: fileFingerprint?.size,
+    fileMimeType: fileFingerprint?.mimeType,
   };
 }
 
 type ControlEntry = { element: Element; control: Control };
+
+const controlHints = new Map<string, Control>();
 
 function scanControlEntries(): ControlEntry[] {
   const duplicateCounts = new Map<string, number>();
@@ -367,13 +487,12 @@ function scanControlEntries(): ControlEntry[] {
     if (!control) continue;
     const count = duplicateCounts.get(control.controlId) ?? 0;
     duplicateCounts.set(control.controlId, count + 1);
-    entries.push({
-      element,
-      control:
-        count === 0
-          ? control
-          : { ...control, controlId: `${control.controlId}-${count + 1}` },
-    });
+    const finalControl =
+      count === 0
+        ? control
+        : { ...control, controlId: `${control.controlId}-${count + 1}` };
+    entries.push({ element, control: finalControl });
+    controlHints.set(finalControl.controlId, finalControl);
   }
   return entries;
 }
@@ -641,6 +760,7 @@ export function scanDocument(): ApplicationPage {
     validationErrorCount: controls.filter((control) => control.invalid).length,
     navigationCandidates: navigation,
     finalSubmissionBoundary,
+    atsFamily: detectAtsFamily(),
   };
   return { ...page, pageFingerprint: snapshotFingerprint(page) };
 }
@@ -654,6 +774,59 @@ export function controlElementMap(): Map<string, Element> {
   );
 }
 
+function sameText(
+  left: string | undefined,
+  right: string | undefined,
+): boolean {
+  return normalized(left) !== "" && normalized(left) === normalized(right);
+}
+
+function reboundScore(hint: Control, candidate: Control): number {
+  if (hint.kind !== candidate.kind) return -1;
+  if (
+    hint.repeatIndex !== null &&
+    hint.repeatIndex !== undefined &&
+    candidate.repeatIndex !== hint.repeatIndex
+  ) {
+    return -1;
+  }
+  let score = 4;
+  if (sameText(hint.label, candidate.label)) score += 5;
+  if (sameText(hint.name, candidate.name)) score += 4;
+  if (sameText(hint.ariaLabel, candidate.ariaLabel)) score += 4;
+  if (sameText(hint.placeholder, candidate.placeholder)) score += 2;
+  if (sameText(hint.autocomplete, candidate.autocomplete)) score += 2;
+  if (hint.tagName === candidate.tagName) score += 1;
+  if (hint.repeatGroupId && candidate.repeatGroupId === hint.repeatGroupId) {
+    score += 3;
+  }
+  if (
+    hint.componentFingerprint &&
+    candidate.componentFingerprint === hint.componentFingerprint
+  ) {
+    score += 2;
+  }
+  return score;
+}
+
+export function resolveControlElement(
+  controlId: string,
+): { element: Element; control: Control; rebound: boolean } | null {
+  const hint = controlHints.get(controlId);
+  const entries = scanControlEntries();
+  const exact = entries.find((entry) => entry.control.controlId === controlId);
+  if (exact) return { ...exact, rebound: false };
+  if (!hint) return null;
+
+  const ranked = entries
+    .map((entry) => ({ entry, score: reboundScore(hint, entry.control) }))
+    .filter((item) => item.score >= 9)
+    .sort((left, right) => right.score - left.score);
+  if (ranked.length === 0) return null;
+  if (ranked.length > 1 && ranked[0]!.score === ranked[1]!.score) return null;
+  return { ...ranked[0]!.entry, rebound: true };
+}
+
 export function snapshotFingerprint(page: ApplicationPage): string {
   return hash(
     JSON.stringify({
@@ -665,6 +838,7 @@ export function snapshotFingerprint(page: ApplicationPage): string {
       validationErrorCount: page.validationErrorCount,
       navigationCandidates: page.navigationCandidates,
       finalSubmissionBoundary: page.finalSubmissionBoundary,
+      atsFamily: page.atsFamily,
     }),
   );
 }

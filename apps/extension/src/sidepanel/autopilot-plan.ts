@@ -35,6 +35,7 @@ const fillableKinds = new Set([
 export function buildAutoPilotLaunchPlan(
   page: ApplicationPage,
   answers: Record<string, AutoPilotAnswer>,
+  options: { expectedResumeSha256?: string | null } = {},
 ): AutoPilotLaunchPlan {
   const controls = new Map(
     page.controls.map((control) => [control.controlId, control]),
@@ -49,7 +50,28 @@ export function buildAutoPilotLaunchPlan(
     const control = controls.get(question.controlId);
     if (!control || control.disabled) continue;
     if (control.kind === "FILE") {
-      if (!control.fileSelected) manual.set(control.controlId, control);
+      const resumeLike = /\b(resume|résumé|cv)\b/i.test(
+        `${control.label} ${control.name} ${control.ariaLabel}`,
+      );
+      if (!control.fileSelected) {
+        manual.set(control.controlId, control);
+      } else if (resumeLike && options.expectedResumeSha256) {
+        if (control.fileFingerprintState !== "READY") {
+          manual.set(control.controlId, {
+            ...control,
+            invalid: true,
+            validationMessage:
+              "Selected résumé is still being fingerprinted locally; wait for verification before continuing.",
+          });
+        } else if (control.fileSha256 !== options.expectedResumeSha256) {
+          manual.set(control.controlId, {
+            ...control,
+            invalid: true,
+            validationMessage:
+              "Selected résumé does not match the résumé version bound to this application.",
+          });
+        }
+      }
       continue;
     }
     if (!control.visible) continue;

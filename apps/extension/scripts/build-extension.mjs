@@ -36,7 +36,8 @@ const mobileManifest = structuredClone(desktopManifest);
 mobileManifest.description =
   "Evidence-grounded application understanding and preparation for Microsoft Edge mobile.";
 mobileManifest.permissions = mobileManifest.permissions.filter(
-  (permission) => !["nativeMessaging", "sidePanel"].includes(permission),
+  (permission) =>
+    !["nativeMessaging", "sidePanel", "webNavigation"].includes(permission),
 );
 mobileManifest.action = {
   ...mobileManifest.action,

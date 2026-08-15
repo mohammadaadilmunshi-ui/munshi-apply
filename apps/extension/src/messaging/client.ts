@@ -43,6 +43,7 @@ export type AutoPilotControllerStatus = {
   ownerPauseRequested: boolean;
   ownerPauseReason: string | null;
   pendingDraftUsageId: string | null;
+  lastFillResult: FillResult | null;
 };
 
 export type AutoPilotStartPayload = {

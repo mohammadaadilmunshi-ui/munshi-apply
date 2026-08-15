@@ -18,6 +18,7 @@ export type AutoPilotObservation = {
   securityCheckpoint: SecurityCheckpointKind | null;
   canNavigateNext: boolean;
   isFinalSubmissionStep: boolean;
+  unresolvedRequiredControlIds?: readonly string[];
 };
 
 export type AutoPilotCheckpoint = {
@@ -234,6 +235,20 @@ export function planAutoPilotStep(input: {
       checkpointRequired: false,
       reason:
         "Apply one approved visible instruction and verify before continuing",
+    };
+  }
+
+  const unresolvedRequired = observation.unresolvedRequiredControlIds ?? [];
+  if (unresolvedRequired.length > 0) {
+    return {
+      action: {
+        type: "PAUSE_REVIEW",
+        reason:
+          "A required control appeared after the current fill plan was prepared",
+      },
+      checkpointRequired: true,
+      reason:
+        "Re-scan and rebuild the fill plan before continuing through a dependent form",
     };
   }
 

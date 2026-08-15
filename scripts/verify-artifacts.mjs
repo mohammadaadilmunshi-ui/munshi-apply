@@ -15,7 +15,13 @@ if (manifest.manifest_version !== 3) {
   throw new Error("Extension build is not Manifest V3");
 }
 
-const expectedPermissions = ["nativeMessaging", "sidePanel", "storage", "tabs"];
+const expectedPermissions = [
+  "nativeMessaging",
+  "sidePanel",
+  "storage",
+  "tabs",
+  "webNavigation",
+];
 if (
   JSON.stringify(manifest.permissions) !== JSON.stringify(expectedPermissions)
 ) {

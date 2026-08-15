@@ -1,61 +1,38 @@
-function compact(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
-}
-
-function normalized(value: string): string {
-  return compact(value).toLocaleLowerCase("en-US");
-}
-
-function requestedValues(value: string): string[] | null {
-  const trimmed = value.trim();
-  if (!trimmed) return [];
-  if (trimmed.startsWith("[")) {
-    try {
-      const parsed: unknown = JSON.parse(trimmed);
-      if (
-        !Array.isArray(parsed) ||
-        parsed.some((item) => typeof item !== "string")
-      ) {
-        return null;
-      }
-      return parsed.map((item) => compact(item));
-    } catch {
-      return null;
-    }
-  }
-  return trimmed
-    .split(/\r?\n|[;|,]/)
-    .map(compact)
-    .filter(Boolean);
-}
+import {
+  interactionContext,
+  optionEquivalent,
+  parseRequestedOptionValues,
+} from "./adaptive";
 
 export function fillNativeMultiSelect(
   element: HTMLSelectElement,
   value: string,
 ): boolean {
-  if (!element.multiple) return false;
-  const requested = requestedValues(value);
+  if (!element.multiple || element.disabled) return false;
+  const requested = parseRequestedOptionValues(value);
   if (!requested || requested.length === 0) return false;
 
   const previous = Array.from(element.options).map((option) => option.selected);
-  const requestedNormalized = new Set(requested.map(normalized));
+  const context = interactionContext(element);
   const matches = new Set<HTMLOptionElement>();
 
-  for (const requestedValue of requestedNormalized) {
-    const match = Array.from(element.options).find(
+  for (const requestedValue of requested) {
+    const candidates = Array.from(element.options).filter(
       (option) =>
-        normalized(option.value) === requestedValue ||
-        normalized(option.text) === requestedValue,
+        !option.disabled &&
+        (optionEquivalent(option.value, requestedValue, context) ||
+          optionEquivalent(option.text, requestedValue, context)),
     );
-    if (!match) {
+    if (candidates.length !== 1) {
       Array.from(element.options).forEach((option, index) => {
         option.selected = previous[index] ?? false;
       });
       return false;
     }
-    matches.add(match);
+    matches.add(candidates[0]!);
   }
 
+  if (matches.size !== requested.length) return false;
   Array.from(element.options).forEach((option) => {
     option.selected = matches.has(option);
   });
@@ -63,15 +40,10 @@ export function fillNativeMultiSelect(
   element.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
   element.dispatchEvent(new Event("blur", { bubbles: true, composed: true }));
 
-  const selected = new Set(
-    Array.from(element.selectedOptions).map((option) =>
-      normalized(option.value || option.text),
-    ),
-  );
+  const selected = Array.from(element.selectedOptions);
   const verified =
-    selected.size === requestedNormalized.size &&
-    [...requestedNormalized].every((item) => selected.has(item));
-
+    selected.length === matches.size &&
+    selected.every((option) => matches.has(option));
   if (!verified) {
     Array.from(element.options).forEach((option, index) => {
       option.selected = previous[index] ?? false;

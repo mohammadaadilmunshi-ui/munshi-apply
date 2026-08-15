@@ -1,11 +1,24 @@
 import type { FillInstruction, FillResult } from "@munshi-apply/contracts";
 import { fillNativeMultiSelect } from "./multi-select";
-import { controlElementMap } from "./scanner";
+import { resolveControlElement } from "./scanner";
+import {
+  defaultAdaptiveTiming,
+  fillAriaBooleanControl,
+  fillAriaRadioControl,
+  fillCustomDateControl,
+  interactionContext,
+  isPopupChoiceControl,
+  optionEquivalent,
+  validationFailureReason,
+  waitForDomStability,
+} from "./adaptive";
 
 export type FillInteractionOptions = {
   optionTimeoutMs?: number;
   pollIntervalMs?: number;
   verificationTimeoutMs?: number;
+  stabilityQuietMs?: number;
+  stabilityTimeoutMs?: number;
 };
 
 const DEFAULT_OPTION_TIMEOUT_MS = 1_200;
@@ -72,28 +85,22 @@ function radioCandidates(element: HTMLInputElement): HTMLInputElement[] {
 
 function radioCandidateValues(element: HTMLInputElement): string[] {
   return [
-    normalized(element.value),
-    normalized(inputLabel(element)),
-    normalized(element.getAttribute("aria-label") ?? ""),
+    compactText(element.value),
+    compactText(inputLabel(element)),
+    compactText(element.getAttribute("aria-label")),
   ].filter(Boolean);
 }
 
 function radioMatches(candidate: HTMLInputElement, requested: string): boolean {
-  const values = radioCandidateValues(candidate);
-  if (values.includes(requested)) return true;
-  if (["true", "yes", "1", "checked"].includes(requested)) {
-    return values.some((value) => ["true", "yes", "1"].includes(value));
-  }
-  if (["false", "no", "0", "unchecked"].includes(requested)) {
-    return values.some((value) => ["false", "no", "0"].includes(value));
-  }
-  return false;
+  const context = interactionContext(candidate);
+  return radioCandidateValues(candidate).some((value) =>
+    optionEquivalent(value, requested, context),
+  );
 }
 
 function fillRadio(element: HTMLInputElement, value: string): boolean {
-  const requested = normalized(value);
   const candidates = radioCandidates(element).filter((candidate) =>
-    radioMatches(candidate, requested),
+    radioMatches(candidate, value),
   );
   if (candidates.length !== 1) return false;
   const match = candidates[0]!;
@@ -210,9 +217,10 @@ function portaledComboboxOptions(element: Element): HTMLElement[] {
 
 function comboboxOptionValues(option: HTMLElement): string[] {
   return [
-    normalized(option.textContent ?? ""),
-    normalized(option.getAttribute("aria-label") ?? ""),
-    normalized(option.getAttribute("data-value") ?? ""),
+    compactText(option.textContent),
+    compactText(option.getAttribute("aria-label")),
+    compactText(option.getAttribute("data-value")),
+    compactText(option.getAttribute("value")),
   ].filter(Boolean);
 }
 
@@ -234,10 +242,13 @@ function exactComboboxOption(
   element: Element,
   requested: string,
 ): ExactOptionResult {
+  const context = interactionContext(element);
   const controlled = controlledComboboxOptions(element).filter(
     (option) =>
       optionAvailable(option) &&
-      comboboxOptionValues(option).includes(requested),
+      comboboxOptionValues(option).some((value) =>
+        optionEquivalent(value, requested, context),
+      ),
   );
   if (controlled.length === 1) {
     return { status: "FOUND", option: controlled[0]! };
@@ -247,7 +258,9 @@ function exactComboboxOption(
   const portaled = portaledComboboxOptions(element).filter(
     (option) =>
       optionAvailable(option) &&
-      comboboxOptionValues(option).includes(requested),
+      comboboxOptionValues(option).some((value) =>
+        optionEquivalent(value, requested, context),
+      ),
   );
   if (portaled.length === 1) {
     return { status: "FOUND", option: portaled[0]! };
@@ -260,13 +273,15 @@ function comboboxVerified(
   option: HTMLElement,
   requested: string,
 ): boolean {
+  const context = interactionContext(element);
   if (
     element instanceof HTMLInputElement &&
-    normalized(element.value) === requested
+    optionEquivalent(element.value, requested, context)
   ) {
     return true;
   }
-  if (normalized(element.textContent ?? "") === requested) return true;
+  if (optionEquivalent(element.textContent ?? "", requested, context))
+    return true;
   if (option.getAttribute("aria-selected") === "true") return true;
   return (
     element.getAttribute("aria-activedescendant") === option.id &&
@@ -314,7 +329,7 @@ async function fillCombobox(
   value: string,
   options: Required<FillInteractionOptions>,
 ): Promise<boolean> {
-  const requested = normalized(value);
+  const requested = compactText(value);
   if (!requested) return false;
   const originalValue =
     element instanceof HTMLInputElement ? element.value : null;
@@ -381,11 +396,10 @@ async function waitForVerification(
 }
 
 function radioVerified(element: HTMLInputElement, value: string): boolean {
-  const requested = normalized(value);
   const checked = radioCandidates(element).filter(
     (candidate) => candidate.checked,
   );
-  return checked.length === 1 && radioMatches(checked[0]!, requested);
+  return checked.length === 1 && radioMatches(checked[0]!, value);
 }
 
 async function fillElement(
@@ -394,11 +408,17 @@ async function fillElement(
   options: Required<FillInteractionOptions>,
 ): Promise<boolean> {
   if (elementUnavailable(element)) return false;
-  if (
-    element instanceof HTMLElement &&
-    element.getAttribute("role") === "combobox"
-  ) {
-    return fillCombobox(element, value, options);
+  if (element.getAttribute("aria-readonly") === "true") return false;
+  if (element instanceof HTMLElement) {
+    const customDate = await fillCustomDateControl(element, value, options);
+    if (customDate !== null) return customDate;
+    const ariaBoolean = await fillAriaBooleanControl(element, value, options);
+    if (ariaBoolean !== null) return ariaBoolean;
+    const ariaRadio = await fillAriaRadioControl(element, value, options);
+    if (ariaRadio !== null) return ariaRadio;
+    if (isPopupChoiceControl(element)) {
+      return fillCombobox(element, value, options);
+    }
   }
   if (element instanceof HTMLInputElement) {
     if (
@@ -462,6 +482,8 @@ async function fillElement(
       return verified;
     }
     const original = element.value;
+    if (element.maxLength >= 0 && value.length > element.maxLength)
+      return false;
     element.focus();
     setNativeValue(element, value);
     dispatchValueEvents(element);
@@ -478,6 +500,8 @@ async function fillElement(
   }
   if (element instanceof HTMLTextAreaElement) {
     if (element.readOnly) return false;
+    if (element.maxLength >= 0 && value.length > element.maxLength)
+      return false;
     const original = element.value;
     element.focus();
     setNativeValue(element, value);
@@ -495,11 +519,12 @@ async function fillElement(
   }
   if (element instanceof HTMLSelectElement) {
     if (element.multiple) return fillNativeMultiSelect(element, value);
-    const requested = normalized(value);
+    const context = interactionContext(element);
     const matches = Array.from(element.options).filter(
       (candidate) =>
-        normalized(candidate.value) === requested ||
-        normalized(candidate.text) === requested,
+        !candidate.disabled &&
+        (optionEquivalent(candidate.value, value, context) ||
+          optionEquivalent(candidate.text, value, context)),
     );
     if (matches.length !== 1) return false;
     const option = matches[0]!;
@@ -543,7 +568,8 @@ export type FilePickerAssistResult = {
 };
 
 export function assistFilePicker(controlId: string): FilePickerAssistResult {
-  const element = controlElementMap().get(controlId);
+  const resolved = resolveControlElement(controlId);
+  const element = resolved?.element;
   if (
     !(element instanceof HTMLInputElement) ||
     element.type !== "file" ||
@@ -564,19 +590,62 @@ export function assistFilePicker(controlId: string): FilePickerAssistResult {
   };
 }
 
+function strategyFor(element: Element): string {
+  if (isPopupChoiceControl(element)) {
+    return element.getAttribute("aria-haspopup") === "dialog"
+      ? "CUSTOM_DATE"
+      : "ARIA_COMBOBOX";
+  }
+  if (element.getAttribute("role") === "radio") return "ARIA_RADIO";
+  if (["checkbox", "switch"].includes(element.getAttribute("role") ?? "")) {
+    return "ARIA_BOOLEAN";
+  }
+  if (element instanceof HTMLSelectElement) {
+    return element.multiple ? "NATIVE_MULTI_SELECT" : "NATIVE_SELECT";
+  }
+  if (element instanceof HTMLInputElement)
+    return `NATIVE_${element.type.toUpperCase()}`;
+  if (element instanceof HTMLTextAreaElement) return "NATIVE_TEXTAREA";
+  if (element instanceof HTMLElement && element.isContentEditable)
+    return "CONTENTEDITABLE";
+  return "UNKNOWN";
+}
+
+async function resolveWithRetry(
+  controlId: string,
+  options: Required<FillInteractionOptions>,
+): Promise<ReturnType<typeof resolveControlElement>> {
+  const deadline = Date.now() + Math.min(350, options.verificationTimeoutMs);
+  while (Date.now() <= deadline) {
+    const resolved = resolveControlElement(controlId);
+    if (resolved) return resolved;
+    await delay(options.pollIntervalMs);
+  }
+  return resolveControlElement(controlId);
+}
+
 export async function applyFillInstructions(
   instructions: FillInstruction[],
   interactionOptions: FillInteractionOptions = {},
 ): Promise<FillResult[]> {
-  const elements = controlElementMap();
+  const adaptive = defaultAdaptiveTiming();
   const options: Required<FillInteractionOptions> = {
     optionTimeoutMs:
-      interactionOptions.optionTimeoutMs ?? DEFAULT_OPTION_TIMEOUT_MS,
+      interactionOptions.optionTimeoutMs ??
+      adaptive.optionTimeoutMs ??
+      DEFAULT_OPTION_TIMEOUT_MS,
     pollIntervalMs:
-      interactionOptions.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
+      interactionOptions.pollIntervalMs ??
+      adaptive.pollIntervalMs ??
+      DEFAULT_POLL_INTERVAL_MS,
     verificationTimeoutMs:
       interactionOptions.verificationTimeoutMs ??
+      adaptive.verificationTimeoutMs ??
       DEFAULT_VERIFICATION_TIMEOUT_MS,
+    stabilityQuietMs:
+      interactionOptions.stabilityQuietMs ?? adaptive.stabilityQuietMs,
+    stabilityTimeoutMs:
+      interactionOptions.stabilityTimeoutMs ?? adaptive.stabilityTimeoutMs,
   };
   const results: FillResult[] = [];
 
@@ -591,7 +660,8 @@ export async function applyFillInstructions(
       });
       continue;
     }
-    const element = elements.get(instruction.controlId);
+    const resolved = await resolveWithRetry(instruction.controlId, options);
+    const element = resolved?.element;
     if (!element) {
       results.push({
         controlId: instruction.controlId,
@@ -602,17 +672,31 @@ export async function applyFillInstructions(
     }
 
     let filled = false;
+    const strategy = strategyFor(element);
     try {
       filled = await fillElement(element, instruction.value, options);
     } catch {
       filled = false;
     }
+    const stabilized = filled
+      ? await waitForDomStability(
+          options.stabilityQuietMs,
+          options.stabilityTimeoutMs,
+        )
+      : false;
     results.push({
       controlId: instruction.controlId,
       status: filled ? "FILLED" : "FAILED",
       reason: filled
-        ? "Value applied, browser events dispatched, and DOM value verified"
-        : "Control is unsupported, ambiguous, timed out, or its value did not verify",
+        ? stabilized
+          ? "Value applied, verified, and the dependent DOM reached a quiet state"
+          : "Value applied and verified; the dependent DOM was still changing at the stability timeout"
+        : `${validationFailureReason(element, instruction.value)}; the control may also be unsupported or ambiguous`,
+      strategy,
+      verification: filled ? "POST_ACTION_DOM_VERIFIED" : "FAILED_CLOSED",
+      rebound: resolved?.rebound ?? false,
+      stabilized,
+      componentFingerprint: resolved?.control.componentFingerprint,
     });
   }
 

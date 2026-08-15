@@ -101,6 +101,23 @@ export async function getPagesForTab(
     .sort((left, right) => left.frameId - right.frameId);
 }
 
+export async function deletePage(
+  tabId: number,
+  frameId: number,
+): Promise<void> {
+  const database = await openVault();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(pagesStore, "readwrite");
+    transaction.objectStore(pagesStore).delete(`${tabId}:${frameId}`);
+    transaction.onerror = () =>
+      reject(transaction.error ?? new Error("Vault page deletion failed"));
+    transaction.oncomplete = () => {
+      database.close();
+      resolve();
+    };
+  });
+}
+
 export async function clearPagesForTab(tabId: number): Promise<void> {
   const database = await openVault();
   await new Promise<void>((resolve, reject) => {

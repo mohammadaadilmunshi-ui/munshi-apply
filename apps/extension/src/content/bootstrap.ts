@@ -3,6 +3,7 @@ import type {
   FillInstruction,
 } from "@munshi-apply/contracts";
 import { applyFillInstructions, assistFilePicker } from "./fill";
+import { refreshFileFingerprint } from "./adaptive";
 import { applyNavigationAction } from "./navigation";
 import { scanDocument, snapshotFingerprint } from "./scanner";
 
@@ -48,13 +49,19 @@ observer.observe(document.documentElement, {
   childList: true,
   subtree: true,
   attributeFilter: [
+    "aria-activedescendant",
+    "aria-busy",
+    "aria-checked",
     "aria-expanded",
     "aria-hidden",
     "aria-invalid",
     "aria-label",
     "aria-labelledby",
     "aria-required",
+    "aria-selected",
+    "aria-valuetext",
     "class",
+    "data-value",
     "disabled",
     "hidden",
     "name",
@@ -65,7 +72,24 @@ observer.observe(document.documentElement, {
 });
 
 document.addEventListener("input", () => scheduleScan(), true);
-document.addEventListener("change", () => scheduleScan(), true);
+document.addEventListener(
+  "change",
+  (event) => {
+    const target = event.target;
+    if (target instanceof HTMLInputElement && target.type === "file") {
+      void refreshFileFingerprint(target).finally(() => scheduleScan(true));
+      return;
+    }
+    scheduleScan();
+  },
+  true,
+);
+document.addEventListener("invalid", () => scheduleScan(true), true);
+document.addEventListener("blur", () => scheduleScan(), true);
+window.addEventListener("pageshow", () => scheduleScan(true));
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") scheduleScan(true);
+});
 window.addEventListener("popstate", () => scheduleScan());
 window.addEventListener("hashchange", () => scheduleScan());
 wrapHistoryMethod("pushState");

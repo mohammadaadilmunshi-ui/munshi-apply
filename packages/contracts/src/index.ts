@@ -78,6 +78,14 @@ export type FillResult = {
   controlId: string;
   status: "FILLED" | "SKIPPED" | "FAILED";
   reason: string;
+  strategy?: string;
+  verification?: string;
+  rebound?: boolean;
+  stabilized?: boolean;
+  componentFingerprint?: string;
+  recipeId?: string;
+  recipeAttempted?: boolean;
+  recipeSucceeded?: boolean;
 };
 
 export const semanticTypes = [
@@ -229,6 +237,44 @@ export const ControlSchema = z.object({
   invalid: z.boolean().default(false),
   validationMessage: z.string().default(""),
   fileSelected: z.boolean().optional(),
+  role: z.string().optional(),
+  inputType: z.string().optional(),
+  hasPopup: z.string().optional(),
+  readOnly: z.boolean().optional(),
+  maxLength: z.number().int().optional(),
+  minLength: z.number().int().optional(),
+  pattern: z.string().optional(),
+  accept: z.string().optional(),
+  satisfied: z.boolean().optional(),
+  validationCode: z
+    .enum([
+      "NONE",
+      "REQUIRED",
+      "FORMAT",
+      "TOO_LONG",
+      "TOO_SHORT",
+      "RANGE",
+      "PATTERN",
+      "FILE_TYPE",
+      "FILE_SIZE",
+      "UNKNOWN",
+    ])
+    .optional(),
+  interactionConfidence: z.number().min(0).max(1).optional(),
+  repeatGroupId: z.string().nullable().optional(),
+  repeatIndex: z.number().int().nonnegative().nullable().optional(),
+  componentFingerprint: z.string().optional(),
+  fileFingerprintState: z
+    .enum(["NONE", "PENDING", "READY", "ERROR"])
+    .optional(),
+  fileSha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .nullable()
+    .optional(),
+  fileCount: z.number().int().nonnegative().optional(),
+  fileSize: z.number().int().nonnegative().nullable().optional(),
+  fileMimeType: z.string().nullable().optional(),
 });
 export type Control = z.infer<typeof ControlSchema>;
 
@@ -268,6 +314,18 @@ export const ApplicationPageSchema = z.object({
   validationErrorCount: z.number().int().nonnegative().default(0),
   navigationCandidates: z.array(NavigationCandidateSchema).default([]),
   finalSubmissionBoundary: z.boolean().default(false),
+  atsFamily: z
+    .enum([
+      "WORKDAY",
+      "GREENHOUSE",
+      "LEVER",
+      "ASHBY",
+      "SMARTRECRUITERS",
+      "ICIMS",
+      "TALEO",
+      "GENERIC",
+    ])
+    .optional(),
 });
 export type ApplicationPage = z.infer<typeof ApplicationPageSchema>;
 

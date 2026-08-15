@@ -16,6 +16,7 @@ import {
 } from "./autopilot-controller";
 import {
   clearPagesForTab,
+  deletePage,
   getLatestPage,
   getPage,
   getPagesForTab,
@@ -192,6 +193,17 @@ async function initialize(): Promise<void> {
     // Runtime recovery is fail-closed inside the controller. The side panel can
     // still open for diagnostics if native messaging is temporarily unavailable.
   }
+}
+
+if (chrome.webNavigation?.onCommitted) {
+  chrome.webNavigation.onCommitted.addListener((details) => {
+    if (details.tabId < 0) return;
+    if (details.frameId === 0) {
+      void clearPagesForTab(details.tabId);
+    } else {
+      void deletePage(details.tabId, details.frameId);
+    }
+  });
 }
 
 if (!supportsSidePanel) {
@@ -404,14 +416,10 @@ async function routeMessage(
             frameId,
           })),
         });
-        if (frameId === 0) {
-          const previousTopLevel = await getPage(tabId, 0);
-          if (
-            previousTopLevel &&
-            previousTopLevel.documentId !== page.documentId
-          ) {
-            await clearPagesForTab(tabId);
-          }
+        const previousFrame = await getPage(tabId, frameId);
+        if (previousFrame && previousFrame.documentId !== page.documentId) {
+          if (frameId === 0) await clearPagesForTab(tabId);
+          else await deletePage(tabId, frameId);
         }
         await savePage(page);
         const mergedPage = await getMergedPageForTab(tabId);

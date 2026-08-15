@@ -204,7 +204,10 @@ export function parseRequestedOptionValues(value: string): string[] | null {
   if (trimmed.startsWith("[")) {
     try {
       const parsed: unknown = JSON.parse(trimmed);
-      if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== "string")) {
+      if (
+        !Array.isArray(parsed) ||
+        parsed.some((item) => typeof item !== "string")
+      ) {
         return null;
       }
       return parsed.map((item) => compactText(item)).filter(Boolean);
@@ -224,7 +227,9 @@ export function uniqueOptionCandidate<T>(
   context = "",
 ): T | null {
   const matches = candidates.filter((candidate) =>
-    candidate.values.some((value) => optionEquivalent(value, requested, context)),
+    candidate.values.some((value) =>
+      optionEquivalent(value, requested, context),
+    ),
   );
   return matches.length === 1 ? matches[0]!.item : null;
 }
@@ -248,8 +253,13 @@ export function interactionContext(element: Element): string {
       ...Array.from(element.labels ?? []).map((label) => label.textContent),
     );
   }
-  if (element instanceof HTMLSelectElement || element instanceof HTMLTextAreaElement) {
-    pieces.push(...Array.from(element.labels).map((label) => label.textContent));
+  if (
+    element instanceof HTMLSelectElement ||
+    element instanceof HTMLTextAreaElement
+  ) {
+    pieces.push(
+      ...Array.from(element.labels).map((label) => label.textContent),
+    );
   }
   const labelledBy = element.getAttribute("aria-labelledby");
   if (labelledBy) {
@@ -264,7 +274,9 @@ export function interactionContext(element: Element): string {
       }
     }
   }
-  const group = element.closest("fieldset, [role='group'], [role='radiogroup']");
+  const group = element.closest(
+    "fieldset, [role='group'], [role='radiogroup']",
+  );
   pieces.push(group?.querySelector("legend")?.textContent ?? "");
   pieces.push(group?.getAttribute("aria-label") ?? "");
   return compactText(pieces.filter(Boolean).join(" "));
@@ -273,7 +285,8 @@ export function interactionContext(element: Element): string {
 export function defaultAdaptiveTiming(): AdaptiveTiming {
   const hostname = window.location.hostname.toLocaleLowerCase("en-US");
   const workdayLike =
-    hostname.includes("myworkdayjobs") || Boolean(document.querySelector("[data-automation-id]"));
+    hostname.includes("myworkdayjobs") ||
+    Boolean(document.querySelector("[data-automation-id]"));
   const dynamicAts =
     workdayLike ||
     hostname.includes("greenhouse") ||
@@ -396,28 +409,51 @@ export function validationMessageFor(element: Element): string {
 export function classifyValidationMessage(message: string): ValidationCode {
   const normalized = normalizedText(message);
   if (!normalized) return "NONE";
-  if (/\b(required|must (be )?completed|please (enter|select|choose|provide))\b/.test(normalized)) {
+  if (
+    /\b(required|must (be )?completed|please (enter|select|choose|provide))\b/.test(
+      normalized,
+    )
+  ) {
     return "REQUIRED";
   }
-  if (/\b(max(imum)?|no more than|too long|characters? or fewer)\b/.test(normalized)) {
+  if (
+    /\b(max(imum)?|no more than|too long|characters? or fewer)\b/.test(
+      normalized,
+    )
+  ) {
     return "TOO_LONG";
   }
-  if (/\b(min(imum)?|at least|too short)\b/.test(normalized)) return "TOO_SHORT";
-  if (/\b(file type|unsupported file|pdf only|docx? only)\b/.test(normalized)) return "FILE_TYPE";
-  if (/\b(file size|too large|maximum upload|upload limit)\b/.test(normalized)) return "FILE_SIZE";
-  if (/\b(pattern|format|invalid (email|phone|date|url)|valid (email|phone|date|url))\b/.test(normalized)) {
+  if (/\b(min(imum)?|at least|too short)\b/.test(normalized))
+    return "TOO_SHORT";
+  if (/\b(file type|unsupported file|pdf only|docx? only)\b/.test(normalized))
+    return "FILE_TYPE";
+  if (/\b(file size|too large|maximum upload|upload limit)\b/.test(normalized))
+    return "FILE_SIZE";
+  if (
+    /\b(pattern|format|invalid (email|phone|date|url)|valid (email|phone|date|url))\b/.test(
+      normalized,
+    )
+  ) {
     return "FORMAT";
   }
-  if (/\b(range|between|greater than|less than|minimum value|maximum value)\b/.test(normalized)) {
+  if (
+    /\b(range|between|greater than|less than|minimum value|maximum value)\b/.test(
+      normalized,
+    )
+  ) {
     return "RANGE";
   }
   return "UNKNOWN";
 }
 
-export function validationFailureReason(element: Element, value?: string): string {
+export function validationFailureReason(
+  element: Element,
+  value?: string,
+): string {
   if (
     value !== undefined &&
-    (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) &&
+    (element instanceof HTMLInputElement ||
+      element instanceof HTMLTextAreaElement) &&
     element.maxLength >= 0 &&
     value.length > element.maxLength
   ) {
@@ -449,7 +485,8 @@ export function isAriaRadioControl(element: Element): boolean {
 }
 
 export function isCustomDateControl(element: Element): boolean {
-  if (normalizedText(element.getAttribute("aria-haspopup")) !== "dialog") return false;
+  if (normalizedText(element.getAttribute("aria-haspopup")) !== "dialog")
+    return false;
   return /\b(date|day|month|year|graduat|available|start|end)\b/.test(
     normalizedText(interactionContext(element)),
   );
@@ -476,9 +513,11 @@ function collectShadowRoots(root: Document | ShadowRoot): ShadowRoot[] {
 function calendarSearchRoots(element: Element): Array<Document | ShadowRoot> {
   const roots: Array<Document | ShadowRoot> = [];
   const ownRoot = element.getRootNode();
-  if (ownRoot instanceof Document || ownRoot instanceof ShadowRoot) roots.push(ownRoot);
+  if (ownRoot instanceof Document || ownRoot instanceof ShadowRoot)
+    roots.push(ownRoot);
   if (!roots.includes(document)) roots.push(document);
-  for (const root of collectShadowRoots(document)) if (!roots.includes(root)) roots.push(root);
+  for (const root of collectShadowRoots(document))
+    if (!roots.includes(root)) roots.push(root);
   return roots;
 }
 
@@ -555,7 +594,8 @@ export async function fillCustomDateControl(
   if (!isCustomDateControl(element)) return null;
   const requested = canonicalDate(value);
   if (!requested) return false;
-  const originalValue = element instanceof HTMLInputElement ? element.value : null;
+  const originalValue =
+    element instanceof HTMLInputElement ? element.value : null;
   element.focus();
   element.click();
   const deadline = Date.now() + timing.optionTimeoutMs;
@@ -599,10 +639,18 @@ export async function fillCustomDateControl(
     timing.verificationTimeoutMs,
     timing.pollIntervalMs,
   );
-  if (!verified && element instanceof HTMLInputElement && originalValue !== null) {
+  if (
+    !verified &&
+    element instanceof HTMLInputElement &&
+    originalValue !== null
+  ) {
     element.value = originalValue;
-    element.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
-    element.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+    element.dispatchEvent(
+      new Event("input", { bubbles: true, composed: true }),
+    );
+    element.dispatchEvent(
+      new Event("change", { bubbles: true, composed: true }),
+    );
   }
   return verified;
 }
@@ -625,7 +673,10 @@ export async function fillAriaBooleanControl(
     timing.verificationTimeoutMs,
     timing.pollIntervalMs,
   );
-  if (!verified && (element.getAttribute("aria-checked") === "true") !== original) {
+  if (
+    !verified &&
+    (element.getAttribute("aria-checked") === "true") !== original
+  ) {
     element.click();
   }
   return verified;
@@ -634,7 +685,11 @@ export async function fillAriaBooleanControl(
 function ariaRadioCandidates(element: HTMLElement): HTMLElement[] {
   const group = element.closest("[role='radiogroup']");
   const root = group ?? element.getRootNode();
-  if (!(root instanceof Element || root instanceof Document || root instanceof ShadowRoot)) {
+  if (!(
+    root instanceof Element ||
+    root instanceof Document ||
+    root instanceof ShadowRoot
+  )) {
     return [element];
   }
   return Array.from(root.querySelectorAll("[role='radio']")).filter(
@@ -667,7 +722,9 @@ export async function fillAriaRadioControl(
     context,
   );
   if (!match) return false;
-  const original = candidates.find((item) => item.getAttribute("aria-checked") === "true") ?? null;
+  const original =
+    candidates.find((item) => item.getAttribute("aria-checked") === "true") ??
+    null;
   match.focus();
   match.click();
   const verified = await waitForCondition(
@@ -680,7 +737,9 @@ export async function fillAriaRadioControl(
 }
 
 function hex(bytes: ArrayBuffer): string {
-  return Array.from(new Uint8Array(bytes), (value) => value.toString(16).padStart(2, "0")).join("");
+  return Array.from(new Uint8Array(bytes), (value) =>
+    value.toString(16).padStart(2, "0"),
+  ).join("");
 }
 
 export function fileFingerprintFor(element: HTMLInputElement): FileFingerprint {
@@ -691,12 +750,14 @@ export function fileFingerprintFor(element: HTMLInputElement): FileFingerprint {
     state: count === 0 ? "NONE" : "PENDING",
     count,
     sha256: null,
-    size: count === 1 ? element.files?.[0]?.size ?? null : null,
+    size: count === 1 ? (element.files?.[0]?.size ?? null) : null,
     mimeType: count === 1 ? element.files?.[0]?.type || null : null,
   };
 }
 
-export async function refreshFileFingerprint(element: HTMLInputElement): Promise<FileFingerprint> {
+export async function refreshFileFingerprint(
+  element: HTMLInputElement,
+): Promise<FileFingerprint> {
   if (element.type !== "file") {
     throw new Error("File fingerprinting requires a file input");
   }
@@ -726,7 +787,10 @@ export async function refreshFileFingerprint(element: HTMLInputElement): Promise
     return unsupported;
   }
   try {
-    const digest = await globalThis.crypto.subtle.digest("SHA-256", await files[0]!.arrayBuffer());
+    const digest = await globalThis.crypto.subtle.digest(
+      "SHA-256",
+      await files[0]!.arrayBuffer(),
+    );
     const ready: FileFingerprint = {
       ...pending,
       state: "READY",
@@ -747,12 +811,15 @@ export function interactionConfidenceFor(element: Element): number {
     element instanceof HTMLTextAreaElement ||
     element instanceof HTMLSelectElement
   ) {
-    if (element instanceof HTMLInputElement && element.type === "file") return 1;
-    if (element.getAttribute("role") === "combobox") return element.getAttribute("aria-controls") ? 0.97 : 0.9;
+    if (element instanceof HTMLInputElement && element.type === "file")
+      return 1;
+    if (element.getAttribute("role") === "combobox")
+      return element.getAttribute("aria-controls") ? 0.97 : 0.9;
     return 0.99;
   }
   if (isAriaBooleanControl(element) || isAriaRadioControl(element)) return 0.94;
-  if (isPopupChoiceControl(element)) return element.getAttribute("aria-controls") ? 0.93 : 0.84;
+  if (isPopupChoiceControl(element))
+    return element.getAttribute("aria-controls") ? 0.93 : 0.84;
   if (element instanceof HTMLElement && element.isContentEditable) return 0.9;
   return 0.55;
 }
@@ -771,7 +838,8 @@ export function repeatMetadataFor(element: Element): {
   const match = source.match(/(?:\[|[_.-])(\d{1,3})(?:\]|[_.-]|$)/);
   if (!match) return { groupId: null, index: null };
   const index = Number(match[1]);
-  if (!Number.isSafeInteger(index) || index < 0) return { groupId: null, index: null };
+  if (!Number.isSafeInteger(index) || index < 0)
+    return { groupId: null, index: null };
   const groupId = source.replace(match[0], "[#]");
   return { groupId: groupId || null, index };
 }
@@ -788,8 +856,16 @@ export type AtsFamily =
 
 export function detectAtsFamily(): AtsFamily {
   const hostname = window.location.hostname.toLocaleLowerCase("en-US");
-  if (hostname.includes("myworkdayjobs") || document.querySelector("[data-automation-id]")) return "WORKDAY";
-  if (hostname.includes("greenhouse") || document.querySelector("[data-mapped='true']")) return "GREENHOUSE";
+  if (
+    hostname.includes("myworkdayjobs") ||
+    document.querySelector("[data-automation-id]")
+  )
+    return "WORKDAY";
+  if (
+    hostname.includes("greenhouse") ||
+    document.querySelector("[data-mapped='true']")
+  )
+    return "GREENHOUSE";
   if (hostname.includes("lever.co")) return "LEVER";
   if (hostname.includes("ashbyhq")) return "ASHBY";
   if (hostname.includes("smartrecruiters")) return "SMARTRECRUITERS";

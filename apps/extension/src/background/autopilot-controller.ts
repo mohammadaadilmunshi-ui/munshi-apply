@@ -38,6 +38,7 @@ export type AutoPilotRuntimeState = {
   ownerPauseRequested: boolean;
   ownerPauseReason: string | null;
   pendingDraftUsageId: string | null;
+  lastFillResult: FillResult | null;
 };
 
 export type AutoPilotControllerStatus = {
@@ -49,6 +50,7 @@ export type AutoPilotControllerStatus = {
   ownerPauseRequested: boolean;
   ownerPauseReason: string | null;
   pendingDraftUsageId: string | null;
+  lastFillResult: FillResult | null;
 };
 
 export type AutoPilotStartInput = {
@@ -212,6 +214,48 @@ function parseFillInstructions(value: unknown): FillInstruction[] {
   });
 }
 
+function parseRuntimeFillResult(value: unknown): FillResult | null {
+  if (value === null || value === undefined) return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("AutoPilot last fill result must be an object");
+  }
+  const candidate = value as Record<string, unknown>;
+  if (!new Set(["FILLED", "SKIPPED", "FAILED"]).has(String(candidate.status))) {
+    throw new Error("AutoPilot last fill status is invalid");
+  }
+  return {
+    controlId: requiredString(candidate.controlId, "lastFillResult.controlId"),
+    status: candidate.status as FillResult["status"],
+    reason: requiredString(candidate.reason, "lastFillResult.reason"),
+    strategy:
+      typeof candidate.strategy === "string" ? candidate.strategy : undefined,
+    verification:
+      typeof candidate.verification === "string"
+        ? candidate.verification
+        : undefined,
+    rebound:
+      typeof candidate.rebound === "boolean" ? candidate.rebound : undefined,
+    stabilized:
+      typeof candidate.stabilized === "boolean"
+        ? candidate.stabilized
+        : undefined,
+    componentFingerprint:
+      typeof candidate.componentFingerprint === "string"
+        ? candidate.componentFingerprint
+        : undefined,
+    recipeId:
+      typeof candidate.recipeId === "string" ? candidate.recipeId : undefined,
+    recipeAttempted:
+      typeof candidate.recipeAttempted === "boolean"
+        ? candidate.recipeAttempted
+        : undefined,
+    recipeSucceeded:
+      typeof candidate.recipeSucceeded === "boolean"
+        ? candidate.recipeSucceeded
+        : undefined,
+  };
+}
+
 function parseObservation(value: unknown): AutoPilotObservation | null {
   if (value === null) return null;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -244,6 +288,13 @@ function parseObservation(value: unknown): AutoPilotObservation | null {
           ) as AutoPilotObservation["securityCheckpoint"]),
     canNavigateNext: Boolean(candidate.canNavigateNext),
     isFinalSubmissionStep: Boolean(candidate.isFinalSubmissionStep),
+    unresolvedRequiredControlIds: Array.isArray(
+      candidate.unresolvedRequiredControlIds,
+    )
+      ? candidate.unresolvedRequiredControlIds.map((item) =>
+          requiredString(item, "unresolvedRequiredControlId"),
+        )
+      : [],
   };
 }
 
@@ -303,6 +354,7 @@ export function parseAutoPilotRuntimeState(
       candidate.pendingDraftUsageId === undefined
         ? null
         : nullableString(candidate.pendingDraftUsageId, "pendingDraftUsageId"),
+    lastFillResult: parseRuntimeFillResult(candidate.lastFillResult),
   };
 }
 
@@ -327,6 +379,16 @@ function observationFor(
     ),
     isFinalSubmissionStep:
       page.finalSubmissionBoundary || page.applicationState === "SUBMISSION",
+    unresolvedRequiredControlIds: page.controls
+      .filter(
+        (control) =>
+          control.visible &&
+          !control.disabled &&
+          control.required &&
+          control.kind !== "BUTTON" &&
+          control.satisfied === false,
+      )
+      .map((control) => control.controlId),
   };
 }
 
@@ -638,20 +700,18 @@ export class AutoPilotController {
 
     switch (plan.action.type) {
       case "FILL": {
+        const fillInstruction = plan.action.instruction;
         const armed = parseAutoPilotRuntimeState({
           ...runtime,
-          dispatchingFillControlId: plan.action.instruction.controlId,
-          pendingDraftUsageId: plan.action.instruction.sourceDraftId ?? null,
+          dispatchingFillControlId: fillInstruction.controlId,
+          pendingDraftUsageId: fillInstruction.sourceDraftId ?? null,
           actionDeadlineAt: this.deadline(FILL_TIMEOUT_MS),
         });
         await this.persist(armed);
 
         let results: FillResult[];
         try {
-          results = await this.dependencies.fill(
-            armed.tabId,
-            plan.action.instruction,
-          );
+          results = await this.dependencies.fill(armed.tabId, fillInstruction);
         } catch (error) {
           return this.fail(
             armed,
@@ -661,7 +721,7 @@ export class AutoPilotController {
           );
         }
         const verification = verifyFillAction(
-          plan.action.instruction.controlId,
+          fillInstruction.controlId,
           results,
         );
         if (!verification.success) {
@@ -675,10 +735,10 @@ export class AutoPilotController {
           ...armed,
           session: reduceAutoPilotSession(armed.session, {
             type: "FILL_VERIFIED",
-            controlId: plan.action.instruction.controlId,
+            controlId: fillInstruction.controlId,
             pendingControlIds: pendingControlIds(
               armed,
-              plan.action.instruction.controlId,
+              fillInstruction.controlId,
             ),
             at: this.now(),
           }),
@@ -686,6 +746,10 @@ export class AutoPilotController {
           beforeNavigation: null,
           dispatchingFillControlId: null,
           actionDeadlineAt: this.deadline(FILL_TIMEOUT_MS),
+          lastFillResult:
+            results.find(
+              (result) => result.controlId === fillInstruction.controlId,
+            ) ?? null,
         });
         await this.persist(waiting);
         const attributed = await this.settlePendingDraftUsage(waiting);
@@ -812,6 +876,7 @@ export class AutoPilotController {
       ownerPauseRequested: false,
       ownerPauseReason: null,
       pendingDraftUsageId: null,
+      lastFillResult: null,
     });
     const observation = observationFor(runtime, page);
     const latest = await this.dependencies.getLatestCheckpoint(applicationId);
@@ -885,6 +950,7 @@ export class AutoPilotController {
       ownerPauseRequested: runtime.ownerPauseRequested,
       ownerPauseReason: runtime.ownerPauseReason,
       pendingDraftUsageId: runtime.pendingDraftUsageId,
+      lastFillResult: runtime.lastFillResult,
     };
   }
 

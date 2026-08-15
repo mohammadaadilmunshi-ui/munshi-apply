@@ -35,8 +35,13 @@ export function AutoPilotControlCenter({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const plan = useMemo(
-    () => (page ? buildAutoPilotLaunchPlan(page, answers) : null),
-    [answers, page],
+    () =>
+      page
+        ? buildAutoPilotLaunchPlan(page, answers, {
+            expectedResumeSha256: selectedResumeSha256,
+          })
+        : null,
+    [answers, page, selectedResumeSha256],
   );
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -142,6 +147,16 @@ export function AutoPilotControlCenter({
                 Recording approved AI-answer usage before continuing
               </span>
             )}
+            {status?.lastFillResult && (
+              <span>
+                Last verified autofill:{" "}
+                {status.lastFillResult.strategy ?? "guarded"}
+                {status.lastFillResult.rebound ? " · self-healed binding" : ""}
+                {status.lastFillResult.stabilized === false
+                  ? " · DOM still changing at timeout"
+                  : ""}
+              </span>
+            )}
             <span>
               Last verified page: {status?.session.lastPageId ?? "not started"}
             </span>
@@ -189,6 +204,11 @@ export function AutoPilotControlCenter({
                     {control.label || control.name || "Manual control"}
                   </strong>
                   <span>{control.kind.replaceAll("_", " ")}</span>
+                  {control.validationMessage && (
+                    <span className="diagnostic-error">
+                      {control.validationMessage}
+                    </span>
+                  )}
                   {control.kind === "FILE" ? (
                     <button
                       className="quiet"
