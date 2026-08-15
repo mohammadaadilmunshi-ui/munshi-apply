@@ -1,0 +1,81 @@
+name: End-to-end profile sync helper
+
+on:
+  push:
+    branches:
+      - feat/v3-foundation-alignment
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - name: Guard repair inputs
+        run: |
+          test -f scripts/fix-end-to-end-profile-sync.py
+          test -f .github/workflows/end-to-end-profile-sync-helper.yml
+          test "$(git status --porcelain | wc -l | tr -d ' ')" = "0"
+      - name: Install locked root dependencies
+        run: npm ci
+      - name: Apply end-to-end synchronization repair
+        run: python3 scripts/fix-end-to-end-profile-sync.py
+      - name: Format patched product files
+        run: |
+          npx prettier --write \
+            apps/extension/src/storage/cloud.ts \
+            apps/extension/src/storage/cloud.test.ts \
+            apps/extension/src/sidepanel/App.tsx \
+            apps/owner-workspace/app/api/sync/events/route.ts \
+            apps/owner-workspace/app/vault-client.ts \
+            apps/owner-workspace/app/application-eligibility.ts \
+            apps/owner-workspace/app/workspace/mobile-workspace.tsx \
+            apps/owner-workspace/tests/profile-vault.test.mjs \
+            apps/owner-workspace/tests/application-eligibility.test.mjs
+      - name: Verify extension and shared packages
+        run: npm run check
+      - name: Verify extension production artifact
+        run: |
+          npm run build
+          node scripts/verify-artifacts.mjs
+      - name: Install owner workspace dependencies
+        working-directory: apps/owner-workspace
+        run: npm run install:ci
+      - name: Verify owner workspace lint
+        working-directory: apps/owner-workspace
+        run: npm run lint
+      - name: Verify owner workspace tests and production build
+        working-directory: apps/owner-workspace
+        run: npm test
+      - name: Verify owner workspace artifact
+        working-directory: apps/owner-workspace
+        run: npm run validate:artifact
+      - name: Remove temporary helper files
+        run: |
+          git rm -f scripts/fix-end-to-end-profile-sync.py .github/workflows/end-to-end-profile-sync-helper.yml
+      - name: Commit clean repair
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            apps/extension/src/storage/cloud.ts \
+            apps/extension/src/storage/cloud.test.ts \
+            apps/extension/src/sidepanel/App.tsx \
+            apps/owner-workspace/app/api/sync/events/route.ts \
+            apps/owner-workspace/app/vault-client.ts \
+            apps/owner-workspace/app/application-eligibility.ts \
+            apps/owner-workspace/app/workspace/mobile-workspace.tsx \
+            apps/owner-workspace/tests/profile-vault.test.mjs \
+            apps/owner-workspace/tests/application-eligibility.test.mjs
+          git diff --cached --check
+          git commit -m "fix: restore end-to-end profile synchronization"
+          git push origin HEAD:feat/v3-foundation-alignment
