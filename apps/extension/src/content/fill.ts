@@ -580,6 +580,62 @@ export type FilePickerAssistResult = {
   reason: string;
 };
 
+const FILE_PICKER_HANDOFF_ID = "munshi-apply-file-picker-handoff";
+
+function removeFilePickerHandoff(): void {
+  document.getElementById(FILE_PICKER_HANDOFF_ID)?.remove();
+}
+
+function mountFilePickerHandoff(element: HTMLInputElement): void {
+  removeFilePickerHandoff();
+  const host = document.createElement("div");
+  host.id = FILE_PICKER_HANDOFF_ID;
+  host.style.position = "fixed";
+  host.style.right = "20px";
+  host.style.bottom = "20px";
+  host.style.zIndex = "2147483647";
+  host.style.maxWidth = "360px";
+  document.body.append(host);
+
+  const shadow = host.attachShadow({ mode: "closed" });
+  const card = document.createElement("div");
+  card.setAttribute("role", "dialog");
+  card.setAttribute("aria-label", "MUNSHI file upload handoff");
+  card.style.cssText =
+    "font: 14px/1.4 system-ui, sans-serif; background:#1c2331; color:#fff; border-radius:12px; padding:14px; box-shadow:0 12px 36px rgba(0,0,0,.35);";
+
+  const title = document.createElement("strong");
+  title.textContent = "MUNSHI file upload handoff";
+  title.style.display = "block";
+  title.style.marginBottom = "6px";
+
+  const detail = document.createElement("div");
+  detail.textContent =
+    "Choose the file yourself. MUNSHI will verify the selected file after Edge returns to the application.";
+  detail.style.marginBottom = "10px";
+
+  const choose = document.createElement("button");
+  choose.type = "button";
+  choose.textContent = `Choose file${inputLabel(element) ? ` · ${inputLabel(element)}` : ""}`;
+  choose.style.cssText =
+    "font:inherit; font-weight:700; border:0; border-radius:8px; padding:9px 12px; cursor:pointer; background:#fff; color:#111; margin-right:8px;";
+  choose.addEventListener("click", () => {
+    element.focus();
+    element.click();
+  });
+
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.textContent = "Cancel";
+  cancel.style.cssText =
+    "font:inherit; border:1px solid rgba(255,255,255,.45); border-radius:8px; padding:8px 11px; cursor:pointer; background:transparent; color:#fff;";
+  cancel.addEventListener("click", removeFilePickerHandoff);
+
+  card.append(title, detail, choose, cancel);
+  shadow.append(card);
+  element.addEventListener("change", removeFilePickerHandoff, { once: true });
+}
+
 export function assistFilePicker(controlId: string): FilePickerAssistResult {
   const resolved = resolveControlElement(controlId);
   const element = resolved?.element;
@@ -594,12 +650,19 @@ export function assistFilePicker(controlId: string): FilePickerAssistResult {
       reason: "The employer file input changed, is disabled, or is unavailable",
     };
   }
+  element.scrollIntoView?.({ block: "center", inline: "nearest" });
   element.focus();
-  element.click();
+  mountFilePickerHandoff(element);
+  try {
+    element.click();
+  } catch {
+    // Cross-context browser activation may refuse a programmatic picker.
+    // The on-page handoff keeps the file choice as a direct owner gesture.
+  }
   return {
     status: "OWNER_ACTION_REQUESTED",
     reason:
-      "Employer file picker requested. File selection remains an explicit owner action.",
+      "Employer file picker requested. If Edge blocks the cross-context request, use the temporary on-page MUNSHI Choose file handoff. File selection remains an explicit owner action.",
   };
 }
 

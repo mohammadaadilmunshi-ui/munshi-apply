@@ -76,6 +76,41 @@ describe("AutoPilot page-state scanner", () => {
     expect(actions).toEqual(["NEXT", "REVIEW"]);
   });
 
+  it("ignores passive reCAPTCHA integration until a challenge is active", () => {
+    document.body.innerHTML = `
+      <label for="resume">Upload CV</label>
+      <input id="resume" type="file" required>
+      <div class="grecaptcha-badge">
+        <iframe title="reCAPTCHA" src="https://www.google.com/recaptcha/api2/anchor"></iframe>
+      </div>
+    `;
+    const result = scanDocument();
+    expect(result.securityCheckpoint).toBeNull();
+    expect(result.applicationState).toBe("RESUME");
+  });
+
+  it("detects a visible active CAPTCHA challenge", () => {
+    document.body.innerHTML = `
+      <iframe title="recaptcha challenge" src="https://www.google.com/recaptcha/api2/bframe"></iframe>
+    `;
+    expect(scanDocument().securityCheckpoint).toBe("CAPTCHA");
+  });
+
+  it("ignores hidden final-submit controls when inferring the current step", () => {
+    document.body.innerHTML = `
+      <label for="resume">Upload CV</label>
+      <input id="resume" type="file" required>
+      <button type="submit" style="display:none">Submit application</button>
+      <button type="button">Continue</button>
+    `;
+    const result = scanDocument();
+    expect(result.finalSubmissionBoundary).toBe(false);
+    expect(result.applicationState).toBe("RESUME");
+    expect(result.navigationCandidates.map((item) => item.action)).toEqual([
+      "NEXT",
+    ]);
+  });
+
   it("does not treat an application-entry Apply Now control as final submission", () => {
     document.body.innerHTML = `
       <button type="button">Apply Now</button>

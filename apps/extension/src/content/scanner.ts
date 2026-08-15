@@ -558,7 +558,7 @@ function navigationCandidates(
   entries: readonly ControlEntry[],
 ): NavigationCandidate[] {
   return entries.flatMap((entry) => {
-    if (entry.control.kind !== "BUTTON") return [];
+    if (entry.control.kind !== "BUTTON" || !entry.control.visible) return [];
     const action = navigationActionFor(entry.control.label);
     if (!action) return [];
     if (
@@ -579,13 +579,59 @@ function navigationCandidates(
   });
 }
 
+function visibleSecurityText(): string {
+  const selectors = [
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "p",
+    "label",
+    "button",
+    "[role='alert']",
+    "[role='dialog']",
+    "[aria-live]",
+  ].join(",");
+  return normalized(
+    Array.from(document.querySelectorAll(selectors))
+      .filter((element) => isVisible(element))
+      .map((element) => compactText(element.textContent))
+      .filter(Boolean)
+      .join(" "),
+  ).slice(0, 120_000);
+}
+
+function hasVisibleSecurityElement(selector: string): boolean {
+  return Array.from(document.querySelectorAll(selector)).some((element) =>
+    isVisible(element),
+  );
+}
+
+function hasActiveCaptchaFrame(): boolean {
+  const frames = Array.from(
+    document.querySelectorAll(
+      "iframe[src*='recaptcha' i], iframe[src*='hcaptcha' i], iframe[src*='challenges.cloudflare.com' i]",
+    ),
+  );
+  return frames.some((frame) => {
+    if (!isVisible(frame)) return false;
+    const descriptor = normalized(
+      `${frame.getAttribute("src")} ${frame.getAttribute("title")}`,
+    );
+    if (/\b(bframe|challenge|checkbox)\b/.test(descriptor)) return true;
+    const rect = frame.getBoundingClientRect();
+    return rect.width >= 180 && rect.height >= 50;
+  });
+}
+
 function detectSecurityCheckpoint(): SecurityCheckpointKind | null {
-  const body = normalized(document.body?.textContent).slice(0, 120_000);
+  const body = visibleSecurityText();
   if (
-    document.querySelector(
-      "iframe[src*='recaptcha'], iframe[src*='hcaptcha'], iframe[src*='challenges.cloudflare.com'], [class*='captcha' i], [id*='captcha' i]",
+    hasActiveCaptchaFrame() ||
+    hasVisibleSecurityElement(
+      "[role='dialog'][class*='captcha' i], [role='dialog'][id*='captcha' i]",
     ) ||
-    /\b(recaptcha|hcaptcha|captcha|verify you are human|human verification)\b/.test(
+    /\b(recaptcha|hcaptcha|captcha|verify you are human|human verification|i(?:'| a)m not a robot)\b/.test(
       body,
     )
   ) {
@@ -608,7 +654,9 @@ function detectSecurityCheckpoint(): SecurityCheckpointKind | null {
   ) {
     return "OTP";
   }
-  if (document.querySelector("input[type='password']")) return "AUTHENTICATION";
+  if (hasVisibleSecurityElement("input[type='password']")) {
+    return "AUTHENTICATION";
+  }
   return null;
 }
 

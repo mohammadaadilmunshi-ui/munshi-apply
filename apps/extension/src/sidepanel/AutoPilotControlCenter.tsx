@@ -79,7 +79,11 @@ export function AutoPilotControlCenter({
     }
   }
 
-  const active = status && status.session.status !== "STOPPED";
+  const sessionOpen = Boolean(
+    status &&
+    status.session.status !== "STOPPED" &&
+    status.session.status !== "IDLE",
+  );
   const resumable =
     status?.session.status === "PAUSED_OWNER" ||
     status?.session.status === "PAUSED_REVIEW" ||
@@ -109,7 +113,7 @@ export function AutoPilotControlCenter({
           <p className="eyebrow">Owner-operated application runtime</p>
           <h2>AutoPilot Control Center</h2>
         </div>
-        <span className={active ? "badge" : "badge review"}>
+        <span className={sessionOpen ? "badge" : "badge review"}>
           {status?.session.status ?? "IDLE"}
         </span>
       </div>
@@ -140,7 +144,11 @@ export function AutoPilotControlCenter({
               <span>pending</span>
             </article>
             <article>
-              <strong>{status?.session.lastCheckpointSequence ?? -1}</strong>
+              <strong>
+                {(status?.session.lastCheckpointSequence ?? -1) >= 0
+                  ? status?.session.lastCheckpointSequence
+                  : "—"}
+              </strong>
               <span>checkpoint</span>
             </article>
           </div>
@@ -194,6 +202,17 @@ export function AutoPilotControlCenter({
           {plan && (
             <div className="cloud-connection">
               <strong>Live pre-flight: {plan.preflight.state}</strong>
+              {page.securityCheckpoint && (
+                <span className="diagnostic-error">
+                  Security checkpoint detected:{" "}
+                  {page.securityCheckpoint.replaceAll("_", " ")}
+                </span>
+              )}
+              {page.finalSubmissionBoundary && (
+                <span className="diagnostic-error">
+                  Final submission control detected · owner action required
+                </span>
+              )}
               <span>{plan.preflight.readyCount} approved fill actions</span>
               <span>
                 {plan.preflight.reviewCount} require review/manual interaction
@@ -243,7 +262,7 @@ export function AutoPilotControlCenter({
                               control.frameId,
                               control.controlId,
                             ),
-                          "Employer file picker requested. Choose the file yourself; MUNSHI will continue only after a fresh scan confirms a selection.",
+                          "File handoff prepared. If Edge did not open the picker automatically, click the temporary MUNSHI Choose file prompt on the employer page. MUNSHI will continue only after a fresh scan verifies the selection.",
                         )
                       }
                     >
@@ -264,9 +283,7 @@ export function AutoPilotControlCenter({
             <button
               className="primary"
               type="button"
-              disabled={
-                busy || !nativeAvailable || !canProgress || Boolean(active)
-              }
+              disabled={busy || !nativeAvailable || !canProgress || sessionOpen}
               onClick={() =>
                 void run(
                   () =>

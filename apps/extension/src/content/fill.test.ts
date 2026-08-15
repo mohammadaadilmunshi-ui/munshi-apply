@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { applyFillInstructions } from "./fill";
+import { applyFillInstructions, assistFilePicker } from "./fill";
 import { scanDocument } from "./scanner";
 
 const visibleRectangle: DOMRect = {
@@ -462,5 +462,33 @@ describe("guarded field filling", () => {
     expect(control).toBeDefined();
     expect(control?.fileSelected).toBe(false);
     expect(JSON.stringify(control)).not.toContain("fakepath");
+  });
+
+  it("prepares a resilient owner file-picker handoff without selecting a file", () => {
+    document.body.innerHTML = `<label for="resume">Resume</label><input id="resume" type="file" required>`;
+    const control = scanDocument().controls.find(
+      (item) => item.kind === "FILE",
+    );
+    const input = document.getElementById("resume") as HTMLInputElement;
+    Object.defineProperty(input, "scrollIntoView", {
+      value: vi.fn(),
+      configurable: true,
+    });
+    const click = vi.spyOn(input, "click");
+    const result = assistFilePicker(control!.controlId);
+    expect(result.status).toBe("OWNER_ACTION_REQUESTED");
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(
+      document.getElementById("munshi-apply-file-picker-handoff"),
+    ).not.toBeNull();
+    expect(input.files?.length ?? 0).toBe(0);
+  });
+
+  it("refuses file-picker handoff when the employer input is disabled", () => {
+    document.body.innerHTML = `<label for="resume">Resume</label><input id="resume" type="file" required disabled>`;
+    const control = scanDocument().controls.find(
+      (item) => item.kind === "FILE",
+    );
+    expect(assistFilePicker(control!.controlId).status).toBe("REFUSED");
   });
 });
