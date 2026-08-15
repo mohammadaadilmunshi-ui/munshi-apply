@@ -114,8 +114,7 @@ describe("resolveProfileAnswer", () => {
   it("allows explicitly confirmed deterministic sponsorship facts", () => {
     const result = resolveProfileAnswer(
       question({
-        rawText:
-          "Would you require any Visa sponsorship now or in the future?",
+        rawText: "Would you require any Visa sponsorship now or in the future?",
         semanticType: "SPONSORSHIP_FUTURE",
         sensitive: true,
         requiresReview: true,

@@ -127,7 +127,9 @@ function factIsAuthoritative(fact: ProfileFact): boolean {
 }
 
 function factIsExplicitlyUsable(fact: ProfileFact): boolean {
-  return factIsAuthoritative(fact) && (!fact.protected || Boolean(fact.confirmedAt));
+  return (
+    factIsAuthoritative(fact) && (!fact.protected || Boolean(fact.confirmedAt))
+  );
 }
 
 function unresolved(
@@ -266,9 +268,12 @@ function recruitmentEvidence(
   profile: MasterProfile | ProfileSnapshot,
 ): ProfileFact | undefined {
   const legacyCandidates = profile.facts.filter((fact) =>
-    ["current_title", "employment_summary", "job_title", "responsibilities"].includes(
-      fact.key,
-    ),
+    [
+      "current_title",
+      "employment_summary",
+      "job_title",
+      "responsibilities",
+    ].includes(fact.key),
   );
   const recordCandidates =
     "records" in profile

@@ -128,7 +128,10 @@ describe("classifyQuestion", () => {
       classifyQuestion(
         "How would you describe 360° recruitment and what are the key responsibilities of the position? *",
       ),
-    ).toMatchObject({ semanticType: "WHY_ROLE", matchedRule: "role-understanding" });
+    ).toMatchObject({
+      semanticType: "WHY_ROLE",
+      matchedRule: "role-understanding",
+    });
     expect(
       classifyQuestion(
         "What motivates you to pursue a career in recruitment or sales? *",
