@@ -82,9 +82,9 @@ describe("AutoPilot page-state scanner", () => {
       <button type="button">Next</button>
     `;
     const result = scanDocument();
-    expect(result.navigationCandidates.map((candidate) => candidate.action)).toEqual([
-      "NEXT",
-    ]);
+    expect(
+      result.navigationCandidates.map((candidate) => candidate.action),
+    ).toEqual(["NEXT"]);
     expect(result.finalSubmissionBoundary).toBe(false);
   });
 
