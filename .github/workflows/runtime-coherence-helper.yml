@@ -50,8 +50,20 @@ jobs:
           python -m ruff format \
             apps/native-host/src/munshi_apply_native/native_messaging.py \
             apps/native-host/tests/test_native_messaging.py
-      - name: Verify extension and shared packages
-        run: npm run check
+      - name: Verify Prettier
+        run: npm run format:check
+      - name: Verify ESLint
+        run: npm run lint
+      - name: Verify TypeScript
+        run: npm run typecheck
+      - name: Verify JS and TS tests
+        run: npm test
+      - name: Verify production build
+        run: npm run build
+      - name: Verify extension artifacts
+        run: npm run verify
+      - name: Verify secret scan
+        run: npm run secret:scan
       - name: Verify native Ruff
         run: python -m ruff check apps/native-host
       - name: Verify native tests
