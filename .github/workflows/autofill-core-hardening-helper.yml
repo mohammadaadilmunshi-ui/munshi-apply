@@ -51,18 +51,15 @@ jobs:
           if marker not in content:
               raise SystemExit("helper insertion marker missing")
           content = content.replace(marker, helper + marker, 1)
-
           input_patch = '''replace_once(\n    "apps/extension/src/content/fill.ts",\n    \'\'\'    const original = element.value;\\n    element.focus();\\n    setNativeValue(element, value);\'\'\','''
           if content.count(input_patch) != 1:
               raise SystemExit("generic input patch marker changed")
           content = content.replace(input_patch, input_patch.replace("replace_once", "replace_first", 1), 1)
-
           controller_old = '''replace_once(\n    "apps/extension/src/background/autopilot-controller.ts",\n    \'\'\'          actionDeadlineAt: this.deadline(FILL_TIMEOUT_MS),\\n        });\'\'\',\n    \'\'\'          actionDeadlineAt: this.deadline(FILL_TIMEOUT_MS),\\n          lastFillResult:\\n            results.find(\\n              (result) =>\\n                result.controlId === plan.action.instruction.controlId,\\n            ) ?? null,\\n        });\'\'\',\n)'''
           controller_new = '''replace_once(\n    "apps/extension/src/background/autopilot-controller.ts",\n    \'\'\'          waitingFor: "FILL",\\n          beforeNavigation: null,\\n          dispatchingFillControlId: null,\\n          actionDeadlineAt: this.deadline(FILL_TIMEOUT_MS),\\n        });\'\'\',\n    \'\'\'          waitingFor: "FILL",\\n          beforeNavigation: null,\\n          dispatchingFillControlId: null,\\n          actionDeadlineAt: this.deadline(FILL_TIMEOUT_MS),\\n          lastFillResult:\\n            results.find(\\n              (result) =>\\n                result.controlId === plan.action.instruction.controlId,\\n            ) ?? null,\\n        });\'\'\',\n)'''
           if content.count(controller_old) != 1:
               raise SystemExit("verified-fill patch marker changed")
           content = content.replace(controller_old, controller_new, 1)
-
           initializer_old = '''replace_once(\n    "apps/extension/src/background/autopilot-controller.ts",\n    \'\'\'      pendingDraftUsageId: null,\\n    });\'\'\',\n    \'\'\'      pendingDraftUsageId: null,\\n      lastFillResult: null,\\n    });\'\'\',\n)'''
           initializer_new = '''replace_once(\n    "apps/extension/src/background/autopilot-controller.ts",\n    \'\'\'      ownerPauseRequested: false,\\n      ownerPauseReason: null,\\n      pendingDraftUsageId: null,\\n    });\'\'\',\n    \'\'\'      ownerPauseRequested: false,\\n      ownerPauseReason: null,\\n      pendingDraftUsageId: null,\\n      lastFillResult: null,\\n    });\'\'\',\n)'''
           if content.count(initializer_old) != 1:
@@ -73,7 +70,7 @@ jobs:
       - name: Apply autofill core hardening
         run: python scripts/apply-autofill-core-hardening.py
 
-      - name: Repair typed integration and radio fixture
+      - name: Repair typed integration, fixtures, and permission contract
         shell: bash
         run: |
           python - <<'PY'
@@ -106,16 +103,20 @@ jobs:
           question_line = "    const question = scanDocument().questions[0]!;"
           if block.count(question_line) != 1 or block.count("question.controlId") != 1:
               raise SystemExit("radio fixture block changed")
-          block = block.replace(
-              question_line,
-              '    const radio = scanDocument().controls.find((control) => control.kind === "RADIO")!;',
-              1,
-          ).replace("question.controlId", "radio.controlId", 1)
+          block = block.replace(question_line, '    const radio = scanDocument().controls.find((control) => control.kind === "RADIO")!;', 1).replace("question.controlId", "radio.controlId", 1)
           test_path.write_text(test[:start] + block + test[end:])
+
+          verify_path = Path("scripts/verify-artifacts.mjs")
+          verify = verify_path.read_text()
+          old = 'const expectedPermissions = ["nativeMessaging", "sidePanel", "storage", "tabs"];'
+          new = '''const expectedPermissions = [\n  "nativeMessaging",\n  "sidePanel",\n  "storage",\n  "tabs",\n  "webNavigation",\n];'''
+          if verify.count(old) != 1:
+              raise SystemExit("permission budget anchor changed")
+          verify_path.write_text(verify.replace(old, new, 1))
           PY
 
       - name: Apply authoritative formatting
-        run: npx prettier --write packages/contracts/src/index.ts packages/application-model/src/autopilot.ts packages/application-model/src/autopilot-dependent.test.ts apps/extension/src/content/adaptive.ts apps/extension/src/content/autofill-advanced.test.ts apps/extension/src/content/bootstrap.ts apps/extension/src/content/fill.ts apps/extension/src/content/multi-select.ts apps/extension/src/content/scanner.ts apps/extension/src/storage/vault.ts apps/extension/src/background/autopilot-controller.ts apps/extension/src/background/service-worker.ts apps/extension/src/messaging/client.ts apps/extension/src/sidepanel/autopilot-plan.ts apps/extension/src/sidepanel/AutoPilotControlCenter.tsx apps/extension/public/manifest.json
+        run: npx prettier --write packages/contracts/src/index.ts packages/application-model/src/autopilot.ts packages/application-model/src/autopilot-dependent.test.ts apps/extension/src/content/adaptive.ts apps/extension/src/content/autofill-advanced.test.ts apps/extension/src/content/bootstrap.ts apps/extension/src/content/fill.ts apps/extension/src/content/multi-select.ts apps/extension/src/content/scanner.ts apps/extension/src/storage/vault.ts apps/extension/src/background/autopilot-controller.ts apps/extension/src/background/service-worker.ts apps/extension/src/messaging/client.ts apps/extension/src/sidepanel/autopilot-plan.ts apps/extension/src/sidepanel/AutoPilotControlCenter.tsx apps/extension/public/manifest.json scripts/verify-artifacts.mjs
 
       - name: Verify complete extension tranche
         run: npm run check
