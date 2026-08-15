@@ -1,0 +1,480 @@
+name: One-time AutoPilot live diagnostic repair
+
+on:
+  push:
+    branches:
+      - feat/v3-foundation-alignment
+    paths:
+      - .github/workflows/autopilot-live-repair.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Apply deterministic repair patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file_path = Path(path)
+              text = file_path.read_text()
+              if old not in text:
+                  raise SystemExit(f"Expected repair anchor not found in {path}: {old[:100]!r}")
+              if text.count(old) != 1:
+                  raise SystemExit(f"Repair anchor is not unique in {path}: {old[:100]!r}")
+              file_path.write_text(text.replace(old, new, 1))
+
+          scanner_path = Path('apps/extension/src/content/scanner.ts')
+          scanner = scanner_path.read_text()
+          old_navigation = '''  return entries.flatMap((entry) => {
+              if (entry.control.kind !== "BUTTON") return [];
+              const action = navigationActionFor(entry.control.label);'''
+          new_navigation = '''  return entries.flatMap((entry) => {
+              if (entry.control.kind !== "BUTTON" || !entry.control.visible) return [];
+              const action = navigationActionFor(entry.control.label);'''
+          if old_navigation not in scanner:
+              raise SystemExit('Navigation visibility repair anchor not found')
+          scanner = scanner.replace(old_navigation, new_navigation, 1)
+
+          security_start = scanner.index('function detectSecurityCheckpoint(): SecurityCheckpointKind | null {')
+          security_end = scanner.index('\nconst personalTypes', security_start)
+          security_replacement = r'''function visibleSecurityText(): string {
+            const selectors = [
+              "h1",
+              "h2",
+              "h3",
+              "h4",
+              "p",
+              "label",
+              "button",
+              "[role='alert']",
+              "[role='dialog']",
+              "[aria-live]",
+            ].join(",");
+            return normalized(
+              Array.from(document.querySelectorAll(selectors))
+                .filter((element) => isVisible(element))
+                .map((element) => compactText(element.textContent))
+                .filter(Boolean)
+                .join(" "),
+            ).slice(0, 120_000);
+          }
+
+          function hasVisibleSecurityElement(selector: string): boolean {
+            return Array.from(document.querySelectorAll(selector)).some((element) =>
+              isVisible(element),
+            );
+          }
+
+          function hasActiveCaptchaFrame(): boolean {
+            const frames = Array.from(
+              document.querySelectorAll(
+                "iframe[src*='recaptcha' i], iframe[src*='hcaptcha' i], iframe[src*='challenges.cloudflare.com' i]",
+              ),
+            );
+            return frames.some((frame) => {
+              if (!isVisible(frame)) return false;
+              const descriptor = normalized(
+                `${frame.getAttribute("src")} ${frame.getAttribute("title")}`,
+              );
+              if (/\b(bframe|challenge|checkbox)\b/.test(descriptor)) return true;
+              const rect = frame.getBoundingClientRect();
+              return rect.width >= 180 && rect.height >= 50;
+            });
+          }
+
+          function detectSecurityCheckpoint(): SecurityCheckpointKind | null {
+            const body = visibleSecurityText();
+            if (
+              hasActiveCaptchaFrame() ||
+              hasVisibleSecurityElement(
+                "[role='dialog'][class*='captcha' i], [role='dialog'][id*='captcha' i]",
+              ) ||
+              /\b(recaptcha|hcaptcha|captcha|verify you are human|human verification|i(?:'| a)m not a robot)\b/.test(
+                body,
+              )
+            ) {
+              return "CAPTCHA";
+            }
+            if (
+              /\b(identity verification|verify your identity|proof of identity)\b/.test(
+                body,
+              )
+            ) {
+              return "IDENTITY_VERIFICATION";
+            }
+            if (/\b(multi[- ]factor|two[- ]factor|2fa|authenticator app)\b/.test(body)) {
+              return "MFA";
+            }
+            if (
+              /\b(one[- ]time (passcode|password|code)|verification code|security code|enter the code we sent|otp)\b/.test(
+                body,
+              )
+            ) {
+              return "OTP";
+            }
+            if (hasVisibleSecurityElement("input[type='password']")) {
+              return "AUTHENTICATION";
+            }
+            return null;
+          }
+          '''
+          scanner = scanner[:security_start] + security_replacement + scanner[security_end:]
+          scanner_path.write_text(scanner)
+
+          fill_path = Path('apps/extension/src/content/fill.ts')
+          fill_text = fill_path.read_text()
+          assist_start = fill_text.index('export type FilePickerAssistResult = {')
+          assist_end = fill_text.index('\nfunction strategyFor', assist_start)
+          assist_replacement = r'''export type FilePickerAssistResult = {
+            status: "OWNER_ACTION_REQUESTED" | "REFUSED";
+            reason: string;
+          };
+
+          const FILE_PICKER_HANDOFF_ID = "munshi-apply-file-picker-handoff";
+
+          function removeFilePickerHandoff(): void {
+            document.getElementById(FILE_PICKER_HANDOFF_ID)?.remove();
+          }
+
+          function mountFilePickerHandoff(element: HTMLInputElement): void {
+            removeFilePickerHandoff();
+            const host = document.createElement("div");
+            host.id = FILE_PICKER_HANDOFF_ID;
+            host.style.position = "fixed";
+            host.style.right = "20px";
+            host.style.bottom = "20px";
+            host.style.zIndex = "2147483647";
+            host.style.maxWidth = "360px";
+            document.body.append(host);
+
+            const shadow = host.attachShadow({ mode: "closed" });
+            const card = document.createElement("div");
+            card.setAttribute("role", "dialog");
+            card.setAttribute("aria-label", "MUNSHI file upload handoff");
+            card.style.cssText =
+              "font: 14px/1.4 system-ui, sans-serif; background:#1c2331; color:#fff; border-radius:12px; padding:14px; box-shadow:0 12px 36px rgba(0,0,0,.35);";
+
+            const title = document.createElement("strong");
+            title.textContent = "MUNSHI file upload handoff";
+            title.style.display = "block";
+            title.style.marginBottom = "6px";
+
+            const detail = document.createElement("div");
+            detail.textContent =
+              "Choose the file yourself. MUNSHI will verify the selected file after Edge returns to the application.";
+            detail.style.marginBottom = "10px";
+
+            const choose = document.createElement("button");
+            choose.type = "button";
+            choose.textContent = `Choose file${inputLabel(element) ? ` · ${inputLabel(element)}` : ""}`;
+            choose.style.cssText =
+              "font:inherit; font-weight:700; border:0; border-radius:8px; padding:9px 12px; cursor:pointer; background:#fff; color:#111; margin-right:8px;";
+            choose.addEventListener("click", () => {
+              element.focus();
+              element.click();
+            });
+
+            const cancel = document.createElement("button");
+            cancel.type = "button";
+            cancel.textContent = "Cancel";
+            cancel.style.cssText =
+              "font:inherit; border:1px solid rgba(255,255,255,.45); border-radius:8px; padding:8px 11px; cursor:pointer; background:transparent; color:#fff;";
+            cancel.addEventListener("click", removeFilePickerHandoff);
+
+            card.append(title, detail, choose, cancel);
+            shadow.append(card);
+            element.addEventListener("change", removeFilePickerHandoff, { once: true });
+          }
+
+          export function assistFilePicker(controlId: string): FilePickerAssistResult {
+            const resolved = resolveControlElement(controlId);
+            const element = resolved?.element;
+            if (
+              !(element instanceof HTMLInputElement) ||
+              element.type !== "file" ||
+              element.disabled ||
+              element.getAttribute("aria-disabled") === "true"
+            ) {
+              return {
+                status: "REFUSED",
+                reason: "The employer file input changed, is disabled, or is unavailable",
+              };
+            }
+            element.scrollIntoView?.({ block: "center", inline: "nearest" });
+            element.focus();
+            mountFilePickerHandoff(element);
+            try {
+              element.click();
+            } catch {
+              // Cross-context browser activation may refuse a programmatic picker.
+              // The on-page handoff keeps the file choice as a direct owner gesture.
+            }
+            return {
+              status: "OWNER_ACTION_REQUESTED",
+              reason:
+                "Employer file picker requested. If Edge blocks the cross-context request, use the temporary on-page MUNSHI Choose file handoff. File selection remains an explicit owner action.",
+            };
+          }
+          '''
+          fill_text = fill_text[:assist_start] + assist_replacement + fill_text[assist_end:]
+          fill_path.write_text(fill_text)
+
+          scanner_test = Path('apps/extension/src/content/scanner.test.ts')
+          scanner_tests = scanner_test.read_text()
+          scanner_anchor = '''  it("classifies recognized next and review actions", () => {
+              document.body.innerHTML = `
+                <button type="button">Continue</button>
+                <button type="button">Review application</button>
+              `;
+              const actions = scanDocument().navigationCandidates.map(
+                (candidate) => candidate.action,
+              );
+              expect(actions).toEqual(["NEXT", "REVIEW"]);
+            });
+          '''
+          scanner_extra = scanner_anchor + r'''
+
+            it("ignores passive reCAPTCHA integration until a challenge is active", () => {
+              document.body.innerHTML = `
+                <label for="resume">Upload CV</label>
+                <input id="resume" type="file" required>
+                <div class="grecaptcha-badge">
+                  <iframe title="reCAPTCHA" src="https://www.google.com/recaptcha/api2/anchor"></iframe>
+                </div>
+              `;
+              const result = scanDocument();
+              expect(result.securityCheckpoint).toBeNull();
+              expect(result.applicationState).toBe("RESUME");
+            });
+
+            it("detects a visible active CAPTCHA challenge", () => {
+              document.body.innerHTML = `
+                <iframe title="recaptcha challenge" src="https://www.google.com/recaptcha/api2/bframe"></iframe>
+              `;
+              expect(scanDocument().securityCheckpoint).toBe("CAPTCHA");
+            });
+
+            it("ignores hidden final-submit controls when inferring the current step", () => {
+              document.body.innerHTML = `
+                <label for="resume">Upload CV</label>
+                <input id="resume" type="file" required>
+                <button type="submit" style="display:none">Submit application</button>
+                <button type="button">Continue</button>
+              `;
+              const result = scanDocument();
+              expect(result.finalSubmissionBoundary).toBe(false);
+              expect(result.applicationState).toBe("RESUME");
+              expect(result.navigationCandidates.map((item) => item.action)).toEqual([
+                "NEXT",
+              ]);
+            });
+          '''
+          if scanner_anchor not in scanner_tests:
+              raise SystemExit('Scanner test insertion anchor not found')
+          scanner_test.write_text(scanner_tests.replace(scanner_anchor, scanner_extra, 1))
+
+          fill_test = Path('apps/extension/src/content/fill.test.ts')
+          fill_tests = fill_test.read_text()
+          old_import = 'import { applyFillInstructions } from "./fill";'
+          new_import = 'import { applyFillInstructions, assistFilePicker } from "./fill";'
+          if old_import not in fill_tests:
+              raise SystemExit('Fill test import anchor not found')
+          fill_tests = fill_tests.replace(old_import, new_import, 1)
+          closing = '''  it("reports only whether a file has been selected, never its local path", () => {
+              document.body.innerHTML = `<label for="resume">Resume</label><input id="resume" type="file" required>`;
+              const control = scanDocument().controls.find(
+                (item) => item.kind === "FILE",
+              );
+              expect(control).toBeDefined();
+              expect(control?.fileSelected).toBe(false);
+              expect(JSON.stringify(control)).not.toContain("fakepath");
+            });
+          });'''
+          replacement = '''  it("reports only whether a file has been selected, never its local path", () => {
+              document.body.innerHTML = `<label for="resume">Resume</label><input id="resume" type="file" required>`;
+              const control = scanDocument().controls.find(
+                (item) => item.kind === "FILE",
+              );
+              expect(control).toBeDefined();
+              expect(control?.fileSelected).toBe(false);
+              expect(JSON.stringify(control)).not.toContain("fakepath");
+            });
+
+            it("prepares a resilient owner file-picker handoff without selecting a file", () => {
+              document.body.innerHTML = `<label for="resume">Resume</label><input id="resume" type="file" required>`;
+              const control = scanDocument().controls.find(
+                (item) => item.kind === "FILE",
+              );
+              const input = document.getElementById("resume") as HTMLInputElement;
+              Object.defineProperty(input, "scrollIntoView", {
+                value: vi.fn(),
+                configurable: true,
+              });
+              const click = vi.spyOn(input, "click");
+              const result = assistFilePicker(control!.controlId);
+              expect(result.status).toBe("OWNER_ACTION_REQUESTED");
+              expect(click).toHaveBeenCalledTimes(1);
+              expect(document.getElementById("munshi-apply-file-picker-handoff")).not.toBeNull();
+              expect(input.files?.length ?? 0).toBe(0);
+            });
+
+            it("refuses file-picker handoff when the employer input is disabled", () => {
+              document.body.innerHTML = `<label for="resume">Resume</label><input id="resume" type="file" required disabled>`;
+              const control = scanDocument().controls.find(
+                (item) => item.kind === "FILE",
+              );
+              expect(assistFilePicker(control!.controlId).status).toBe("REFUSED");
+            });
+          });'''
+          if closing not in fill_tests:
+              raise SystemExit('Fill test insertion anchor not found')
+          fill_test.write_text(fill_tests.replace(closing, replacement, 1))
+
+          panel_path = Path('apps/extension/src/sidepanel/AutoPilotControlCenter.tsx')
+          panel = panel_path.read_text()
+          panel = panel.replace(
+              '  const active = status && status.session.status !== "STOPPED";\n',
+              '''  const sessionOpen = Boolean(\n    status &&\n      status.session.status !== "STOPPED" &&\n      status.session.status !== "IDLE",\n  );\n''',
+              1,
+          )
+          panel = panel.replace(
+              '<span className={active ? "badge" : "badge review"}>',
+              '<span className={sessionOpen ? "badge" : "badge review"}>',
+              1,
+          )
+          panel = panel.replace(
+              '<strong>{status?.session.lastCheckpointSequence ?? -1}</strong>',
+              '''<strong>\n                {(status?.session.lastCheckpointSequence ?? -1) >= 0\n                  ? status?.session.lastCheckpointSequence\n                  : "—"}\n              </strong>''',
+              1,
+          )
+          panel = panel.replace(
+              '''              <strong>Live pre-flight: {plan.preflight.state}</strong>\n              <span>{plan.preflight.readyCount} approved fill actions</span>''',
+              '''              <strong>Live pre-flight: {plan.preflight.state}</strong>\n              {page.securityCheckpoint && (\n                <span className="diagnostic-error">\n                  Security checkpoint detected: {page.securityCheckpoint.replaceAll("_", " ")}\n                </span>\n              )}\n              {page.finalSubmissionBoundary && (\n                <span className="diagnostic-error">\n                  Final submission control detected · owner action required\n                </span>\n              )}\n              <span>{plan.preflight.readyCount} approved fill actions</span>''',
+              1,
+          )
+          panel = panel.replace(
+              '"Employer file picker requested. Choose the file yourself; MUNSHI will continue only after a fresh scan confirms a selection.",',
+              '"File handoff prepared. If Edge did not open the picker automatically, click the temporary MUNSHI Choose file prompt on the employer page. MUNSHI will continue only after a fresh scan verifies the selection.",',
+              1,
+          )
+          panel = panel.replace('Boolean(active)', 'sessionOpen', 1)
+          if 'Boolean(active)' in panel or 'active ? "badge"' in panel:
+              raise SystemExit('AutoPilot panel active-state repair was incomplete')
+          panel_path.write_text(panel)
+
+          status_path = Path('docs/IMPLEMENTATION_STATUS.md')
+          status = status_path.read_text()
+          old_file = '- **Employer file controls — Manual fallback.** The encrypted résumé vault does not imply automatic employer file upload. Unsupported file selection remains an owner action.'
+          new_file = '- **Employer file controls — Owner-controlled verified handoff.** The encrypted résumé vault does not imply automatic employer file upload. MUNSHI can request the employer picker, provides an on-page direct-gesture fallback when Edge blocks a cross-context picker request, and locally fingerprints the owner-selected file for résumé-binding verification. Operating-system file selection remains an owner action.'
+          if old_file not in status:
+              raise SystemExit('Implementation-status file-control anchor not found')
+          status = status.replace(old_file, new_file, 1)
+          old_auto = '- **AutoPilot planning core — Implemented foundation.** A checkpoint-first planner pauses for security checkpoints, refuses automatic final submission by construction, requires a ready pre-flight gate, performs at most one approved visible fill per plan step, checkpoints before navigation, verifies fill/navigation evidence, and validates checkpoint resume compatibility. Migration `003` and the native architecture store persist application checkpoints. The live extension still needs the persistent Observe → Plan → Act → Verify → Rescan runtime controller and physical crash/interruption recovery testing.'
+          new_auto = '- **AutoPilot guarded runtime — Implemented and live in the desktop extension.** Start, Pause, Resume, and Stop are backed by a persistent Observe → Plan → Act → Verify → Rescan controller. It executes one approved visible fill at a time, verifies the DOM after every fill, supports safe-progress fills before review-only items, persists checkpoints before navigation and owner pauses, recovers durable application state, and never performs final employer submission or security-checkpoint actions. Physical ATS crash/interruption and broader site-compatibility testing remain release work.'
+          if old_auto not in status:
+              raise SystemExit('Implementation-status AutoPilot anchor not found')
+          status_path.write_text(status.replace(old_auto, new_auto, 1))
+          PY
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run complete JavaScript and extension verification
+        run: npm run check
+
+      - name: Install and verify native companion
+        run: |
+          python -m pip install -e './apps/native-host[dev]'
+          python -m ruff check apps/native-host
+          python -m pytest apps/native-host
+
+      - name: Run repository safety gates
+        run: |
+          ./scripts/repository-safety.sh
+          node scripts/secret-scan.mjs
+
+      - name: Record repair report and publish patch
+        shell: bash
+        run: |
+          cat > docs/reports/LIVE_AUTOPILOT_DIAGNOSTIC_REPAIR_2026-08-15.md <<'EOF'
+          # Live AutoPilot diagnostic repair — 2026-08-15
+
+          ## Scope
+
+          This repair was performed after an owner Edge smoke test showed the AutoPilot screen on a résumé step reporting a blocked pre-flight while safe approved fills and an owner-controlled file handoff were present.
+
+          The repair preserves all permanent boundaries: final employer submission, CAPTCHA/MFA/OTP, identity verification, authentication, and operating-system file selection remain owner actions.
+
+          ## Diagnostic findings
+
+          1. Passive/invisible anti-bot integration could be mistaken for an active CAPTCHA because the scanner inspected any matching iframe/class/id and hidden page text. Many ATS pages preload reCAPTCHA assets before any owner challenge is shown. This could incorrectly hard-block an otherwise ordinary résumé step.
+          2. Navigation detection considered hidden buttons. A hidden final-submit control mounted for a later application step could therefore misclassify the current page as a final-submission boundary.
+          3. The side-panel file-picker request crossed extension/background/content-script contexts. Browser transient user activation is not guaranteed to survive that path, so a direct `input.click()` request could be ignored even though the code reported the handoff as requested.
+          4. The owner UI exposed the internal checkpoint sentinel `-1` instead of a not-started display value and did not explain which detected boundary caused a blocked pre-flight.
+          5. `docs/IMPLEMENTATION_STATUS.md` still described the live AutoPilot controller as future work and the current verified file handoff as a generic manual fallback.
+
+          ## Repairs
+
+          - Security checkpoint detection now uses visible security text and active challenge heuristics. Passive reCAPTCHA integration no longer blocks a normal application step, while visible/active challenges remain fail-closed owner checkpoints.
+          - Hidden navigation controls are excluded from navigation/final-submit inference.
+          - File upload handoff now keeps the direct picker request but also mounts an isolated on-page MUNSHI owner prompt. If Edge rejects the cross-context request, the owner can click the on-page prompt, preserving a direct browser user gesture. MUNSHI still never selects a local file or captures a local path.
+          - AutoPilot diagnostics now display an em dash before the first checkpoint and explicitly surface detected security/final boundaries.
+          - Current implementation status documentation was aligned with the live controller and verified file handoff.
+
+          ## Regression coverage
+
+          New automated coverage verifies:
+
+          - passive reCAPTCHA integration does not create a CAPTCHA checkpoint;
+          - an active visible CAPTCHA challenge still does;
+          - hidden final-submit controls cannot mark an earlier résumé step as final submission;
+          - file-picker handoff creates the resilient owner fallback without selecting a file;
+          - disabled employer file controls fail closed.
+
+          ## Verification executed before publication
+
+          - `npm ci`
+          - Prettier formatting check
+          - ESLint with zero warnings
+          - TypeScript checks across workspaces
+          - complete Vitest suite
+          - production builds
+          - desktop/mobile artifact verification
+          - repository secret scan
+          - native companion installation in the CI environment
+          - Ruff
+          - complete native Pytest suite
+          - repository private-data boundary
+
+          The patch is source/runtime automated verification. A physical Edge smoke test remains necessary for the exact employer page because browser file-picker behavior and third-party anti-bot widgets are browser/site controlled.
+          EOF
+
+          rm .github/workflows/autopilot-live-repair.yml
+          git config user.name 'Aadil Munshi'
+          git config user.email 'mohammadaadilmunshi@gmail.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'fix: repair live AutoPilot security and file handoff'
+          git push origin HEAD:feat/v3-foundation-alignment
