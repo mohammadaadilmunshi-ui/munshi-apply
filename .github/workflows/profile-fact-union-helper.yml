@@ -23,12 +23,15 @@ jobs:
       - name: Guard repair inputs
         run: |
           test -f scripts/fix-profile-fact-union.py
+          test -f scripts/fix-profile-fact-union-tie.py
           test -f .github/workflows/profile-fact-union-helper.yml
           test "$(git status --porcelain | wc -l | tr -d ' ')" = "0"
       - name: Install root dependencies
         run: npm ci
       - name: Apply profile fact union hardening
-        run: python3 scripts/fix-profile-fact-union.py
+        run: |
+          python3 scripts/fix-profile-fact-union.py
+          python3 scripts/fix-profile-fact-union-tie.py
       - name: Format patched files
         run: |
           npx prettier --write \
@@ -48,7 +51,11 @@ jobs:
           npm test
           npm run validate:artifact
       - name: Remove temporary helper files
-        run: git rm -f scripts/fix-profile-fact-union.py .github/workflows/profile-fact-union-helper.yml
+        run: |
+          git rm -f \
+            scripts/fix-profile-fact-union.py \
+            scripts/fix-profile-fact-union-tie.py \
+            .github/workflows/profile-fact-union-helper.yml
       - name: Commit clean hardening
         run: |
           git config user.name "github-actions[bot]"
