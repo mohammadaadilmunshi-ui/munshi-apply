@@ -1,7 +1,7 @@
 import type { ApplicationPage, SemanticType } from "@munshi-apply/contracts";
 
 const explicitApplicationIntent =
-  /(?:^|[\s/_?=&.-])(apply|application|candidate|requisition)(?:$|[\s/_?=&.-])/i;
+  /(?:^|[\s/_?=&#.-])(apply|application|candidate|requisition)(?:$|[\s/_?=&#.-])/i;
 const resumeLabel = /\b(resume|résumé|cv)\b/i;
 const applicationNavigation = /\b(apply|application)\b/i;
 
@@ -50,6 +50,21 @@ const applicationSpecificSemantics = new Set<SemanticType>([
   "BEHAVIORAL_EXAMPLE",
 ]);
 
+const candidateIdentitySemantics = new Set<SemanticType>([
+  "FIRST_NAME",
+  "MIDDLE_NAME",
+  "LAST_NAME",
+  "PREFERRED_NAME",
+  "EMAIL",
+  "PHONE",
+  "STREET_ADDRESS",
+  "ADDRESS_LINE_2",
+  "CITY",
+  "STATE_PROVINCE",
+  "POSTAL_CODE",
+  "COUNTRY",
+]);
+
 export type ApplicationEligibility = {
   eligible: boolean;
   reasons: string[];
@@ -59,7 +74,7 @@ function hasExplicitIntent(page: ApplicationPage): boolean {
   try {
     const url = new URL(page.url);
     return explicitApplicationIntent.test(
-      `${url.pathname} ${url.search} ${page.title}`,
+      `${url.pathname} ${url.search} ${url.hash} ${page.title}`,
     );
   } catch {
     return false;
@@ -76,6 +91,13 @@ function applicationSpecificQuestionCount(page: ApplicationPage): number {
   const questions = Array.isArray(page.questions) ? page.questions : [];
   return questions.filter((question) =>
     applicationSpecificSemantics.has(question.semanticType),
+  ).length;
+}
+
+function candidateIdentityQuestionCount(page: ApplicationPage): number {
+  const questions = Array.isArray(page.questions) ? page.questions : [];
+  return questions.filter((question) =>
+    candidateIdentitySemantics.has(question.semanticType),
   ).length;
 }
 
@@ -101,6 +123,17 @@ function hasApplicationNavigation(page: ApplicationPage): boolean {
   );
 }
 
+function hasApplicationProgression(page: ApplicationPage): boolean {
+  const navigationCandidates = Array.isArray(page.navigationCandidates)
+    ? page.navigationCandidates
+    : [];
+  return navigationCandidates.some(
+    (candidate) =>
+      !candidate.disabled &&
+      ["NEXT", "REVIEW", "FINAL_SUBMIT"].includes(candidate.action),
+  );
+}
+
 /**
  * Decide whether an observed browser page has enough deterministic evidence to
  * enter the application ledger. The scanner intentionally observes broadly;
@@ -115,14 +148,26 @@ export function applicationPageEligibility(
   const explicitIntent = hasExplicitIntent(page);
   const meaningfulQuestions = meaningfulQuestionCount(page);
   const specificQuestions = applicationSpecificQuestionCount(page);
+  const candidateIdentityQuestions = candidateIdentityQuestionCount(page);
   const resumeControl = hasResumeControl(page);
   const applicationNav = hasApplicationNavigation(page);
+  const applicationProgression = hasApplicationProgression(page);
 
   if (page.finalSubmissionBoundary) {
     reasons.push("verified final-application boundary");
   }
   if (resumeControl && (knownAts || explicitIntent)) {
     reasons.push("résumé control inside application context");
+  }
+  if (
+    page.applicationState !== "AUTH" &&
+    resumeControl &&
+    candidateIdentityQuestions >= 2 &&
+    applicationProgression
+  ) {
+    reasons.push(
+      "embedded candidate form with résumé control and application progression",
+    );
   }
   if (
     applicationNav &&

@@ -151,6 +151,45 @@ describe("application page eligibility", () => {
     ).toBe(true);
   });
 
+  it("recognizes application intent carried by a URL fragment", () => {
+    expect(
+      applicationPageEligibility(
+        page({
+          url: "https://careers.example.test/jobs/role#apply",
+          title: "Role details",
+          resume: true,
+        }),
+      ).eligible,
+    ).toBe(true);
+  });
+
+  it("accepts a generic embedded candidate form from strong structural evidence", () => {
+    expect(
+      applicationPageEligibility(
+        page({
+          url: "https://careers.example.test/jobs/role",
+          title: "Role details",
+          semantics: ["FIRST_NAME", "LAST_NAME", "EMAIL", "PHONE"],
+          resume: true,
+          navigationLabel: "Next",
+        }),
+      ).eligible,
+    ).toBe(true);
+  });
+
+  it("does not treat a résumé/profile editor as an application without progression", () => {
+    expect(
+      applicationPageEligibility(
+        page({
+          url: "https://profile.example.test/documents",
+          title: "Candidate profile",
+          semantics: ["FIRST_NAME", "EMAIL"],
+          resume: true,
+        }),
+      ).eligible,
+    ).toBe(false);
+  });
+
   it("accepts a known ATS page with application-specific questions", () => {
     expect(
       applicationPageEligibility(
@@ -210,6 +249,7 @@ describe("application page eligibility", () => {
       ).eligible,
     ).toBe(true);
   });
+
   it("does not crash on legacy snapshots that omit newer array fields", () => {
     const legacy = page({
       url: "https://help.openai.com/en/articles/legacy-help",
