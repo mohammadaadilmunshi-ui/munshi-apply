@@ -35,6 +35,8 @@ const mobileManifest = structuredClone(desktopManifest);
 
 mobileManifest.description =
   "Evidence-grounded application understanding and preparation for Microsoft Edge mobile.";
+// webNavigation is required only by the desktop AutoPilot iframe lifecycle observer.
+// Keep the mobile owner surface on its smaller storage + tabs permission budget.
 mobileManifest.permissions = mobileManifest.permissions.filter(
   (permission) =>
     !["nativeMessaging", "sidePanel", "webNavigation"].includes(permission),
