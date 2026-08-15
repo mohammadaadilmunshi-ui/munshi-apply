@@ -1,0 +1,38 @@
+name: Format probe
+
+on:
+  push:
+    branches: [feat/v3-foundation-alignment]
+
+permissions:
+  contents: read
+
+jobs:
+  prettier:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Format changed TypeScript files
+        run: >-
+          npx prettier --write
+          packages/application-model/src/resolver.ts
+          packages/application-model/src/resolver.test.ts
+          packages/semantic-engine/src/index.test.ts
+      - name: Emit formatted files
+        shell: bash
+        run: |
+          for file in \
+            packages/application-model/src/resolver.ts \
+            packages/application-model/src/resolver.test.ts \
+            packages/semantic-engine/src/index.test.ts
+          do
+            echo "BEGIN_FILE:${file}"
+            base64 -w0 "${file}"
+            echo
+            echo "END_FILE:${file}"
+          done
