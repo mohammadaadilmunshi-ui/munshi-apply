@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { ApplicationPage } from "@munshi-apply/contracts";
-import { buildAutoPilotLaunchPlan } from "./autopilot-plan";
+import {
+  buildAutoPilotLaunchPlan,
+  canAutoPilotMakeProgress,
+  remainingApprovedFillCount,
+} from "./autopilot-plan";
 
 function page(): ApplicationPage {
   return {
@@ -81,7 +85,7 @@ function page(): ApplicationPage {
 }
 
 describe("buildAutoPilotLaunchPlan", () => {
-  it("pauses for an unselected required file while preserving verified fills", () => {
+  it("preserves safe progress while an unselected required file remains manual", () => {
     const result = buildAutoPilotLaunchPlan(page(), {
       "q-name": { value: "Aadil", approved: true, sensitive: false },
     });
@@ -90,6 +94,9 @@ describe("buildAutoPilotLaunchPlan", () => {
       "resume",
     ]);
     expect(result.fillInstructions).toHaveLength(1);
+    expect(remainingApprovedFillCount(result)).toBe(1);
+    expect(canAutoPilotMakeProgress(result)).toBe(true);
+    expect(canAutoPilotMakeProgress(result, ["name"])).toBe(false);
   });
 
   it("allows the step after the owner selected the file", () => {
@@ -100,6 +107,18 @@ describe("buildAutoPilotLaunchPlan", () => {
     });
     expect(result.preflight.state).toBe("READY");
     expect(result.manualControls).toHaveLength(0);
+    expect(canAutoPilotMakeProgress(result, ["name"])).toBe(true);
+  });
+
+  it("does not expose safe-progress mode across a hard safety boundary", () => {
+    const current = page();
+    current.finalSubmissionBoundary = true;
+    const result = buildAutoPilotLaunchPlan(current, {
+      "q-name": { value: "Aadil", approved: true, sensitive: false },
+    });
+    expect(result.preflight.state).toBe("BLOCKED");
+    expect(result.preflight.blockedCount).toBe(1);
+    expect(canAutoPilotMakeProgress(result)).toBe(false);
   });
 
   it("carries an approved AI draft identity into the AutoPilot fill instruction", () => {
