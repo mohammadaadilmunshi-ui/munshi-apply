@@ -26,12 +26,14 @@ jobs:
           git merge-base --is-ancestor "$BASE" HEAD
           mapfile -t changed < <(git diff --name-only "$BASE"..HEAD | sort)
           printf '%s\n' "${changed[@]}"
-          test "${#changed[@]}" -eq 5
+          test "${#changed[@]}" -eq 7
           test "${changed[0]}" = ".github/workflows/autofill-final-hardening-helper.yml"
-          test "${changed[1]}" = "apps/extension/src/content/advanced-controls.ts"
-          test "${changed[2]}" = "apps/native-host/src/munshi_apply_native/interaction_recipe_service.py"
-          test "${changed[3]}" = "apps/native-host/tests/test_interaction_recipe_service.py"
-          test "${changed[4]}" = "scripts/apply-autofill-final-hardening.py"
+          test "${changed[1]}" = "apps/extension/scripts/build-extension.mjs"
+          test "${changed[2]}" = "apps/extension/src/content/advanced-controls.ts"
+          test "${changed[3]}" = "apps/native-host/src/munshi_apply_native/database.py"
+          test "${changed[4]}" = "apps/native-host/src/munshi_apply_native/interaction_recipe_service.py"
+          test "${changed[5]}" = "apps/native-host/tests/test_interaction_recipe_service.py"
+          test "${changed[6]}" = "scripts/apply-autofill-final-hardening.py"
 
       - name: Set up Node
         uses: actions/setup-node@v7
