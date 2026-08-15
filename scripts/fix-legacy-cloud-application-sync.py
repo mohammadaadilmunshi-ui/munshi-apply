@@ -49,7 +49,7 @@ eligibility.write_text(text)
 
 app_test = Path("packages/application-model/src/application-detection.test.ts")
 text = app_test.read_text()
-insert = '''\n  it("does not crash on legacy snapshots that omit newer array fields", () => {\n    const legacy = page({\n      url: "https://help.openai.com/en/articles/legacy-help",\n      title: "Legacy help page",\n      semantics: ["UNKNOWN", "UNKNOWN"],\n    }) as ApplicationPage & {\n      controls?: ApplicationPage["controls"];\n      navigationCandidates?: ApplicationPage["navigationCandidates"];\n    };\n    delete legacy.controls;\n    delete legacy.navigationCandidates;\n\n    expect(applicationPageEligibility(legacy as ApplicationPage)).toEqual({\n      eligible: false,\n      reasons: [],\n    });\n  });\n'''
+insert = '''\n  it("does not crash on legacy snapshots that omit newer array fields", () => {\n    const legacy = page({\n      url: "https://help.openai.com/en/articles/legacy-help",\n      title: "Legacy help page",\n      semantics: ["UNKNOWN", "UNKNOWN"],\n    }) as Partial<ApplicationPage>;\n    delete legacy.controls;\n    delete legacy.navigationCandidates;\n\n    expect(applicationPageEligibility(legacy as ApplicationPage)).toEqual({\n      eligible: false,\n      reasons: [],\n    });\n  });\n'''
 closing = '\n});\n'
 if not text.endswith(closing):
     raise SystemExit("application detection test closing anchor missing")
@@ -63,7 +63,7 @@ text = text.replace(
 'import { parseCloudApplicationPage, shouldPublishApplicationSnapshot } from "./cloud";',
 1,
 )
-insert = '''\n  it("normalizes valid legacy application snapshots and skips malformed ones", () => {\n    const current = applicationPage("https://careers.example.test/apply/legacy");\n    const { navigationCandidates: _navigationCandidates, ...legacy } = current;\n    const normalized = parseCloudApplicationPage(legacy);\n\n    expect(normalized).not.toBeNull();\n    expect(normalized?.navigationCandidates).toEqual([]);\n    expect(\n      shouldPublishApplicationSnapshot(connection, normalized!),\n    ).toBe(true);\n\n    const { controls: _controls, ...malformed } = legacy;\n    expect(parseCloudApplicationPage(malformed)).toBeNull();\n  });\n'''
+insert = '''\n  it("normalizes valid legacy application snapshots and skips malformed ones", () => {\n    const legacy: Partial<ApplicationPage> = {\n      ...applicationPage("https://careers.example.test/apply/legacy"),\n    };\n    delete legacy.navigationCandidates;\n    const normalized = parseCloudApplicationPage(legacy);\n\n    expect(normalized).not.toBeNull();\n    expect(normalized?.navigationCandidates).toEqual([]);\n    expect(\n      shouldPublishApplicationSnapshot(connection, normalized!),\n    ).toBe(true);\n\n    const malformed: Partial<ApplicationPage> = { ...legacy };\n    delete malformed.controls;\n    expect(parseCloudApplicationPage(malformed)).toBeNull();\n  });\n'''
 if not text.endswith(closing):
     raise SystemExit("cloud application test closing anchor missing")
 text = text[:-len(closing)] + insert + closing
