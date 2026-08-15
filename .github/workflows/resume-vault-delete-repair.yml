@@ -28,40 +28,24 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
-          def replace_once(path: str, old: str, new: str) -> None:
+          def replace_once(path: str, old: str, new: str, label: str) -> None:
               file = Path(path)
               text = file.read_text()
-              if text.count(old) != 1:
-                  raise SystemExit(f"Expected exactly one patch target in {path}, found {text.count(old)}")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected 1 target in {path}, found {count}")
               file.write_text(text.replace(old, new, 1))
 
+          # Owner vault record and browser-side delete request.
           replace_once(
               "apps/owner-workspace/app/vault-client.ts",
-              '''export type ResumeRecord = {
-            resumeId: string;
-            objectId: string;
-            name: string;
-            contentType: string;
-            sizeBytes: number;
-            addedAt: string;
-          };''',
-              '''export type ResumeRecord = {
-            resumeId: string;
-            objectId: string;
-            name: string;
-            contentType: string;
-            sizeBytes: number;
-            addedAt: string;
-            deletedAt?: string;
-          };''',
+              "  addedAt: string;\n};\n\nexport type ApplicationSnapshot",
+              "  addedAt: string;\n  deletedAt?: string;\n};\n\nexport type ApplicationSnapshot",
+              "owner resume tombstone type",
           )
-
           replace_once(
               "apps/owner-workspace/app/vault-client.ts",
-              '''export async function downloadEncryptedResume(
-            rawKey: string,
-            record: ResumeRecord,
-          ): Promise<void> {''',
+              "export async function downloadEncryptedResume(\n",
               '''export async function deleteEncryptedResume(
             record: ResumeRecord,
           ): Promise<void> {
@@ -81,15 +65,15 @@ jobs:
           }
 
           export async function downloadEncryptedResume(
-            rawKey: string,
-            record: ResumeRecord,
-          ): Promise<void> {''',
+          ''',
+              "owner delete helper",
           )
 
+          # Owner-only API physically removes the encrypted R2 object and D1 metadata.
           route = Path("apps/owner-workspace/app/api/objects/[objectId]/route.ts")
           route_text = route.read_text()
           if "export async function DELETE(" in route_text:
-              raise SystemExit("DELETE route already exists")
+              raise SystemExit("delete object route already exists")
           route.write_text(
               route_text
               + '''
@@ -141,18 +125,16 @@ jobs:
           '''
           )
 
+          # Owner UI: import helper, confirm deletion, publish tombstone, and expose Delete beside Download.
           replace_once(
               "apps/owner-workspace/app/workspace/mobile-workspace.tsx",
-              '''  decryptLatestEntities,
-            downloadEncryptedResume,''',
-              '''  decryptLatestEntities,
-            deleteEncryptedResume,
-            downloadEncryptedResume,''',
+              "  decryptLatestEntities,\n",
+              "  decryptLatestEntities,\n  deleteEncryptedResume,\n",
+              "owner delete import",
           )
-
           replace_once(
               "apps/owner-workspace/app/workspace/mobile-workspace.tsx",
-              '''  function beginReview(application: ApplicationSnapshot) {''',
+              "  function beginReview(application: ApplicationSnapshot) {\n",
               '''  async function deleteResume(record: ResumeRecord) {
             if (!rawKey) return;
             if (
@@ -187,9 +169,10 @@ jobs:
             }
           }
 
-          function beginReview(application: ApplicationSnapshot) {''',
+          function beginReview(application: ApplicationSnapshot) {
+          ''',
+              "owner delete action",
           )
-
           replace_once(
               "apps/owner-workspace/app/workspace/mobile-workspace.tsx",
               '''                    <button
@@ -199,7 +182,8 @@ jobs:
                       }
                     >
                       Download
-                    </button>''',
+                    </button>
+          ''',
               '''                    <div className="resume-actions">
                       <button
                         type="button"
@@ -218,14 +202,14 @@ jobs:
                       >
                         Delete
                       </button>
-                    </div>''',
+                    </div>
+          ''',
+              "resume card actions",
           )
 
           replace_once(
               "apps/owner-workspace/app/globals.css",
-              '''.record-list article button,
-          .recovery-secret button,
-          .text-button {''',
+              ".record-list article button,\n.recovery-secret button,\n.text-button {",
               '''.resume-actions {
             align-items: center;
             display: flex;
@@ -237,15 +221,11 @@ jobs:
           .record-list article button,
           .recovery-secret button,
           .text-button {''',
+              "resume action layout",
           )
-
           replace_once(
               "apps/owner-workspace/app/globals.css",
-              '''  font-size: 12px;
-            font-weight: 750;
-          }
-
-          .review-list article {''',
+              "  font-size: 12px;\n  font-weight: 750;\n}\n\n.review-list article {",
               '''  font-size: 12px;
             font-weight: 750;
           }
@@ -260,35 +240,34 @@ jobs:
           }
 
           .review-list article {''',
+              "resume destructive button style",
           )
 
+          # Extension honors synchronized tombstones and preserves monotonically increasing resume versions.
           replace_once(
               "apps/extension/src/storage/cloud.ts",
-              '''  roleFamily?: string | null;
-            active?: boolean;
-          };''',
-              '''  roleFamily?: string | null;
-            active?: boolean;
-            deletedAt?: string;
-          };''',
+              "  active?: boolean;\n};\n\nexport type ApplicationReview",
+              "  active?: boolean;\n  deletedAt?: string;\n};\n\nexport type ApplicationReview",
+              "extension resume tombstone type",
           )
-
           replace_once(
               "apps/extension/src/storage/cloud.ts",
               '''    } else if (event.entityType === "RESUME.V1") {
               resumes.push(
                 await decryptJson<ResumeRecord>(rawKey, event.payloadCiphertext),
               );
-            }''',
+            }
+          ''',
               '''    } else if (event.entityType === "RESUME.V1") {
               const resume = await decryptJson<ResumeRecord>(
                 rawKey,
                 event.payloadCiphertext,
               );
               if (!resume.deletedAt) resumes.push(resume);
-            }''',
+            }
+          ''',
+              "extension hide tombstones",
           )
-
           replace_once(
               "apps/extension/src/storage/cloud.ts",
               '''  const family = options.family?.trim() || "master";
@@ -299,7 +278,8 @@ jobs:
                 ...snapshot.resumes
                   .filter((resume) => (resume.family ?? "master") === family)
                   .map((resume) => resume.version ?? 1),
-              ) + 1;''',
+              ) + 1;
+          ''',
               '''  const family = options.family?.trim() || "master";
             const { events: resumeEvents } = await fetchCloudEvents(connection, 0);
             const resumeHistory: ResumeRecord[] = [];
@@ -315,29 +295,28 @@ jobs:
                 ...resumeHistory
                   .filter((resume) => (resume.family ?? "master") === family)
                   .map((resume) => resume.version ?? 1),
-              ) + 1;''',
+              ) + 1;
+          ''',
+              "extension preserve resume version history",
           )
 
+          # Regression tests for tombstone shape and owner DELETE request.
           replace_once(
               "apps/extension/src/storage/cloud.test.ts",
-              '''  normalizeBaseUrl,
-            parsePairingBundle,
-            validateResumeFile,''',
-              '''  normalizeBaseUrl,
-            parsePairingBundle,
-            type ResumeRecord,
-            validateResumeFile,''',
+              "  parsePairingBundle,\n  validateResumeFile,",
+              "  parsePairingBundle,\n  type ResumeRecord,\n  validateResumeFile,",
+              "extension test type import",
           )
-
-          test_path = Path("apps/extension/src/storage/cloud.test.ts")
-          test_text = test_path.read_text()
-          marker = '''describe("cloud event pagination", () => {'''
-          if test_text.count(marker) != 1:
-              raise SystemExit("Could not locate cloud event pagination test marker")
-          test_text = test_text.replace(
-              marker,
-              '''describe("resume deletion tombstones", () => {
-            it("can represent deleted encrypted resume records without losing version history", () => {
+          extension_test = Path("apps/extension/src/storage/cloud.test.ts")
+          text = extension_test.read_text()
+          marker = 'describe("cloud event pagination", () => {'
+          if text.count(marker) != 1:
+              raise SystemExit("extension pagination marker missing or ambiguous")
+          extension_test.write_text(
+              text.replace(
+                  marker,
+                  '''describe("resume deletion tombstones", () => {
+            it("keeps deletion metadata available for synchronized filtering", () => {
               const record: ResumeRecord = {
                 resumeId: "resume-test",
                 objectId: "object-test",
@@ -355,22 +334,20 @@ jobs:
           });
 
           describe("cloud event pagination", () => {''',
-              1,
+                  1,
+              )
           )
-          test_path.write_text(test_text)
 
           replace_once(
               "apps/owner-workspace/tests/profile-vault.test.mjs",
-              '''  ProtectedProfileConflictError,
-            encryptedHistoryNeedsRecovery,''',
-              '''  ProtectedProfileConflictError,
-            deleteEncryptedResume,
-            encryptedHistoryNeedsRecovery,''',
+              "  ProtectedProfileConflictError,\n",
+              "  ProtectedProfileConflictError,\n  deleteEncryptedResume,\n",
+              "owner test delete import",
           )
-
           owner_test = Path("apps/owner-workspace/tests/profile-vault.test.mjs")
-          owner_text = owner_test.read_text()
-          owner_text += '''
+          owner_test.write_text(
+              owner_test.read_text()
+              + '''
 
           test("owner résumé deletion uses the dedicated encrypted-object delete endpoint", async () => {
             const originalFetch = globalThis.fetch;
@@ -397,7 +374,7 @@ jobs:
             }
           });
           '''
-          owner_test.write_text(owner_text)
+          )
           PY
       - name: Format changed files
         run: |
