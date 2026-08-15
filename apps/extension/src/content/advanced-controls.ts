@@ -30,13 +30,31 @@ function validDateParts(year: number, month: number, day: number): boolean {
   if (year < 1 || year > 9999 || month < 1 || month > 12 || day < 1) {
     return false;
   }
-  const days = [31, leapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  const days = [
+    31,
+    leapYear(year) ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31,
+  ];
   return day <= days[month - 1]!;
 }
 
 function validMonth(value: string): boolean {
   const match = value.match(/^(\d{4})-(\d{2})$/);
-  return Boolean(match && Number(match[1]) >= 1 && Number(match[2]) >= 1 && Number(match[2]) <= 12);
+  return Boolean(
+    match &&
+    Number(match[1]) >= 1 &&
+    Number(match[2]) >= 1 &&
+    Number(match[2]) <= 12,
+  );
 }
 
 function validTime(value: string): boolean {
@@ -45,7 +63,14 @@ function validTime(value: string): boolean {
   const hour = Number(match[1]);
   const minute = Number(match[2]);
   const second = match[3] === undefined ? 0 : Number(match[3]);
-  return hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59 && second >= 0 && second <= 59;
+  return (
+    hour >= 0 &&
+    hour <= 23 &&
+    minute >= 0 &&
+    minute <= 59 &&
+    second >= 0 &&
+    second <= 59
+  );
 }
 
 function validDateTimeLocal(value: string): boolean {
@@ -55,7 +80,9 @@ function validDateTimeLocal(value: string): boolean {
   if (!match) return false;
   return (
     validDateParts(Number(match[1]), Number(match[2]), Number(match[3])) &&
-    validTime(`${match[4]}:${match[5]}${match[6] === undefined ? "" : `:${match[6]}`}`)
+    validTime(
+      `${match[4]}:${match[5]}${match[6] === undefined ? "" : `:${match[6]}`}`,
+    )
   );
 }
 
@@ -65,7 +92,9 @@ function isoWeeksInYear(year: number): number {
   const thursday = new Date(december28);
   thursday.setUTCDate(december28.getUTCDate() + 4 - day);
   const yearStart = new Date(Date.UTC(thursday.getUTCFullYear(), 0, 1));
-  return Math.ceil(((thursday.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7);
+  return Math.ceil(
+    ((thursday.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7,
+  );
 }
 
 function validWeek(value: string): boolean {
@@ -111,14 +140,18 @@ function rootFor(element: Element): Document | ShadowRoot {
 }
 
 function controlledContainers(element: HTMLElement): HTMLElement[] {
-  const ids = [element.getAttribute("aria-controls"), element.getAttribute("aria-owns")]
+  const ids = [
+    element.getAttribute("aria-controls"),
+    element.getAttribute("aria-owns"),
+  ]
     .filter((value): value is string => Boolean(value))
     .flatMap((value) => value.split(/\s+/))
     .filter(Boolean);
   const roots: Array<Document | ShadowRoot> = [rootFor(element)];
   if (!roots.includes(document)) roots.push(document);
   const containers: HTMLElement[] = [];
-  if (element.getAttribute("aria-multiselectable") === "true") containers.push(element);
+  if (element.getAttribute("aria-multiselectable") === "true")
+    containers.push(element);
   for (const id of ids) {
     for (const root of roots) {
       const candidate =
@@ -159,7 +192,10 @@ function optionValues(element: HTMLElement): string[] {
 function optionElements(container: HTMLElement): HTMLElement[] {
   return Array.from(
     container.querySelectorAll("[role='option'], [role='treeitem']"),
-  ).filter((item): item is HTMLElement => item instanceof HTMLElement && available(item));
+  ).filter(
+    (item): item is HTMLElement =>
+      item instanceof HTMLElement && available(item),
+  );
 }
 
 function exactTargets(
@@ -215,7 +251,10 @@ export async function fillAriaMultiSelectControl(
   if (!isAriaMultiSelectControl(element)) return null;
   const requested = parseRequestedOptionValues(value);
   if (!requested || requested.length === 0) return false;
-  if (new Set(requested.map((item) => item.toLocaleLowerCase("en-US"))).size !== requested.length) {
+  if (
+    new Set(requested.map((item) => item.toLocaleLowerCase("en-US"))).size !==
+    requested.length
+  ) {
     return false;
   }
 
@@ -238,12 +277,16 @@ export async function fillAriaMultiSelectControl(
         break;
       }
     }
-    await new Promise((resolve) => window.setTimeout(resolve, timing.pollIntervalMs));
+    await new Promise((resolve) =>
+      window.setTimeout(resolve, timing.pollIntervalMs),
+    );
   }
   if (!container || !targets) return false;
 
   const options = optionElements(container);
-  const originals = new Map(options.map((option) => [option, selected(option)] as const));
+  const originals = new Map(
+    options.map((option) => [option, selected(option)] as const),
+  );
   const targetSet = new Set(targets);
   for (const option of options) {
     const desired = targetSet.has(option);
@@ -260,7 +303,9 @@ export async function fillAriaMultiSelectControl(
     }
   }
 
-  const verified = options.every((option) => selected(option) === targetSet.has(option));
+  const verified = options.every(
+    (option) => selected(option) === targetSet.has(option),
+  );
   if (!verified) await restoreSelection(options, originals, timing);
   return verified;
 }

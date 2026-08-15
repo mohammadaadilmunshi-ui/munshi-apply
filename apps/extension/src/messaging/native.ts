@@ -687,3 +687,117 @@ export async function markAIDraftUsed(draftId: string): Promise<AIDraftRecord> {
     }),
   );
 }
+
+export type InteractionRecipeStrategy =
+  | "ARIA_COMBOBOX"
+  | "ARIA_RADIO"
+  | "ARIA_BOOLEAN"
+  | "CUSTOM_DATE"
+  | "CUSTOM_MULTI_SELECT";
+
+export type InteractionRecipeStatus = {
+  recipeId: string;
+  componentFingerprint: string;
+  semanticType: string;
+  siteOrigin: string;
+  strategy: InteractionRecipeStrategy;
+  state: "SHADOW" | "PROMOTED" | "ROLLED_BACK";
+  version: number;
+  actions: unknown[];
+  attemptInserted?: boolean;
+  verifiedAttempts?: number;
+  verifiedSuccesses?: number;
+};
+
+function parseInteractionRecipe(
+  value: unknown,
+): InteractionRecipeStatus | null {
+  if (value === null) return null;
+  const candidate = objectValue(value, "Interaction recipe");
+  const strategies = new Set([
+    "ARIA_COMBOBOX",
+    "ARIA_RADIO",
+    "ARIA_BOOLEAN",
+    "CUSTOM_DATE",
+    "CUSTOM_MULTI_SELECT",
+  ]);
+  const states = new Set(["SHADOW", "PROMOTED", "ROLLED_BACK"]);
+  if (
+    typeof candidate.strategy !== "string" ||
+    !strategies.has(candidate.strategy)
+  ) {
+    throw new Error("Interaction recipe strategy is invalid");
+  }
+  if (typeof candidate.state !== "string" || !states.has(candidate.state)) {
+    throw new Error("Interaction recipe state is invalid");
+  }
+  if (!Array.isArray(candidate.actions)) {
+    throw new Error("Interaction recipe actions are invalid");
+  }
+  const result: InteractionRecipeStatus = {
+    recipeId: stringValue(candidate.recipeId, "Interaction recipeId"),
+    componentFingerprint: stringValue(
+      candidate.componentFingerprint,
+      "Interaction component fingerprint",
+    ),
+    semanticType: stringValue(
+      candidate.semanticType,
+      "Interaction semantic type",
+    ),
+    siteOrigin: stringValue(candidate.siteOrigin, "Interaction site origin"),
+    strategy: candidate.strategy as InteractionRecipeStrategy,
+    state: candidate.state as InteractionRecipeStatus["state"],
+    version: integerValue(candidate.version, "Interaction recipe version"),
+    actions: [...candidate.actions],
+  };
+  if (typeof candidate.attemptInserted === "boolean") {
+    result.attemptInserted = candidate.attemptInserted;
+  }
+  if (candidate.verifiedAttempts !== undefined) {
+    result.verifiedAttempts = integerValue(
+      candidate.verifiedAttempts,
+      "Interaction verified attempts",
+    );
+  }
+  if (candidate.verifiedSuccesses !== undefined) {
+    result.verifiedSuccesses = integerValue(
+      candidate.verifiedSuccesses,
+      "Interaction verified successes",
+    );
+  }
+  return result;
+}
+
+export async function getPromotedInteractionRecipe(input: {
+  siteOrigin: string;
+  componentFingerprint: string;
+  semanticType: string;
+}): Promise<InteractionRecipeStatus | null> {
+  return parseInteractionRecipe(
+    await sendNative<unknown>({
+      type: "GET_INTERACTION_RECIPE",
+      payload: input,
+    }),
+  );
+}
+
+export async function recordInteractionRecipeAttempt(input: {
+  attemptId: string;
+  applicationId?: string | null;
+  siteOrigin: string;
+  componentFingerprint: string;
+  semanticType: string;
+  strategy: InteractionRecipeStrategy;
+  success: boolean;
+  verified: boolean;
+  failureReason: string | null;
+}): Promise<InteractionRecipeStatus> {
+  const result = parseInteractionRecipe(
+    await sendNative<unknown>({
+      type: "RECORD_INTERACTION_RECIPE_ATTEMPT",
+      payload: input,
+    }),
+  );
+  if (!result) throw new Error("Native recipe attempt returned no recipe");
+  return result;
+}

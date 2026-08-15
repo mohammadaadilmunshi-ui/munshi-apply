@@ -26,7 +26,10 @@ import {
   ensureNativeApplication,
   getLatestNativeApplicationCheckpoint,
   getNativeHealth,
+  getPromotedInteractionRecipe,
   markAIDraftUsed,
+  recordInteractionRecipeAttempt,
+  type InteractionRecipeStrategy,
   saveNativeApplicationCheckpoint,
 } from "../messaging/native";
 import {
@@ -91,10 +94,50 @@ async function getMergedPageForTab(
   };
 }
 
+const learnableStrategies = new Set<InteractionRecipeStrategy>([
+  "ARIA_COMBOBOX",
+  "ARIA_RADIO",
+  "ARIA_BOOLEAN",
+  "CUSTOM_DATE",
+  "CUSTOM_MULTI_SELECT",
+]);
+
 async function sendFillInstruction(
   tabId: number,
   instruction: FillInstruction,
 ): Promise<FillResult[]> {
+  const before = await getMergedPageForTab(tabId);
+  const control = before?.controls.find(
+    (candidate) => candidate.controlId === instruction.controlId,
+  );
+  const question = before?.questions.find(
+    (candidate) => candidate.controlId === instruction.controlId,
+  );
+  let siteOrigin: string | null = null;
+  try {
+    siteOrigin = before ? new URL(before.url).origin : null;
+  } catch {
+    siteOrigin = null;
+  }
+  let promotedRecipe: Awaited<ReturnType<typeof getPromotedInteractionRecipe>> =
+    null;
+  if (
+    siteOrigin &&
+    control?.componentFingerprint &&
+    question &&
+    !question.sensitive
+  ) {
+    try {
+      promotedRecipe = await getPromotedInteractionRecipe({
+        siteOrigin,
+        componentFingerprint: control.componentFingerprint,
+        semanticType: question.semanticType,
+      });
+    } catch {
+      promotedRecipe = null;
+    }
+  }
+
   const response = (await chrome.tabs.sendMessage(
     tabId,
     {
@@ -103,7 +146,49 @@ async function sendFillInstruction(
     },
     { frameId: instruction.frameId },
   )) as { results?: FillResult[] } | undefined;
-  return response?.results ?? [];
+  const results = response?.results ?? [];
+
+  return Promise.all(
+    results.map(async (result) => {
+      const strategy = result.strategy as InteractionRecipeStrategy | undefined;
+      if (
+        !siteOrigin ||
+        !control?.componentFingerprint ||
+        !question ||
+        question.sensitive ||
+        !strategy ||
+        !learnableStrategies.has(strategy)
+      ) {
+        return result;
+      }
+      const promotedAttempted =
+        promotedRecipe?.state === "PROMOTED" &&
+        promotedRecipe.strategy === strategy;
+      try {
+        const learned = await recordInteractionRecipeAttempt({
+          attemptId: crypto.randomUUID(),
+          applicationId: null,
+          siteOrigin,
+          componentFingerprint: control.componentFingerprint,
+          semanticType: question.semanticType,
+          strategy,
+          success: result.status === "FILLED",
+          verified: true,
+          failureReason: result.status === "FILLED" ? null : result.reason,
+        });
+        return {
+          ...result,
+          recipeId: promotedRecipe?.recipeId ?? learned.recipeId,
+          recipeAttempted: promotedAttempted,
+          recipeSucceeded: promotedAttempted
+            ? result.status === "FILLED"
+            : undefined,
+        };
+      } catch {
+        return result;
+      }
+    }),
+  );
 }
 
 async function sendNavigationAction(

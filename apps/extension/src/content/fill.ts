@@ -1,5 +1,10 @@
 import type { FillInstruction, FillResult } from "@munshi-apply/contracts";
 import { fillNativeMultiSelect } from "./multi-select";
+import {
+  fillAriaMultiSelectControl,
+  fillStrictTemporalInput,
+  isAriaMultiSelectControl,
+} from "./advanced-controls";
 import { resolveControlElement } from "./scanner";
 import {
   defaultAdaptiveTiming,
@@ -410,6 +415,12 @@ async function fillElement(
   if (elementUnavailable(element)) return false;
   if (element.getAttribute("aria-readonly") === "true") return false;
   if (element instanceof HTMLElement) {
+    const ariaMultiSelect = await fillAriaMultiSelectControl(
+      element,
+      value,
+      options,
+    );
+    if (ariaMultiSelect !== null) return ariaMultiSelect;
     const customDate = await fillCustomDateControl(element, value, options);
     if (customDate !== null) return customDate;
     const ariaBoolean = await fillAriaBooleanControl(element, value, options);
@@ -431,6 +442,8 @@ async function fillElement(
     if (element.readOnly && !["radio", "checkbox"].includes(element.type)) {
       return false;
     }
+    const strictTemporal = fillStrictTemporalInput(element, value);
+    if (strictTemporal !== null) return strictTemporal;
     if (element.type === "radio") {
       const group = radioCandidates(element);
       const original = group.map((candidate) => candidate.checked);
@@ -591,6 +604,7 @@ export function assistFilePicker(controlId: string): FilePickerAssistResult {
 }
 
 function strategyFor(element: Element): string {
+  if (isAriaMultiSelectControl(element)) return "CUSTOM_MULTI_SELECT";
   if (isPopupChoiceControl(element)) {
     return element.getAttribute("aria-haspopup") === "dialog"
       ? "CUSTOM_DATE"

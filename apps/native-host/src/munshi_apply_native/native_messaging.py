@@ -12,6 +12,7 @@ from .ai_settings import AIConfiguration, AISettingsStore
 from .application_store import ApplicationStore
 from .checkpoint_store import ApplicationCheckpointStore
 from .database import Database
+from .interaction_recipe_service import InteractionRecipeService
 from .models import ApplicationCheckpointPayload, EventEnvelope
 from .profile_store import ProfileStore
 from .settings import Settings
@@ -110,6 +111,16 @@ def handle(
             return {"ok": True, "data": None}
         checkpoint = ApplicationCheckpointPayload.model_validate(stored)
         return {"ok": True, "data": checkpoint.wire_payload()}
+    if message_type == "GET_INTERACTION_RECIPE":
+        return {
+            "ok": True,
+            "data": InteractionRecipeService(database).lookup(message.get("payload")),
+        }
+    if message_type == "RECORD_INTERACTION_RECIPE_ATTEMPT":
+        return {
+            "ok": True,
+            "data": InteractionRecipeService(database).record(message.get("payload")),
+        }
 
     if message_type in {
         "GET_AI_SETTINGS",
