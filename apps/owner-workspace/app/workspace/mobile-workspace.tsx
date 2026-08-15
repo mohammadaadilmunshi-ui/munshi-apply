@@ -31,6 +31,10 @@ import {
   type ProfileSnapshot,
   type ResumeRecord,
 } from "../vault-client";
+import {
+  isEligibleApplicationSnapshot,
+  pendingReviewCount,
+} from "../application-eligibility";
 
 type View =
   "overview" | "profile" | "resumes" | "applications" | "devices" | "security";
@@ -316,6 +320,9 @@ export function MobileWorkspace({ ownerName }: { ownerName: string }) {
     const snapshots = Array.from(nextEntities.entries())
       .filter(([entityKey]) => entityKey.startsWith("APPLICATION.V1:"))
       .map(([, entity]) => entity.value as ApplicationSnapshot)
+      .filter((application) =>
+        isEligibleApplicationSnapshot(application, window.location.origin),
+      )
       .sort((left, right) => right.observedAt.localeCompare(left.observedAt));
 
     setRawKey(key);
@@ -490,14 +497,13 @@ export function MobileWorkspace({ ownerName }: { ownerName: string }) {
 
   const openReviews = useMemo(
     () =>
-      applications.reduce(
-        (total, application) =>
-          total +
-          application.questions.filter((question) => question.requiresReview)
-            .length,
-        0,
-      ),
-    [applications],
+      applications.reduce((total, application) => {
+        const prior = entities.get(
+          `APPLICATION.REVIEW.V1:review-${application.pageId}`,
+        ) as DecryptedEntity<ApplicationReview> | undefined;
+        return total + pendingReviewCount(application, prior?.value);
+      }, 0),
+    [applications, entities],
   );
 
   function markProfileDirty(): void {
@@ -1297,30 +1303,42 @@ export function MobileWorkspace({ ownerName }: { ownerName: string }) {
             <div className="workspace-card">
               <h2>Application review queue</h2>
               <p>
-                Applications appear here after the paired desktop extension
-                observes them.
+                Only pages with verified application-form evidence appear here.
+                Ordinary browsing pages are ignored.
               </p>
               <div className="record-list">
                 {applications.length === 0 && (
-                  <p>No application checkpoint has synchronized yet.</p>
+                  <p>No verified application checkpoint has synchronized yet.</p>
                 )}
-                {applications.map((application) => (
-                  <article key={application.pageId}>
-                    <div>
-                      <strong>{application.title}</strong>
-                      <span>
-                        {new URL(application.url).hostname} ·{" "}
-                        {application.questions.length} questions
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => beginReview(application)}
-                    >
-                      Review
-                    </button>
-                  </article>
-                ))}
+                {applications.map((application) => {
+                  const prior = entities.get(
+                    `APPLICATION.REVIEW.V1:review-${application.pageId}`,
+                  ) as DecryptedEntity<ApplicationReview> | undefined;
+                  const pending = pendingReviewCount(application, prior?.value);
+                  return (
+                    <article key={application.pageId}>
+                      <div>
+                        <strong>{application.title}</strong>
+                        <span>
+                          {new URL(application.url).hostname} ·{" "}
+                          {application.questions.length} questions · {pending}{" "}
+                          pending
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={application.questions.length === 0}
+                        onClick={() => beginReview(application)}
+                      >
+                        {pending > 0
+                          ? "Review"
+                          : application.questions.length > 0
+                            ? "View"
+                            : "Tracked"}
+                      </button>
+                    </article>
+                  );
+                })}
               </div>
             </div>
           )}

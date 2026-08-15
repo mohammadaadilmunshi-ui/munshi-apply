@@ -1,4 +1,5 @@
 import type { ApplicationPage } from "@munshi-apply/contracts";
+import { isEligibleApplicationPage } from "@munshi-apply/application-model";
 import {
   parseProfileSnapshot,
   type ProfileSnapshot,
@@ -232,6 +233,23 @@ export function normalizeBaseUrl(value: string): string {
   url.search = "";
   url.hash = "";
   return url.toString().replace(/\/$/, "");
+}
+
+function sameOrigin(left: string, right: string): boolean {
+  try {
+    return new URL(left).origin === new URL(right).origin;
+  } catch {
+    return false;
+  }
+}
+
+export function shouldPublishApplicationSnapshot(
+  connection: CloudConnection,
+  page: ApplicationPage,
+): boolean {
+  return (
+    !sameOrigin(connection.baseUrl, page.url) && isEligibleApplicationPage(page)
+  );
 }
 
 export async function getCloudConnection(): Promise<CloudConnection | null> {
@@ -557,9 +575,13 @@ export async function getCloudSnapshot(
       );
       profileVersion = event.baseVersion + 1;
     } else if (event.entityType === "APPLICATION.V1") {
-      applications.push(
-        await decryptJson<ApplicationPage>(rawKey, event.payloadCiphertext),
+      const application = await decryptJson<ApplicationPage>(
+        rawKey,
+        event.payloadCiphertext,
       );
+      if (shouldPublishApplicationSnapshot(connection, application)) {
+        applications.push(application);
+      }
     } else if (event.entityType === "APPLICATION.REVIEW.V1") {
       reviews.push(
         await decryptJson<ApplicationReview>(rawKey, event.payloadCiphertext),
@@ -588,6 +610,7 @@ export async function publishApplicationSnapshot(
   connection: CloudConnection,
   page: ApplicationPage,
 ): Promise<void> {
+  if (!shouldPublishApplicationSnapshot(connection, page)) return;
   const rawKey = await getWorkspaceEncryptionKey();
   if (!rawKey) return;
   const { events } = await fetchCloudEvents(connection, 0);

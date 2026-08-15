@@ -1,4 +1,5 @@
 export * from "./analytics";
+export * from "./application-detection";
 export * from "./autopilot";
 export * from "./autopilot-session";
 export * from "./budget";

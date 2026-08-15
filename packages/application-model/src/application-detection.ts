@@ -91,7 +91,8 @@ function hasResumeControl(page: ApplicationPage): boolean {
 function hasApplicationNavigation(page: ApplicationPage): boolean {
   return page.navigationCandidates.some(
     (candidate) =>
-      candidate.action !== "BACK" && applicationNavigation.test(candidate.label),
+      candidate.action !== "BACK" &&
+      applicationNavigation.test(candidate.label),
   );
 }
 
@@ -130,16 +131,14 @@ export function applicationPageEligibility(
     explicitIntent &&
     meaningfulQuestions >= 2
   ) {
-    reasons.push("explicit application context with multiple classified questions");
+    reasons.push(
+      "explicit application context with multiple classified questions",
+    );
   }
   if (knownAts && specificQuestions > 0) {
     reasons.push("known ATS with application-specific questions");
   }
-  if (
-    knownAts &&
-    page.applicationState === "CONFIRMATION" &&
-    explicitIntent
-  ) {
+  if (knownAts && page.applicationState === "CONFIRMATION" && explicitIntent) {
     reasons.push("known ATS application confirmation");
   }
 
