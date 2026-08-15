@@ -1,0 +1,77 @@
+name: Resume vault delete repair v3
+
+on:
+  push:
+    branches: [feat/v3-foundation-alignment]
+    paths: [.github/workflows/resume-vault-delete-repair-v3.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+
+      - name: Apply corrected résumé delete feature
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          workflow = Path(".github/workflows/resume-vault-delete-repair-v2.yml").read_text()
+          marker = "          python - <<'PY'\n"
+          start = workflow.index(marker) + len(marker)
+          end = workflow.index("\n          PY", start)
+          script = textwrap.dedent(workflow[start:end])
+          old = 'end_marker = "  const resumeId = crypto.randomUUID();\\n"'
+          new = 'end_marker = "  const fileBuffer = await file.arrayBuffer();\\n"'
+          if script.count(old) != 1:
+              raise SystemExit("Could not locate the v2 version-boundary marker")
+          Path("/tmp/resume-delete-patch.py").write_text(script.replace(old, new, 1))
+          PY
+          python /tmp/resume-delete-patch.py
+
+      - name: Format
+        run: |
+          npx prettier --write \
+            apps/extension/src/storage/cloud.ts \
+            apps/owner-workspace/app/vault-client.ts \
+            apps/owner-workspace/app/workspace/mobile-workspace.tsx \
+            apps/owner-workspace/app/api/objects/'[objectId]'/route.ts \
+            apps/owner-workspace/app/globals.css \
+            apps/owner-workspace/tests/resume-delete.test.mjs
+
+      - name: Verify extension and shared code
+        run: npm run check
+
+      - name: Verify owner workspace
+        working-directory: apps/owner-workspace
+        run: |
+          npm ci
+          npm run lint
+          npm test
+          npm run build
+
+      - name: Publish verified feature
+        shell: bash
+        run: |
+          rm -f .github/workflows/resume-vault-delete-repair.yml
+          rm -f .github/workflows/resume-vault-delete-repair-v2.yml
+          rm -f .github/workflows/resume-vault-delete-repair-v3.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "feat: add synchronized resume deletion"
+          git push origin HEAD:feat/v3-foundation-alignment
