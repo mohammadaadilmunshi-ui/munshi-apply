@@ -8,7 +8,10 @@ import {
   type FillInstruction,
   type FillResult,
 } from "@munshi-apply/contracts";
-import { parseProfileSnapshot } from "@munshi-apply/contracts/profile-vault";
+import {
+  parseProfileSnapshot,
+  type ProfileSnapshot,
+} from "@munshi-apply/contracts/profile-vault";
 import {
   AutoPilotController,
   type AutoPilotResumeInput,
@@ -70,6 +73,16 @@ type AutoPilotRuntimeRequest =
 type RuntimeRequest = ExtensionRequest | AutoPilotRuntimeRequest;
 
 let initialized = false;
+
+function sameProfileSaveContent(
+  left: ProfileSnapshot,
+  right: ProfileSnapshot,
+): boolean {
+  return (
+    JSON.stringify({ ...left, updatedAt: "SYNC_ACK" }) ===
+    JSON.stringify({ ...right, updatedAt: "SYNC_ACK" })
+  );
+}
 
 async function getMergedPageForTab(
   tabId: number,
@@ -434,9 +447,9 @@ async function routeMessage(
             parsed,
           );
           await persistAuthoritativeProfileSnapshot(synchronized);
-          if (JSON.stringify(synchronized) !== JSON.stringify(parsed)) {
+          if (!sameProfileSaveContent(synchronized, parsed)) {
             throw new Error(
-              "Profile changed on another device. Refresh before saving again.",
+              "Profile content changed on another device. Refresh before saving again.",
             );
           }
         }
