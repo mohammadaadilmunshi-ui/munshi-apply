@@ -50,12 +50,14 @@ jobs:
           python -m ruff format \
             apps/native-host/src/munshi_apply_native/native_messaging.py \
             apps/native-host/tests/test_native_messaging.py
-      - name: Verify extension and native companion
-        run: |
-          npm run check
-          python -m ruff check apps/native-host
-          python -m pytest apps/native-host
-          bash -n scripts/update-local-runtime.sh
+      - name: Verify extension and shared packages
+        run: npm run check
+      - name: Verify native Ruff
+        run: python -m ruff check apps/native-host
+      - name: Verify native tests
+        run: python -m pytest apps/native-host
+      - name: Verify local updater shell
+        run: bash -n scripts/update-local-runtime.sh
       - name: Remove temporary helper files
         run: git rm -f scripts/fix-runtime-coherence.py .github/workflows/runtime-coherence-helper.yml
       - name: Commit clean repair
