@@ -214,4 +214,31 @@ describe("protected profile convergence", () => {
       /record:education-1:graduation_date/,
     );
   });
+  it("preserves unrelated ordinary facts when a newer profile is sparse", () => {
+    const local = profile(
+      [
+        fact("email", "aadil@example.test", { protected: false }),
+        fact("preferred_name", "Aadil", { protected: false }),
+      ],
+      "2026-08-14T12:00:00.000Z",
+    );
+    const remote = profile(
+      [
+        fact("preferred_name", "Aadil M", {
+          protected: false,
+          updatedAt: "2026-08-14T12:05:00.000Z",
+        }),
+      ],
+      "2026-08-14T12:05:00.000Z",
+    );
+
+    const reconciled = reconcileProtectedProfile(local, remote);
+    expect(
+      reconciled.facts.find((candidate) => candidate.key === "email")?.value,
+    ).toBe("aadil@example.test");
+    expect(
+      reconciled.facts.find((candidate) => candidate.key === "preferred_name")
+        ?.value,
+    ).toBe("Aadil M");
+  });
 });

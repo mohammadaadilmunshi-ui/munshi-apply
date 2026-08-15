@@ -469,15 +469,30 @@ function reconcileFacts(
   const localByKey = new Map(localFacts.map((fact) => [fact.key, fact]));
   const remoteByKey = new Map(remoteFacts.map((fact) => [fact.key, fact]));
   const keys = new Set(
-    [...localFacts, ...remoteFacts]
-      .filter((fact) => fact.protected)
-      .map((fact) => fact.key),
+    [...baseFacts, ...localFacts, ...remoteFacts].map((fact) => fact.key),
   );
   const selected = new Map<string, ProfileFact>();
   for (const key of keys) {
     const baseFact = baseByKey.get(key);
     const localFact = localByKey.get(key);
     const remoteFact = remoteByKey.get(key);
+    const protectedFact = Boolean(
+      baseFact?.protected || localFact?.protected || remoteFact?.protected,
+    );
+    if (!protectedFact) {
+      const choice =
+        !localFact
+          ? (remoteFact ?? baseFact)
+          : !remoteFact
+            ? localFact
+            : localFact.updatedAt > remoteFact.updatedAt
+              ? localFact
+              : remoteFact.updatedAt > localFact.updatedAt
+                ? remoteFact
+                : (baseFact ?? localFact);
+      if (choice) selected.set(key, choice);
+      continue;
+    }
     if (
       localFact &&
       remoteFact &&

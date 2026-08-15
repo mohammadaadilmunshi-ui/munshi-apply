@@ -126,28 +126,37 @@ function reconcileFacts(
   const remoteByKey = new Map(
     remoteFacts.map((fact) => [fact.key, fact] as const),
   );
-  const protectedKeys = new Set(
-    [...localFacts, ...remoteFacts]
-      .filter((fact) => fact.protected)
-      .map((fact) => fact.key),
+  const allKeys = new Set(
+    [...baseFacts, ...localFacts, ...remoteFacts].map((fact) => fact.key),
   );
-  const selectedProtected = new Map<string, ProfileFact>();
+  const selected = new Map<string, ProfileFact>();
 
-  for (const key of protectedKeys) {
-    const selected = chooseProtectedFact(
-      baseByKey.get(key),
-      localByKey.get(key),
-      remoteByKey.get(key),
+  for (const key of allKeys) {
+    const baseFact = baseByKey.get(key);
+    const localFact = localByKey.get(key);
+    const remoteFact = remoteByKey.get(key);
+    const protectedFact = Boolean(
+      baseFact?.protected || localFact?.protected || remoteFact?.protected,
     );
-    if (selected) selectedProtected.set(key, selected);
+    const ordinaryChoice = !localFact
+      ? (remoteFact ?? baseFact)
+      : !remoteFact
+        ? localFact
+        : localFact.updatedAt > remoteFact.updatedAt
+          ? localFact
+          : remoteFact.updatedAt > localFact.updatedAt
+            ? remoteFact
+            : (baseFact ?? localFact);
+    const choice = protectedFact
+      ? chooseProtectedFact(baseFact, localFact, remoteFact)
+      : ordinaryChoice;
+    if (choice) selected.set(key, choice);
   }
 
-  const facts = baseFacts.map(
-    (fact) => selectedProtected.get(fact.key) ?? fact,
-  );
+  const facts = baseFacts.map((fact) => selected.get(fact.key) ?? fact);
   const seen = new Set(facts.map((fact) => fact.key));
-  for (const key of [...selectedProtected.keys()].sort()) {
-    if (!seen.has(key)) facts.push(selectedProtected.get(key)!);
+  for (const key of [...selected.keys()].sort()) {
+    if (!seen.has(key)) facts.push(selected.get(key)!);
   }
   return facts;
 }

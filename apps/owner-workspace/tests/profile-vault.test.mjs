@@ -246,3 +246,48 @@ test("owner workspace downloads every sync event page", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("sparse newer profile cannot erase unrelated ordinary facts", () => {
+  const local = snapshot({
+    facts: [
+      fact({
+        factId: "email",
+        key: "email",
+        value: "aadil@example.test",
+        category: "CONTACT",
+        protected: false,
+      }),
+      fact({
+        factId: "preferred-old",
+        key: "preferred_name",
+        value: "Aadil",
+        protected: false,
+      }),
+    ],
+    updatedAt: "2026-08-14T18:00:00.000Z",
+  });
+  const remote = snapshot({
+    facts: [
+      fact({
+        factId: "preferred-new",
+        key: "preferred_name",
+        value: "Aadil M",
+        protected: false,
+        updatedAt: "2026-08-14T18:05:00.000Z",
+      }),
+    ],
+    updatedAt: "2026-08-14T18:05:00.000Z",
+  });
+
+  const reconciled = reconcileProfileSnapshots(local, remote);
+  assert.equal(
+    reconciled.facts.find((candidate) => candidate.key === "email")?.value,
+    "aadil@example.test",
+  );
+  assert.equal(
+    reconciled.facts.find((candidate) => candidate.key === "preferred_name")
+      ?.value,
+    "Aadil M",
+  );
+});
