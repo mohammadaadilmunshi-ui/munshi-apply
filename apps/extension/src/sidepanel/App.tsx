@@ -24,6 +24,8 @@ import {
   getNativeHealth,
   getProfile,
   getProfileSyncStatus,
+  nativeRuntimeCompatibility,
+  resolveProfileSyncConflict,
   saveProfile,
   type AutoPilotControllerStatus,
   type ExtensionRuntimeHealth,
@@ -65,6 +67,7 @@ type SaveState =
 type NativeState =
   | { status: "checking" }
   | { status: "unsupported" }
+  | { status: "upgrade_required"; data: NativeRuntimeHealth; reason: string }
   | { status: "unavailable"; error: string }
   | { status: "healthy"; data: NativeRuntimeHealth };
 
@@ -276,6 +279,7 @@ export function App() {
       conflict: null,
     },
   );
+  const [profileConflictBusy, setProfileConflictBusy] = useState(false);
   const [workspaceUrl, setWorkspaceUrl] = useState(defaultWorkspaceUrl);
   const [pairingBundle, setPairingBundle] = useState("");
   const [activationBundle, setActivationBundle] = useState("");
@@ -368,6 +372,15 @@ export function App() {
     setNative({ status: "checking" });
     try {
       const nativeHealth = await getNativeHealth();
+      const compatibility = nativeRuntimeCompatibility(nativeHealth);
+      if (!compatibility.compatible) {
+        setNative({
+          status: "upgrade_required",
+          data: nativeHealth,
+          reason: compatibility.reason,
+        });
+        return;
+      }
       setNative({ status: "healthy", data: nativeHealth });
       await refreshAI();
     } catch (error) {
@@ -460,24 +473,30 @@ export function App() {
       () => {
         setSaveState("saving");
         void saveProfile(profile)
-          .then(() => {
+          .then(async () => {
+            const status = await getProfileSyncStatus();
+            setProfileSyncStatus(status);
             if (profileRevision.current !== revision) return;
             setProfileDirty(false);
             setSaveState(
-              cloud.status === "connected" && cloud.data.encryptionReady
-                ? "synced"
-                : "local",
+              status.conflict
+                ? "conflict"
+                : cloud.status === "connected" && cloud.data.encryptionReady
+                  ? "synced"
+                  : "local",
             );
           })
           .catch(() => {
             void getProfileSyncStatus().then((status) => {
               setProfileSyncStatus(status);
               setSaveState(status.conflict ? "conflict" : "error");
+              if (!status.conflict) {
+                retryTimer.current = window.setTimeout(
+                  () => setRetryTick((value) => value + 1),
+                  5_000,
+                );
+              }
             });
-            retryTimer.current = window.setTimeout(
-              () => setRetryTick((value) => value + 1),
-              5_000,
-            );
           });
       },
       retryTick === 0 ? 800 : 0,
@@ -558,9 +577,11 @@ export function App() {
       ? "Unavailable"
       : native.status === "healthy"
         ? "Connected"
-        : native.status === "checking"
-          ? "Checking"
-          : "Extension ready";
+        : native.status === "upgrade_required"
+          ? "Companion update"
+          : native.status === "checking"
+            ? "Checking"
+            : "Extension ready";
   const connectionClass =
     native.status === "healthy" || cloud.status === "connected"
       ? "healthy"
@@ -786,7 +807,42 @@ export function App() {
     markProfileDirty();
   }
 
+  async function resolveProfileConflict(
+    winner: "local" | "remote",
+  ): Promise<void> {
+    setProfileConflictBusy(true);
+    setNotice("");
+    try {
+      const resolved = await resolveProfileSyncConflict(winner);
+      setProfile(resolved);
+      setProtectedDrafts({});
+      profileRevision.current += 1;
+      setProfileDirty(false);
+      setProfileSyncStatus({ conflict: null });
+      setSaveState("synced");
+      setNotice(
+        winner === "local"
+          ? "Protected profile conflict resolved using this Mac's confirmed values."
+          : "Protected profile conflict resolved using the encrypted workspace values.",
+      );
+    } catch (error) {
+      setSaveState("conflict");
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Protected profile conflict resolution failed",
+      );
+    } finally {
+      setProfileConflictBusy(false);
+    }
+  }
+
   async function syncNow(): Promise<void> {
+    if (profileSyncStatus.conflict) {
+      setSaveState("conflict");
+      setNotice("Resolve the protected profile conflict before synchronizing.");
+      return;
+    }
     setSaveState("saving");
     const revision = profileRevision.current;
     try {
@@ -1079,15 +1135,26 @@ export function App() {
         ))}
       </nav>
       {profileSyncStatus.conflict && (
-        <div className="notice review">
-          <strong>Profile review required.</strong>{" "}
-          {profileSyncStatus.conflict.keys.map(profileConflictLabel).join(", ")}
-          {profileSyncStatus.conflict.keys.length === 1
-            ? " differs"
-            : " differ"}
-          {
-            " between this Mac and the encrypted workspace. Open Profile and confirm the intended value; application detection and extension health remain available."
-          }
+        <div className="notice review profile-conflict-banner">
+          <div>
+            <strong>Profile review required.</strong>{" "}
+            {profileSyncStatus.conflict.keys
+              .map(profileConflictLabel)
+              .join(", ")}
+            {profileSyncStatus.conflict.keys.length === 1
+              ? " differs"
+              : " differ"}
+            {" between this Mac and the encrypted workspace."}
+          </div>
+          {view !== "profile" && (
+            <button
+              className="quiet"
+              type="button"
+              onClick={() => setView("profile")}
+            >
+              Review profile
+            </button>
+          )}
         </div>
       )}
       {notice && <div className="notice">{notice}</div>}
@@ -1273,7 +1340,13 @@ export function App() {
               <p className="eyebrow">Encrypted profile vault</p>
               <h2>Complete application profile</h2>
             </div>
-            <span className={saveState === "error" ? "badge review" : "badge"}>
+            <span
+              className={
+                saveState === "error" || saveState === "conflict"
+                  ? "badge review"
+                  : "badge"
+              }
+            >
               {saveLabel}
             </span>
           </div>
@@ -1282,6 +1355,52 @@ export function App() {
             facts become confirmed only after you leave the field, and are
             encrypted before cloud synchronization.
           </p>
+          {profileSyncStatus.conflict && (
+            <div className="profile-conflict-panel">
+              <strong>Choose the authoritative protected value</strong>
+              <p>
+                Both sides contain confirmed protected information, so MUNSHI
+                will not choose automatically. Review every difference below,
+                then explicitly keep one side for all listed conflicts.
+              </p>
+              <div className="profile-conflict-list">
+                {profileSyncStatus.conflict.keys.map((key) => {
+                  const detail = profileSyncStatus.conflict?.details.find(
+                    (candidate) => candidate.key === key,
+                  );
+                  return (
+                    <article key={key}>
+                      <strong>{profileConflictLabel(key)}</strong>
+                      <span>
+                        This Mac: {String(detail?.localValue ?? "(empty)")}
+                      </span>
+                      <span>
+                        Workspace: {String(detail?.remoteValue ?? "(empty)")}
+                      </span>
+                    </article>
+                  );
+                })}
+              </div>
+              <div className="profile-conflict-actions">
+                <button
+                  className="primary"
+                  type="button"
+                  disabled={profileConflictBusy}
+                  onClick={() => void resolveProfileConflict("local")}
+                >
+                  Keep this Mac's values
+                </button>
+                <button
+                  className="quiet"
+                  type="button"
+                  disabled={profileConflictBusy}
+                  onClick={() => void resolveProfileConflict("remote")}
+                >
+                  Use workspace values
+                </button>
+              </div>
+            </div>
+          )}
           {profileSections.map((sectionName) => (
             <div key={sectionName}>
               <h3>{sectionName}</h3>
@@ -1518,7 +1637,12 @@ export function App() {
       )}
 
       {view === "ai" && (
-        <AIControlCenter nativeAvailable={native.status === "healthy"} />
+        <AIControlCenter
+          nativeAvailable={native.status === "healthy"}
+          nativeIssue={
+            native.status === "upgrade_required" ? native.reason : undefined
+          }
+        />
       )}
 
       {view === "diagnostics" && (
@@ -1537,6 +1661,15 @@ export function App() {
             <div>
               <dt>Native companion</dt>
               <dd>{native.status}</dd>
+            </div>
+            <div>
+              <dt>Native protocol</dt>
+              <dd>
+                {native.status === "healthy" ||
+                native.status === "upgrade_required"
+                  ? (native.data.protocol_version ?? "legacy")
+                  : "not available"}
+              </dd>
             </div>
             <div>
               <dt>SQLite database</dt>
@@ -1631,6 +1764,11 @@ export function App() {
               </dd>
             </div>
           </dl>
+          {native.status === "upgrade_required" && (
+            <p className="diagnostic-error">
+              Native companion update required: {native.reason}
+            </p>
+          )}
           {native.status === "unavailable" && (
             <p className="diagnostic-error">
               Native connection failed: {native.error}

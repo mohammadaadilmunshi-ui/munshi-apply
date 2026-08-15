@@ -45,6 +45,7 @@ import {
 } from "../storage/cloud";
 import {
   ProtectedProfileConflictError,
+  resolveProtectedProfileConflict,
   synchronizeProtectedProfile,
 } from "../storage/profile-sync";
 import {
@@ -75,11 +76,16 @@ type AutoPilotRuntimeRequest =
 type RuntimeRequest = ExtensionRequest | AutoPilotRuntimeRequest;
 
 let initialized = false;
-let profileSyncConflict: { keys: string[]; detectedAt: string } | null = null;
+let profileSyncConflict: {
+  keys: string[];
+  details: ProtectedProfileConflictError["details"];
+  detectedAt: string;
+} | null = null;
 
 function rememberProfileConflict(error: ProtectedProfileConflictError): void {
   profileSyncConflict = {
     keys: [...error.keys],
+    details: [...error.details],
     detectedAt: new Date().toISOString(),
   };
 }
@@ -452,6 +458,22 @@ async function routeMessage(
       }
       case "GET_PROFILE_SYNC_STATUS":
         return { ok: true, data: { conflict: profileSyncConflict } };
+      case "RESOLVE_PROFILE_SYNC_CONFLICT": {
+        const localProfile = await loadAuthoritativeProfileSnapshot();
+        if (!localProfile) throw new Error("No local profile is available");
+        const connection = await getCloudConnection();
+        if (!connection || !(await isCloudEncryptionReady())) {
+          throw new Error("Encrypted workspace synchronization is unavailable");
+        }
+        const resolved = await resolveProtectedProfileConflict(
+          connection,
+          localProfile,
+          request.payload.winner,
+        );
+        await persistAuthoritativeProfileSnapshot(resolved);
+        profileSyncConflict = null;
+        return { ok: true, data: resolved };
+      }
       case "SAVE_PROFILE": {
         const parsed = parseProfileSnapshot(request.payload);
         await persistAuthoritativeProfileSnapshot(parsed);
@@ -472,11 +494,19 @@ async function routeMessage(
           } catch (error) {
             if (error instanceof ProtectedProfileConflictError) {
               rememberProfileConflict(error);
+              return {
+                ok: true,
+                data: {
+                  localSaved: true,
+                  cloudSynced: false,
+                  conflict: profileSyncConflict,
+                },
+              };
             }
             throw error;
           }
         }
-        return { ok: true };
+        return { ok: true, data: { localSaved: true, cloudSynced: true } };
       }
       case "APPLY_FILL_PLAN":
         return { ok: true, data: await applyFillPlan(request.payload) };

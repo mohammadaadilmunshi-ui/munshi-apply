@@ -32,7 +32,51 @@ export type NativeRuntimeHealth = {
   migration_count: number;
   schema_version: string;
   outbox: Record<string, number>;
+  protocol_version?: number;
+  capabilities?: {
+    profile_vault?: boolean;
+    application_checkpoints?: boolean;
+    interaction_learning?: boolean;
+    ai_settings?: boolean;
+    ai_governance?: boolean;
+    ai_draft_lifecycle?: boolean;
+  };
 };
+
+export const REQUIRED_NATIVE_PROTOCOL_VERSION = 2;
+
+export type NativeRuntimeCompatibility =
+  { compatible: true } | { compatible: false; reason: string };
+
+export function nativeRuntimeCompatibility(
+  health: NativeRuntimeHealth,
+): NativeRuntimeCompatibility {
+  if (health.protocol_version !== REQUIRED_NATIVE_PROTOCOL_VERSION) {
+    return {
+      compatible: false,
+      reason:
+        health.protocol_version === undefined
+          ? "Installed native companion predates the current protocol."
+          : `Installed native protocol ${health.protocol_version}; version ${REQUIRED_NATIVE_PROTOCOL_VERSION} is required.`,
+    };
+  }
+  const requiredCapabilities = [
+    "profile_vault",
+    "application_checkpoints",
+    "ai_settings",
+    "ai_governance",
+    "ai_draft_lifecycle",
+  ] as const;
+  const missing = requiredCapabilities.filter(
+    (capability) => health.capabilities?.[capability] !== true,
+  );
+  return missing.length === 0
+    ? { compatible: true }
+    : {
+        compatible: false,
+        reason: `Native companion is missing required capabilities: ${missing.join(", ")}.`,
+      };
+}
 
 export type AutoPilotControllerStatus = {
   session: AutoPilotSession;
@@ -59,9 +103,16 @@ export type AutoPilotResumePayload = {
   fillInstructions: readonly FillInstruction[];
 };
 
+export type ProfileConflictDetail = {
+  key: string;
+  localValue: unknown;
+  remoteValue: unknown;
+};
+
 export type ProfileSyncStatus = {
   conflict: {
     keys: string[];
+    details: ProfileConflictDetail[];
     detectedAt: string;
   } | null;
 };
@@ -133,6 +184,17 @@ export async function getProfile(): Promise<ProfileSnapshot | null> {
 
 export async function getProfileSyncStatus(): Promise<ProfileSyncStatus> {
   return (await send({ type: "GET_PROFILE_SYNC_STATUS" })) as ProfileSyncStatus;
+}
+
+export async function resolveProfileSyncConflict(
+  winner: "local" | "remote",
+): Promise<ProfileSnapshot> {
+  return parseProfileSnapshot(
+    await send({
+      type: "RESOLVE_PROFILE_SYNC_CONFLICT",
+      payload: { winner },
+    }),
+  );
 }
 
 export function saveProfile(profile: ProfileSnapshot): Promise<void> {

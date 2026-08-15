@@ -241,4 +241,29 @@ describe("protected profile convergence", () => {
         ?.value,
     ).toBe("Aadil M");
   });
+
+  it("resolves confirmed protected conflicts only after an explicit owner winner", () => {
+    const local = profile(
+      [fact("first_name", "Mohammad Aadil Vasim")],
+      "2026-08-14T12:02:00.000Z",
+    );
+    const remote = profile(
+      [fact("first_name", "Mohammad Aadil")],
+      "2026-08-14T12:03:00.000Z",
+    );
+
+    expect(() => reconcileProtectedProfile(local, remote)).toThrow(
+      /first_name/,
+    );
+    expect(
+      reconcileProtectedProfile(local, remote, "local").facts.find(
+        (candidate) => candidate.key === "first_name",
+      )?.value,
+    ).toBe("Mohammad Aadil Vasim");
+    expect(
+      reconcileProtectedProfile(local, remote, "remote").facts.find(
+        (candidate) => candidate.key === "first_name",
+      )?.value,
+    ).toBe("Mohammad Aadil");
+  });
 });

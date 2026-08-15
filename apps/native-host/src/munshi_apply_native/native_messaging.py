@@ -17,6 +17,16 @@ from .models import ApplicationCheckpointPayload, EventEnvelope
 from .profile_store import ProfileStore
 from .settings import Settings
 
+NATIVE_PROTOCOL_VERSION = 2
+NATIVE_CAPABILITIES: dict[str, bool] = {
+    "profile_vault": True,
+    "application_checkpoints": True,
+    "interaction_learning": True,
+    "ai_settings": True,
+    "ai_governance": True,
+    "ai_draft_lifecycle": True,
+}
+
 
 def read_message(stream: BinaryIO) -> dict[str, object] | None:
     raw_length = stream.read(4)
@@ -80,7 +90,10 @@ def handle(
 ) -> dict[str, object]:
     message_type = message.get("type")
     if message_type == "PING":
-        return {"ok": True, "data": database.health()}
+        health = database.health()
+        health["protocol_version"] = NATIVE_PROTOCOL_VERSION
+        health["capabilities"] = dict(NATIVE_CAPABILITIES)
+        return {"ok": True, "data": health}
     if message_type == "APPEND_EVENT":
         event = EventEnvelope.model_validate(message.get("payload"))
         database.append_event(event.database_record())

@@ -35,8 +35,10 @@ function money(value: number): string {
 
 export function AIControlCenter({
   nativeAvailable,
+  nativeIssue,
 }: {
   nativeAvailable: boolean;
+  nativeIssue?: string;
 }) {
   const [status, setStatus] = useState<AIControlStatus | null>(null);
   const [settings, setSettings] = useState<AISettings>(defaultSettings);
@@ -44,16 +46,19 @@ export function AIControlCenter({
   const [apiKey, setApiKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [messageIsError, setMessageIsError] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!nativeAvailable) return;
     const next = await getAIControlStatus();
+    setMessageIsError(false);
     setStatus(next);
     setSettings(next.settings);
   }, [nativeAvailable]);
 
   useEffect(() => {
     void refresh().catch((error: unknown) => {
+      setMessageIsError(true);
       setMessage(
         error instanceof Error ? error.message : "Unable to load AI controls",
       );
@@ -76,10 +81,12 @@ export function AIControlCenter({
       await setOpenAIKey(apiKey.trim());
       setApiKey("");
       await refresh();
+      setMessageIsError(false);
       setMessage(
         "OpenAI credential stored in macOS Keychain. The saved secret is never displayed by MUNSHI.",
       );
     } catch (error) {
+      setMessageIsError(true);
       setMessage(
         error instanceof Error ? error.message : "Unable to store API key",
       );
@@ -95,8 +102,10 @@ export function AIControlCenter({
       await deleteOpenAIKey();
       setModels([]);
       await refresh();
+      setMessageIsError(false);
       setMessage("Stored OpenAI credential removed from macOS Keychain.");
     } catch (error) {
+      setMessageIsError(true);
       setMessage(
         error instanceof Error ? error.message : "Unable to delete API key",
       );
@@ -112,10 +121,12 @@ export function AIControlCenter({
       const connection = await testOpenAIConnection();
       const availableModels = await listOpenAIModels();
       setModels(availableModels);
+      setMessageIsError(false);
       setMessage(
         `OpenAI connection verified. ${connection.modelCount} models are visible to this credential. No generation request was made.`,
       );
     } catch (error) {
+      setMessageIsError(true);
       setMessage(
         error instanceof Error
           ? error.message
@@ -133,8 +144,10 @@ export function AIControlCenter({
       const saved = await saveAISettings(settings);
       setSettings(saved);
       await refresh();
+      setMessageIsError(false);
       setMessage("AI permissions and spending controls saved locally.");
     } catch (error) {
+      setMessageIsError(true);
       setMessage(
         error instanceof Error ? error.message : "Unable to save AI controls",
       );
@@ -149,10 +162,14 @@ export function AIControlCenter({
         <p className="eyebrow">Owner-controlled intelligence</p>
         <h2>AI Control Center</h2>
         <div className="safety-callout">
-          <strong>Native companion required</strong>
+          <strong>
+            {nativeIssue
+              ? "Native companion update required"
+              : "Native companion required"}
+          </strong>
           <span>
-            API credentials and paid-AI enforcement live in the local native
-            companion. No browser-only fallback stores or uses your API key.
+            {nativeIssue ??
+              "API credentials and paid-AI enforcement live in the local native companion. No browser-only fallback stores or uses your API key."}
           </span>
         </div>
       </section>
@@ -167,7 +184,9 @@ export function AIControlCenter({
           <h2>AI Control Center</h2>
         </div>
         <span className={settings.keyConfigured ? "badge" : "badge review"}>
-          {settings.keyConfigured ? "Keychain connected" : "Not connected"}
+          {settings.keyConfigured
+            ? "Keychain connected"
+            : "API key not configured"}
         </span>
       </div>
 
@@ -431,7 +450,11 @@ export function AIControlCenter({
       >
         Refresh usage
       </button>
-      {message && <div className="notice">{message}</div>}
+      {message && (
+        <div className={messageIsError ? "diagnostic-error" : "notice"}>
+          {message}
+        </div>
+      )}
 
       <div className="safety-callout">
         <strong>Permanent truth boundary</strong>

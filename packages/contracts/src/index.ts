@@ -382,6 +382,10 @@ export type ExtensionRequest =
   | { type: "GET_ACTIVE_PAGE" }
   | { type: "GET_PROFILE" }
   | { type: "GET_PROFILE_SYNC_STATUS" }
+  | {
+      type: "RESOLVE_PROFILE_SYNC_CONFLICT";
+      payload: { winner: "local" | "remote" };
+    }
   | { type: "SAVE_PROFILE"; payload: MasterProfile }
   | { type: "APPLY_FILL_PLAN"; payload: FillPlan }
   | { type: "PAGE_SNAPSHOT"; payload: ApplicationPage }

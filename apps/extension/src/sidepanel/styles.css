@@ -220,7 +220,7 @@ p {
   margin-bottom: 5px;
   text-transform: capitalize;
 }
-.form-grid input,
+.form-grid input:not([type="checkbox"]):not([type="radio"]),
 .form-grid textarea {
   background: #fff;
   border: 1px solid #bfc2c7;
@@ -232,7 +232,7 @@ p {
   min-height: 74px;
   resize: vertical;
 }
-.form-grid input:focus,
+.form-grid input:not([type="checkbox"]):not([type="radio"]):focus,
 .form-grid textarea:focus {
   border-color: #b85c38;
   outline: 2px solid #edd1c5;
@@ -413,6 +413,52 @@ p {
   color: #8b3f24;
 }
 
+.profile-conflict-banner {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.profile-conflict-panel {
+  background: #f5e6df;
+  border: 1px solid #e3c0b2;
+  border-radius: 12px;
+  margin: 18px 0 24px;
+  padding: 14px;
+}
+
+.profile-conflict-panel > p {
+  margin: 7px 0 12px;
+}
+
+.profile-conflict-list {
+  display: grid;
+  gap: 8px;
+}
+
+.profile-conflict-list article {
+  background: #fff;
+  border: 1px solid #e3c0b2;
+  border-radius: 9px;
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+}
+
+.profile-conflict-list span {
+  color: #555b63;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.profile-conflict-actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr 1fr;
+  margin-top: 12px;
+}
+
 .answer-list {
   display: grid;
   gap: 10px;
@@ -470,6 +516,16 @@ p {
   display: flex;
   font-size: 11px;
   gap: 7px;
+}
+
+.answer-approval input[type="checkbox"],
+.answer-approval input[type="radio"] {
+  accent-color: #b85c38;
+  flex: 0 0 auto;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  width: 18px;
 }
 
 .resume-select {

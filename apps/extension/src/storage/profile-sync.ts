@@ -13,15 +13,25 @@ import {
   type CloudConnection,
 } from "./cloud";
 
+export type ProtectedProfileConflictWinner = "local" | "remote";
+
+export type ProtectedProfileConflictDetail = {
+  key: string;
+  localValue: ProfileFact["value"] | null;
+  remoteValue: ProfileFact["value"] | null;
+};
+
 export class ProtectedProfileConflictError extends Error {
   readonly keys: string[];
+  readonly details: ProtectedProfileConflictDetail[];
 
-  constructor(keys: string[]) {
+  constructor(keys: string[], details: ProtectedProfileConflictDetail[] = []) {
     super(
       `Protected profile facts changed on another device: ${keys.join(", ")}. Review the workspace before continuing.`,
     );
     this.name = "ProtectedProfileConflictError";
     this.keys = keys;
+    this.details = details;
   }
 }
 
@@ -93,10 +103,40 @@ export function protectedProfileConflictKeys(
   return [...new Set(conflicts)].sort();
 }
 
+function conflictValue(
+  profile: ProfileSnapshot,
+  key: string,
+): ProfileFact["value"] | null {
+  if (!key.startsWith("record:")) {
+    return profile.facts.find((fact) => fact.key === key)?.value ?? null;
+  }
+  const [, recordId, factKey] = key.split(":");
+  const record = profile.records.find(
+    (candidate) => candidate.recordId === recordId,
+  );
+  if (!record) return null;
+  if (factKey === "kind") return record.kind;
+  return record.facts.find((fact) => fact.key === factKey)?.value ?? null;
+}
+
+export function protectedProfileConflictDetails(
+  localProfile: ProfileSnapshot,
+  remoteProfile: ProfileSnapshot,
+): ProtectedProfileConflictDetail[] {
+  return protectedProfileConflictKeys(localProfile, remoteProfile).map(
+    (key) => ({
+      key,
+      localValue: conflictValue(localProfile, key),
+      remoteValue: conflictValue(remoteProfile, key),
+    }),
+  );
+}
+
 function chooseProtectedFact(
   baseFact: ProfileFact | undefined,
   localFact: ProfileFact | undefined,
   remoteFact: ProfileFact | undefined,
+  winner: ProtectedProfileConflictWinner | null,
 ): ProfileFact | undefined {
   if (localFact && remoteFact) {
     const sameValue =
@@ -108,6 +148,8 @@ function chooseProtectedFact(
       if (isConfirmedProtectedFact(remoteFact)) return remoteFact;
       return baseFact ?? laterFact(localFact, remoteFact);
     }
+    if (winner === "local") return localFact;
+    if (winner === "remote") return remoteFact;
   }
   if (isConfirmedProtectedFact(localFact)) return localFact;
   if (isConfirmedProtectedFact(remoteFact)) return remoteFact;
@@ -118,6 +160,7 @@ function reconcileFacts(
   baseFacts: ProfileFact[],
   localFacts: ProfileFact[],
   remoteFacts: ProfileFact[],
+  protectedWinner: ProtectedProfileConflictWinner | null = null,
 ): ProfileFact[] {
   const baseByKey = new Map(baseFacts.map((fact) => [fact.key, fact] as const));
   const localByKey = new Map(
@@ -148,7 +191,7 @@ function reconcileFacts(
             ? remoteFact
             : (baseFact ?? localFact);
     const choice = protectedFact
-      ? chooseProtectedFact(baseFact, localFact, remoteFact)
+      ? chooseProtectedFact(baseFact, localFact, remoteFact, protectedWinner)
       : ordinaryChoice;
     if (choice) selected.set(key, choice);
   }
@@ -175,8 +218,11 @@ function masterProfile(snapshot: ProfileSnapshot): MasterProfile {
 function reconcileRecord(
   local: ProfileRecord,
   remote: ProfileRecord,
+  protectedWinner: ProtectedProfileConflictWinner | null,
 ): ProfileRecord {
   if (local.kind !== remote.kind) {
+    if (protectedWinner === "local") return local;
+    if (protectedWinner === "remote") return remote;
     throw new ProtectedProfileConflictError([`record:${local.recordId}:kind`]);
   }
   const conflicts = protectedFactConflictKeys(
@@ -184,13 +230,20 @@ function reconcileRecord(
     remote.facts,
     `record:${local.recordId}:`,
   );
-  if (conflicts.length > 0) throw new ProtectedProfileConflictError(conflicts);
+  if (conflicts.length > 0 && !protectedWinner) {
+    throw new ProtectedProfileConflictError(conflicts);
+  }
   const base = local.updatedAt > remote.updatedAt ? local : remote;
   return {
     ...base,
     createdAt:
       local.createdAt < remote.createdAt ? local.createdAt : remote.createdAt,
-    facts: reconcileFacts(base.facts, local.facts, remote.facts),
+    facts: reconcileFacts(
+      base.facts,
+      local.facts,
+      remote.facts,
+      protectedWinner,
+    ),
   };
 }
 
@@ -219,6 +272,7 @@ function recordEvents(snapshot: ProfileSnapshot): Map<string, RecordEvent> {
 function reconcileRecordEvents(
   local: ProfileSnapshot,
   remote: ProfileSnapshot,
+  protectedWinner: ProtectedProfileConflictWinner | null,
 ): {
   records: ProfileRecord[];
   recordTombstones: ProfileRecordTombstone[];
@@ -236,7 +290,11 @@ function reconcileRecordEvents(
     const remoteEvent = remoteEvents.get(recordId);
     let selected: RecordEvent | undefined;
     if (localEvent?.record && remoteEvent?.record) {
-      const record = reconcileRecord(localEvent.record, remoteEvent.record);
+      const record = reconcileRecord(
+        localEvent.record,
+        remoteEvent.record,
+        protectedWinner,
+      );
       selected = { timestamp: record.updatedAt, record };
     } else if (!localEvent) {
       selected = remoteEvent;
@@ -267,17 +325,25 @@ function reconcileRecordEvents(
 export function reconcileProtectedProfile(
   localProfile: ProfileSnapshot,
   remoteProfile: ProfileSnapshot,
+  protectedWinner: ProtectedProfileConflictWinner | null = null,
 ): ProfileSnapshot {
   const conflicts = protectedProfileConflictKeys(localProfile, remoteProfile);
-  if (conflicts.length > 0) {
-    throw new ProtectedProfileConflictError(conflicts);
+  if (conflicts.length > 0 && !protectedWinner) {
+    throw new ProtectedProfileConflictError(
+      conflicts,
+      protectedProfileConflictDetails(localProfile, remoteProfile),
+    );
   }
 
   const base =
     localProfile.updatedAt > remoteProfile.updatedAt
       ? localProfile
       : remoteProfile;
-  const recordState = reconcileRecordEvents(localProfile, remoteProfile);
+  const recordState = reconcileRecordEvents(
+    localProfile,
+    remoteProfile,
+    protectedWinner,
+  );
 
   return parseProfileSnapshot({
     ...masterProfile(base),
@@ -286,7 +352,12 @@ export function reconcileProtectedProfile(
       localProfile.createdAt < remoteProfile.createdAt
         ? localProfile.createdAt
         : remoteProfile.createdAt,
-    facts: reconcileFacts(base.facts, localProfile.facts, remoteProfile.facts),
+    facts: reconcileFacts(
+      base.facts,
+      localProfile.facts,
+      remoteProfile.facts,
+      protectedWinner,
+    ),
     ...recordState,
     snapshotVersion: 1,
   });
@@ -340,6 +411,38 @@ async function postProfile(
     );
   }
   return expectedVersion;
+}
+
+export async function resolveProtectedProfileConflict(
+  connection: CloudConnection,
+  localProfile: ProfileSnapshot,
+  winner: ProtectedProfileConflictWinner,
+): Promise<ProfileSnapshot> {
+  const rawKey = await getWorkspaceEncryptionKey();
+  if (!rawKey) throw new Error("Encrypted synchronization is not enabled");
+
+  const snapshot = await getCloudSnapshot(connection);
+  if (!snapshot.profile) {
+    throw new Error("No encrypted workspace profile exists to resolve");
+  }
+  const conflicts = protectedProfileConflictKeys(
+    localProfile,
+    snapshot.profile,
+  );
+  if (conflicts.length === 0) {
+    return synchronizeProtectedProfile(connection, localProfile);
+  }
+  const resolved = reconcileProtectedProfile(
+    localProfile,
+    snapshot.profile,
+    winner,
+  );
+  const synchronized = parseProfileSnapshot({
+    ...resolved,
+    updatedAt: new Date().toISOString(),
+  });
+  await postProfile(connection, rawKey, synchronized, snapshot.profileVersion);
+  return synchronized;
 }
 
 export async function synchronizeProtectedProfile(
