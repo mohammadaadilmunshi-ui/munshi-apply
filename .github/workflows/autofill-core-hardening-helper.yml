@@ -1,0 +1,100 @@
+name: Autofill core hardening helper
+
+on:
+  push:
+    branches:
+      - feat/v3-foundation-alignment
+
+permissions:
+  contents: write
+
+jobs:
+  integrate-and-certify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out guarded PR branch
+        uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
+          fetch-depth: 0
+
+      - name: Guard exact autofill helper staging
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=bd303154348e4c56784ec168675c385c11371e7b
+          git merge-base --is-ancestor "$BASE" HEAD
+          mapfile -t changed < <(git diff --name-only "$BASE"..HEAD | sort)
+          printf '%s\n' "${changed[@]}"
+          test "${#changed[@]}" -eq 2
+          test "${changed[0]}" = ".github/workflows/autofill-core-hardening-helper.yml"
+          test "${changed[1]}" = "scripts/apply-autofill-core-hardening.py"
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Apply autofill core hardening
+        run: python scripts/apply-autofill-core-hardening.py
+
+      - name: Apply authoritative formatting
+        run: |
+          npx prettier --write \
+            packages/contracts/src/index.ts \
+            packages/application-model/src/autopilot.ts \
+            packages/application-model/src/autopilot-dependent.test.ts \
+            apps/extension/src/content/adaptive.ts \
+            apps/extension/src/content/autofill-advanced.test.ts \
+            apps/extension/src/content/bootstrap.ts \
+            apps/extension/src/content/fill.ts \
+            apps/extension/src/content/multi-select.ts \
+            apps/extension/src/content/scanner.ts \
+            apps/extension/src/storage/vault.ts \
+            apps/extension/src/background/autopilot-controller.ts \
+            apps/extension/src/background/service-worker.ts \
+            apps/extension/src/sidepanel/autopilot-plan.ts \
+            apps/extension/src/sidepanel/AutoPilotControlCenter.tsx \
+            apps/extension/public/manifest.json
+
+      - name: Verify complete extension tranche
+        run: npm run check
+
+      - name: Remove temporary autofill helper
+        run: |
+          git rm -f scripts/apply-autofill-core-hardening.py
+          git rm -f .github/workflows/autofill-core-hardening-helper.yml
+
+      - name: Commit exact certified tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git config user.name "Aadil Munshi"
+          git config user.email "mohammadaadilmunshi@gmail.com"
+          git add -- \
+            packages/contracts/src/index.ts \
+            packages/application-model/src/autopilot.ts \
+            packages/application-model/src/autopilot-dependent.test.ts \
+            apps/extension/src/content/adaptive.ts \
+            apps/extension/src/content/autofill-advanced.test.ts \
+            apps/extension/src/content/bootstrap.ts \
+            apps/extension/src/content/fill.ts \
+            apps/extension/src/content/multi-select.ts \
+            apps/extension/src/content/scanner.ts \
+            apps/extension/src/storage/vault.ts \
+            apps/extension/src/background/autopilot-controller.ts \
+            apps/extension/src/background/service-worker.ts \
+            apps/extension/src/sidepanel/autopilot-plan.ts \
+            apps/extension/src/sidepanel/AutoPilotControlCenter.tsx \
+            apps/extension/public/manifest.json \
+            scripts/apply-autofill-core-hardening.py \
+            .github/workflows/autofill-core-hardening-helper.yml
+          git diff --cached --stat
+          git commit -m "feat: harden universal autofill runtime"
+          git push origin HEAD:feat/v3-foundation-alignment
