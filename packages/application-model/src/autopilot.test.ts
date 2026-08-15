@@ -20,6 +20,24 @@ const readyGate: PreflightGateSummary = {
   canAct: true,
 };
 
+const reviewGate: PreflightGateSummary = {
+  state: "REVIEW",
+  readyCount: 1,
+  reviewCount: 1,
+  unresolvedCount: 1,
+  blockedCount: 0,
+  canAct: false,
+};
+
+const hardBlockedGate: PreflightGateSummary = {
+  state: "BLOCKED",
+  readyCount: 1,
+  reviewCount: 0,
+  unresolvedCount: 0,
+  blockedCount: 1,
+  canAct: false,
+};
+
 const observation: AutoPilotObservation = {
   applicationId: "app-1",
   state: "PERSONAL",
@@ -51,18 +69,35 @@ describe("planAutoPilotStep", () => {
     expect(plan.checkpointRequired).toBe(false);
   });
 
-  it("pauses before any action when pre-flight is not ready", () => {
+  it("fills approved safe fields before pausing for review or unresolved items", () => {
     const plan = planAutoPilotStep({
       observation,
-      preflight: {
-        ...readyGate,
-        state: "REVIEW",
-        reviewCount: 1,
-        canAct: false,
-      },
+      preflight: reviewGate,
+      fillInstructions: [instruction],
+    });
+    expect(plan.action).toEqual({ type: "FILL", instruction });
+    expect(plan.checkpointRequired).toBe(false);
+  });
+
+  it("pauses after approved safe fills are exhausted when pre-flight is not ready", () => {
+    const plan = planAutoPilotStep({
+      observation,
+      preflight: reviewGate,
+      fillInstructions: [instruction],
+      completedControlIds: ["control-1"],
+    });
+    expect(plan.action.type).toBe("PAUSE_REVIEW");
+    expect(plan.checkpointRequired).toBe(true);
+  });
+
+  it("does not fill when pre-flight contains a hard safety block", () => {
+    const plan = planAutoPilotStep({
+      observation,
+      preflight: hardBlockedGate,
       fillInstructions: [instruction],
     });
     expect(plan.action.type).toBe("PAUSE_REVIEW");
+    expect(plan.reason).toMatch(/hard-blocked/i);
   });
 
   it("pauses for browser security checkpoints", () => {

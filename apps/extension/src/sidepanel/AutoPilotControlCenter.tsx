@@ -11,6 +11,8 @@ import {
 } from "../messaging/client";
 import {
   buildAutoPilotLaunchPlan,
+  canAutoPilotMakeProgress,
+  remainingApprovedFillCount,
   type AutoPilotAnswer,
 } from "./autopilot-plan";
 
@@ -87,6 +89,18 @@ export function AutoPilotControlCenter({
     status?.session.status === "WAITING_RESCAN" ||
     status?.session.status === "WAITING_NAVIGATION";
   const pauseQueued = status?.ownerPauseRequested === true;
+  const completedControlIds = status?.session.completedControlIds ?? [];
+  const remainingApprovedFillCountValue = plan
+    ? remainingApprovedFillCount(plan, completedControlIds)
+    : 0;
+  const safeProgressAvailable = Boolean(
+    plan &&
+      !plan.preflight.canAct &&
+      canAutoPilotMakeProgress(plan, completedControlIds),
+  );
+  const canProgress = Boolean(
+    plan && canAutoPilotMakeProgress(plan, completedControlIds),
+  );
 
   return (
     <section>
@@ -187,6 +201,14 @@ export function AutoPilotControlCenter({
               <span>
                 {plan.preflight.unresolvedCount} required answers unresolved
               </span>
+              {safeProgressAvailable && (
+                <span>
+                  Safe-progress mode: MUNSHI can fill{" "}
+                  {remainingApprovedFillCountValue} approved field
+                  {remainingApprovedFillCountValue === 1 ? "" : "s"}, then it
+                  will pause before navigation for the remaining review.
+                </span>
+              )}
               {plan.optionalUnansweredCount > 0 && (
                 <span>
                   {plan.optionalUnansweredCount} optional questions left blank
@@ -242,12 +264,7 @@ export function AutoPilotControlCenter({
             <button
               className="primary"
               type="button"
-              disabled={
-                busy ||
-                !nativeAvailable ||
-                !plan?.preflight.canAct ||
-                Boolean(active)
-              }
+              disabled={busy || !nativeAvailable || !canProgress || Boolean(active)}
               onClick={() =>
                 void run(
                   () =>
@@ -258,7 +275,9 @@ export function AutoPilotControlCenter({
                       selectedResumeId,
                       selectedResumeSha256,
                     }),
-                  "AutoPilot started with the current verified pre-flight state.",
+                  plan!.preflight.canAct
+                    ? "AutoPilot started with the current verified pre-flight state."
+                    : "AutoPilot started in safe-progress mode. Approved fields will fill first; MUNSHI will pause before navigation for unresolved or review-required items.",
                 )
               }
             >
@@ -280,7 +299,7 @@ export function AutoPilotControlCenter({
             <button
               className="quiet"
               type="button"
-              disabled={busy || !resumable || !plan?.preflight.canAct}
+              disabled={busy || !resumable || !canProgress}
               onClick={() =>
                 void run(
                   () =>
@@ -288,7 +307,9 @@ export function AutoPilotControlCenter({
                       preflight: plan!.preflight,
                       fillInstructions: plan!.fillInstructions,
                     }),
-                  "AutoPilot resumed from its durable application state.",
+                  plan!.preflight.canAct
+                    ? "AutoPilot resumed from its durable application state."
+                    : "AutoPilot resumed in safe-progress mode for remaining approved fields; navigation remains blocked until review is complete.",
                 )
               }
             >

@@ -201,26 +201,14 @@ export function planAutoPilotStep(input: {
     };
   }
 
-  if (!preflight.canAct) {
+  if (preflight.blockedCount > 0) {
     return {
       action: {
         type: "PAUSE_REVIEW",
-        reason: `Pre-flight gate is ${preflight.state}`,
+        reason: "Pre-flight contains a hard safety block",
       },
       checkpointRequired: true,
-      reason:
-        "Unresolved or review-required items must be resolved before action",
-    };
-  }
-
-  if (observation.validationErrorCount > 0) {
-    return {
-      action: {
-        type: "PAUSE_REVIEW",
-        reason: "Current page contains validation errors",
-      },
-      checkpointRequired: true,
-      reason: "Validation failures must be resolved before navigation",
+      reason: "Hard-blocked facts or policy findings require owner resolution",
     };
   }
 
@@ -235,6 +223,29 @@ export function planAutoPilotStep(input: {
       checkpointRequired: false,
       reason:
         "Apply one approved visible instruction and verify before continuing",
+    };
+  }
+
+  if (!preflight.canAct) {
+    return {
+      action: {
+        type: "PAUSE_REVIEW",
+        reason: `Pre-flight gate is ${preflight.state}`,
+      },
+      checkpointRequired: true,
+      reason:
+        "Approved safe fills are complete; unresolved or review-required items must be resolved before navigation",
+    };
+  }
+
+  if (observation.validationErrorCount > 0) {
+    return {
+      action: {
+        type: "PAUSE_REVIEW",
+        reason: "Current page contains validation errors",
+      },
+      checkpointRequired: true,
+      reason: "Validation failures must be resolved before navigation",
     };
   }
 

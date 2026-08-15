@@ -32,6 +32,28 @@ const fillableKinds = new Set([
   "COMBOBOX",
 ]);
 
+export function remainingApprovedFillCount(
+  plan: AutoPilotLaunchPlan,
+  completedControlIds: readonly string[] = [],
+): number {
+  const completed = new Set(completedControlIds);
+  return plan.fillInstructions.filter(
+    (instruction) =>
+      instruction.approved && !completed.has(instruction.controlId),
+  ).length;
+}
+
+export function canAutoPilotMakeProgress(
+  plan: AutoPilotLaunchPlan,
+  completedControlIds: readonly string[] = [],
+): boolean {
+  if (plan.preflight.canAct) return true;
+  return (
+    plan.preflight.blockedCount === 0 &&
+    remainingApprovedFillCount(plan, completedControlIds) > 0
+  );
+}
+
 export function buildAutoPilotLaunchPlan(
   page: ApplicationPage,
   answers: Record<string, AutoPilotAnswer>,
