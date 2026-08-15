@@ -40,6 +40,29 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      - name: Narrow the generic input patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("scripts/apply-autofill-core-hardening.py")
+          content = path.read_text()
+          marker = "\n\n# Contracts: preserve backward compatibility"
+          helper = '''\n\ndef replace_first(path: str, old: str, new: str) -> None:\n    content = read(path)\n    if old not in content:\n        raise RuntimeError(f"Expected a match in {path}: {old[:120]!r}")\n    write(path, content.replace(old, new, 1))\n'''
+          if marker not in content:
+              raise SystemExit("helper insertion marker missing")
+          content = content.replace(marker, helper + marker, 1)
+          needle = '''replace_once(\n    "apps/extension/src/content/fill.ts",\n    \'\'\'    const original = element.value;\\n    element.focus();\\n    setNativeValue(element, value);\'\'\','''
+          if content.count(needle) != 1:
+              raise SystemExit("generic input patch marker is not unique")
+          content = content.replace(
+              needle,
+              needle.replace("replace_once", "replace_first", 1),
+              1,
+          )
+          path.write_text(content)
+          PY
+
       - name: Apply autofill core hardening
         run: python scripts/apply-autofill-core-hardening.py
 
