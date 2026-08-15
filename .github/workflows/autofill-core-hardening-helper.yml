@@ -68,6 +68,13 @@ jobs:
           if content.count(controller_old) != 1:
               raise SystemExit("verified-fill result patch marker is not unique")
           content = content.replace(controller_old, controller_new, 1)
+
+          initializer_old = '''replace_once(\n    "apps/extension/src/background/autopilot-controller.ts",\n    \'\'\'      pendingDraftUsageId: null,\\n    });\'\'\',\n    \'\'\'      pendingDraftUsageId: null,\\n      lastFillResult: null,\\n    });\'\'\',\n)'''
+          initializer_new = '''replace_once(\n    "apps/extension/src/background/autopilot-controller.ts",\n    \'\'\'      ownerPauseRequested: false,\\n      ownerPauseReason: null,\\n      pendingDraftUsageId: null,\\n    });\'\'\',\n    \'\'\'      ownerPauseRequested: false,\\n      ownerPauseReason: null,\\n      pendingDraftUsageId: null,\\n      lastFillResult: null,\\n    });\'\'\',\n)'''
+          if content.count(initializer_old) != 1:
+              raise SystemExit("runtime initializer patch marker is not unique")
+          content = content.replace(initializer_old, initializer_new, 1)
+
           path.write_text(content)
           PY
 
