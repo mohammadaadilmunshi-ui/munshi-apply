@@ -2,6 +2,7 @@
 
 **Date:** 2026-08-16  
 **Candidate:** 0.2.3  
+**Verified source head:** `d33d870c7e460e44281b79af6415bdb738da328b`  
 **Scope:** browser application discovery, semantic classification, profile resolution, field interaction, verification, recovery, AI drafting, résumé handling, and guarded AutoPilot behavior.
 
 ## Executive verdict
@@ -432,6 +433,28 @@ New tests cover:
 
 Existing runtime, scanner, fill, semantic, resolver, AutoPilot, profile, security, migration, and owner-workspace tests continue to run alongside these additions.
 
+## Automated verification
+
+At verified source head `d33d870c7e460e44281b79af6415bdb738da328b`:
+
+- CI: passed
+- Browser tests: passed
+- Security: passed
+- Migration tests: passed
+- Owner workspace: passed
+- TypeScript/JavaScript: 45 test files / 282 tests passed
+- Native companion: Ruff passed / 90 Pytest tests passed
+- Prettier: passed
+- ESLint: passed
+- TypeScript type checking: passed
+- production build and artifact verification: passed
+- repository safety and secret scan: passed
+- fresh Edge artifact: `munshi-apply-edge-unpacked`
+- artifact ID: `9259397568`
+- artifact SHA-256: `6963e76ff29bd2ad0883cdc0eb3b6bcadcb2d4f2fe3bf7925b83460d01627384`
+
+Automated verification does not replace the physical Edge gate.
+
 ## Physical Bain acceptance checklist
 
 The physical browser run should verify all of the following on a fresh 0.2.3 build:
@@ -473,4 +496,4 @@ These are treated as explicit boundaries, not silent successes.
 
 ## Release position
 
-0.2.3 should be considered a broad universal-fill candidate, not final release, until the physical Bain run confirms the repaired scanner, semantic resolver, and fill interactions in Edge. PR #11 must remain draft and unmerged until that physical gate is satisfied.
+0.2.3 is an automated-test-green broad universal-fill candidate, not final release, until the physical Bain run confirms the repaired scanner, semantic resolver, and fill interactions in Edge. PR #11 must remain draft and unmerged until that physical gate is satisfied.
