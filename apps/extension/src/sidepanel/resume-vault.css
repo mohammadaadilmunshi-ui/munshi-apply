@@ -1,0 +1,88 @@
+.resume-vault-manager {
+  display: grid;
+  gap: 16px;
+}
+
+.resume-vault-heading,
+.managed-resume-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.resume-vault-heading h3,
+.resume-vault-heading p {
+  margin-top: 0;
+}
+
+.resume-vault-heading p {
+  margin-bottom: 0;
+}
+
+.resume-vault-controls {
+  display: grid;
+  gap: 12px;
+}
+
+.resume-dropzone {
+  min-height: 112px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  text-align: center;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    transform 120ms ease;
+}
+
+.resume-dropzone.dragging {
+  border-color: currentColor;
+  transform: translateY(-1px);
+}
+
+.resume-dropzone input[type="file"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.managed-resume-list {
+  display: grid;
+  gap: 10px;
+}
+
+.managed-resume-card {
+  display: grid;
+  gap: 8px;
+}
+
+.managed-resume-card.selected {
+  outline: 2px solid currentColor;
+  outline-offset: 1px;
+}
+
+.managed-resume-heading > div {
+  display: grid;
+  gap: 3px;
+}
+
+.managed-resume-actions {
+  flex-wrap: wrap;
+}
+
+.managed-resume-actions .destructive {
+  margin-left: auto;
+}
+
+@media (max-width: 520px) {
+  .managed-resume-actions .destructive {
+    margin-left: 0;
+  }
+}
