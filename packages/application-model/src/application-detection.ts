@@ -88,9 +88,11 @@ function hasExplicitIntent(page: ApplicationPage): boolean {
 function hasCandidateRegistrationIntent(page: ApplicationPage): boolean {
   try {
     const url = new URL(page.url);
-    const context = `${url.hostname} ${url.pathname} ${url.search} ${url.hash} ${page.title}`;
+    const context =
+      `${url.hostname} ${url.pathname} ${url.search} ${url.hash} ${page.title}`;
     return (
-      candidateRegistrationIntent.test(context) && careerOrJobContext.test(context)
+      candidateRegistrationIntent.test(context) &&
+      careerOrJobContext.test(context)
     );
   } catch {
     return false;
@@ -198,7 +200,10 @@ export function applicationPageEligibility(
   }
   if (
     applicationNav &&
-    (knownAts || explicitIntent || candidateRegistration || specificQuestions > 0) &&
+    (knownAts ||
+      explicitIntent ||
+      candidateRegistration ||
+      specificQuestions > 0) &&
     meaningfulQuestions > 0
   ) {
     reasons.push("application-specific navigation with form questions");
