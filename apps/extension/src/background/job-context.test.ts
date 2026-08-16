@@ -117,7 +117,8 @@ describe("job listing context carryover", () => {
     const stored: StoredJobContext = {
       url: "https://careers.example.test/jobs/recruiter-123",
       title: "Recruiter",
-      pageContext: "Responsibilities include candidate sourcing and stakeholder partnership.",
+      pageContext:
+        "Responsibilities include candidate sourcing and stakeholder partnership.",
       capturedAt: "2026-08-16T00:00:00.000Z",
     };
     const application = page({
@@ -129,9 +130,15 @@ describe("job listing context carryover", () => {
       stored,
       Date.parse("2026-08-16T00:30:00.000Z"),
     );
-    expect(merged.pageContext).toContain("Job listing context captured before the application");
-    expect(merged.pageContext).toContain("candidate sourcing and stakeholder partnership");
-    expect(merged.pageContext).toContain("Work history Company Title Start date");
+    expect(merged.pageContext).toContain(
+      "Job listing context captured before the application",
+    );
+    expect(merged.pageContext).toContain(
+      "candidate sourcing and stakeholder partnership",
+    );
+    expect(merged.pageContext).toContain(
+      "Work history Company Title Start date",
+    );
   });
 
   it("ignores stale listing context", () => {
