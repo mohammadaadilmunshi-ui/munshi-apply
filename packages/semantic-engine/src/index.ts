@@ -109,12 +109,13 @@ const rules: readonly Rule[] = [
   {
     id: "employer-name",
     pattern:
-      /^(employer|employer name|company name|current employer|most recent employer)$/i,
+      /^(employer|employer name|company|company name|current employer|most recent employer)$/i,
     semanticType: "EMPLOYER_NAME",
   },
   {
     id: "job-title",
-    pattern: /^(job title|position title|current title|most recent title)$/i,
+    pattern:
+      /^(title|job title|position title|current title|most recent title)$/i,
     semanticType: "JOB_TITLE",
   },
   {
@@ -164,7 +165,7 @@ const rules: readonly Rule[] = [
   {
     id: "start-date",
     pattern:
-      /\b(start date|available date|earliest (?:possible )?start date|available to start|when (?:would|can|could|are) you (?:be )?available to start)\b/i,
+      /\b(available date|earliest (?:possible )?start date|available to start|when (?:would|can|could|are) you (?:be )?available to start|desired start date)\b/i,
     semanticType: "START_DATE",
   },
   {
