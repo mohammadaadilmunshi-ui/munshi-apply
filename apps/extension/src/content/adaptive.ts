@@ -42,17 +42,35 @@ function normalizedToken(value: string): string {
   return normalizedText(value)
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[.]/g, "")
+    .replace(/[.'’]/g, "")
+    .replace(/&/g, " and ")
+    .replace(/[()]/g, " ")
+    .replace(/[\/_-]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-const booleanYes = new Set(["yes", "true", "1", "checked"]);
-const booleanNo = new Set(["no", "false", "0", "unchecked"]);
+const booleanYes = new Set([
+  "yes",
+  "true",
+  "1",
+  "checked",
+  "y",
+  "affirmative",
+]);
+const booleanNo = new Set([
+  "no",
+  "false",
+  "0",
+  "unchecked",
+  "n",
+  "negative",
+]);
 
 const statePairs = [
   ["AL", "Alabama"],
   ["AK", "Alaska"],
+  ["AS", "American Samoa"],
   ["AZ", "Arizona"],
   ["AR", "Arkansas"],
   ["CA", "California"],
@@ -62,6 +80,7 @@ const statePairs = [
   ["DC", "District of Columbia"],
   ["FL", "Florida"],
   ["GA", "Georgia"],
+  ["GU", "Guam"],
   ["HI", "Hawaii"],
   ["ID", "Idaho"],
   ["IL", "Illinois"],
@@ -86,10 +105,12 @@ const statePairs = [
   ["NY", "New York"],
   ["NC", "North Carolina"],
   ["ND", "North Dakota"],
+  ["MP", "Northern Mariana Islands"],
   ["OH", "Ohio"],
   ["OK", "Oklahoma"],
   ["OR", "Oregon"],
   ["PA", "Pennsylvania"],
+  ["PR", "Puerto Rico"],
   ["RI", "Rhode Island"],
   ["SC", "South Carolina"],
   ["SD", "South Dakota"],
@@ -97,6 +118,7 @@ const statePairs = [
   ["TX", "Texas"],
   ["UT", "Utah"],
   ["VT", "Vermont"],
+  ["VI", "U.S. Virgin Islands"],
   ["VA", "Virginia"],
   ["WA", "Washington"],
   ["WV", "West Virginia"],
@@ -109,6 +131,8 @@ for (const [code, name] of statePairs) {
   stateKey.set(normalizedToken(code), `state:${code}`);
   stateKey.set(normalizedToken(name), `state:${code}`);
 }
+stateKey.set("virgin islands", "state:VI");
+stateKey.set("us virgin islands", "state:VI");
 
 const monthPairs = [
   ["01", "January", "Jan"],
@@ -134,17 +158,212 @@ for (const [number, longName, shortName] of monthPairs) {
 }
 
 const degreeClasses: ReadonlyArray<readonly [string, readonly string[]]> = [
-  ["degree:bs", ["BS", "B.S.", "Bachelor of Science"]],
-  ["degree:ba", ["BA", "B.A.", "Bachelor of Arts"]],
-  ["degree:ms", ["MS", "M.S.", "Master of Science"]],
-  ["degree:ma", ["MA", "M.A.", "Master of Arts"]],
-  ["degree:mba", ["MBA", "M.B.A.", "Master of Business Administration"]],
-  ["degree:phd", ["PhD", "Ph.D.", "Doctor of Philosophy"]],
+  [
+    "degree:high-school",
+    [
+      "High School",
+      "High School Diploma",
+      "Secondary School",
+      "GED",
+      "High School/GED",
+    ],
+  ],
+  [
+    "degree:associate",
+    ["Associate", "Associate Degree", "Associate's Degree", "AA", "AS"],
+  ],
+  [
+    "degree:bachelor",
+    [
+      "Bachelor",
+      "Bachelors",
+      "Bachelor's Degree",
+      "Bachelor Degree",
+      "BS",
+      "B.S.",
+      "Bachelor of Science",
+      "BA",
+      "B.A.",
+      "Bachelor of Arts",
+      "BBA",
+      "Bachelor of Business Administration",
+    ],
+  ],
+  [
+    "degree:master",
+    [
+      "Master",
+      "Masters",
+      "Master's Degree",
+      "Master Degree",
+      "MS",
+      "M.S.",
+      "Master of Science",
+      "MA",
+      "M.A.",
+      "Master of Arts",
+      "MBA",
+      "M.B.A.",
+      "Master of Business Administration",
+    ],
+  ],
+  [
+    "degree:doctorate",
+    [
+      "Doctorate",
+      "Doctoral Degree",
+      "PhD",
+      "Ph.D.",
+      "Doctor of Philosophy",
+      "JD",
+      "J.D.",
+      "Juris Doctor",
+      "MD",
+      "M.D.",
+      "Doctor of Medicine",
+    ],
+  ],
 ];
 
 const degreeKey = new Map<string, string>();
 for (const [key, values] of degreeClasses) {
   for (const value of values) degreeKey.set(normalizedToken(value), key);
+}
+
+const fieldClasses: ReadonlyArray<readonly [string, readonly string[]]> = [
+  [
+    "field:human-resources",
+    [
+      "Human Resources",
+      "Human Resource",
+      "Human Resource Management",
+      "HR",
+      "People Management",
+      "Human Capital",
+    ],
+  ],
+  [
+    "field:analytics",
+    ["Analytics", "Data Analytics", "Business Analytics", "People Analytics"],
+  ],
+  [
+    "field:business",
+    [
+      "Business",
+      "Business Administration",
+      "Management",
+      "Business Management",
+    ],
+  ],
+  [
+    "field:computer-science",
+    ["Computer Science", "Computing", "Information Technology", "IT"],
+  ],
+];
+
+const fieldKey = new Map<string, string>();
+for (const [key, values] of fieldClasses) {
+  for (const value of values) fieldKey.set(normalizedToken(value), key);
+}
+
+const industryClasses: ReadonlyArray<readonly [string, readonly string[]]> = [
+  [
+    "industry:automotive",
+    [
+      "Automotive",
+      "Automotive & Mobility",
+      "Automotive and Mobility",
+      "Automotive Manufacturing",
+      "Motor Vehicle Manufacturing",
+    ],
+  ],
+  ["industry:consulting", ["Consulting", "Management Consulting"]],
+  [
+    "industry:consumer-products",
+    ["Consumer Products", "Consumer Goods", "Consumer Packaged Goods", "CPG"],
+  ],
+  [
+    "industry:financial-services",
+    ["Financial Services", "Banking", "Finance", "Insurance"],
+  ],
+  ["industry:healthcare", ["Healthcare", "Health Care", "Hospital & Health Care"]],
+  ["industry:legal", ["Law / Legal", "Legal", "Law Practice"]],
+  ["industry:media", ["Media", "Media & Entertainment"]],
+  ["industry:public-sector", ["Public Sector", "Government"]],
+  ["industry:retail", ["Retail", "Retail Trade"]],
+  [
+    "industry:social-sector",
+    ["Social Sector", "Social Sector (i.e., non-profit)", "Nonprofit", "Non-profit"],
+  ],
+  [
+    "industry:technology",
+    ["Technology", "Software", "Information Technology", "IT Services"],
+  ],
+  ["industry:telecom", ["Telecommunications", "Telecom"]],
+];
+
+const industryKey = new Map<string, string>();
+for (const [key, values] of industryClasses) {
+  for (const value of values) industryKey.set(normalizedToken(value), key);
+}
+
+const functionClasses: ReadonlyArray<readonly [string, readonly string[]]> = [
+  [
+    "function:human-capital",
+    [
+      "Human Capital",
+      "Human Resources",
+      "HR",
+      "People",
+      "People Operations",
+      "Talent Acquisition",
+      "Recruiting",
+      "Recruitment",
+    ],
+  ],
+  ["function:operations", ["Operations", "Business Operations"]],
+  ["function:sales", ["Sales", "Business Development"]],
+  ["function:finance", ["Finance/Accounting", "Finance", "Accounting"]],
+  ["function:legal", ["Legal", "Law"]],
+  ["function:marketing", ["Marketing", "Media/PR", "Public Relations"]],
+  [
+    "function:information-technology",
+    ["Information Technology", "IT", "Technology", "Software Engineering"],
+  ],
+  ["function:product", ["Product Management", "Product"]],
+  ["function:strategy", ["Strategy", "Corporate Strategy"]],
+  ["function:supply-chain", ["Supply Chain", "Logistics"]],
+  [
+    "function:research-development",
+    ["Research & Development", "Research and Development", "R&D"],
+  ],
+  [
+    "function:customer-insights",
+    [
+      "Customer Insights/Experience/Service",
+      "Customer Experience",
+      "Customer Insights",
+      "Customer Service",
+    ],
+  ],
+  ["function:education", ["Higher Education/Education", "Education"]],
+];
+
+const functionKey = new Map<string, string>();
+for (const [key, values] of functionClasses) {
+  for (const value of values) functionKey.set(normalizedToken(value), key);
+}
+
+function fieldStudyKey(token: string): string | null {
+  const direct = fieldKey.get(token);
+  if (direct) return direct;
+  if (/\bhuman resources?\b|\bhuman capital\b/.test(token)) {
+    return "field:human-resources";
+  }
+  if (/\b(data|business|people) analytics\b/.test(token)) {
+    return "field:analytics";
+  }
+  return null;
 }
 
 function contextualKey(value: string, context: string): string | null {
@@ -177,8 +396,20 @@ function contextualKey(value: string, context: string): string | null {
     if (month) return month;
   }
 
-  if (/\b(degree|qualification|education)\b/.test(normalizedContext)) {
+  if (/\b(degree|qualification|education level|level of education)\b/.test(normalizedContext)) {
     return degreeKey.get(token) ?? null;
+  }
+
+  if (/\b(field of study|major|area of study)\b/.test(normalizedContext)) {
+    return fieldStudyKey(token);
+  }
+
+  if (/\b(company industry|employer industry|industry)\b/.test(normalizedContext)) {
+    return industryKey.get(token) ?? null;
+  }
+
+  if (/\b(position function|job function|role function|functional area)\b/.test(normalizedContext)) {
+    return functionKey.get(token) ?? null;
   }
 
   return null;
@@ -192,7 +423,9 @@ export function optionEquivalent(
   const left = normalizedText(candidate);
   const right = normalizedText(requested);
   if (!left || !right) return false;
-  if (left === right) return true;
+  if (left === right || normalizedToken(candidate) === normalizedToken(requested)) {
+    return true;
+  }
   const leftKey = contextualKey(candidate, context);
   const rightKey = contextualKey(requested, context);
   return leftKey !== null && leftKey === rightKey;
@@ -226,6 +459,24 @@ export function uniqueOptionCandidate<T>(
   candidates: readonly { item: T; values: readonly string[] }[],
   context = "",
 ): T | null {
+  const requestedNormalized = normalizedText(requested);
+  const exact = candidates.filter((candidate) =>
+    candidate.values.some(
+      (value) => normalizedText(value) === requestedNormalized,
+    ),
+  );
+  if (exact.length === 1) return exact[0]!.item;
+  if (exact.length > 1) return null;
+
+  const normalizedRequestedToken = normalizedToken(requested);
+  const tokenExact = candidates.filter((candidate) =>
+    candidate.values.some(
+      (value) => normalizedToken(value) === normalizedRequestedToken,
+    ),
+  );
+  if (tokenExact.length === 1) return tokenExact[0]!.item;
+  if (tokenExact.length > 1) return null;
+
   const matches = candidates.filter((candidate) =>
     candidate.values.some((value) =>
       optionEquivalent(value, requested, context),
@@ -294,13 +545,22 @@ export function defaultAdaptiveTiming(): AdaptiveTiming {
     hostname.includes("ashbyhq") ||
     hostname.includes("smartrecruiters") ||
     hostname.includes("icims") ||
+    hostname.includes("taleo") ||
+    hostname.includes("successfactors") ||
+    hostname.includes("oraclecloud") ||
+    hostname.includes("brassring") ||
+    hostname.includes("jobvite") ||
+    hostname.includes("bamboohr") ||
+    hostname.includes("paylocity") ||
+    hostname.includes("ultipro") ||
+    hostname.includes("ukg") ||
     hostname.includes("levintalent");
   return {
-    optionTimeoutMs: workdayLike ? 3_000 : dynamicAts ? 2_000 : 1_500,
+    optionTimeoutMs: workdayLike ? 3_000 : dynamicAts ? 2_500 : 1_800,
     pollIntervalMs: 25,
-    verificationTimeoutMs: workdayLike ? 1_200 : 750,
+    verificationTimeoutMs: workdayLike ? 1_200 : dynamicAts ? 1_000 : 800,
     stabilityQuietMs: 90,
-    stabilityTimeoutMs: dynamicAts ? 1_800 : 1_100,
+    stabilityTimeoutMs: dynamicAts ? 2_000 : 1_200,
   };
 }
 
@@ -501,6 +761,17 @@ function canonicalDate(value: string): string | null {
   return parsed.toISOString().slice(0, 10) === requested ? requested : null;
 }
 
+function canonicalMonth(value: string): string | null {
+  const requested = value.trim();
+  const direct = requested.match(/^(\d{4})-(\d{2})$/);
+  if (direct) {
+    const month = Number(direct[2]);
+    return month >= 1 && month <= 12 ? requested : null;
+  }
+  const date = canonicalDate(requested);
+  return date ? date.slice(0, 7) : null;
+}
+
 function collectShadowRoots(root: Document | ShadowRoot): ShadowRoot[] {
   const result: ShadowRoot[] = [];
   for (const item of Array.from(root.querySelectorAll("*"))) {
@@ -563,6 +834,35 @@ function naturalDate(value: string): string | null {
   return canonicalDate(date);
 }
 
+function naturalMonth(value: string): string | null {
+  const text = normalizedText(value).replace(/,/g, "");
+  let match = text.match(
+    /^(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{4})$/,
+  );
+  if (match) {
+    const month = monthByName.get(match[1]!);
+    return month ? `${match[2]}-${String(month).padStart(2, "0")}` : null;
+  }
+  match = text.match(
+    /^(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\s+(\d{4})$/,
+  );
+  if (match) {
+    const short = match[1] === "sept" ? "sep" : match[1];
+    const month = monthPairs.find(
+      (item) => item[2].toLocaleLowerCase("en-US") === short,
+    )?.[0];
+    return month ? `${match[2]}-${month}` : null;
+  }
+  match = text.match(/^(\d{1,2})[-/](\d{4})$/);
+  if (match) {
+    const month = Number(match[1]);
+    return month >= 1 && month <= 12
+      ? `${match[2]}-${String(month).padStart(2, "0")}`
+      : null;
+  }
+  return null;
+}
+
 function flexibleDate(value: string): string | null {
   const direct = canonicalDate(value.trim());
   if (direct) return direct;
@@ -574,6 +874,10 @@ function flexibleDate(value: string): string | null {
     if (parsed) return parsed;
   }
   return naturalDate(text);
+}
+
+function flexibleMonth(value: string): string | null {
+  return canonicalMonth(value) ?? naturalMonth(value);
 }
 
 function setNativeTextValue(element: HTMLInputElement, value: string): void {
@@ -599,6 +903,23 @@ function dateDisplayCandidates(
   return [...new Set(order)];
 }
 
+function monthDisplayCandidates(
+  element: HTMLInputElement,
+  canonical: string,
+): string[] {
+  const [year, month] = canonical.split("-");
+  const monthPair = monthPairs.find((item) => item[0] === month);
+  if (!monthPair) return [canonical];
+  const longName = monthPair[1];
+  const shortName = monthPair[2];
+  const placeholder = normalizedText(element.placeholder);
+  const numeric = `${month}/${year}`;
+  const candidates = /yyyy.{0,3}mm/.test(placeholder)
+    ? [canonical, `${year}/${month}`, numeric, `${longName} ${year}`]
+    : [numeric, `${longName} ${year}`, `${shortName} ${year}`, canonical];
+  return [...new Set(candidates)];
+}
+
 function dateTextRejected(element: HTMLInputElement): boolean {
   if (
     element.getAttribute("aria-invalid") === "true" ||
@@ -606,9 +927,7 @@ function dateTextRejected(element: HTMLInputElement): boolean {
   )
     return true;
   const message = normalizedText(validationMessageFor(element));
-  return /\b(not valid date|invalid date|valid date|date format)\b/.test(
-    message,
-  );
+  return /\b(not valid date|invalid date|valid date|date format)\b/.test(message);
 }
 
 export async function fillDateLikeTextInput(
@@ -617,17 +936,30 @@ export async function fillDateLikeTextInput(
   timing: AdaptiveTiming,
 ): Promise<boolean | null> {
   if (element.type !== "text" && element.type !== "search") return null;
-  const requested = canonicalDate(value);
-  if (!requested) return null;
-  if (
-    !/\b(date|day|month|year|graduat|available|start|end)\b/.test(
-      normalizedText(interactionContext(element)),
-    )
-  ) {
+  const context = normalizedText(interactionContext(element));
+  if (!/\b(date|day|month|year|graduat|available|start|end)\b/.test(context)) {
     return null;
   }
+
+  const requestedDate = canonicalDate(value);
+  const requestedMonth = canonicalMonth(value);
+  if (!requestedDate && !requestedMonth) return null;
+  const monthOnly =
+    /\b(month|month\/year|month and year|start month|end month)\b/.test(context) ||
+    /\bmm\s*[/.-]\s*yyyy\b|\byyyy\s*[/.-]\s*mm\b/.test(
+      normalizedText(element.placeholder),
+    );
   const original = element.value;
-  for (const candidate of dateDisplayCandidates(element, requested)) {
+  const candidates =
+    monthOnly && requestedMonth
+      ? monthDisplayCandidates(element, requestedMonth)
+      : requestedDate
+        ? dateDisplayCandidates(element, requestedDate)
+        : requestedMonth
+          ? monthDisplayCandidates(element, requestedMonth)
+          : [];
+
+  for (const candidate of candidates) {
     element.focus();
     setNativeTextValue(element, candidate);
     element.dispatchEvent(
@@ -638,8 +970,14 @@ export async function fillDateLikeTextInput(
     );
     element.dispatchEvent(new Event("blur", { bubbles: true, composed: true }));
     const verified = await waitForCondition(
-      () =>
-        flexibleDate(element.value) === requested && !dateTextRejected(element),
+      () => {
+        const valueMatches = monthOnly
+          ? flexibleMonth(element.value) === requestedMonth
+          : requestedDate
+            ? flexibleDate(element.value) === requestedDate
+            : flexibleMonth(element.value) === requestedMonth;
+        return valueMatches && !dateTextRejected(element);
+      },
       timing.verificationTimeoutMs,
       timing.pollIntervalMs,
     );
@@ -778,11 +1116,13 @@ export async function fillAriaBooleanControl(
 function ariaRadioCandidates(element: HTMLElement): HTMLElement[] {
   const group = element.closest("[role='radiogroup']");
   const root = group ?? element.getRootNode();
-  if (!(
-    root instanceof Element ||
-    root instanceof Document ||
-    root instanceof ShadowRoot
-  )) {
+  if (
+    !(
+      root instanceof Element ||
+      root instanceof Document ||
+      root instanceof ShadowRoot
+    )
+  ) {
     return [element];
   }
   return Array.from(root.querySelectorAll("[role='radio']")).filter(
@@ -925,6 +1265,7 @@ export function repeatMetadataFor(element: Element): {
     element.getAttribute("name"),
     element.id,
     element.getAttribute("data-testid"),
+    element.getAttribute("data-automation-id"),
   ]
     .filter((value): value is string => Boolean(value))
     .join("|");
