@@ -201,7 +201,7 @@ describe("advanced adaptive autofill", () => {
       quick,
     );
     expect(result[0]?.status).toBe("FILLED");
-    expect(input.value).toBe("2026-12-17");
+    expect(input.value).toBe("12/17/2026");
   });
 
   it("marks repeated indexed controls without auto-creating records", () => {

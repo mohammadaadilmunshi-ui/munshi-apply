@@ -18,12 +18,14 @@ export function AIDraftReview({
   pageId,
   question,
   nativeAvailable,
+  pageContext,
   onApproved,
 }: {
   applicationId: string;
   pageId: string;
   question: Question;
   nativeAvailable: boolean;
+  pageContext: string;
   onApproved: (value: string, draftId: string) => void;
 }) {
   const [draft, setDraft] = useState<AIDraftRecord | null>(null);
@@ -41,12 +43,14 @@ export function AIDraftReview({
       controlId: question.controlId,
       question: question.rawText,
       semanticType: question.semanticType,
+      pageContext,
       correlationId: `draft-${question.questionId}`,
       maxWords: 250,
       maxOutputTokens: 768,
     }),
     [
       applicationId,
+      pageContext,
       pageId,
       question.controlId,
       question.questionId,

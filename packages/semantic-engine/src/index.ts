@@ -102,7 +102,8 @@ const rules: readonly Rule[] = [
   },
   {
     id: "graduation",
-    pattern: /\b(graduation|graduate|completion) (date|year)\b/i,
+    pattern:
+      /(?:\b(?:graduation|completion)\s+(?:date|year)\b|\b(?:when|what)\b.{0,60}\bgraduat(?:e|ing|ed)\b|\bgraduat(?:e|ing|ed)\b.{0,45}\b(?:university|college|school)\b)/i,
     semanticType: "GRADUATION_DATE",
   },
   {
@@ -258,6 +259,12 @@ const rules: readonly Rule[] = [
     id: "career-motivation",
     pattern:
       /\bwhat motivates you\b.{0,100}\b(?:career|recruitment|recruiting|sales|talent acquisition)\b/i,
+    semanticType: "CAREER_GOALS",
+  },
+  {
+    id: "leave-current-employer",
+    pattern:
+      /\b(?:why are you|why do you|what makes you)\b.{0,70}\b(?:leave|leaving|looking to leave|move on from|change from)\b.{0,60}\b(?:current )?(?:employer|company|role|job|position)\b/i,
     semanticType: "CAREER_GOALS",
   },
   {

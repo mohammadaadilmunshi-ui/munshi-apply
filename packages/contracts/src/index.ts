@@ -306,6 +306,7 @@ export const ApplicationPageSchema = z.object({
   documentId: z.string().min(1),
   url: z.string().url(),
   title: z.string(),
+  pageContext: z.string().max(20_000).optional(),
   observedAt: z.string().datetime(),
   controls: z.array(ControlSchema),
   questions: z.array(QuestionSchema),

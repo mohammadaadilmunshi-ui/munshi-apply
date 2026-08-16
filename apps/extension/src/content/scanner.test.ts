@@ -174,6 +174,43 @@ describe("AutoPilot page-state scanner", () => {
     ]);
   });
 
+  it("recovers a nearby prompt for a custom select instead of its placeholder", () => {
+    document.body.innerHTML = `
+      <div class="question-field">
+        <label>How did you hear about us? *</label>
+        <div id="source" role="combobox" aria-haspopup="listbox" aria-label="-- Select one --"></div>
+      </div>
+    `;
+    const question = scanDocument().questions[0];
+    expect(question).toMatchObject({
+      rawText: "How did you hear about us? *",
+      semanticType: "REFERRAL",
+    });
+  });
+
+  it("uses the radio-group prompt instead of Yes or No option labels", () => {
+    document.body.innerHTML = `
+      <div class="question-field">
+        <p>Would you require any Visa sponsorship now or in the future? *</p>
+        <label><input type="radio" name="sponsor" value="Yes"> Yes</label>
+        <label><input type="radio" name="sponsor" value="No"> No</label>
+      </div>
+    `;
+    const result = scanDocument();
+    expect(result.questions).toHaveLength(1);
+    expect(result.questions[0]).toMatchObject({
+      rawText: "Would you require any Visa sponsorship now or in the future? *",
+      semanticType: "SPONSORSHIP_FUTURE",
+    });
+  });
+
+  it("captures bounded visible page text for AI job context", () => {
+    document.body.innerHTML = `<main><h1>Recruiter</h1><p>Build relationships with candidates and clients.</p><label for="why">Why this role?</label><textarea id="why"></textarea></main>`;
+    expect(scanDocument().pageContext).toContain(
+      "Build relationships with candidates and clients.",
+    );
+  });
+
   it("does not treat an application-entry Apply Now control as final submission", () => {
     document.body.innerHTML = `
       <button type="button">Apply Now</button>

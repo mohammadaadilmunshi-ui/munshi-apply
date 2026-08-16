@@ -191,6 +191,95 @@ function recordFactForSemanticType(
     .find((fact): fact is ProfileFact => fact !== undefined);
 }
 
+function ownerDefaultReferral(question: Question): AnswerResolution | null {
+  if (question.semanticType !== "REFERRAL") return null;
+  return {
+    state: "READY",
+    value: "LinkedIn",
+    sourceFactId: null,
+    sourceKey: "owner_default_referral",
+    trustLevel: "USER_CONFIRMED",
+    sensitive: false,
+    protected: false,
+    confidence: Math.max(question.confidence, 0.99),
+    reasons: ["Owner default referral source is LinkedIn"],
+  };
+}
+
+function salaryBoolean(value: string): "Yes" | "No" | null {
+  const token = value.trim().toLocaleLowerCase("en-US");
+  if (
+    /^(yes|true|accept|acceptable|accepted|ok|okay|willing|agree)$/.test(token)
+  )
+    return "Yes";
+  if (
+    /^(no|false|decline|unacceptable|not acceptable|not willing|disagree)$/.test(
+      token,
+    )
+  )
+    return "No";
+  return null;
+}
+
+function moneyValues(value: string): number[] {
+  const values: number[] = [];
+  for (const match of value.matchAll(
+    /\$?\s*(\d{2,3}(?:,\d{3})+|\d{2,3}(?:\.\d+)?)\s*([kK])?/g,
+  )) {
+    const numeric = Number(match[1]!.replaceAll(",", ""));
+    if (!Number.isFinite(numeric)) continue;
+    const expanded = match[2] ? numeric * 1_000 : numeric;
+    if (expanded >= 10_000) values.push(expanded);
+  }
+  return values;
+}
+
+function resolveSalaryAcceptance(
+  question: Question,
+  profile: MasterProfile | ProfileSnapshot,
+): AnswerResolution | null {
+  if (question.semanticType !== "SALARY_EXPECTATION") return null;
+  if (!/\b(accept|happy|comfortable|agree|willing)\b/i.test(question.rawText))
+    return null;
+  const fact = profile.facts.find(
+    (candidate) => candidate.key === "salary_expectation",
+  );
+  if (!fact || !factIsExplicitlyUsable(fact)) return null;
+  const raw = stringifyFactValue(fact.value).trim();
+  const direct = salaryBoolean(raw);
+  if (direct) {
+    return {
+      state: "READY",
+      value: direct,
+      sourceFactId: fact.factId,
+      sourceKey: fact.key,
+      trustLevel: fact.trustLevel,
+      sensitive: true,
+      protected: fact.protected,
+      confidence: Math.min(question.confidence, 0.96),
+      reasons: ["Exact owner-confirmed salary acceptance preference"],
+    };
+  }
+  const offered = moneyValues(question.rawText)[0];
+  const expected = moneyValues(raw)[0];
+  if (offered && expected && offered >= expected) {
+    return {
+      state: "READY",
+      value: "Yes",
+      sourceFactId: fact.factId,
+      sourceKey: fact.key,
+      trustLevel: fact.trustLevel,
+      sensitive: true,
+      protected: fact.protected,
+      confidence: Math.min(question.confidence, 0.94),
+      reasons: [
+        "Advertised base salary meets the owner-confirmed minimum salary preference",
+      ],
+    };
+  }
+  return null;
+}
+
 function startAvailabilityDateFromQuestion(rawText: string): number | null {
   const match = rawText.match(/\bavailable to start on\s+(.+?)(?:\?|\*|$)/i);
   if (!match?.[1]) return null;
@@ -342,6 +431,12 @@ export function resolveProfileAnswer(
   question: Question,
   profile: MasterProfile | ProfileSnapshot,
 ): AnswerResolution {
+  const referralResolution = ownerDefaultReferral(question);
+  if (referralResolution) return referralResolution;
+
+  const salaryResolution = resolveSalaryAcceptance(question, profile);
+  if (salaryResolution) return salaryResolution;
+
   const availabilityResolution = resolveBooleanAvailabilityDate(
     question,
     profile,

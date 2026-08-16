@@ -142,6 +142,23 @@ describe("classifyQuestion", () => {
     });
   });
 
+  it("recognizes live graduation and career-transition prompts", () => {
+    expect(
+      classifyQuestion(
+        "When did you / when do you Graduate from University? *",
+      ),
+    ).toMatchObject({
+      semanticType: "GRADUATION_DATE",
+      matchedRule: "graduation",
+    });
+    expect(
+      classifyQuestion("Why are you looking to leave your current employer? *"),
+    ).toMatchObject({
+      semanticType: "CAREER_GOALS",
+      matchedRule: "leave-current-employer",
+    });
+  });
+
   it("leaves novel questions unknown instead of inventing a meaning", () => {
     expect(classifyQuestion("Name your favorite constellation")).toEqual({
       semanticType: "UNKNOWN",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 import uuid
 from collections.abc import Callable
@@ -12,6 +13,7 @@ from .ai_settings import AIConfiguration, AISettingsStore
 from .application_store import ApplicationStore
 from .architecture_store import ArchitectureStore
 from .database import Database
+from .profile_store import ProfileStore
 from .providers import (
     OpenAIResponsesProvider,
     ProviderContextItem,
@@ -192,6 +194,12 @@ class AIGovernanceService:
             or not 1 <= max_words <= 500
         ):
             raise ValueError("AI draft maxWords must be an integer between 1 and 500")
+        page_context = payload.get("pageContext", "")
+        if page_context is not None and not isinstance(page_context, str):
+            raise ValueError("AI draft pageContext must be a string")
+        page_context = (page_context or "").strip()
+        if len(page_context) > 20_000:
+            raise ValueError("AI draft pageContext exceeds 20,000 characters")
         max_output_tokens = payload.get("maxOutputTokens", 512)
         if (
             not isinstance(max_output_tokens, int)
@@ -206,6 +214,7 @@ class AIGovernanceService:
             "controlId": control_id.strip(),
             "question": question.strip(),
             "semanticType": semantic_type.strip(),
+            "pageContext": page_context,
             "correlationId": correlation_id.strip(),
             "maxWords": max_words,
             "maxOutputTokens": max_output_tokens,
@@ -226,12 +235,113 @@ class AIGovernanceService:
         application_id: str,
         question: str,
         semantic_type: str,
+        page_context: str,
         config: AIConfiguration,
     ) -> tuple[tuple[ProviderContextItem, ...], set[str], dict[str, object]]:
         graph = self.architecture.evidence_graph(application_id)
         query_tokens = _words(question)
         allowed_kinds = self._allowed_kinds(config)
         candidates: list[tuple[float, dict[str, object]]] = []
+        if page_context:
+            page_evidence_id = (
+                "job-context-" + hashlib.sha256(page_context.encode("utf-8")).hexdigest()[:20]
+            )
+            candidates.append(
+                (
+                    1.0,
+                    {
+                        "evidence_id": page_evidence_id,
+                        "kind": "JOB_REQUIREMENT",
+                        "text": page_context,
+                        "semantic_types": [semantic_type],
+                        "trust_level": "DOCUMENT_CONFIRMED",
+                        "protected": False,
+                        "source": "current-employer-page",
+                        "updated_at": self._now().isoformat(),
+                    },
+                )
+            )
+
+        profile = ProfileStore(self.database).latest()
+        if profile:
+            if config.allow_profile_evidence:
+                for fact in profile.get("facts", []):
+                    if fact.get("protected") or fact.get("trustLevel") not in _AUTHORITATIVE_TRUST:
+                        continue
+                    value = str(fact.get("value", "")).strip()
+                    if not value:
+                        continue
+                    candidates.append(
+                        (
+                            0.58,
+                            {
+                                "evidence_id": "profile-" + str(fact.get("factId", "unknown")),
+                                "kind": "PROFILE_FACT",
+                                "text": f"{fact.get('key', 'profile fact')}: {value}",
+                                "semantic_types": [],
+                                "trust_level": fact.get("trustLevel"),
+                                "protected": False,
+                                "source": "confirmed-profile",
+                                "updated_at": fact.get("updatedAt", self._now().isoformat()),
+                            },
+                        )
+                    )
+            for record in profile.get("records", []):
+                if record.get("kind") not in {
+                    "EMPLOYMENT",
+                    "PROJECT",
+                    "EDUCATION",
+                    "CERTIFICATION",
+                }:
+                    continue
+                for fact in record.get("facts", []):
+                    if fact.get("protected") or fact.get("trustLevel") not in _AUTHORITATIVE_TRUST:
+                        continue
+                    key = str(fact.get("key", ""))
+                    if not config.allow_profile_evidence and not (
+                        config.allow_resume_evidence
+                        and key
+                        in {
+                            "responsibilities",
+                            "achievements",
+                            "project_summary",
+                            "project_technologies",
+                            "gpa",
+                        }
+                    ):
+                        continue
+                    value = str(fact.get("value", "")).strip()
+                    if not value:
+                        continue
+                    kind = (
+                        "RESUME_BULLET"
+                        if key
+                        in {
+                            "responsibilities",
+                            "achievements",
+                            "project_summary",
+                            "project_technologies",
+                        }
+                        else str(record.get("kind"))
+                    )
+                    candidates.append(
+                        (
+                            0.72 if kind == "RESUME_BULLET" else 0.62,
+                            {
+                                "evidence_id": "record-" + str(fact.get("factId", "unknown")),
+                                "kind": kind,
+                                "text": (
+                                    f"{record.get('label', record.get('kind', 'record'))}: {value}"
+                                ),
+                                "semantic_types": [],
+                                "trust_level": fact.get("trustLevel"),
+                                "protected": False,
+                                "source": "confirmed-profile-record",
+                                "updated_at": fact.get("updatedAt", self._now().isoformat()),
+                            },
+                        )
+                    )
+
         blocked_protected = 0
         blocked_trust = 0
         blocked_kind = 0
@@ -328,6 +438,7 @@ class AIGovernanceService:
             application_id=str(request["applicationId"]),
             question=str(request["question"]),
             semantic_type=semantic_type,
+            page_context=str(request.get("pageContext", "")),
             config=config,
         )
         estimated_input_tokens = 2_048 + len(str(request["question"]).encode("utf-8"))

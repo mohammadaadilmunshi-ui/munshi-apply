@@ -285,3 +285,48 @@ def test_second_reservation_sees_first_active_reservation(
     )
     assert one["state"] == "ALLOW"
     assert two["state"] == "BLOCK"
+
+
+def test_preview_uses_live_job_context_and_confirmed_profile_without_seeded_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = create_database(tmp_path)
+    store = configured_store(tmp_path, monkeypatch)
+    from munshi_apply_native.profile_store import ProfileStore
+
+    ProfileStore(database).save(
+        {
+            "profileId": "profile-1",
+            "displayName": "Aadil",
+            "facts": [
+                {
+                    "factId": "skills-1",
+                    "key": "skills",
+                    "value": "recruiting operations, people analytics",
+                    "category": "SKILL",
+                    "trustLevel": "USER_CONFIRMED",
+                    "source": "profile",
+                    "confirmedAt": FIXED_NOW.isoformat(),
+                    "updatedAt": FIXED_NOW.isoformat(),
+                    "protected": False,
+                }
+            ],
+            "records": [],
+            "recordTombstones": [],
+            "createdAt": FIXED_NOW.isoformat(),
+            "updatedAt": FIXED_NOW.isoformat(),
+            "schemaVersion": 1,
+            "snapshotVersion": 1,
+        }
+    )
+    payload = request("CAREER_GOALS")
+    payload["question"] = "Why are you looking to leave your current employer?"
+    payload["pageContext"] = (
+        "Recruiter role focused on candidate relationships, business development, "
+        "and career growth."
+    )
+    result = service(database, store).preview(payload)
+    assert result["state"] == "READY_FOR_PROVIDER"
+    assert len(result["evidenceIds"]) >= 2
+    assert any(item.startswith("job-context-") for item in result["evidenceIds"])
+    assert any(item.startswith("profile-") for item in result["evidenceIds"])

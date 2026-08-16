@@ -162,20 +162,103 @@ function labelledByText(element: Element): string {
     .join(" ");
 }
 
+function placeholderChoiceText(value: string): boolean {
+  const text = normalized(value)
+    .replace(/[–—-]+/g, " ")
+    .trim();
+  return (
+    /^(select|choose)( one| an option| option)?$/.test(text) ||
+    text === "please select"
+  );
+}
+
+function usablePromptText(value: string): string {
+  const text = compactText(value);
+  if (!text || placeholderChoiceText(text)) return "";
+  if (/^(yes|no|true|false)$/i.test(text)) return "";
+  return text.length <= 500 ? text : "";
+}
+
+function nearbyPromptText(element: Element): string {
+  if (element.id) {
+    const root = element.getRootNode();
+    const labels =
+      root instanceof Document || root instanceof ShadowRoot
+        ? Array.from(root.querySelectorAll("label[for]")).filter(
+            (label) =>
+              label instanceof HTMLLabelElement && label.htmlFor === element.id,
+          )
+        : [];
+    const direct = labels
+      .map((item) => usablePromptText(item.textContent ?? ""))
+      .find(Boolean);
+    if (direct) return direct;
+  }
+
+  const group = element.closest(
+    "fieldset, [role='radiogroup'], [role='group']",
+  );
+  if (group) {
+    const legend = usablePromptText(
+      group.querySelector("legend")?.textContent ?? "",
+    );
+    if (legend) return legend;
+    const aria = usablePromptText(group.getAttribute("aria-label") ?? "");
+    if (aria) return aria;
+    const labelled = usablePromptText(labelledByText(group));
+    if (labelled) return labelled;
+  }
+
+  let current: Element | null = element.parentElement;
+  for (
+    let depth = 0;
+    current && depth < 6;
+    depth += 1, current = current.parentElement
+  ) {
+    const candidates = Array.from(
+      current.querySelectorAll(
+        ":scope > label, :scope > legend, :scope > p, :scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > [class*='label' i], :scope > [class*='question' i]",
+      ),
+    );
+    for (const candidate of candidates) {
+      if (candidate === element || candidate.contains(element)) continue;
+      const value = usablePromptText(candidate.textContent ?? "");
+      if (value) return value;
+    }
+    let previous: Element | null =
+      current === element.parentElement
+        ? element.previousElementSibling
+        : current.previousElementSibling;
+    for (
+      let hops = 0;
+      previous && hops < 3;
+      hops += 1, previous = previous.previousElementSibling
+    ) {
+      const value = usablePromptText(previous.textContent ?? "");
+      if (value) return value;
+    }
+  }
+  return "";
+}
+
 function labelFor(element: Element): string {
-  const ariaLabel = compactText(element.getAttribute("aria-label"));
+  const ariaLabel = usablePromptText(element.getAttribute("aria-label") ?? "");
   if (ariaLabel) return ariaLabel;
 
-  const labelled = labelledByText(element);
+  const labelled = usablePromptText(labelledByText(element));
   if (labelled) return labelled;
 
   if (element instanceof HTMLInputElement) {
     if (element.type === "radio") {
-      const legend = groupLegend(element);
+      const legend = usablePromptText(groupLegend(element));
       if (legend) return legend;
+      const prompt = nearbyPromptText(element);
+      if (prompt) return prompt;
     }
-    const labels = inputLabel(element);
+    const labels = usablePromptText(inputLabel(element));
     if (labels) return labels;
+    const prompt = nearbyPromptText(element);
+    if (prompt) return prompt;
     if (["button", "submit", "reset"].includes(element.type)) {
       return compactText(element.value);
     }
@@ -186,22 +269,28 @@ function labelFor(element: Element): string {
     element instanceof HTMLTextAreaElement
   ) {
     const labels = Array.from(element.labels)
-      .map((label) => compactText(label.textContent))
+      .map((label) => usablePromptText(label.textContent ?? ""))
       .filter(Boolean)
       .join(" ");
     if (labels) return labels;
+    const prompt = nearbyPromptText(element);
+    if (prompt) return prompt;
+  }
+
+  if (isPopupChoiceControl(element) || isCustomDateControl(element)) {
+    const prompt = nearbyPromptText(element);
+    if (prompt) return prompt;
   }
 
   if (
     element instanceof HTMLButtonElement ||
     element.getAttribute("role") === "button"
   ) {
-    const text = compactText(element.textContent);
-    if (text) return text;
+    const value = usablePromptText(element.textContent ?? "");
+    if (value) return value;
   }
 
-  const container = element.closest("fieldset, [role='group'], .form-group");
-  return compactText(container?.querySelector("legend")?.textContent);
+  return nearbyPromptText(element);
 }
 
 function kindFor(element: Element): ControlKind {
@@ -840,6 +929,7 @@ export function scanDocument(): ApplicationPage {
     documentId: `doc-${hash(pageSignature)}`,
     url: url.href,
     title: document.title,
+    pageContext: compactText(document.body?.textContent).slice(0, 20_000),
     observedAt: new Date().toISOString(),
     controls,
     questions,

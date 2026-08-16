@@ -293,7 +293,8 @@ export function defaultAdaptiveTiming(): AdaptiveTiming {
     hostname.includes("lever.co") ||
     hostname.includes("ashbyhq") ||
     hostname.includes("smartrecruiters") ||
-    hostname.includes("icims");
+    hostname.includes("icims") ||
+    hostname.includes("levintalent");
   return {
     optionTimeoutMs: workdayLike ? 3_000 : dynamicAts ? 2_000 : 1_500,
     pollIntervalMs: 25,
@@ -562,6 +563,94 @@ function naturalDate(value: string): string | null {
   return canonicalDate(date);
 }
 
+function flexibleDate(value: string): string | null {
+  const direct = canonicalDate(value.trim());
+  if (direct) return direct;
+  const text = compactText(value);
+  const us = text.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  if (us) {
+    const date = `${us[3]}-${String(Number(us[1])).padStart(2, "0")}-${String(Number(us[2])).padStart(2, "0")}`;
+    const parsed = canonicalDate(date);
+    if (parsed) return parsed;
+  }
+  return naturalDate(text);
+}
+
+function setNativeTextValue(element: HTMLInputElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(
+    HTMLInputElement.prototype,
+    "value",
+  )?.set;
+  if (setter) setter.call(element, value);
+  else element.value = value;
+}
+
+function dateDisplayCandidates(
+  element: HTMLInputElement,
+  canonical: string,
+): string[] {
+  const [year, month, day] = canonical.split("-");
+  const placeholder = normalizedText(element.placeholder);
+  const us = `${month}/${day}/${year}`;
+  const eu = `${day}/${month}/${year}`;
+  const order = /dd.{0,3}mm.{0,3}yyyy/.test(placeholder)
+    ? [eu, canonical, us]
+    : [us, canonical, eu];
+  return [...new Set(order)];
+}
+
+function dateTextRejected(element: HTMLInputElement): boolean {
+  if (
+    element.getAttribute("aria-invalid") === "true" ||
+    !element.validity.valid
+  )
+    return true;
+  const message = normalizedText(validationMessageFor(element));
+  return /\b(not valid date|invalid date|valid date|date format)\b/.test(
+    message,
+  );
+}
+
+export async function fillDateLikeTextInput(
+  element: HTMLInputElement,
+  value: string,
+  timing: AdaptiveTiming,
+): Promise<boolean | null> {
+  if (element.type !== "text" && element.type !== "search") return null;
+  const requested = canonicalDate(value);
+  if (!requested) return null;
+  if (
+    !/\b(date|day|month|year|graduat|available|start|end)\b/.test(
+      normalizedText(interactionContext(element)),
+    )
+  ) {
+    return null;
+  }
+  const original = element.value;
+  for (const candidate of dateDisplayCandidates(element, requested)) {
+    element.focus();
+    setNativeTextValue(element, candidate);
+    element.dispatchEvent(
+      new Event("input", { bubbles: true, composed: true }),
+    );
+    element.dispatchEvent(
+      new Event("change", { bubbles: true, composed: true }),
+    );
+    element.dispatchEvent(new Event("blur", { bubbles: true, composed: true }));
+    const verified = await waitForCondition(
+      () =>
+        flexibleDate(element.value) === requested && !dateTextRejected(element),
+      timing.verificationTimeoutMs,
+      timing.pollIntervalMs,
+    );
+    if (verified) return true;
+  }
+  setNativeTextValue(element, original);
+  element.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+  element.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+  return false;
+}
+
 function dateForCandidate(element: Element): string | null {
   for (const attribute of ["data-date", "data-value", "datetime"]) {
     const value = element.getAttribute(attribute);
@@ -596,6 +685,10 @@ export async function fillCustomDateControl(
   if (!requested) return false;
   const originalValue =
     element instanceof HTMLInputElement ? element.value : null;
+  if (element instanceof HTMLInputElement) {
+    const direct = await fillDateLikeTextInput(element, requested, timing);
+    if (direct === true) return true;
+  }
   element.focus();
   element.click();
   const deadline = Date.now() + timing.optionTimeoutMs;
@@ -632,7 +725,7 @@ export async function fillCustomDateControl(
       if (match?.getAttribute("aria-selected") === "true") return true;
       if (element instanceof HTMLInputElement) {
         if (element.value === requested) return true;
-        if (naturalDate(element.value) === requested) return true;
+        if (flexibleDate(element.value) === requested) return true;
       }
       return false;
     },

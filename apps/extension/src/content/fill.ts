@@ -11,6 +11,7 @@ import {
   fillAriaBooleanControl,
   fillAriaRadioControl,
   fillCustomDateControl,
+  fillDateLikeTextInput,
   interactionContext,
   isPopupChoiceControl,
   optionEquivalent,
@@ -110,8 +111,11 @@ function fillRadio(element: HTMLInputElement, value: string): boolean {
   if (candidates.length !== 1) return false;
   const match = candidates[0]!;
   match.focus();
-  setNativeChecked(match, true);
-  dispatchValueEvents(match);
+  match.click();
+  if (!match.checked) {
+    setNativeChecked(match, true);
+    dispatchValueEvents(match);
+  }
   return match.checked;
 }
 
@@ -125,8 +129,11 @@ function fillCheckbox(element: HTMLInputElement, value: string): boolean {
 
   const shouldCheck = truthy.includes(requested);
   element.focus();
-  setNativeChecked(element, shouldCheck);
-  dispatchValueEvents(element);
+  if (element.checked !== shouldCheck) element.click();
+  if (element.checked !== shouldCheck) {
+    setNativeChecked(element, shouldCheck);
+    dispatchValueEvents(element);
+  }
   return element.checked === shouldCheck;
 }
 
@@ -213,7 +220,11 @@ function controlledComboboxOptions(element: Element): HTMLElement[] {
 function portaledComboboxOptions(element: Element): HTMLElement[] {
   const options: HTMLElement[] = [];
   for (const root of optionSearchRoots(element)) {
-    for (const option of Array.from(root.querySelectorAll("[role='option']"))) {
+    for (const option of Array.from(
+      root.querySelectorAll(
+        "[role='option'], [role='menuitem'], [data-value], [data-option-value], li",
+      ),
+    )) {
       if (option instanceof HTMLElement) options.push(option);
     }
   }
@@ -442,6 +453,8 @@ async function fillElement(
     if (element.readOnly && !["radio", "checkbox"].includes(element.type)) {
       return false;
     }
+    const dateLikeText = await fillDateLikeTextInput(element, value, options);
+    if (dateLikeText !== null) return dateLikeText;
     const strictTemporal = fillStrictTemporalInput(element, value);
     if (strictTemporal !== null) return strictTemporal;
     if (element.type === "radio") {

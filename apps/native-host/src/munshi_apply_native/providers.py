@@ -243,10 +243,17 @@ class OpenAIResponsesProvider:
             "store": False,
             "max_output_tokens": request.max_output_tokens,
             "instructions": (
-                "You draft one job-application answer using only the supplied evidence. "
-                "Do not add facts, metrics, employers, dates, credentials, immigration facts, "
-                "or claims that are not supported by the supplied evidence. Every factual claim "
-                "must cite one or more supplied evidenceId values in the structured claims array."
+                "Draft one direct, natural, professional job-application answer "
+                "to the supplied question. "
+                "Use current job/company context together with candidate evidence "
+                "when relevant. "
+                "Do not invent facts, metrics, employers, dates, credentials, "
+                "immigration facts, motives, or claims. "
+                "For career-transition questions, stay constructive and future-focused. "
+                "Do not criticize an employer unless evidence explicitly requires it. "
+                "Avoid generic filler and do not mention the evidence system. "
+                "Every factual claim must cite supplied evidenceId values "
+                "in the structured claims array."
             ),
             "input": _input_text(request),
             "text": {

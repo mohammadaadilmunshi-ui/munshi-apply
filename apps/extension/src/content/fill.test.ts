@@ -454,6 +454,56 @@ describe("guarded field filling", () => {
     expect(input.value).toBe("Aadil");
   });
 
+  it("fills a date-like text widget using the employer display format", async () => {
+    document.body.innerHTML = `
+      <label for="available">When are you available to start this role?</label>
+      <input id="available" type="text" placeholder="MM/DD/YYYY">
+    `;
+    const input = document.getElementById("available") as HTMLInputElement;
+    const question = scanDocument().questions[0]!;
+    const result = await applyFillInstructions(
+      [
+        {
+          controlId: question.controlId,
+          frameId: 0,
+          value: "2026-12-17",
+          sensitive: false,
+          approved: true,
+        },
+      ],
+      { verificationTimeoutMs: 80, pollIntervalMs: 5 },
+    );
+    expect(result[0]?.status).toBe("FILLED");
+    expect(input.value).toBe("12/17/2026");
+  });
+
+  it("uses a real click for a controlled native radio group", async () => {
+    document.body.innerHTML = `
+      <fieldset><legend>Are you happy to accept the salary?</legend>
+        <label><input type="radio" name="salary" value="Yes"> Yes</label>
+        <label><input type="radio" name="salary" value="No"> No</label>
+      </fieldset>
+    `;
+    const yes = document.querySelector<HTMLInputElement>('input[value="Yes"]')!;
+    let clicks = 0;
+    yes.addEventListener("click", () => {
+      clicks += 1;
+    });
+    const question = scanDocument().questions[0]!;
+    const result = await applyFillInstructions([
+      {
+        controlId: question.controlId,
+        frameId: 0,
+        value: "Yes",
+        sensitive: true,
+        approved: true,
+      },
+    ]);
+    expect(result[0]?.status).toBe("FILLED");
+    expect(clicks).toBeGreaterThan(0);
+    expect(yes.checked).toBe(true);
+  });
+
   it("reports only whether a file has been selected, never its local path", () => {
     document.body.innerHTML = `<label for="resume">Resume</label><input id="resume" type="file" required>`;
     const control = scanDocument().controls.find(

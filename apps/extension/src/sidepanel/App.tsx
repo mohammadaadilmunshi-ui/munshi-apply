@@ -25,6 +25,7 @@ import {
   getProfile,
   getProfileSyncStatus,
   nativeRuntimeCompatibility,
+  requestFilePickerAssist,
   resolveProfileSyncConflict,
   saveProfile,
   type AutoPilotControllerStatus,
@@ -225,6 +226,7 @@ type AnswerDraft = {
   approved: boolean;
   sensitive: boolean;
   sourceDraftId?: string | null;
+  ownerEdited?: boolean;
 };
 
 const defaultAISettings: AISettings = {
@@ -530,7 +532,16 @@ export function App() {
         ];
       }),
     );
-    setAnswers(next);
+    setAnswers((current) =>
+      Object.fromEntries(
+        page.questions.map((question) => [
+          question.questionId,
+          current[question.questionId]?.ownerEdited
+            ? current[question.questionId]!
+            : next[question.questionId]!,
+        ]),
+      ),
+    );
     setSelectedResumeId((current) => {
       const reviewedResume = review?.resumeId;
       if (
@@ -555,6 +566,17 @@ export function App() {
         (resume) => resume.resumeId === selectedResumeId,
       ) ?? null,
     [cloudSnapshot, selectedResumeId],
+  );
+  const employerFileControl = useMemo(
+    () =>
+      page?.controls.find(
+        (control) =>
+          control.kind === "FILE" &&
+          /\b(resume|résumé|cv)\b/i.test(`${control.label} ${control.name}`),
+      ) ??
+      page?.controls.find((control) => control.kind === "FILE") ??
+      null,
+    [page],
   );
   const runtimeOwnsCurrentPage = Boolean(
     autoPilotStatus &&
@@ -1234,6 +1256,7 @@ export function App() {
                               value: event.target.value,
                               approved: false,
                               sourceDraftId: null,
+                              ownerEdited: true,
                             },
                           }))
                         }
@@ -1249,6 +1272,7 @@ export function App() {
                               [question.questionId]: {
                                 ...answer,
                                 approved: event.target.checked,
+                                ownerEdited: true,
                               },
                             }))
                           }
@@ -1260,6 +1284,7 @@ export function App() {
                         pageId={page.pageId}
                         question={question}
                         nativeAvailable={native.status === "healthy"}
+                        pageContext={page.pageContext ?? ""}
                         onApproved={(value, draftId) =>
                           setAnswers((current) => ({
                             ...current,
@@ -1268,6 +1293,7 @@ export function App() {
                               approved: true,
                               sensitive: question.sensitive,
                               sourceDraftId: draftId,
+                              ownerEdited: true,
                             },
                           }))
                         }
@@ -1295,6 +1321,32 @@ export function App() {
                     Browser security requires you to choose the file in the
                     employer’s upload control manually.
                   </small>
+                  {employerFileControl && (
+                    <button
+                      className="quiet"
+                      type="button"
+                      onClick={() =>
+                        void requestFilePickerAssist(
+                          employerFileControl.frameId,
+                          employerFileControl.controlId,
+                        )
+                          .then(() =>
+                            setNotice(
+                              "Employer file handoff opened. Choose the matching résumé file; MUNSHI will verify it after selection.",
+                            ),
+                          )
+                          .catch((error: unknown) =>
+                            setNotice(
+                              error instanceof Error
+                                ? error.message
+                                : "Unable to open employer file handoff",
+                            ),
+                          )
+                      }
+                    >
+                      Open employer file picker
+                    </button>
+                  )}
                 </label>
               ) : null}
               <button

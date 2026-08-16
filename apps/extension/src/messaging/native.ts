@@ -69,6 +69,7 @@ export type AIDraftRequest = {
   controlId: string;
   question: string;
   semanticType: string;
+  pageContext?: string;
   correlationId: string;
   maxWords?: number;
   maxOutputTokens?: number;

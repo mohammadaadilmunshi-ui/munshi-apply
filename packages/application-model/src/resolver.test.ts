@@ -265,6 +265,46 @@ describe("resolveProfileAnswer", () => {
     expect(result.value).toBeNull();
   });
 
+  it("uses LinkedIn as the owner default referral source", () => {
+    const result = resolveProfileAnswer(
+      question({
+        semanticType: "REFERRAL",
+        rawText: "How did you hear about us? *",
+      }),
+      profile([]),
+    );
+    expect(result).toMatchObject({
+      state: "READY",
+      value: "LinkedIn",
+      sourceKey: "owner_default_referral",
+    });
+  });
+
+  it("fills an explicitly saved salary acceptance answer", () => {
+    const result = resolveProfileAnswer(
+      question({
+        semanticType: "SALARY_EXPECTATION",
+        rawText:
+          "Are you happy to accept an annual base salary of $55,000 + commission? *",
+        sensitive: true,
+        requiresReview: true,
+      }),
+      profile([
+        fact({
+          key: "salary_expectation",
+          value: "Yes",
+          category: "SAVED_ANSWER",
+          protected: false,
+        }),
+      ]),
+    );
+    expect(result).toMatchObject({
+      state: "READY",
+      value: "Yes",
+      sourceKey: "salary_expectation",
+    });
+  });
+
   it("does not promote generated facts to ready answers", () => {
     const result = resolveProfileAnswer(
       question({}),
