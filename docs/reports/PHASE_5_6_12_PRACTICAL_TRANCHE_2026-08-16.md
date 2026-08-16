@@ -4,7 +4,7 @@
 **Candidate:** 0.2.4  
 **Functional implementation commit:** `515f916738c069ef191cf3a3b52795a789f73ef8`  
 **Verified implementation + cleanup head:** `5419b61c1f0b1de1b92d4551ef6fd6ba0bab9141`  
-**This report commit:** `a4c1e453702c78c08351d85bdb66f0c9ebbadd73` (verified by the normal PR workflow set)  
+**Latest verification before this documentation-only update:** `b70ddf50079614ca8f7c929b4b84c21346520c53`  
 **Architecture source:** Complete Master Architecture Plan 2.0
 
 ## Goal
@@ -51,7 +51,7 @@ Guardrails should prevent incorrect claims, irreversible submission, credential/
 
 ## Automated verification
 
-The implementation and subsequent report-only commit were verified by the normal PR workflow set:
+The implementation and subsequent documentation-only commits were verified by the normal PR workflow set:
 
 - CI ✅
 - Browser tests ✅
@@ -70,11 +70,11 @@ The verification stack included:
 - Desktop/mobile artifact verification ✅
 - Repository safety and secret scan ✅
 
-Fresh unpacked Edge artifact from CI at `a4c1e453702c78c08351d85bdb66f0c9ebbadd73`:
+Fresh unpacked Edge artifact from CI at `b70ddf50079614ca8f7c929b4b84c21346520c53`:
 
 - name: `munshi-apply-edge-unpacked`
-- artifact ID: `9260614215`
-- SHA-256: `854bf481529defb8e0618f5ab24e2859d319c2054d6a292b206657ca6f2c0112`
+- artifact ID: `9260635872`
+- SHA-256: `7fb3ae02b30a66f953c7c60fca6b42d7757d3c8f006f88fd3e422b96f48b100f`
 
 ## Release gate
 
