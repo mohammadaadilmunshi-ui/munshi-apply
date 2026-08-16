@@ -232,7 +232,9 @@ export function applicationPageEligibility(
     );
   }
   if (strongJobRegistration && interactiveFields >= 2) {
-    reasons.push("explicit careers job-registration route with candidate fields");
+    reasons.push(
+      "explicit careers job-registration route with candidate fields",
+    );
   }
   if (
     page.applicationState !== "AUTH" &&
