@@ -27,6 +27,8 @@ jobs:
       - run: npm ci
       - name: Apply live ATS deep repair
         run: python .github/live_ats_deep_repair.py
+      - name: Normalize generated regex
+        run: python -c 'from pathlib import Path; p=Path("apps/extension/src/content/adaptive.ts"); s=p.read_text(); p.write_text(s.replace("[\\/-]", "[-/]"))'
       - name: Format repaired source
         run: npm run format
       - name: Verify extension and shared packages
