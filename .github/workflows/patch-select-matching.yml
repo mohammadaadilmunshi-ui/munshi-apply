@@ -1,0 +1,59 @@
+name: Harden universal option matching
+
+on:
+  push:
+    branches:
+      - feat/v3-foundation-alignment
+    paths:
+      - .github/workflows/patch-select-matching.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
+      - name: Prefer exact options before semantic aliases
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("apps/extension/src/content/fill.ts")
+          text = path.read_text()
+
+          text = text.replace(
+              '  optionEquivalent,\n  validationFailureReason,',
+              '  optionEquivalent,\n  uniqueOptionCandidate,\n  validationFailureReason,',
+              1,
+          )
+
+          old_combobox = '''function exactComboboxOption(\n  element: Element,\n  requested: string,\n): ExactOptionResult {\n  const context = interactionContext(element);\n  const controlled = controlledComboboxOptions(element).filter(\n    (option) =>\n      optionAvailable(option) &&\n      comboboxOptionValues(option).some((value) =>\n        optionEquivalent(value, requested, context),\n      ),\n  );\n  if (controlled.length === 1) {\n    return { status: "FOUND", option: controlled[0]! };\n  }\n  if (controlled.length > 1) return { status: "AMBIGUOUS" };\n\n  const portaled = portaledComboboxOptions(element).filter(\n    (option) =>\n      optionAvailable(option) &&\n      comboboxOptionValues(option).some((value) =>\n        optionEquivalent(value, requested, context),\n      ),\n  );\n  if (portaled.length === 1) {\n    return { status: "FOUND", option: portaled[0]! };\n  }\n  return portaled.length > 1 ? { status: "AMBIGUOUS" } : { status: "WAIT" };\n}\n'''
+          new_combobox = '''function exactComboboxOption(\n  element: Element,\n  requested: string,\n): ExactOptionResult {\n  const context = interactionContext(element);\n  const controlled = controlledComboboxOptions(element).filter(optionAvailable);\n  const controlledMatch = uniqueOptionCandidate(\n    requested,\n    controlled.map((option) => ({\n      item: option,\n      values: comboboxOptionValues(option),\n    })),\n    context,\n  );\n  if (controlledMatch) {\n    return { status: "FOUND", option: controlledMatch };\n  }\n\n  const portaled = portaledComboboxOptions(element).filter(optionAvailable);\n  const portaledMatch = uniqueOptionCandidate(\n    requested,\n    portaled.map((option) => ({\n      item: option,\n      values: comboboxOptionValues(option),\n    })),\n    context,\n  );\n  if (portaledMatch) {\n    return { status: "FOUND", option: portaledMatch };\n  }\n\n  const hasSemanticCandidates = [...controlled, ...portaled].some((option) =>\n    comboboxOptionValues(option).some((value) =>\n      optionEquivalent(value, requested, context),\n    ),\n  );\n  return hasSemanticCandidates ? { status: "AMBIGUOUS" } : { status: "WAIT" };\n}\n'''
+          if old_combobox not in text:
+              raise SystemExit("Combobox matching anchor not found")
+          text = text.replace(old_combobox, new_combobox, 1)
+
+          old_select = '''  if (element instanceof HTMLSelectElement) {\n    if (element.multiple) return fillNativeMultiSelect(element, value);\n    const context = interactionContext(element);\n    const matches = Array.from(element.options).filter(\n      (candidate) =>\n        !candidate.disabled &&\n        (optionEquivalent(candidate.value, value, context) ||\n          optionEquivalent(candidate.text, value, context)),\n    );\n    if (matches.length !== 1) return false;\n    const option = matches[0]!;\n    const original = element.value;\n'''
+          new_select = '''  if (element instanceof HTMLSelectElement) {\n    if (element.multiple) return fillNativeMultiSelect(element, value);\n    const context = interactionContext(element);\n    const option = uniqueOptionCandidate(\n      value,\n      Array.from(element.options)\n        .filter((candidate) => !candidate.disabled)\n        .map((candidate) => ({\n          item: candidate,\n          values: [candidate.value, candidate.text],\n        })),\n      context,\n    );\n    if (!option) return false;\n    const original = element.value;\n'''
+          if old_select not in text:
+              raise SystemExit("Native select matching anchor not found")
+          text = text.replace(old_select, new_select, 1)
+
+          path.write_text(text)
+          PY
+      - name: Format and commit
+        run: |
+          npx prettier --write apps/extension/src/content/fill.ts
+          if git diff --quiet; then
+            echo "No select changes required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/extension/src/content/fill.ts
+          git commit -m "fix: prefer exact employer options before aliases"
+          git push origin HEAD:feat/v3-foundation-alignment
