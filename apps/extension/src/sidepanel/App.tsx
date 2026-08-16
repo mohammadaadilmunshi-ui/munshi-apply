@@ -52,7 +52,6 @@ import {
   getCloudSnapshot,
   publishApplicationReview,
   publishApplicationSnapshot,
-  uploadEncryptedResume,
   type ApplicationReview,
   type CloudHealth,
   type CloudSnapshot,
@@ -60,6 +59,7 @@ import {
 import { AIControlCenter } from "./AIControlCenter";
 import { AIDraftReview } from "./AIDraftReview";
 import { AutoPilotControlCenter } from "./AutoPilotControlCenter";
+import { ResumeVaultPanel } from "./ResumeVaultPanel";
 
 type View = "application" | "profile" | "autopilot" | "ai" | "diagnostics";
 type SaveState =
@@ -946,32 +946,6 @@ export function App() {
     }
   }
 
-  async function addResume(file: File | null): Promise<void> {
-    if (!file) return;
-    const connection = await getCloudConnection();
-    if (
-      !connection ||
-      cloud.status !== "connected" ||
-      !cloud.data.encryptionReady
-    ) {
-      setNotice("Enable encrypted synchronization before adding a résumé.");
-      return;
-    }
-    setPairing(true);
-    try {
-      const resume = await uploadEncryptedResume(connection, file);
-      setSelectedResumeId(resume.resumeId);
-      setNotice(`${resume.name} encrypted and synchronized.`);
-      await refresh();
-    } catch (error) {
-      setNotice(
-        error instanceof Error ? error.message : "Résumé upload failed",
-      );
-    } finally {
-      setPairing(false);
-    }
-  }
-
   async function fillApprovedFields(): Promise<void> {
     if (!page) return;
     const controls = new Map(
@@ -1313,6 +1287,11 @@ export function App() {
                   >
                     {cloudSnapshot.resumes.map((resume) => (
                       <option key={resume.resumeId} value={resume.resumeId}>
+                        {resume.source === "MASTER"
+                          ? "Master · "
+                          : resume.source === "TAILORED"
+                            ? `Tailored${resume.roleFamily ? ` (${resume.roleFamily})` : ""} · `
+                            : ""}
                         {resume.name}
                       </option>
                     ))}
@@ -1660,31 +1639,14 @@ export function App() {
             </button>
           </div>
           {cloud.status === "connected" && cloud.data.encryptionReady && (
-            <div className="resume-vault">
-              <h3>Résumé vault</h3>
-              <label className="resume-upload">
-                <span>{pairing ? "Uploading…" : "Add encrypted résumé"}</span>
-                <input
-                  type="file"
-                  accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                  disabled={pairing}
-                  onChange={(event) => {
-                    void addResume(event.target.files?.[0] ?? null);
-                    event.currentTarget.value = "";
-                  }}
-                />
-              </label>
-              <div className="resume-list">
-                {cloudSnapshot?.resumes.map((resume) => (
-                  <div key={resume.resumeId}>
-                    <strong>{resume.name}</strong>
-                    <span>
-                      {Math.ceil(resume.sizeBytes / 1024)} KB · encrypted
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <ResumeVaultPanel
+              snapshot={cloudSnapshot}
+              selectedResumeId={selectedResumeId}
+              currentRole={page?.title ?? null}
+              onSelected={setSelectedResumeId}
+              onRefresh={refresh}
+              onNotice={setNotice}
+            />
           )}
         </section>
       )}
