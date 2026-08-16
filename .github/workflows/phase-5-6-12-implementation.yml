@@ -25,11 +25,13 @@ jobs:
           cache: npm
       - uses: actions/setup-python@v7
         with:
-          python-version: '3.12'
+          python-version: "3.12"
       - name: Apply practical Phase 5/6/12 tranche
         run: python scripts/phase_5_6_12_practical_tranche.py
       - name: Install locked Node dependencies
         run: npm ci
+      - name: Format generated implementation
+        run: npm run format
       - name: Verify TypeScript/browser workspace
         run: npm run check
       - name: Install native companion
