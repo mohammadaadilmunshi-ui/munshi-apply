@@ -161,10 +161,10 @@ function hasApplicationProgression(page: ApplicationPage): boolean {
 
 /**
  * Decide whether an observed browser page has enough deterministic evidence to
- * enter the application ledger. The scanner intentionally observes broadly;
- * persistence still rejects ordinary browsing, but a genuine careers/job
- * registration flow no longer has to contain the literal word "application"
- * on every step before MUNSHI can track it.
+ * enter the application ledger. The scanner observes broadly, while this gate
+ * rejects ordinary browsing. Multi-step careers registration flows are allowed
+ * to remain tracked between steps even when the current step has no visible
+ * Next button or résumé control.
  */
 export function applicationPageEligibility(
   page: ApplicationPage,
@@ -215,6 +215,14 @@ export function applicationPageEligibility(
     reasons.push(
       "explicit application context with multiple classified questions",
     );
+  }
+  if (
+    page.applicationState !== "AUTH" &&
+    candidateRegistration &&
+    interactiveFields >= 2 &&
+    (specificQuestions >= 1 || candidateIdentityQuestions >= 2)
+  ) {
+    reasons.push("careers/job registration flow with candidate form evidence");
   }
   if (
     page.applicationState !== "AUTH" &&
