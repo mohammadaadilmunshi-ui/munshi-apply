@@ -18,6 +18,11 @@ interface Rule {
 
 const rules: readonly Rule[] = [
   {
+    id: "honorific",
+    pattern: /^(salutation|honorific)$/i,
+    semanticType: "HONORIFIC",
+  },
+  {
     id: "preferred-name",
     pattern: /^preferred (first )?name$/i,
     semanticType: "PREFERRED_NAME",
@@ -120,8 +125,7 @@ const rules: readonly Rule[] = [
   },
   {
     id: "job-title",
-    pattern:
-      /^(title|job title|position title|current title|most recent title)$/i,
+    pattern: /^(job title|position title|current title|most recent title)$/i,
     semanticType: "JOB_TITLE",
   },
   {
@@ -412,6 +416,18 @@ const rules: readonly Rule[] = [
 ];
 
 const contextualRules: readonly Rule[] = [
+  {
+    id: "personal-title-context",
+    pattern:
+      /\b(basic information|personal information|candidate information|contact info(?:rmation)?)\b.{0,160}\btitle\b/i,
+    semanticType: "HONORIFIC",
+  },
+  {
+    id: "employment-title-context",
+    pattern:
+      /\b(work history|employment|experience|employer|company)\b.{0,160}\btitle\b/i,
+    semanticType: "JOB_TITLE",
+  },
   {
     id: "education-start-date-context",
     pattern:

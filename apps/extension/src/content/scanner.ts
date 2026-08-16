@@ -873,6 +873,7 @@ const personalTypes = new Set<SemanticType>([
   "MIDDLE_NAME",
   "LAST_NAME",
   "PREFERRED_NAME",
+  "HONORIFIC",
   "CONTACT",
   "ADDRESS",
   "STREET_ADDRESS",

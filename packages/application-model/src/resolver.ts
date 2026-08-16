@@ -31,6 +31,7 @@ const semanticFactKey: Readonly<Partial<Record<SemanticType, string>>> = {
   MIDDLE_NAME: "middle_name",
   LAST_NAME: "last_name",
   PREFERRED_NAME: "preferred_name",
+  HONORIFIC: "honorific",
   PRONOUNS: "pronouns",
   CONTACT: "email",
   ADDRESS: "street_address",

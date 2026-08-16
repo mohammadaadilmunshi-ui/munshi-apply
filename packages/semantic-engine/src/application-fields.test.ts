@@ -2,6 +2,15 @@ import { describe, expect, it } from "vitest";
 import { classifyQuestion } from "./index";
 
 describe("expanded application field semantics", () => {
+  it("separates personal title from employment title using section context", () => {
+    expect(classifyQuestion("Title", "Basic Information").semanticType).toBe(
+      "HONORIFIC",
+    );
+    expect(classifyQuestion("Title", "Work History").semanticType).toBe(
+      "JOB_TITLE",
+    );
+  });
+
   it("classifies broad education-level prompts as degree fields", () => {
     expect(
       classifyQuestion("Highest level of education obtained or in progress")

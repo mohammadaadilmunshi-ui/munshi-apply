@@ -109,6 +109,7 @@ const profileFields: readonly ProfileField[] = [
   { section: "Identity", key: "middle_name", label: "Middle name", category: "IDENTITY", protected: true },
   { section: "Identity", key: "last_name", label: "Last name", category: "IDENTITY", protected: true },
   { section: "Identity", key: "preferred_name", label: "Preferred name", category: "IDENTITY", protected: false },
+  { section: "Identity", key: "honorific", label: "Title / honorific", category: "IDENTITY", protected: false },
   { section: "Identity", key: "pronouns", label: "Preferred pronouns", category: "IDENTITY", protected: true },
   { section: "Identity", key: "legal_name", label: "Full legal name", category: "IDENTITY", protected: true },
   { section: "Contact", key: "email", label: "Primary email", category: "CONTACT", protected: false, inputType: "email" },

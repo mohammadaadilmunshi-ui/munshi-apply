@@ -94,6 +94,7 @@ export const semanticTypes = [
   "MIDDLE_NAME",
   "LAST_NAME",
   "PREFERRED_NAME",
+  "HONORIFIC",
   "PRONOUNS",
   "CONTACT",
   "ADDRESS",

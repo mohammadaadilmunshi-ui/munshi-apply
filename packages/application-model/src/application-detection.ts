@@ -76,6 +76,7 @@ const candidateIdentitySemantics = new Set<SemanticType>([
   "MIDDLE_NAME",
   "LAST_NAME",
   "PREFERRED_NAME",
+  "HONORIFIC",
   "EMAIL",
   "PHONE",
   "STREET_ADDRESS",
