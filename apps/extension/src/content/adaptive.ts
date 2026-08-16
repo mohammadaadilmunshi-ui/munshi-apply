@@ -51,22 +51,8 @@ function normalizedToken(value: string): string {
     .trim();
 }
 
-const booleanYes = new Set([
-  "yes",
-  "true",
-  "1",
-  "checked",
-  "y",
-  "affirmative",
-]);
-const booleanNo = new Set([
-  "no",
-  "false",
-  "0",
-  "unchecked",
-  "n",
-  "negative",
-]);
+const booleanYes = new Set(["yes", "true", "1", "checked", "y", "affirmative"]);
+const booleanNo = new Set(["no", "false", "0", "unchecked", "n", "negative"]);
 
 const statePairs = [
   ["AL", "Alabama"],
@@ -287,14 +273,22 @@ const industryClasses: ReadonlyArray<readonly [string, readonly string[]]> = [
     "industry:financial-services",
     ["Financial Services", "Banking", "Finance", "Insurance"],
   ],
-  ["industry:healthcare", ["Healthcare", "Health Care", "Hospital & Health Care"]],
+  [
+    "industry:healthcare",
+    ["Healthcare", "Health Care", "Hospital & Health Care"],
+  ],
   ["industry:legal", ["Law / Legal", "Legal", "Law Practice"]],
   ["industry:media", ["Media", "Media & Entertainment"]],
   ["industry:public-sector", ["Public Sector", "Government"]],
   ["industry:retail", ["Retail", "Retail Trade"]],
   [
     "industry:social-sector",
-    ["Social Sector", "Social Sector (i.e., non-profit)", "Nonprofit", "Non-profit"],
+    [
+      "Social Sector",
+      "Social Sector (i.e., non-profit)",
+      "Nonprofit",
+      "Non-profit",
+    ],
   ],
   [
     "industry:technology",
@@ -397,7 +391,11 @@ function contextualKey(value: string, context: string): string | null {
     if (month) return month;
   }
 
-  if (/\b(degree|qualification|education level|level of education)\b/.test(normalizedContext)) {
+  if (
+    /\b(degree|qualification|education level|level of education)\b/.test(
+      normalizedContext,
+    )
+  ) {
     return degreeKey.get(token) ?? null;
   }
 
@@ -405,11 +403,17 @@ function contextualKey(value: string, context: string): string | null {
     return fieldStudyKey(token);
   }
 
-  if (/\b(company industry|employer industry|industry)\b/.test(normalizedContext)) {
+  if (
+    /\b(company industry|employer industry|industry)\b/.test(normalizedContext)
+  ) {
     return industryKey.get(token) ?? null;
   }
 
-  if (/\b(position function|job function|role function|functional area)\b/.test(normalizedContext)) {
+  if (
+    /\b(position function|job function|role function|functional area)\b/.test(
+      normalizedContext,
+    )
+  ) {
     return functionKey.get(token) ?? null;
   }
 
@@ -424,7 +428,10 @@ export function optionEquivalent(
   const left = normalizedText(candidate);
   const right = normalizedText(requested);
   if (!left || !right) return false;
-  if (left === right || normalizedToken(candidate) === normalizedToken(requested)) {
+  if (
+    left === right ||
+    normalizedToken(candidate) === normalizedToken(requested)
+  ) {
     return true;
   }
   const leftKey = contextualKey(candidate, context);
@@ -928,7 +935,9 @@ function dateTextRejected(element: HTMLInputElement): boolean {
   )
     return true;
   const message = normalizedText(validationMessageFor(element));
-  return /\b(not valid date|invalid date|valid date|date format)\b/.test(message);
+  return /\b(not valid date|invalid date|valid date|date format)\b/.test(
+    message,
+  );
 }
 
 export async function fillDateLikeTextInput(
@@ -946,7 +955,9 @@ export async function fillDateLikeTextInput(
   const requestedMonth = canonicalMonth(value);
   if (!requestedDate && !requestedMonth) return null;
   const monthOnly =
-    /\b(month|month\/year|month and year|start month|end month)\b/.test(context) ||
+    /\b(month|month\/year|month and year|start month|end month)\b/.test(
+      context,
+    ) ||
     /\bmm\s*[/.-]\s*yyyy\b|\byyyy\s*[/.-]\s*mm\b/.test(
       normalizedText(element.placeholder),
     );
@@ -1117,13 +1128,11 @@ export async function fillAriaBooleanControl(
 function ariaRadioCandidates(element: HTMLElement): HTMLElement[] {
   const group = element.closest("[role='radiogroup']");
   const root = group ?? element.getRootNode();
-  if (
-    !(
-      root instanceof Element ||
-      root instanceof Document ||
-      root instanceof ShadowRoot
-    )
-  ) {
+  if (!(
+    root instanceof Element ||
+    root instanceof Document ||
+    root instanceof ShadowRoot
+  )) {
     return [element];
   }
   return Array.from(root.querySelectorAll("[role='radio']")).filter(

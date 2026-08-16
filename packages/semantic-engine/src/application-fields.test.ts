@@ -19,9 +19,9 @@ describe("expanded application field semantics", () => {
   });
 
   it("uses section context to disambiguate identical Start date labels", () => {
-    expect(classifyQuestion("Start date", "Education History").semanticType).toBe(
-      "EDUCATION_START_DATE",
-    );
+    expect(
+      classifyQuestion("Start date", "Education History").semanticType,
+    ).toBe("EDUCATION_START_DATE");
     expect(classifyQuestion("Start date", "Work History").semanticType).toBe(
       "EMPLOYMENT_START_DATE",
     );

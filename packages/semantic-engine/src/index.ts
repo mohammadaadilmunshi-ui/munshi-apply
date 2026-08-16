@@ -160,8 +160,7 @@ const rules: readonly Rule[] = [
   },
   {
     id: "certification-expiration-date",
-    pattern:
-      /^(expiration|expiry|expires|certification expiration) date$/i,
+    pattern: /^(expiration|expiry|expires|certification expiration) date$/i,
     semanticType: "CERTIFICATION_EXPIRATION_DATE",
   },
   {
@@ -407,8 +406,7 @@ const rules: readonly Rule[] = [
   },
   {
     id: "experience",
-    pattern:
-      /\b(describe|summarize).{0,30}(relevant|your).{0,20}experience\b/i,
+    pattern: /\b(describe|summarize).{0,30}(relevant|your).{0,20}experience\b/i,
     semanticType: "RELEVANT_EXPERIENCE",
   },
 ];

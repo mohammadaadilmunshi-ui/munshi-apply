@@ -99,10 +99,8 @@ describe("repeatable application record resolution", () => {
       ).value,
     ).toBe("2024-07-01");
     expect(
-      resolveProfileAnswer(
-        question("EMPLOYMENT_END_DATE", "End date"),
-        profile,
-      ).value,
+      resolveProfileAnswer(question("EMPLOYMENT_END_DATE", "End date"), profile)
+        .value,
     ).toBe("2025-01-31");
   });
 

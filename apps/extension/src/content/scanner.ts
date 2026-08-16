@@ -315,7 +315,9 @@ function sectionContextFor(element: Element): string {
           ":scope > legend, :scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > [role='heading']",
         ),
       )
-        .filter((candidate) => candidate !== element && !candidate.contains(element))
+        .filter(
+          (candidate) => candidate !== element && !candidate.contains(element),
+        )
         .map(headingText)
         .find(Boolean);
       if (heading) return heading;
@@ -335,7 +337,7 @@ function sectionContextFor(element: Element): string {
         isVisible(candidate) &&
         Boolean(
           candidate.compareDocumentPosition(element) &
-            Node.DOCUMENT_POSITION_FOLLOWING,
+          Node.DOCUMENT_POSITION_FOLLOWING,
         ),
     )
     .map((candidate) => ({ candidate, text: headingText(candidate) }))

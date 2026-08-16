@@ -245,7 +245,9 @@ function recordForQuestion(
   return records[0];
 }
 
-function recordMappingForQuestion(question: Question): RecordFactMapping | undefined {
+function recordMappingForQuestion(
+  question: Question,
+): RecordFactMapping | undefined {
   const mapping = semanticRecordFact[question.semanticType];
   if (!mapping) return undefined;
   if (
@@ -534,16 +536,30 @@ function classifyIndustry(value: string): string | null {
   ) {
     return "Automotive & Mobility";
   }
-  if (/\b(deloitte|mckinsey|bain|bcg|boston consulting|accenture|kearney)\b/.test(text)) {
+  if (
+    /\b(deloitte|mckinsey|bain|bcg|boston consulting|accenture|kearney)\b/.test(
+      text,
+    )
+  ) {
     return "Consulting";
   }
-  if (/\b(jpmorgan|chase|goldman sachs|morgan stanley|bank of america|citibank|citi|wells fargo|capital one)\b/.test(text)) {
+  if (
+    /\b(jpmorgan|chase|goldman sachs|morgan stanley|bank of america|citibank|citi|wells fargo|capital one)\b/.test(
+      text,
+    )
+  ) {
     return "Financial Services";
   }
-  if (/\b(hospital|healthcare|health care|medical center|clinic)\b/.test(text)) {
+  if (
+    /\b(hospital|healthcare|health care|medical center|clinic)\b/.test(text)
+  ) {
     return "Healthcare";
   }
-  if (/\b(microsoft|google|alphabet|amazon web services|aws\b|oracle|salesforce|adobe|cloudflare|sap\b|software|technology)\b/.test(text)) {
+  if (
+    /\b(microsoft|google|alphabet|amazon web services|aws\b|oracle|salesforce|adobe|cloudflare|sap\b|software|technology)\b/.test(
+      text,
+    )
+  ) {
     return "Technology";
   }
   return null;
@@ -558,11 +574,16 @@ function classifyPositionFunction(value: string): string | null {
   ) {
     return "Human Capital";
   }
-  if (/\b(finance|financial|accounting|accountant|controller|audit)\b/.test(text)) {
+  if (
+    /\b(finance|financial|accounting|accountant|controller|audit)\b/.test(text)
+  ) {
     return "Finance/Accounting";
   }
-  if (/\b(legal|lawyer|attorney|paralegal|counsel)\b/.test(text)) return "Legal";
-  if (/\b(marketing|brand|communications?|public relations|\bpr\b)\b/.test(text)) {
+  if (/\b(legal|lawyer|attorney|paralegal|counsel)\b/.test(text))
+    return "Legal";
+  if (
+    /\b(marketing|brand|communications?|public relations|\bpr\b)\b/.test(text)
+  ) {
     return "Marketing";
   }
   if (/\b(product manager|product management)\b/.test(text)) {
@@ -575,10 +596,16 @@ function classifyPositionFunction(value: string): string | null {
     return "Supply Chain";
   }
   if (/\b(strategy|strategic planning)\b/.test(text)) return "Strategy";
-  if (/\b(research and development|research & development|\br&d\b)\b/.test(text)) {
+  if (
+    /\b(research and development|research & development|\br&d\b)\b/.test(text)
+  ) {
     return "Research & Development";
   }
-  if (/\b(information technology|\bit\b|software engineer|systems engineer|developer)\b/.test(text)) {
+  if (
+    /\b(information technology|\bit\b|software engineer|systems engineer|developer)\b/.test(
+      text,
+    )
+  ) {
     return "Information Technology";
   }
   if (/\b(operations?|operational)\b/.test(text)) return "Operations";
@@ -648,7 +675,10 @@ export function resolveProfileAnswer(
   const recruitmentResolution = resolveFirstRecruitmentRole(question, profile);
   if (recruitmentResolution) return recruitmentResolution;
 
-  const taxonomyResolution = resolveDerivedEmploymentTaxonomy(question, profile);
+  const taxonomyResolution = resolveDerivedEmploymentTaxonomy(
+    question,
+    profile,
+  );
   if (taxonomyResolution) return taxonomyResolution;
 
   const key = factKeyForSemanticType(question.semanticType);
