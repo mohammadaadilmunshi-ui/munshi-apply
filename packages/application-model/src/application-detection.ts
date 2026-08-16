@@ -2,6 +2,10 @@ import type { ApplicationPage, SemanticType } from "@munshi-apply/contracts";
 
 const explicitApplicationIntent =
   /(?:^|[\s/_?=&#.-])(apply|application|requisition)(?:$|[\s/_?=&#.-])/i;
+const candidateRegistrationIntent =
+  /(?:^|[\s/_?=&#.-])(register|registration|candidate)(?:$|[\s/_?=&#.-])/i;
+const careerOrJobContext =
+  /(?:^|[\s/_.-])(career|careers|job|jobs|recruiting|recruitment)(?:$|[\s/_.-])/i;
 const resumeLabel = /\b(resume|résumé|cv)\b/i;
 const applicationNavigation = /\b(apply|application)\b/i;
 
@@ -81,6 +85,18 @@ function hasExplicitIntent(page: ApplicationPage): boolean {
   }
 }
 
+function hasCandidateRegistrationIntent(page: ApplicationPage): boolean {
+  try {
+    const url = new URL(page.url);
+    const context = `${url.hostname} ${url.pathname} ${url.search} ${url.hash} ${page.title}`;
+    return (
+      candidateRegistrationIntent.test(context) && careerOrJobContext.test(context)
+    );
+  } catch {
+    return false;
+  }
+}
+
 function meaningfulQuestionCount(page: ApplicationPage): number {
   const questions = Array.isArray(page.questions) ? page.questions : [];
   return questions.filter((question) => question.semanticType !== "UNKNOWN")
@@ -98,6 +114,14 @@ function candidateIdentityQuestionCount(page: ApplicationPage): number {
   const questions = Array.isArray(page.questions) ? page.questions : [];
   return questions.filter((question) =>
     candidateIdentitySemantics.has(question.semanticType),
+  ).length;
+}
+
+function interactiveFieldCount(page: ApplicationPage): number {
+  const controls = Array.isArray(page.controls) ? page.controls : [];
+  return controls.filter(
+    (control) =>
+      control.kind !== "BUTTON" && control.visible && !control.disabled,
   ).length;
 }
 
@@ -137,8 +161,9 @@ function hasApplicationProgression(page: ApplicationPage): boolean {
 /**
  * Decide whether an observed browser page has enough deterministic evidence to
  * enter the application ledger. The scanner intentionally observes broadly;
- * cloud/application persistence must be much stricter. False negatives are
- * safer than turning arbitrary browsing history into job applications.
+ * persistence still rejects ordinary browsing, but a genuine careers/job
+ * registration flow no longer has to contain the literal word "application"
+ * on every step before MUNSHI can track it.
  */
 export function applicationPageEligibility(
   page: ApplicationPage,
@@ -146,9 +171,11 @@ export function applicationPageEligibility(
   const reasons: string[] = [];
   const knownAts = Boolean(page.atsFamily && page.atsFamily !== "GENERIC");
   const explicitIntent = hasExplicitIntent(page);
+  const candidateRegistration = hasCandidateRegistrationIntent(page);
   const meaningfulQuestions = meaningfulQuestionCount(page);
   const specificQuestions = applicationSpecificQuestionCount(page);
   const candidateIdentityQuestions = candidateIdentityQuestionCount(page);
+  const interactiveFields = interactiveFieldCount(page);
   const resumeControl = hasResumeControl(page);
   const applicationNav = hasApplicationNavigation(page);
   const applicationProgression = hasApplicationProgression(page);
@@ -156,7 +183,7 @@ export function applicationPageEligibility(
   if (page.finalSubmissionBoundary) {
     reasons.push("verified final-application boundary");
   }
-  if (resumeControl && (knownAts || explicitIntent)) {
+  if (resumeControl && (knownAts || explicitIntent || candidateRegistration)) {
     reasons.push("résumé control inside application context");
   }
   if (
@@ -171,7 +198,7 @@ export function applicationPageEligibility(
   }
   if (
     applicationNav &&
-    (knownAts || explicitIntent || specificQuestions > 0) &&
+    (knownAts || explicitIntent || candidateRegistration || specificQuestions > 0) &&
     meaningfulQuestions > 0
   ) {
     reasons.push("application-specific navigation with form questions");
@@ -183,6 +210,26 @@ export function applicationPageEligibility(
   ) {
     reasons.push(
       "explicit application context with multiple classified questions",
+    );
+  }
+  if (
+    page.applicationState !== "AUTH" &&
+    candidateRegistration &&
+    applicationProgression &&
+    interactiveFields >= 2
+  ) {
+    reasons.push(
+      "careers/job registration flow with progressive candidate fields",
+    );
+  }
+  if (
+    page.applicationState !== "AUTH" &&
+    applicationProgression &&
+    candidateIdentityQuestions >= 2 &&
+    (explicitIntent || candidateRegistration || specificQuestions > 0)
+  ) {
+    reasons.push(
+      "candidate identity form with verified application progression",
     );
   }
   if (knownAts && specificQuestions > 0) {

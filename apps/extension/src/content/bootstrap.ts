@@ -1,11 +1,14 @@
-import type {
-  ExtensionRequest,
-  FillInstruction,
-} from "@munshi-apply/contracts";
+import type { FillInstruction, ExtensionRequest } from "@munshi-apply/contracts";
 import { applyFillInstructions, assistFilePicker } from "./fill";
 import { refreshFileFingerprint } from "./adaptive";
 import { applyNavigationAction } from "./navigation";
 import { scanDocument, snapshotFingerprint } from "./scanner";
+import {
+  disposePreviousContentRuntime,
+  registerContentRuntime,
+} from "./runtime-lifecycle";
+
+disposePreviousContentRuntime();
 
 const SCAN_DEBOUNCE_MS = 150;
 const MAX_SCAN_DEBOUNCE_MS = 600;
@@ -13,8 +16,11 @@ let previousFingerprint = "";
 let pending: number | undefined;
 let debounceStartedAt = 0;
 let scanQueue: Promise<void> = Promise.resolve();
+let disposed = false;
+const listenerAbortController = new AbortController();
 
 async function publishSnapshot(force = false): Promise<void> {
+  if (disposed) return;
   const page = scanDocument();
   const fingerprint = snapshotFingerprint(page);
   if (!force && fingerprint === previousFingerprint) return;
@@ -29,6 +35,7 @@ async function publishSnapshot(force = false): Promise<void> {
 }
 
 function enqueueSnapshot(force: boolean): Promise<void> {
+  if (disposed) return Promise.resolve();
   scanQueue = scanQueue
     .catch(() => undefined)
     .then(() => publishSnapshot(force));
@@ -41,6 +48,7 @@ function clearPendingScan(): void {
 }
 
 function scheduleScan(force = false): void {
+  if (disposed) return;
   if (force) {
     clearPendingScan();
     debounceStartedAt = 0;
@@ -69,12 +77,18 @@ function scheduleScan(force = false): void {
   );
 }
 
-function wrapHistoryMethod(method: "pushState" | "replaceState"): void {
-  const original = history[method].bind(history);
-  history[method] = ((...args: Parameters<History["pushState"]>) => {
-    original(...args);
+function wrapHistoryMethod(method: "pushState" | "replaceState"): () => void {
+  const original = history[method];
+  const wrapped = ((...args: Parameters<History["pushState"]>) => {
+    original.apply(history, args);
     scheduleScan();
   }) as History["pushState"];
+  history[method] = wrapped;
+  return () => {
+    if (history[method] === wrapped) {
+      history[method] = original as History["pushState"];
+    }
+  };
 }
 
 const observer = new MutationObserver(() => scheduleScan());
@@ -105,7 +119,13 @@ observer.observe(document.documentElement, {
   ],
 });
 
-document.addEventListener("input", () => scheduleScan(), true);
+const listenerOptions = { signal: listenerAbortController.signal };
+const captureListenerOptions = {
+  capture: true,
+  signal: listenerAbortController.signal,
+};
+
+document.addEventListener("input", () => scheduleScan(), captureListenerOptions);
 document.addEventListener(
   "change",
   (event) => {
@@ -116,76 +136,96 @@ document.addEventListener(
     }
     scheduleScan();
   },
-  true,
+  captureListenerOptions,
 );
-document.addEventListener("invalid", () => scheduleScan(true), true);
-document.addEventListener("blur", () => scheduleScan(), true);
-window.addEventListener("pageshow", () => scheduleScan(true));
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") scheduleScan(true);
-});
-window.addEventListener("popstate", () => scheduleScan());
-window.addEventListener("hashchange", () => scheduleScan());
-wrapHistoryMethod("pushState");
-wrapHistoryMethod("replaceState");
+document.addEventListener("invalid", () => scheduleScan(true), captureListenerOptions);
+document.addEventListener("blur", () => scheduleScan(), captureListenerOptions);
+window.addEventListener("pageshow", () => scheduleScan(true), listenerOptions);
+document.addEventListener(
+  "visibilitychange",
+  () => {
+    if (document.visibilityState === "visible") scheduleScan(true);
+  },
+  listenerOptions,
+);
+window.addEventListener("popstate", () => scheduleScan(), listenerOptions);
+window.addEventListener("hashchange", () => scheduleScan(), listenerOptions);
+const restorePushState = wrapHistoryMethod("pushState");
+const restoreReplaceState = wrapHistoryMethod("replaceState");
 void enqueueSnapshot(false);
 
-chrome.runtime.onMessage.addListener(
-  (
-    message: {
-      type?: string;
-      instructions?: FillInstruction[];
-      controlId?: string;
-    },
-    _sender,
-    sendResponse,
-  ) => {
-    if (message.type === "CONTENT_PING") {
-      sendResponse({ ok: true });
-      return false;
-    }
-    if (message.type === "CONTENT_SCAN_NOW") {
-      void enqueueSnapshot(true)
-        .then(() => sendResponse({ ok: true }))
-        .catch((error: unknown) =>
-          sendResponse({
-            ok: false,
-            error: error instanceof Error ? error.message : "Scan failed",
-          }),
-        );
-      return true;
-    }
-    if (message.type === "APPLY_FILL_INSTRUCTIONS" && message.instructions) {
-      void applyFillInstructions(message.instructions)
-        .then((results) => {
-          sendResponse({ results });
-          scheduleScan(true);
-        })
-        .catch((error: unknown) => {
-          sendResponse({
-            results: message.instructions!.map((instruction) => ({
-              controlId: instruction.controlId,
-              status: "FAILED",
-              reason:
-                error instanceof Error
-                  ? error.message
-                  : "Guarded fill failed unexpectedly",
-            })),
-          });
-          scheduleScan(true);
-        });
-      return true;
-    }
-    if (message.type === "APPLY_FILE_PICKER_ASSIST" && message.controlId) {
-      sendResponse({ result: assistFilePicker(message.controlId) });
-      scheduleScan(true);
-      return false;
-    }
-    if (message.type === "APPLY_NAVIGATION_ACTION" && message.controlId) {
-      sendResponse({ result: applyNavigationAction(message.controlId) });
-      scheduleScan(true);
-      return false;
-    }
-    return false;
+const runtimeMessageListener = (
+  message: {
+    type?: string;
+    instructions?: FillInstruction[];
+    controlId?: string;
   },
-);
+  _sender: chrome.runtime.MessageSender,
+  sendResponse: (response?: unknown) => void,
+): boolean => {
+  if (disposed) return false;
+  if (message.type === "CONTENT_PING") {
+    sendResponse({ ok: true });
+    return false;
+  }
+  if (message.type === "CONTENT_SCAN_NOW") {
+    void enqueueSnapshot(true)
+      .then(() => sendResponse({ ok: true }))
+      .catch((error: unknown) =>
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : "Scan failed",
+        }),
+      );
+    return true;
+  }
+  if (message.type === "APPLY_FILL_INSTRUCTIONS" && message.instructions) {
+    void applyFillInstructions(message.instructions)
+      .then((results) => {
+        sendResponse({ results });
+        scheduleScan(true);
+      })
+      .catch((error: unknown) => {
+        sendResponse({
+          results: message.instructions!.map((instruction) => ({
+            controlId: instruction.controlId,
+            status: "FAILED",
+            reason:
+              error instanceof Error
+                ? error.message
+                : "Guarded fill failed unexpectedly",
+          })),
+        });
+        scheduleScan(true);
+      });
+    return true;
+  }
+  if (message.type === "APPLY_FILE_PICKER_ASSIST" && message.controlId) {
+    sendResponse({ result: assistFilePicker(message.controlId) });
+    scheduleScan(true);
+    return false;
+  }
+  if (message.type === "APPLY_NAVIGATION_ACTION" && message.controlId) {
+    sendResponse({ result: applyNavigationAction(message.controlId) });
+    scheduleScan(true);
+    return false;
+  }
+  return false;
+};
+
+chrome.runtime.onMessage.addListener(runtimeMessageListener);
+
+registerContentRuntime(() => {
+  disposed = true;
+  clearPendingScan();
+  debounceStartedAt = 0;
+  observer.disconnect();
+  listenerAbortController.abort();
+  restorePushState();
+  restoreReplaceState();
+  try {
+    chrome.runtime.onMessage.removeListener(runtimeMessageListener);
+  } catch {
+    // Reloaded extensions can invalidate the previous Chrome runtime object.
+  }
+});

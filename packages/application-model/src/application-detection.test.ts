@@ -177,6 +177,34 @@ describe("application page eligibility", () => {
     ).toBe(true);
   });
 
+  it("tracks Bain-style careers job registration flows without requiring the word application", () => {
+    const result = applicationPageEligibility(
+      page({
+        url: "https://careers.bain.com/jobs/Register?folderId=108235&source=Linked-In",
+        title: "Coordinator, Consultant Recruiting",
+        semantics: ["FIRST_NAME", "LAST_NAME", "PREFERRED_NAME"],
+        navigationLabel: "Next",
+      }),
+    );
+    expect(result.eligible).toBe(true);
+    expect(result.reasons).toContain(
+      "careers/job registration flow with progressive candidate fields",
+    );
+  });
+
+  it("does not loosen ordinary account registration pages into job applications", () => {
+    expect(
+      applicationPageEligibility(
+        page({
+          url: "https://accounts.example.test/Register",
+          title: "Create account",
+          semantics: ["FIRST_NAME", "LAST_NAME", "EMAIL"],
+          navigationLabel: "Next",
+        }),
+      ).eligible,
+    ).toBe(false);
+  });
+
   it("does not treat a résumé/profile editor as an application without progression", () => {
     expect(
       applicationPageEligibility(
