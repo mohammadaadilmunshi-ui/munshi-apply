@@ -91,7 +91,13 @@ describe("classifyQuestion", () => {
     );
     expect(classifyQuestion("Job title").semanticType).toBe("JOB_TITLE");
     expect(classifyQuestion("Company *").semanticType).toBe("EMPLOYER_NAME");
-    expect(classifyQuestion("Title *").semanticType).toBe("JOB_TITLE");
+    expect(classifyQuestion("Title *").semanticType).toBe("UNKNOWN");
+    expect(classifyQuestion("Title *", "Work History").semanticType).toBe(
+      "JOB_TITLE",
+    );
+    expect(classifyQuestion("Title *", "Basic Information").semanticType).toBe(
+      "HONORIFIC",
+    );
   });
 
   it("does not mistake a bare work-history Start date label for job availability", () => {
