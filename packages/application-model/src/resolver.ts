@@ -6,6 +6,7 @@ import type {
   TrustLevel,
 } from "@munshi-apply/contracts";
 import type {
+  ProfileRecord,
   ProfileRecordKind,
   ProfileSnapshot,
 } from "@munshi-apply/contracts/profile-vault";
@@ -61,16 +62,26 @@ const semanticFactKey: Readonly<Partial<Record<SemanticType, string>>> = {
   NOTICE_PERIOD: "notice_period",
   RELOCATION: "relocation_willingness",
   TRAVEL: "travel_willingness",
+  REMOTE: "preferred_work_mode",
+  HYBRID: "preferred_work_mode",
+  ONSITE: "preferred_work_mode",
   SKILLS: "skills",
   CERTIFICATIONS: "certifications",
   LANGUAGES: "languages",
+  SECURITY_CLEARANCE: "security_clearance",
   VETERAN_STATUS: "veteran_status",
+  PROTECTED_VETERAN_STATUS: "protected_veteran_status",
   DISABILITY_STATUS: "disability_status",
   GENDER: "gender",
   RACE_ETHNICITY: "race_ethnicity",
+  EEO_SELF_ID: "eeo_self_id",
   REFERRAL: "referral_source",
   PREVIOUS_EMPLOYEE: "previous_employee",
   PREVIOUS_APPLICATION: "previous_application",
+  CONFLICT_OF_INTEREST: "conflict_of_interest",
+  NON_COMPETE: "non_compete",
+  BACKGROUND_CHECK: "background_check",
+  DRUG_SCREENING: "drug_screening",
 };
 
 type RecordFactMapping = {
@@ -85,12 +96,24 @@ const semanticRecordFact: Readonly<
   SCHOOL_NAME: { kind: "EDUCATION", key: "school_name" },
   DEGREE: { kind: "EDUCATION", key: "degree" },
   FIELD_OF_STUDY: { kind: "EDUCATION", key: "field_of_study" },
+  EDUCATION_LOCATION: { kind: "EDUCATION", key: "education_location" },
+  EDUCATION_START_DATE: { kind: "EDUCATION", key: "education_start_date" },
   GRADUATION_DATE: { kind: "EDUCATION", key: "graduation_date" },
   GPA: { kind: "EDUCATION", key: "gpa" },
   EMPLOYMENT: { kind: "EMPLOYMENT", key: "employer_name" },
   EMPLOYER_NAME: { kind: "EMPLOYMENT", key: "employer_name" },
   JOB_TITLE: { kind: "EMPLOYMENT", key: "job_title" },
+  EMPLOYMENT_LOCATION: { kind: "EMPLOYMENT", key: "employment_location" },
+  EMPLOYMENT_START_DATE: {
+    kind: "EMPLOYMENT",
+    key: "employment_start_date",
+  },
+  EMPLOYMENT_END_DATE: { kind: "EMPLOYMENT", key: "employment_end_date" },
   EMPLOYMENT_DATES: { kind: "EMPLOYMENT", key: "employment_start_date" },
+  EMPLOYMENT_TYPE: { kind: "EMPLOYMENT", key: "employment_type" },
+  CURRENTLY_EMPLOYED: { kind: "EMPLOYMENT", key: "currently_employed" },
+  COMPANY_INDUSTRY: { kind: "EMPLOYMENT", key: "company_industry" },
+  POSITION_FUNCTION: { kind: "EMPLOYMENT", key: "position_function" },
   EMPLOYMENT_RESPONSIBILITIES: {
     kind: "EMPLOYMENT",
     key: "responsibilities",
@@ -98,7 +121,22 @@ const semanticRecordFact: Readonly<
   RELEVANT_EXPERIENCE: { kind: "EMPLOYMENT", key: "responsibilities" },
   CERTIFICATIONS: { kind: "CERTIFICATION", key: "certification_name" },
   LICENSES: { kind: "CERTIFICATION", key: "certification_name" },
+  CERTIFICATION_ISSUER: {
+    kind: "CERTIFICATION",
+    key: "issuing_organization",
+  },
+  CERTIFICATION_ISSUE_DATE: {
+    kind: "CERTIFICATION",
+    key: "certification_issue_date",
+  },
+  CERTIFICATION_EXPIRATION_DATE: {
+    kind: "CERTIFICATION",
+    key: "certification_expiration_date",
+  },
+  CREDENTIAL_ID: { kind: "CERTIFICATION", key: "credential_id" },
+  CREDENTIAL_URL: { kind: "CERTIFICATION", key: "credential_url" },
   LANGUAGES: { kind: "LANGUAGE", key: "language" },
+  LANGUAGE_PROFICIENCY: { kind: "LANGUAGE", key: "proficiency" },
 };
 
 const trustedFactLevels = new Set<TrustLevel>([
@@ -174,21 +212,62 @@ export function factKeyForSemanticType(
   return semanticFactKey[semanticType] ?? null;
 }
 
-function recordFactForSemanticType(
-  semanticType: SemanticType,
+function recordsOfKind(
   profile: MasterProfile | ProfileSnapshot,
-): ProfileFact | undefined {
-  const mapping = semanticRecordFact[semanticType];
-  if (!mapping || !("records" in profile)) return undefined;
+  kind: ProfileRecordKind,
+): ProfileRecord[] {
+  if (!("records" in profile)) return [];
   return [...profile.records]
-    .filter((record) => record.kind === mapping.kind)
+    .filter((record) => record.kind === kind)
     .sort(
       (left, right) =>
         left.sortOrder - right.sortOrder ||
         left.recordId.localeCompare(right.recordId),
+    );
+}
+
+function recordForQuestion(
+  profile: MasterProfile | ProfileSnapshot,
+  kind: ProfileRecordKind,
+  question: Question,
+): ProfileRecord | undefined {
+  const records = recordsOfKind(profile, kind);
+  if (records.length === 0) return undefined;
+  const requested = question.repeatIndex;
+  if (
+    requested !== null &&
+    requested !== undefined &&
+    requested >= 0 &&
+    requested < records.length
+  ) {
+    return records[requested];
+  }
+  return records[0];
+}
+
+function recordMappingForQuestion(question: Question): RecordFactMapping | undefined {
+  const mapping = semanticRecordFact[question.semanticType];
+  if (!mapping) return undefined;
+  if (
+    question.semanticType === "EMPLOYMENT_DATES" &&
+    /\b(end|ended|through|to)\s*(date|month|year)?\b/i.test(
+      `${question.contextText ?? ""} ${question.rawText}`,
     )
-    .map((record) => record.facts.find((fact) => fact.key === mapping.key))
-    .find((fact): fact is ProfileFact => fact !== undefined);
+  ) {
+    return { kind: "EMPLOYMENT", key: "employment_end_date" };
+  }
+  return mapping;
+}
+
+function recordFactForQuestion(
+  question: Question,
+  profile: MasterProfile | ProfileSnapshot,
+): ProfileFact | undefined {
+  const mapping = recordMappingForQuestion(question);
+  if (!mapping) return undefined;
+  return recordForQuestion(profile, mapping.kind, question)?.facts.find(
+    (fact) => fact.key === mapping.key,
+  );
 }
 
 function ownerDefaultReferral(question: Question): AnswerResolution | null {
@@ -427,6 +506,129 @@ function resolveFirstRecruitmentRole(
   };
 }
 
+function derivedRecordResolution(
+  question: Question,
+  fact: ProfileFact,
+  value: string,
+  reason: string,
+): AnswerResolution {
+  return {
+    state: "READY",
+    value,
+    sourceFactId: fact.factId,
+    sourceKey: fact.key,
+    trustLevel: fact.trustLevel,
+    sensitive: question.sensitive || fact.protected,
+    protected: fact.protected,
+    confidence: Math.min(question.confidence, 0.93),
+    reasons: [reason],
+  };
+}
+
+function classifyIndustry(value: string): string | null {
+  const text = value.toLocaleLowerCase("en-US");
+  if (
+    /\b(toyota|lexus|scion|honda|acura|ford|general motors|chevrolet|gm\b|bmw|mercedes|volkswagen|audi|hyundai|kia|nissan|infiniti|mazda|subaru|stellantis|chrysler|jeep|tesla|rivian|lucid)\b/.test(
+      text,
+    )
+  ) {
+    return "Automotive & Mobility";
+  }
+  if (/\b(deloitte|mckinsey|bain|bcg|boston consulting|accenture|kearney)\b/.test(text)) {
+    return "Consulting";
+  }
+  if (/\b(jpmorgan|chase|goldman sachs|morgan stanley|bank of america|citibank|citi|wells fargo|capital one)\b/.test(text)) {
+    return "Financial Services";
+  }
+  if (/\b(hospital|healthcare|health care|medical center|clinic)\b/.test(text)) {
+    return "Healthcare";
+  }
+  if (/\b(microsoft|google|alphabet|amazon web services|aws\b|oracle|salesforce|adobe|cloudflare|sap\b|software|technology)\b/.test(text)) {
+    return "Technology";
+  }
+  return null;
+}
+
+function classifyPositionFunction(value: string): string | null {
+  const text = value.toLocaleLowerCase("en-US");
+  if (
+    /\b(human resources?|hr\b|recruit(?:er|ing|ment)?|talent acquisition|people operations?|people analytics|human capital|total rewards|compensation)\b/.test(
+      text,
+    )
+  ) {
+    return "Human Capital";
+  }
+  if (/\b(finance|financial|accounting|accountant|controller|audit)\b/.test(text)) {
+    return "Finance/Accounting";
+  }
+  if (/\b(legal|lawyer|attorney|paralegal|counsel)\b/.test(text)) return "Legal";
+  if (/\b(marketing|brand|communications?|public relations|\bpr\b)\b/.test(text)) {
+    return "Marketing";
+  }
+  if (/\b(product manager|product management)\b/.test(text)) {
+    return "Product Management";
+  }
+  if (/\b(sales|account executive|business development)\b/.test(text)) {
+    return "Sales";
+  }
+  if (/\b(supply chain|logistics|procurement|purchasing)\b/.test(text)) {
+    return "Supply Chain";
+  }
+  if (/\b(strategy|strategic planning)\b/.test(text)) return "Strategy";
+  if (/\b(research and development|research & development|\br&d\b)\b/.test(text)) {
+    return "Research & Development";
+  }
+  if (/\b(information technology|\bit\b|software engineer|systems engineer|developer)\b/.test(text)) {
+    return "Information Technology";
+  }
+  if (/\b(operations?|operational)\b/.test(text)) return "Operations";
+  return null;
+}
+
+function resolveDerivedEmploymentTaxonomy(
+  question: Question,
+  profile: MasterProfile | ProfileSnapshot,
+): AnswerResolution | null {
+  if (
+    question.semanticType !== "COMPANY_INDUSTRY" &&
+    question.semanticType !== "POSITION_FUNCTION"
+  ) {
+    return null;
+  }
+  const record = recordForQuestion(profile, "EMPLOYMENT", question);
+  if (!record) return null;
+
+  const explicitKey =
+    question.semanticType === "COMPANY_INDUSTRY"
+      ? "company_industry"
+      : "position_function";
+  if (record.facts.some((fact) => fact.key === explicitKey)) return null;
+
+  const sourceKeys =
+    question.semanticType === "COMPANY_INDUSTRY"
+      ? ["employer_name"]
+      : ["job_title", "responsibilities", "achievements"];
+  for (const sourceKey of sourceKeys) {
+    const source = record.facts.find((fact) => fact.key === sourceKey);
+    if (!source || !factIsExplicitlyUsable(source)) continue;
+    const raw = stringifyFactValue(source.value).trim();
+    const value =
+      question.semanticType === "COMPANY_INDUSTRY"
+        ? classifyIndustry(raw)
+        : classifyPositionFunction(raw);
+    if (!value) continue;
+    return derivedRecordResolution(
+      question,
+      source,
+      value,
+      question.semanticType === "COMPANY_INDUSTRY"
+        ? "Industry category derived from authoritative employer identity using a high-confidence taxonomy rule"
+        : "Position function derived from authoritative role evidence using a high-confidence taxonomy rule",
+    );
+  }
+  return null;
+}
+
 export function resolveProfileAnswer(
   question: Question,
   profile: MasterProfile | ProfileSnapshot,
@@ -446,8 +648,11 @@ export function resolveProfileAnswer(
   const recruitmentResolution = resolveFirstRecruitmentRole(question, profile);
   if (recruitmentResolution) return recruitmentResolution;
 
+  const taxonomyResolution = resolveDerivedEmploymentTaxonomy(question, profile);
+  if (taxonomyResolution) return taxonomyResolution;
+
   const key = factKeyForSemanticType(question.semanticType);
-  const recordMapping = semanticRecordFact[question.semanticType];
+  const recordMapping = recordMappingForQuestion(question);
   if (!key && !recordMapping) {
     return unresolved(
       question,
@@ -457,7 +662,7 @@ export function resolveProfileAnswer(
   }
 
   const fact =
-    recordFactForSemanticType(question.semanticType, profile) ??
+    recordFactForQuestion(question, profile) ??
     profile.facts.find((candidate) => candidate.key === key);
   const sourceKey = fact?.key ?? recordMapping?.key ?? key;
   if (!fact) {
