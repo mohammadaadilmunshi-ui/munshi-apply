@@ -83,7 +83,7 @@ export async function ensureTabContentRuntime(
       files: [CONTENT_SCRIPT_FILE],
     });
     framesToScan = [...new Set([0, ...injectedFrameIds(injected)])];
-  } catch (error) {
+  } catch {
     if (!topFrameHealthy) {
       await api.executeScript({
         target: { tabId, frameIds: [0] },
