@@ -26,6 +26,11 @@ import {
   type ContentRuntimeApi,
 } from "./content-runtime";
 import {
+  augmentWithRememberedJobContext,
+  clearJobContext,
+  rememberJobContext,
+} from "./job-context";
+import {
   clearPagesForTab,
   deletePage,
   getPage,
@@ -360,6 +365,10 @@ if (chrome.webNavigation?.onCommitted) {
   });
 }
 
+chrome.tabs.onRemoved.addListener((tabId) => {
+  runSafely(clearJobContext(tabId));
+});
+
 if (!supportsSidePanel) {
   chrome.action.onClicked.addListener(() => {
     runSafely(
@@ -385,9 +394,8 @@ async function getActivePage(): Promise<unknown> {
   if (tab?.id === undefined || !/^https?:\/\//.test(tab.url ?? "")) return null;
   await ensureTabContentRuntime(contentRuntimeApi, tab.id);
   const activePage = await getMergedPageForTab(tab.id);
-  return activePage && isEligibleApplicationPage(activePage)
-    ? activePage
-    : null;
+  if (!activePage || !isEligibleApplicationPage(activePage)) return null;
+  return augmentWithRememberedJobContext(tab.id, activePage);
 }
 
 async function extensionHealth(): Promise<unknown> {
@@ -612,6 +620,7 @@ async function routeMessage(
             frameId,
           })),
         });
+        runSafely(rememberJobContext(tabId, page));
         const previousFrame = await getPage(tabId, frameId);
         if (previousFrame && previousFrame.documentId !== page.documentId) {
           if (frameId === 0) await clearPagesForTab(tabId);
@@ -621,10 +630,13 @@ async function routeMessage(
         const mergedPage = await getMergedPageForTab(tabId);
         const activePage = mergedPage ?? page;
         const eligible = isEligibleApplicationPage(activePage);
+        const contextualPage = eligible
+          ? await augmentWithRememberedJobContext(tabId, activePage)
+          : activePage;
         const connection = await getCloudConnection();
         if (eligible && connection && (await isCloudEncryptionReady())) {
           try {
-            await publishApplicationSnapshot(connection, activePage);
+            await publishApplicationSnapshot(connection, contextualPage);
           } catch {
             // Page discovery remains local-first and retries on the next scan.
           }
@@ -632,13 +644,13 @@ async function routeMessage(
         try {
           await chrome.runtime.sendMessage(
             eligible
-              ? { type: "ACTIVE_PAGE_UPDATED", payload: activePage }
+              ? { type: "ACTIVE_PAGE_UPDATED", payload: contextualPage }
               : { type: "ACTIVE_PAGE_CLEARED" },
           );
         } catch {
           // The side panel is optional and may be closed while the sensor is active.
         }
-        await autoPilotController.onPageSnapshot(tabId, activePage);
+        await autoPilotController.onPageSnapshot(tabId, contextualPage);
         return { ok: true };
       }
     }
