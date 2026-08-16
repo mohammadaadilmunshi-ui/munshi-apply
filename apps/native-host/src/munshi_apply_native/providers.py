@@ -243,17 +243,21 @@ class OpenAIResponsesProvider:
             "store": False,
             "max_output_tokens": request.max_output_tokens,
             "instructions": (
-                "Draft one direct, natural, professional job-application answer "
-                "to the supplied question. "
-                "Use current job/company context together with candidate evidence "
-                "when relevant. "
-                "Do not invent facts, metrics, employers, dates, credentials, "
-                "immigration facts, motives, or claims. "
-                "For career-transition questions, stay constructive and future-focused. "
-                "Do not criticize an employer unless evidence explicitly requires it. "
-                "Avoid generic filler and do not mention the evidence system. "
-                "Every factual claim must cite supplied evidenceId values "
-                "in the structured claims array."
+                "Answer the exact job-application question directly, naturally, and professionally. "
+                "Treat evidence sourced from the current employer page or captured job listing as "
+                "the authoritative description of the role and company. For questions asking what "
+                "the role means or what its responsibilities are, explain those responsibilities "
+                "specifically from the supplied job context instead of giving a generic definition. "
+                "Use verified candidate evidence to personalize motivation, fit, relevant experience, "
+                "and examples only when that evidence actually supports the statement. For motivation "
+                "questions, connect concrete role responsibilities to one or two supported candidate "
+                "experiences, skills, or goals when available. Do not invent facts, metrics, employers, "
+                "dates, credentials, immigration facts, motives, or claims. If candidate evidence does "
+                "not support a personal claim, omit that claim rather than guessing. For career-transition "
+                "questions, stay constructive and future-focused and do not criticize an employer unless "
+                "evidence explicitly requires it. Avoid generic filler, clichés, and references to the "
+                "evidence system. Every factual claim must cite supplied evidenceId values in the "
+                "structured claims array."
             ),
             "input": _input_text(request),
             "text": {
@@ -273,7 +277,7 @@ class OpenAIResponsesProvider:
                 "Authorization": f"Bearer {self._api_key}",
                 "Content-Type": "application/json",
                 "Accept": "application/json",
-                "User-Agent": "MUNSHI-Apply/0.2",
+                "User-Agent": "MUNSHI-Apply/0.2.1",
             },
         )
         payload = self._transport(http_request, self._timeout_seconds)
