@@ -1,0 +1,651 @@
+name: Live ATS deep repair
+
+on:
+  push:
+    branches: [feat/v3-foundation-alignment]
+    paths: [.github/workflows/live-ats-deep-repair.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - name: Apply live ATS deep repair
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str, label: str) -> None:
+              file = Path(path)
+              text = file.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly 1 match in {path}, found {count}")
+              file.write_text(text.replace(old, new, 1))
+
+          def insert_before_last(path: str, marker: str, addition: str, label: str) -> None:
+              file = Path(path)
+              text = file.read_text()
+              pos = text.rfind(marker)
+              if pos < 0:
+                  raise SystemExit(f"{label}: marker missing in {path}")
+              file.write_text(text[:pos] + addition + text[pos:])
+
+          # ApplicationPage carries bounded visible page context so AI can ground answers in the live JD.
+          replace_once(
+              "packages/contracts/src/index.ts",
+              '  title: z.string(),\n  observedAt: z.string().datetime(),',
+              '  title: z.string(),\n  pageContext: z.string().max(20_000).optional(),\n  observedAt: z.string().datetime(),',
+              "application page context contract",
+          )
+
+          # Semantic coverage for the exact live Levin wording and common variants.
+          replace_once(
+              "packages/semantic-engine/src/index.ts",
+              '  {\n    id: "graduation",\n    pattern: /\\b(graduation|graduate|completion) (date|year)\\b/i,\n    semanticType: "GRADUATION_DATE",\n  },',
+              '  {\n    id: "graduation",\n    pattern:\n      /(?:\\b(?:graduation|completion)\\s+(?:date|year)\\b|\\b(?:when|what)\\b.{0,60}\\bgraduat(?:e|ing|ed)\\b|\\bgraduat(?:e|ing|ed)\\b.{0,45}\\b(?:university|college|school)\\b)/i,\n    semanticType: "GRADUATION_DATE",\n  },',
+              "graduation semantic expansion",
+          )
+          replace_once(
+              "packages/semantic-engine/src/index.ts",
+              '  {\n    id: "career-motivation",\n    pattern:\n      /\\bwhat motivates you\\b.{0,100}\\b(?:career|recruitment|recruiting|sales|talent acquisition)\\b/i,\n    semanticType: "CAREER_GOALS",\n  },',
+              '  {\n    id: "career-motivation",\n    pattern:\n      /\\bwhat motivates you\\b.{0,100}\\b(?:career|recruitment|recruiting|sales|talent acquisition)\\b/i,\n    semanticType: "CAREER_GOALS",\n  },\n  {\n    id: "leave-current-employer",\n    pattern:\n      /\\b(?:why are you|why do you|what makes you)\\b.{0,70}\\b(?:leave|leaving|looking to leave|move on from|change from)\\b.{0,60}\\b(?:current )?(?:employer|company|role|job|position)\\b/i,\n    semanticType: "CAREER_GOALS",\n  },',
+              "leaving employer semantic",
+          )
+
+          # Scanner: recover the actual prompt instead of option/placeholder text and capture page JD context.
+          scanner = Path("apps/extension/src/content/scanner.ts")
+          text = scanner.read_text()
+          marker = 'function labelFor(element: Element): string {\n'
+          if text.count(marker) != 1:
+              raise SystemExit("scanner labelFor marker missing")
+          helpers = r'''function placeholderChoiceText(value: string): boolean {
+  const text = normalized(value).replace(/[–—-]+/g, " ").trim();
+  return /^(select|choose)( one| an option| option)?$/.test(text) || text === "please select";
+}
+
+function usablePromptText(value: string): string {
+  const text = compactText(value);
+  if (!text || placeholderChoiceText(text)) return "";
+  if (/^(yes|no|true|false)$/i.test(text)) return "";
+  return text.length <= 500 ? text : "";
+}
+
+function nearbyPromptText(element: Element): string {
+  if (element.id) {
+    const root = element.getRootNode();
+    const labels =
+      root instanceof Document || root instanceof ShadowRoot
+        ? Array.from(root.querySelectorAll(`label[for="${CSS.escape(element.id)}"]`))
+        : [];
+    const direct = labels.map((item) => usablePromptText(item.textContent ?? "")).find(Boolean);
+    if (direct) return direct;
+  }
+
+  const group = element.closest("fieldset, [role='radiogroup'], [role='group']");
+  if (group) {
+    const legend = usablePromptText(group.querySelector("legend")?.textContent ?? "");
+    if (legend) return legend;
+    const aria = usablePromptText(group.getAttribute("aria-label") ?? "");
+    if (aria) return aria;
+    const labelled = usablePromptText(labelledByText(group));
+    if (labelled) return labelled;
+  }
+
+  let current = element.parentElement;
+  for (let depth = 0; current && depth < 6; depth += 1, current = current.parentElement) {
+    const candidates = Array.from(
+      current.querySelectorAll(
+        ":scope > label, :scope > legend, :scope > p, :scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > [class*='label' i], :scope > [class*='question' i]",
+      ),
+    );
+    for (const candidate of candidates) {
+      if (candidate === element || candidate.contains(element)) continue;
+      const value = usablePromptText(candidate.textContent ?? "");
+      if (value) return value;
+    }
+    let previous = element instanceof HTMLElement ? element.previousElementSibling : null;
+    if (current !== element.parentElement) previous = current.previousElementSibling;
+    for (let hops = 0; previous && hops < 3; hops += 1, previous = previous.previousElementSibling) {
+      const value = usablePromptText(previous.textContent ?? "");
+      if (value) return value;
+    }
+  }
+  return "";
+}
+
+'''
+          text = text.replace(marker, helpers + marker, 1)
+          old_label = r'''function labelFor(element: Element): string {
+  const ariaLabel = compactText(element.getAttribute("aria-label"));
+  if (ariaLabel) return ariaLabel;
+
+  const labelled = labelledByText(element);
+  if (labelled) return labelled;
+
+  if (element instanceof HTMLInputElement) {
+    if (element.type === "radio") {
+      const legend = groupLegend(element);
+      if (legend) return legend;
+    }
+    const labels = inputLabel(element);
+    if (labels) return labels;
+    if (["button", "submit", "reset"].includes(element.type)) {
+      return compactText(element.value);
+    }
+  }
+
+  if (
+    element instanceof HTMLSelectElement ||
+    element instanceof HTMLTextAreaElement
+  ) {
+    const labels = Array.from(element.labels)
+      .map((label) => compactText(label.textContent))
+      .filter(Boolean)
+      .join(" ");
+    if (labels) return labels;
+  }
+
+  if (
+    element instanceof HTMLButtonElement ||
+    element.getAttribute("role") === "button"
+  ) {
+    const text = compactText(element.textContent);
+    if (text) return text;
+  }
+
+  const container = element.closest("fieldset, [role='group'], .form-group");
+  return compactText(container?.querySelector("legend")?.textContent);
+}
+'''
+          new_label = r'''function labelFor(element: Element): string {
+  const ariaLabel = usablePromptText(element.getAttribute("aria-label") ?? "");
+  if (ariaLabel) return ariaLabel;
+
+  const labelled = usablePromptText(labelledByText(element));
+  if (labelled) return labelled;
+
+  if (element instanceof HTMLInputElement) {
+    if (element.type === "radio") {
+      const legend = usablePromptText(groupLegend(element));
+      if (legend) return legend;
+      const prompt = nearbyPromptText(element);
+      if (prompt) return prompt;
+    }
+    const labels = usablePromptText(inputLabel(element));
+    if (labels) return labels;
+    const prompt = nearbyPromptText(element);
+    if (prompt) return prompt;
+    if (["button", "submit", "reset"].includes(element.type)) {
+      return compactText(element.value);
+    }
+  }
+
+  if (
+    element instanceof HTMLSelectElement ||
+    element instanceof HTMLTextAreaElement
+  ) {
+    const labels = Array.from(element.labels)
+      .map((label) => usablePromptText(label.textContent ?? ""))
+      .filter(Boolean)
+      .join(" ");
+    if (labels) return labels;
+    const prompt = nearbyPromptText(element);
+    if (prompt) return prompt;
+  }
+
+  if (isPopupChoiceControl(element) || isCustomDateControl(element)) {
+    const prompt = nearbyPromptText(element);
+    if (prompt) return prompt;
+  }
+
+  if (
+    element instanceof HTMLButtonElement ||
+    element.getAttribute("role") === "button"
+  ) {
+    const value = usablePromptText(element.textContent ?? "");
+    if (value) return value;
+  }
+
+  return nearbyPromptText(element);
+}
+'''
+          if text.count(old_label) != 1:
+              raise SystemExit("scanner original labelFor body not found")
+          text = text.replace(old_label, new_label, 1)
+          page_marker = '    title: document.title,\n    observedAt: new Date().toISOString(),'
+          if text.count(page_marker) != 1:
+              raise SystemExit("scanner page context marker not found")
+          text = text.replace(
+              page_marker,
+              '    title: document.title,\n    pageContext: compactText(document.body?.textContent).slice(0, 20_000),\n    observedAt: new Date().toISOString(),',
+              1,
+          )
+          scanner.write_text(text)
+
+          # Adaptive interaction: treat Levin as dynamic and support text/date widgets that require US display dates.
+          adaptive = Path("apps/extension/src/content/adaptive.ts")
+          text = adaptive.read_text()
+          text = text.replace(
+              '    hostname.includes("icims");',
+              '    hostname.includes("icims") ||\n    hostname.includes("levintalent");',
+              1,
+          )
+          old_natural_tail = '''  return canonicalDate(date);\n}\n\nfunction dateForCandidate(element: Element): string | null {'''
+          new_natural_tail = r'''  return canonicalDate(date);
+}
+
+function flexibleDate(value: string): string | null {
+  const direct = canonicalDate(value.trim());
+  if (direct) return direct;
+  const text = compactText(value);
+  const us = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  if (us) {
+    const date = `${us[3]}-${String(Number(us[1])).padStart(2, "0")}-${String(Number(us[2])).padStart(2, "0")}`;
+    const parsed = canonicalDate(date);
+    if (parsed) return parsed;
+  }
+  return naturalDate(text);
+}
+
+function setNativeTextValue(element: HTMLInputElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  if (setter) setter.call(element, value);
+  else element.value = value;
+}
+
+function dateDisplayCandidates(element: HTMLInputElement, canonical: string): string[] {
+  const [year, month, day] = canonical.split("-");
+  const placeholder = normalizedText(element.placeholder);
+  const us = `${month}/${day}/${year}`;
+  const eu = `${day}/${month}/${year}`;
+  const order = /dd.{0,3}mm.{0,3}yyyy/.test(placeholder)
+    ? [eu, canonical, us]
+    : [us, canonical, eu];
+  return [...new Set(order)];
+}
+
+function dateTextRejected(element: HTMLInputElement): boolean {
+  if (element.getAttribute("aria-invalid") === "true" || !element.validity.valid) return true;
+  const message = normalizedText(validationMessageFor(element));
+  return /\b(not valid date|invalid date|valid date|date format)\b/.test(message);
+}
+
+export async function fillDateLikeTextInput(
+  element: HTMLInputElement,
+  value: string,
+  timing: AdaptiveTiming,
+): Promise<boolean | null> {
+  if (element.type !== "text" && element.type !== "search") return null;
+  const requested = canonicalDate(value);
+  if (!requested) return null;
+  if (!/\b(date|day|month|year|graduat|available|start|end)\b/.test(normalizedText(interactionContext(element)))) {
+    return null;
+  }
+  const original = element.value;
+  for (const candidate of dateDisplayCandidates(element, requested)) {
+    element.focus();
+    setNativeTextValue(element, candidate);
+    element.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+    element.dispatchEvent(new Event("blur", { bubbles: true, composed: true }));
+    const verified = await waitForCondition(
+      () => flexibleDate(element.value) === requested && !dateTextRejected(element),
+      timing.verificationTimeoutMs,
+      timing.pollIntervalMs,
+    );
+    if (verified) return true;
+  }
+  setNativeTextValue(element, original);
+  element.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+  element.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+  return false;
+}
+
+function dateForCandidate(element: Element): string | null {'''
+          if old_natural_tail not in text:
+              raise SystemExit("adaptive naturalDate insertion marker missing")
+          text = text.replace(old_natural_tail, new_natural_tail, 1)
+          old_custom_start = '''  const originalValue =\n    element instanceof HTMLInputElement ? element.value : null;\n  element.focus();\n  element.click();'''
+          new_custom_start = '''  const originalValue =\n    element instanceof HTMLInputElement ? element.value : null;\n  if (element instanceof HTMLInputElement) {\n    const direct = await fillDateLikeTextInput(element, requested, timing);\n    if (direct === true) return true;\n  }\n  element.focus();\n  element.click();'''
+          if text.count(old_custom_start) != 1:
+              raise SystemExit("adaptive custom date start marker missing")
+          text = text.replace(old_custom_start, new_custom_start, 1)
+          text = text.replace(
+              '        if (naturalDate(element.value) === requested) return true;',
+              '        if (flexibleDate(element.value) === requested) return true;',
+              1,
+          )
+          adaptive.write_text(text)
+
+          # Fill runtime: controlled radios/checkboxes need real clicks; generic date-like text inputs use adaptive formatting;
+          # custom dropdowns may render exact options as portal menu items/list items rather than role=option.
+          fill = Path("apps/extension/src/content/fill.ts")
+          text = fill.read_text()
+          text = text.replace(
+              '  fillCustomDateControl,\n  interactionContext,',
+              '  fillCustomDateControl,\n  fillDateLikeTextInput,\n  interactionContext,',
+              1,
+          )
+          old_radio = '''  const match = candidates[0]!;\n  match.focus();\n  setNativeChecked(match, true);\n  dispatchValueEvents(match);\n  return match.checked;'''
+          new_radio = '''  const match = candidates[0]!;\n  match.focus();\n  match.click();\n  if (!match.checked) {\n    setNativeChecked(match, true);\n    dispatchValueEvents(match);\n  }\n  return match.checked;'''
+          if text.count(old_radio) != 1:
+              raise SystemExit("fill radio marker missing")
+          text = text.replace(old_radio, new_radio, 1)
+          old_checkbox = '''  const shouldCheck = truthy.includes(requested);\n  element.focus();\n  setNativeChecked(element, shouldCheck);\n  dispatchValueEvents(element);\n  return element.checked === shouldCheck;'''
+          new_checkbox = '''  const shouldCheck = truthy.includes(requested);\n  element.focus();\n  if (element.checked !== shouldCheck) element.click();\n  if (element.checked !== shouldCheck) {\n    setNativeChecked(element, shouldCheck);\n    dispatchValueEvents(element);\n  }\n  return element.checked === shouldCheck;'''
+          if text.count(old_checkbox) != 1:
+              raise SystemExit("fill checkbox marker missing")
+          text = text.replace(old_checkbox, new_checkbox, 1)
+          text = text.replace(
+              '    for (const option of Array.from(root.querySelectorAll("[role=\'option\']"))) {',
+              '    for (const option of Array.from(\n      root.querySelectorAll(\n        "[role=\'option\'], [role=\'menuitem\'], [data-value], [data-option-value], li",\n      ),\n    )) {',
+              1,
+          )
+          date_insert = '''    const strictTemporal = fillStrictTemporalInput(element, value);\n    if (strictTemporal !== null) return strictTemporal;'''
+          date_replace = '''    const dateLikeText = await fillDateLikeTextInput(element, value, options);\n    if (dateLikeText !== null) return dateLikeText;\n    const strictTemporal = fillStrictTemporalInput(element, value);\n    if (strictTemporal !== null) return strictTemporal;'''
+          if text.count(date_insert) != 1:
+              raise SystemExit("fill date-like insertion marker missing")
+          text = text.replace(date_insert, date_replace, 1)
+          fill.write_text(text)
+
+          # Resolver: owner default referral is always LinkedIn; explicitly saved salary acceptance can fill deterministically.
+          resolver = Path("packages/application-model/src/resolver.ts")
+          text = resolver.read_text()
+          insert_marker = 'function startAvailabilityDateFromQuestion(rawText: string): number | null {\n'
+          if text.count(insert_marker) != 1:
+              raise SystemExit("resolver insertion marker missing")
+          resolver_helpers = r'''function ownerDefaultReferral(question: Question): AnswerResolution | null {
+  if (question.semanticType !== "REFERRAL") return null;
+  return {
+    state: "READY",
+    value: "LinkedIn",
+    sourceFactId: null,
+    sourceKey: "owner_default_referral",
+    trustLevel: "USER_CONFIRMED",
+    sensitive: false,
+    protected: false,
+    confidence: Math.max(question.confidence, 0.99),
+    reasons: ["Owner default referral source is LinkedIn"],
+  };
+}
+
+function salaryBoolean(value: string): "Yes" | "No" | null {
+  const token = value.trim().toLocaleLowerCase("en-US");
+  if (/^(yes|true|accept|acceptable|accepted|ok|okay|willing|agree)$/.test(token)) return "Yes";
+  if (/^(no|false|decline|unacceptable|not acceptable|not willing|disagree)$/.test(token)) return "No";
+  return null;
+}
+
+function moneyValues(value: string): number[] {
+  const values: number[] = [];
+  for (const match of value.matchAll(/\$?\s*(\d{2,3}(?:,\d{3})+|\d{2,3}(?:\.\d+)?)\s*([kK])?/g)) {
+    const numeric = Number(match[1]!.replaceAll(",", ""));
+    if (!Number.isFinite(numeric)) continue;
+    const expanded = match[2] ? numeric * 1_000 : numeric;
+    if (expanded >= 10_000) values.push(expanded);
+  }
+  return values;
+}
+
+function resolveSalaryAcceptance(
+  question: Question,
+  profile: MasterProfile | ProfileSnapshot,
+): AnswerResolution | null {
+  if (question.semanticType !== "SALARY_EXPECTATION") return null;
+  if (!/\b(accept|happy|comfortable|agree|willing)\b/i.test(question.rawText)) return null;
+  const fact = profile.facts.find((candidate) => candidate.key === "salary_expectation");
+  if (!fact || !factIsExplicitlyUsable(fact)) return null;
+  const raw = stringifyFactValue(fact.value).trim();
+  const direct = salaryBoolean(raw);
+  if (direct) {
+    return {
+      state: "READY",
+      value: direct,
+      sourceFactId: fact.factId,
+      sourceKey: fact.key,
+      trustLevel: fact.trustLevel,
+      sensitive: true,
+      protected: fact.protected,
+      confidence: Math.min(question.confidence, 0.96),
+      reasons: ["Exact owner-confirmed salary acceptance preference"],
+    };
+  }
+  const offered = moneyValues(question.rawText)[0];
+  const expected = moneyValues(raw)[0];
+  if (offered && expected && offered >= expected) {
+    return {
+      state: "READY",
+      value: "Yes",
+      sourceFactId: fact.factId,
+      sourceKey: fact.key,
+      trustLevel: fact.trustLevel,
+      sensitive: true,
+      protected: fact.protected,
+      confidence: Math.min(question.confidence, 0.94),
+      reasons: ["Advertised base salary meets the owner-confirmed minimum salary preference"],
+    };
+  }
+  return null;
+}
+
+'''
+          text = text.replace(insert_marker, resolver_helpers + insert_marker, 1)
+          resolve_marker = '''export function resolveProfileAnswer(\n  question: Question,\n  profile: MasterProfile | ProfileSnapshot,\n): AnswerResolution {\n  const availabilityResolution = resolveBooleanAvailabilityDate('''
+          resolve_replacement = '''export function resolveProfileAnswer(\n  question: Question,\n  profile: MasterProfile | ProfileSnapshot,\n): AnswerResolution {\n  const referralResolution = ownerDefaultReferral(question);\n  if (referralResolution) return referralResolution;\n\n  const salaryResolution = resolveSalaryAcceptance(question, profile);\n  if (salaryResolution) return salaryResolution;\n\n  const availabilityResolution = resolveBooleanAvailabilityDate('''
+          if text.count(resolve_marker) != 1:
+              raise SystemExit("resolver entry marker missing")
+          text = text.replace(resolve_marker, resolve_replacement, 1)
+          resolver.write_text(text)
+
+          # Sidepanel manual answers are owner drafts: preserve them across high-frequency rescans.
+          app = Path("apps/extension/src/sidepanel/App.tsx")
+          text = app.read_text()
+          text = text.replace(
+              '  getProfileSyncStatus,\n  nativeRuntimeCompatibility,',
+              '  getProfileSyncStatus,\n  nativeRuntimeCompatibility,\n  requestFilePickerAssist,',
+              1,
+          )
+          text = text.replace(
+              'type AnswerDraft = {\n  value: string;\n  approved: boolean;\n  sensitive: boolean;\n  sourceDraftId?: string | null;\n};',
+              'export type AnswerDraft = {\n  value: string;\n  approved: boolean;\n  sensitive: boolean;\n  sourceDraftId?: string | null;\n  ownerEdited?: boolean;\n};',
+              1,
+          )
+          next_block = '''    setAnswers(next);\n    setSelectedResumeId((current) => {'''
+          merged_block = '''    setAnswers((current) =>\n      Object.fromEntries(\n        page.questions.map((question) => [\n          question.questionId,\n          current[question.questionId]?.ownerEdited\n            ? current[question.questionId]!\n            : next[question.questionId]!,\n        ]),\n      ),\n    );\n    setSelectedResumeId((current) => {'''
+          if text.count(next_block) != 1:
+              raise SystemExit("App setAnswers reset marker missing")
+          text = text.replace(next_block, merged_block, 1)
+          text = text.replace(
+              '                              sourceDraftId: null,\n                            },',
+              '                              sourceDraftId: null,\n                              ownerEdited: true,\n                            },',
+              1,
+          )
+          text = text.replace(
+              '                                approved: event.target.checked,\n                              },',
+              '                                approved: event.target.checked,\n                                ownerEdited: true,\n                              },',
+              1,
+          )
+          text = text.replace(
+              '                        nativeAvailable={native.status === "healthy"}\n                        onApproved=',
+              '                        nativeAvailable={native.status === "healthy"}\n                        pageContext={page.pageContext ?? ""}\n                        onApproved=',
+              1,
+          )
+          text = text.replace(
+              '                              sourceDraftId: draftId,\n                            },',
+              '                              sourceDraftId: draftId,\n                              ownerEdited: true,\n                            },',
+              1,
+          )
+          selected_resume_marker = '''  const selectedResume = useMemo(\n    () =>\n      cloudSnapshot?.resumes.find(\n        (resume) => resume.resumeId === selectedResumeId,\n      ) ?? null,\n    [cloudSnapshot, selectedResumeId],\n  );'''
+          selected_resume_replacement = selected_resume_marker + '''\n  const employerFileControl = useMemo(\n    () =>\n      page?.controls.find(\n        (control) =>\n          control.kind === "FILE" &&\n          /\\b(resume|résumé|cv)\\b/i.test(`${control.label} ${control.name}`),\n      ) ?? page?.controls.find((control) => control.kind === "FILE") ?? null,\n    [page],\n  );'''
+          if text.count(selected_resume_marker) != 1:
+              raise SystemExit("App selectedResume marker missing")
+          text = text.replace(selected_resume_marker, selected_resume_replacement, 1)
+          resume_ui_marker = '''                  <small>\n                    Browser security requires you to choose the file in the\n                    employer’s upload control manually.\n                  </small>\n                </label>'''
+          resume_ui_replacement = '''                  <small>\n                    Browser security requires you to choose the file in the\n                    employer’s upload control manually.\n                  </small>\n                  {employerFileControl && (\n                    <button\n                      className="quiet"\n                      type="button"\n                      onClick={() =>\n                        void requestFilePickerAssist(\n                          employerFileControl.frameId,\n                          employerFileControl.controlId,\n                        )\n                          .then(() =>\n                            setNotice(\n                              "Employer file handoff opened. Choose the matching résumé file; MUNSHI will verify it after selection.",\n                            ),\n                          )\n                          .catch((error: unknown) =>\n                            setNotice(\n                              error instanceof Error\n                                ? error.message\n                                : "Unable to open employer file handoff",\n                            ),\n                          )\n                      }\n                    >\n                      Open employer file picker\n                    </button>\n                  )}\n                </label>'''
+          if text.count(resume_ui_marker) != 1:
+              raise SystemExit("App resume UI marker missing")
+          text = text.replace(resume_ui_marker, resume_ui_replacement, 1)
+          app.write_text(text)
+
+          # AI request receives bounded current-page context.
+          native_ts = Path("apps/extension/src/messaging/native.ts")
+          text = native_ts.read_text()
+          text = text.replace(
+              '  semanticType: string;\n  correlationId: string;',
+              '  semanticType: string;\n  pageContext?: string;\n  correlationId: string;',
+              1,
+          )
+          native_ts.write_text(text)
+
+          draft = Path("apps/extension/src/sidepanel/AIDraftReview.tsx")
+          text = draft.read_text()
+          text = text.replace(
+              '  nativeAvailable,\n  onApproved,',
+              '  nativeAvailable,\n  pageContext,\n  onApproved,',
+              1,
+          )
+          text = text.replace(
+              '  nativeAvailable: boolean;\n  onApproved:',
+              '  nativeAvailable: boolean;\n  pageContext: string;\n  onApproved:',
+              1,
+          )
+          text = text.replace(
+              '      semanticType: question.semanticType,\n      correlationId:',
+              '      semanticType: question.semanticType,\n      pageContext,\n      correlationId:',
+              1,
+          )
+          text = text.replace(
+              '      pageId,\n      question.controlId,',
+              '      pageContext,\n      pageId,\n      question.controlId,',
+              1,
+          )
+          draft.write_text(text)
+
+          # Native AI: accept current page context and synthesize authoritative non-protected profile/resume-like evidence at runtime.
+          governance = Path("apps/native-host/src/munshi_apply_native/ai_governance.py")
+          text = governance.read_text()
+          text = text.replace('import re\nimport uuid', 'import hashlib\nimport re\nimport uuid', 1)
+          text = text.replace(
+              'from .providers import (\n',
+              'from .profile_store import ProfileStore\nfrom .providers import (\n',
+              1,
+          )
+          validate_marker = '''        max_output_tokens = payload.get("maxOutputTokens", 512)'''
+          validate_add = '''        page_context = payload.get("pageContext", "")\n        if page_context is not None and not isinstance(page_context, str):\n            raise ValueError("AI draft pageContext must be a string")\n        page_context = (page_context or "").strip()\n        if len(page_context) > 20_000:\n            raise ValueError("AI draft pageContext exceeds 20,000 characters")\n        max_output_tokens = payload.get("maxOutputTokens", 512)'''
+          if text.count(validate_marker) != 1:
+              raise SystemExit("AI governance validation marker missing")
+          text = text.replace(validate_marker, validate_add, 1)
+          text = text.replace(
+              '            "semanticType": semantic_type.strip(),\n            "correlationId": correlation_id.strip(),',
+              '            "semanticType": semantic_type.strip(),\n            "pageContext": page_context,\n            "correlationId": correlation_id.strip(),',
+              1,
+          )
+          context_sig = '''        semantic_type: str,\n        config: AIConfiguration,\n    ) -> tuple[tuple[ProviderContextItem, ...], set[str], dict[str, object]]:'''
+          context_sig_new = '''        semantic_type: str,\n        page_context: str,\n        config: AIConfiguration,\n    ) -> tuple[tuple[ProviderContextItem, ...], set[str], dict[str, object]]:'''
+          if text.count(context_sig) != 1:
+              raise SystemExit("AI governance context signature marker missing")
+          text = text.replace(context_sig, context_sig_new, 1)
+          candidates_marker = '''        candidates: list[tuple[float, dict[str, object]]] = []\n        blocked_protected = 0'''
+          candidates_new = '''        candidates: list[tuple[float, dict[str, object]]] = []\n        if page_context:\n            page_evidence_id = "job-context-" + hashlib.sha256(page_context.encode("utf-8")).hexdigest()[:20]\n            candidates.append(\n                (\n                    1.0,\n                    {\n                        "evidence_id": page_evidence_id,\n                        "kind": "JOB_REQUIREMENT",\n                        "text": page_context,\n                        "semantic_types": [semantic_type],\n                        "trust_level": "DOCUMENT_CONFIRMED",\n                        "protected": False,\n                        "source": "current-employer-page",\n                        "updated_at": self._now().isoformat(),\n                    },\n                )\n            )\n\n        profile = ProfileStore(self.database).latest()\n        if profile:\n            if config.allow_profile_evidence:\n                for fact in profile.get("facts", []):\n                    if fact.get("protected") or fact.get("trustLevel") not in _AUTHORITATIVE_TRUST:\n                        continue\n                    value = str(fact.get("value", "")).strip()\n                    if not value:\n                        continue\n                    candidates.append(\n                        (\n                            0.58,\n                            {\n                                "evidence_id": "profile-" + str(fact.get("factId", "unknown")),\n                                "kind": "PROFILE_FACT",\n                                "text": f"{fact.get('key', 'profile fact')}: {value}",\n                                "semantic_types": [],\n                                "trust_level": fact.get("trustLevel"),\n                                "protected": False,\n                                "source": "confirmed-profile",\n                                "updated_at": fact.get("updatedAt", self._now().isoformat()),\n                            },\n                        )\n                    )\n            for record in profile.get("records", []):\n                if record.get("kind") not in {"EMPLOYMENT", "PROJECT", "EDUCATION", "CERTIFICATION"}:\n                    continue\n                for fact in record.get("facts", []):\n                    if fact.get("protected") or fact.get("trustLevel") not in _AUTHORITATIVE_TRUST:\n                        continue\n                    key = str(fact.get("key", ""))\n                    if not config.allow_profile_evidence and not (\n                        config.allow_resume_evidence\n                        and key in {"responsibilities", "achievements", "project_summary", "project_technologies", "gpa"}\n                    ):\n                        continue\n                    value = str(fact.get("value", "")).strip()\n                    if not value:\n                        continue\n                    kind = "RESUME_BULLET" if key in {"responsibilities", "achievements", "project_summary", "project_technologies"} else str(record.get("kind"))\n                    candidates.append(\n                        (\n                            0.72 if kind == "RESUME_BULLET" else 0.62,\n                            {\n                                "evidence_id": "record-" + str(fact.get("factId", "unknown")),\n                                "kind": kind,\n                                "text": f"{record.get('label', record.get('kind', 'record'))}: {value}",\n                                "semantic_types": [],\n                                "trust_level": fact.get("trustLevel"),\n                                "protected": False,\n                                "source": "confirmed-profile-record",\n                                "updated_at": fact.get("updatedAt", self._now().isoformat()),\n                            },\n                        )\n                    )\n\n        blocked_protected = 0'''
+          if text.count(candidates_marker) != 1:
+              raise SystemExit("AI governance candidates marker missing")
+          text = text.replace(candidates_marker, candidates_new, 1)
+          # Existing graph candidate scoring discarded runtime candidate base scores; preserve a strong base for runtime/JD evidence.
+          score_marker = '''            score = (0.8 if semantic_match else 0.15 * overlap) + (\n                0.2 * overlap if semantic_match else 0\n            )\n            candidates.append((score, node))'''
+          # Only applies to graph nodes, so leave it; runtime candidates are already in candidates.
+          if text.count(score_marker) != 1:
+              raise SystemExit("AI governance graph score marker missing")
+          context_call = '''            semantic_type=semantic_type,\n            config=config,\n        )'''
+          context_call_new = '''            semantic_type=semantic_type,\n            page_context=str(request.get("pageContext", "")),\n            config=config,\n        )'''
+          if text.count(context_call) != 1:
+              raise SystemExit("AI governance context call marker missing")
+          text = text.replace(context_call, context_call_new, 1)
+          governance.write_text(text)
+
+          # Provider instructions: answer directly using live job context and candidate evidence while retaining claim grounding.
+          providers = Path("apps/native-host/src/munshi_apply_native/providers.py")
+          text = providers.read_text()
+          old_instructions = '''                "You draft one job-application answer using only the supplied evidence. "\n                "Do not add facts, metrics, employers, dates, credentials, immigration facts, "\n                "or claims that are not supported by the supplied evidence. Every factual claim "\n                "must cite one or more supplied evidenceId values in the structured claims array."'''
+          new_instructions = '''                "Draft one direct, natural, professional job-application answer to the supplied question. "\n                "Use the current job/company context together with the candidate evidence when relevant. "\n                "Do not invent facts, metrics, employers, dates, credentials, immigration facts, motives, or claims. "\n                "For career-transition questions, stay constructive and future-focused; do not criticize an employer unless evidence explicitly requires it. "\n                "Avoid generic filler and do not mention the evidence system. Every factual claim must cite one or more supplied evidenceId values in the structured claims array."'''
+          if text.count(old_instructions) != 1:
+              raise SystemExit("provider instructions marker missing")
+          providers.write_text(text.replace(old_instructions, new_instructions, 1))
+
+          # Semantic regressions.
+          semantic_test = Path("packages/semantic-engine/src/index.test.ts")
+          text = semantic_test.read_text()
+          addition = '''\n  it("recognizes live graduation and career-transition prompts", () => {\n    expect(\n      classifyQuestion("When did you / when do you Graduate from University? *"),\n    ).toMatchObject({ semanticType: "GRADUATION_DATE", matchedRule: "graduation" });\n    expect(\n      classifyQuestion("Why are you looking to leave your current employer? *"),\n    ).toMatchObject({ semanticType: "CAREER_GOALS", matchedRule: "leave-current-employer" });\n  });\n'''
+          pos = text.rfind('  it("leaves novel questions unknown')
+          if pos < 0:
+              raise SystemExit("semantic test insertion marker missing")
+          semantic_test.write_text(text[:pos] + addition + text[pos:])
+
+          # Resolver regressions.
+          resolver_test = Path("packages/application-model/src/resolver.test.ts")
+          text = resolver_test.read_text()
+          addition = '''\n  it("uses LinkedIn as the owner default referral source", () => {\n    const result = resolveProfileAnswer(\n      question({ semanticType: "REFERRAL", rawText: "How did you hear about us? *" }),\n      profile([]),\n    );\n    expect(result).toMatchObject({ state: "READY", value: "LinkedIn", sourceKey: "owner_default_referral" });\n  });\n\n  it("fills an explicitly saved salary acceptance answer", () => {\n    const result = resolveProfileAnswer(\n      question({\n        semanticType: "SALARY_EXPECTATION",\n        rawText: "Are you happy to accept an annual base salary of $55,000 + commission? *",\n        sensitive: true,\n        requiresReview: true,\n      }),\n      profile([\n        fact({\n          key: "salary_expectation",\n          value: "Yes",\n          category: "SAVED_ANSWER",\n          protected: false,\n        }),\n      ]),\n    );\n    expect(result).toMatchObject({ state: "READY", value: "Yes", sourceKey: "salary_expectation" });\n  });\n'''
+          pos = text.rfind('  it("does not promote generated facts')
+          if pos < 0:
+              raise SystemExit("resolver test insertion marker missing")
+          resolver_test.write_text(text[:pos] + addition + text[pos:])
+
+          # Scanner regressions model the live Levin custom dropdown and radio layouts.
+          scanner_test = Path("apps/extension/src/content/scanner.test.ts")
+          text = scanner_test.read_text()
+          addition = '''\n  it("recovers a nearby prompt for a custom select instead of its placeholder", () => {\n    document.body.innerHTML = `\n      <div class="question-field">\n        <label>How did you hear about us? *</label>\n        <div id="source" role="combobox" aria-haspopup="listbox" aria-label="-- Select one --"></div>\n      </div>\n    `;\n    const question = scanDocument().questions[0];\n    expect(question).toMatchObject({\n      rawText: "How did you hear about us? *",\n      semanticType: "REFERRAL",\n    });\n  });\n\n  it("uses the radio-group prompt instead of Yes or No option labels", () => {\n    document.body.innerHTML = `\n      <div class="question-field">\n        <p>Would you require any Visa sponsorship now or in the future? *</p>\n        <label><input type="radio" name="sponsor" value="Yes"> Yes</label>\n        <label><input type="radio" name="sponsor" value="No"> No</label>\n      </div>\n    `;\n    const result = scanDocument();\n    expect(result.questions).toHaveLength(1);\n    expect(result.questions[0]).toMatchObject({\n      rawText: "Would you require any Visa sponsorship now or in the future? *",\n      semanticType: "SPONSORSHIP_FUTURE",\n    });\n  });\n\n  it("captures bounded visible page text for AI job context", () => {\n    document.body.innerHTML = `<main><h1>Recruiter</h1><p>Build relationships with candidates and clients.</p><label for="why">Why this role?</label><textarea id="why"></textarea></main>`;\n    expect(scanDocument().pageContext).toContain("Build relationships with candidates and clients.");\n  });\n'''
+          pos = text.rfind('  it("does not treat an application-entry')
+          if pos < 0:
+              raise SystemExit("scanner test insertion marker missing")
+          scanner_test.write_text(text[:pos] + addition + text[pos:])
+
+          # Fill regressions: controlled radio clicks and Levin-style display date.
+          fill_test = Path("apps/extension/src/content/fill.test.ts")
+          text = fill_test.read_text()
+          addition = '''\n  it("fills a date-like text widget using the employer display format", async () => {\n    document.body.innerHTML = `\n      <label for="available">When are you available to start this role?</label>\n      <input id="available" type="text" placeholder="MM/DD/YYYY">\n    `;\n    const input = document.getElementById("available") as HTMLInputElement;\n    input.addEventListener("input", () => {\n      input.setAttribute("aria-invalid", input.value === "12/17/2026" ? "false" : "true");\n    });\n    const question = scanDocument().questions[0]!;\n    const result = await applyFillInstructions(\n      [{ controlId: question.controlId, frameId: 0, value: "2026-12-17", sensitive: false, approved: true }],\n      { verificationTimeoutMs: 80, pollIntervalMs: 5 },\n    );\n    expect(result[0]?.status).toBe("FILLED");\n    expect(input.value).toBe("12/17/2026");\n  });\n\n  it("uses a real click for a controlled native radio group", async () => {\n    document.body.innerHTML = `\n      <fieldset><legend>Are you happy to accept the salary?</legend>\n        <label><input type="radio" name="salary" value="Yes"> Yes</label>\n        <label><input type="radio" name="salary" value="No"> No</label>\n      </fieldset>\n    `;\n    const yes = document.querySelector<HTMLInputElement>('input[value="Yes"]')!;\n    let clicks = 0;\n    yes.addEventListener("click", () => { clicks += 1; });\n    const question = scanDocument().questions[0]!;\n    const result = await applyFillInstructions([{ controlId: question.controlId, frameId: 0, value: "Yes", sensitive: true, approved: true }]);\n    expect(result[0]?.status).toBe("FILLED");\n    expect(clicks).toBeGreaterThan(0);\n    expect(yes.checked).toBe(true);\n  });\n'''
+          pos = text.rfind('  it("reports only whether a file has been selected')
+          if pos < 0:
+              raise SystemExit("fill test insertion marker missing")
+          fill_test.write_text(text[:pos] + addition + text[pos:])
+
+          # Native AI regression: page + confirmed profile evidence works without pre-seeded graph nodes.
+          ai_test = Path("apps/native-host/tests/test_ai_governance.py")
+          text = ai_test.read_text()
+          addition = '''\n\ndef test_preview_uses_live_job_context_and_confirmed_profile_without_seeded_evidence(\n    tmp_path: Path, monkeypatch: pytest.MonkeyPatch\n) -> None:\n    database = create_database(tmp_path)\n    store = configured_store(tmp_path, monkeypatch)\n    from munshi_apply_native.profile_store import ProfileStore\n\n    ProfileStore(database).save(\n        {\n            "profileId": "profile-1",\n            "displayName": "Aadil",\n            "facts": [\n                {\n                    "factId": "skills-1",\n                    "key": "skills",\n                    "value": "recruiting operations, people analytics",\n                    "category": "SKILL",\n                    "trustLevel": "USER_CONFIRMED",\n                    "source": "profile",\n                    "confirmedAt": FIXED_NOW.isoformat(),\n                    "updatedAt": FIXED_NOW.isoformat(),\n                    "protected": False,\n                }\n            ],\n            "records": [],\n            "recordTombstones": [],\n            "createdAt": FIXED_NOW.isoformat(),\n            "updatedAt": FIXED_NOW.isoformat(),\n            "schemaVersion": 1,\n            "snapshotVersion": 1,\n        }\n    )\n    payload = request("CAREER_GOALS")\n    payload["question"] = "Why are you looking to leave your current employer?"\n    payload["pageContext"] = "Recruiter role focused on candidate relationships, business development, and career growth."\n    result = service(database, store).preview(payload)\n    assert result["state"] == "READY_FOR_PROVIDER"\n    assert len(result["evidenceIds"]) >= 2\n    assert any(item.startswith("job-context-") for item in result["evidenceIds"])\n    assert any(item.startswith("profile-") for item in result["evidenceIds"])\n'''
+          ai_test.write_text(text + addition)
+
+          PY
+      - name: Format repaired source
+        run: npm run format
+      - name: Verify extension and shared packages
+        run: npm run check
+      - name: Verify native companion
+        shell: bash
+        run: |
+          python -m pip install -e './apps/native-host[dev]'
+          python -m ruff check apps/native-host
+          python -m pytest apps/native-host
+      - name: Publish verified repair
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/live-ats-deep-repair.yml
+          git add apps packages
+          git commit -m "fix: harden live ATS controls and AI drafting"
+          git push origin HEAD:feat/v3-foundation-alignment
