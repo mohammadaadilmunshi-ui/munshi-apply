@@ -91,6 +91,17 @@ export async function readJobContext(
   return value as StoredJobContext;
 }
 
+export async function augmentWithRememberedJobContext(
+  tabId: number,
+  page: ApplicationPage,
+): Promise<ApplicationPage> {
+  try {
+    return mergeJobContext(page, await readJobContext(tabId));
+  } catch {
+    return page;
+  }
+}
+
 export async function clearJobContext(tabId: number): Promise<void> {
   await chrome.storage.session.remove(storageKey(tabId));
 }
