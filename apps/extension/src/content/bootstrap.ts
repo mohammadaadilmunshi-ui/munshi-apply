@@ -1,4 +1,7 @@
-import type { FillInstruction, ExtensionRequest } from "@munshi-apply/contracts";
+import type {
+  FillInstruction,
+  ExtensionRequest,
+} from "@munshi-apply/contracts";
 import { applyFillInstructions, assistFilePicker } from "./fill";
 import { refreshFileFingerprint } from "./adaptive";
 import { applyNavigationAction } from "./navigation";
@@ -125,7 +128,11 @@ const captureListenerOptions = {
   signal: listenerAbortController.signal,
 };
 
-document.addEventListener("input", () => scheduleScan(), captureListenerOptions);
+document.addEventListener(
+  "input",
+  () => scheduleScan(),
+  captureListenerOptions,
+);
 document.addEventListener(
   "change",
   (event) => {
@@ -138,7 +145,11 @@ document.addEventListener(
   },
   captureListenerOptions,
 );
-document.addEventListener("invalid", () => scheduleScan(true), captureListenerOptions);
+document.addEventListener(
+  "invalid",
+  () => scheduleScan(true),
+  captureListenerOptions,
+);
 document.addEventListener("blur", () => scheduleScan(), captureListenerOptions);
 window.addEventListener("pageshow", () => scheduleScan(true), listenerOptions);
 document.addEventListener(
