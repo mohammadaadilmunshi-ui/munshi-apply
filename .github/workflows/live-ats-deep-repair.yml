@@ -51,6 +51,22 @@ jobs:
           if text.count(old) != 1:
               raise SystemExit(f"calendar expectation normalization expected 1 match, found {text.count(old)}")
           test.write_text(text.replace(old, 'expect(input.value).toBe("12/17/2026");', 1))
+
+          governance = Path("apps/native-host/src/munshi_apply_native/ai_governance.py")
+          text = governance.read_text()
+          old = '                            "text": f"{record.get(\'label\', record.get(\'kind\', \'record\'))}: {value}",'
+          new = '''                            "text": (\n                                f"{record.get('label', record.get('kind', 'record'))}: "\n                                f"{value}"\n                            ),'''
+          if text.count(old) != 1:
+              raise SystemExit(f"governance record text normalization expected 1 match, found {text.count(old)}")
+          governance.write_text(text.replace(old, new, 1))
+
+          providers = Path("apps/native-host/src/munshi_apply_native/providers.py")
+          text = providers.read_text()
+          old = '''                "Draft one direct, natural, professional job-application answer to the supplied question. "\n                "Use the current job/company context together with the candidate evidence when relevant. "\n                "Do not invent facts, metrics, employers, dates, credentials, immigration facts, motives, or claims. "\n                "For career-transition questions, stay constructive and future-focused; do not criticize an employer unless evidence explicitly requires it. "\n                "Avoid generic filler and do not mention the evidence system. Every factual claim must cite one or more supplied evidenceId values in the structured claims array."'''
+          new = '''                "Draft one direct, natural, professional job-application answer "\n                "to the supplied question. "\n                "Use current job/company context together with candidate evidence "\n                "when relevant. "\n                "Do not invent facts, metrics, employers, dates, credentials, "\n                "immigration facts, motives, or claims. "\n                "For career-transition questions, stay constructive and future-focused. "\n                "Do not criticize an employer unless evidence explicitly requires it. "\n                "Avoid generic filler and do not mention the evidence system. "\n                "Every factual claim must cite supplied evidenceId values "\n                "in the structured claims array."'''
+          if text.count(old) != 1:
+              raise SystemExit(f"provider instruction normalization expected 1 match, found {text.count(old)}")
+          providers.write_text(text.replace(old, new, 1))
           PY
       - name: Format repaired source
         run: npm run format
