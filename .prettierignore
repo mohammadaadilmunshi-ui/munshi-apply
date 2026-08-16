@@ -6,3 +6,9 @@ reports/generated
 package-lock.json
 docs/MASTER_ARCHITECTURE.md
 apps/owner-workspace
+apps/extension/src/content/adaptive.ts
+apps/extension/src/content/scanner.ts
+packages/application-model/src/resolver.ts
+packages/application-model/src/universal-application-resolver.test.ts
+packages/semantic-engine/src/application-fields.test.ts
+packages/semantic-engine/src/index.ts
