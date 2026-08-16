@@ -293,6 +293,56 @@ function labelFor(element: Element): string {
   return nearbyPromptText(element);
 }
 
+function headingText(element: Element): string {
+  const value = usablePromptText(element.textContent ?? "");
+  return value.length <= 160 ? value : "";
+}
+
+function sectionContextFor(element: Element): string {
+  let current: Element | null = element.parentElement;
+  for (
+    let depth = 0;
+    current && depth < 8;
+    depth += 1, current = current.parentElement
+  ) {
+    if (
+      current.matches(
+        "fieldset, section, article, [role='group'], [class*='section' i], [class*='history' i], [data-section]",
+      )
+    ) {
+      const heading = Array.from(
+        current.querySelectorAll(
+          ":scope > legend, :scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > [role='heading']",
+        ),
+      )
+        .filter((candidate) => candidate !== element && !candidate.contains(element))
+        .map(headingText)
+        .find(Boolean);
+      if (heading) return heading;
+      const aria = usablePromptText(current.getAttribute("aria-label") ?? "");
+      if (aria) return aria;
+    }
+  }
+
+  const root = element.getRootNode();
+  if (!(root instanceof Document || root instanceof ShadowRoot)) return "";
+  const preceding = Array.from(
+    root.querySelectorAll("h1, h2, h3, h4, h5, h6, [role='heading'], legend"),
+  )
+    .filter(
+      (candidate) =>
+        candidate !== element &&
+        isVisible(candidate) &&
+        Boolean(
+          candidate.compareDocumentPosition(element) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+        ),
+    )
+    .map((candidate) => ({ candidate, text: headingText(candidate) }))
+    .filter((item) => Boolean(item.text));
+  return preceding.at(-1)?.text ?? "";
+}
+
 function kindFor(element: Element): ControlKind {
   if (isCustomDateControl(element) || isPopupChoiceControl(element)) {
     return "COMBOBOX";
@@ -313,14 +363,20 @@ function kindFor(element: Element): ControlKind {
       button: "BUTTON",
       checkbox: "CHECKBOX",
       date: "DATE",
+      "datetime-local": "DATE",
       email: "EMAIL",
       file: "FILE",
+      month: "DATE",
       number: "NUMBER",
       radio: "RADIO",
       reset: "BUTTON",
+      search: "TEXT",
       submit: "BUTTON",
       tel: "TEL",
       text: "TEXT",
+      time: "DATE",
+      url: "TEXT",
+      week: "DATE",
     };
     return mapping[element.type] ?? "UNKNOWN";
   }
@@ -464,6 +520,8 @@ function controlSatisfied(element: Element): boolean {
     return Boolean(compactText(element.value)) && element.validity.valid;
   }
   if (element instanceof HTMLSelectElement) {
+    const selected = element.selectedOptions[0];
+    if (!selected || placeholderChoiceText(selected.text)) return false;
     return Boolean(compactText(element.value)) && element.validity.valid;
   }
   if (element instanceof HTMLTextAreaElement) {
@@ -597,20 +655,37 @@ function scanControlEntries(): ControlEntry[] {
   return entries;
 }
 
-function createQuestion(control: Control): Question | null {
+function createQuestion(entry: ControlEntry): Question | null {
+  const { control, element } = entry;
   if (control.kind === "BUTTON") return null;
   const rawText =
     control.label || control.ariaLabel || control.placeholder || control.name;
   if (!rawText) return null;
-  const classification = classifyQuestion(rawText);
+  const sectionContext = sectionContextFor(element);
+  const contextText = compactText(
+    [
+      sectionContext,
+      element.getAttribute("name"),
+      element.id,
+      element.getAttribute("data-testid"),
+      element.getAttribute("data-automation-id"),
+      element.getAttribute("autocomplete"),
+    ]
+      .filter(Boolean)
+      .join(" "),
+  );
+  const classification = classifyQuestion(rawText, contextText);
   return {
     questionId: `q-${control.controlId}`,
     controlId: control.controlId,
     rawText,
+    contextText,
     semanticType: classification.semanticType,
     confidence: classification.confidence,
     sensitive: classification.sensitive,
     requiresReview: classification.requiresReview,
+    repeatGroupId: control.repeatGroupId,
+    repeatIndex: control.repeatIndex,
   };
 }
 
@@ -812,6 +887,8 @@ const educationTypes = new Set<SemanticType>([
   "SCHOOL_NAME",
   "DEGREE",
   "FIELD_OF_STUDY",
+  "EDUCATION_LOCATION",
+  "EDUCATION_START_DATE",
   "GRADUATION_DATE",
   "GPA",
 ]);
@@ -819,7 +896,14 @@ const experienceTypes = new Set<SemanticType>([
   "EMPLOYMENT",
   "EMPLOYER_NAME",
   "JOB_TITLE",
+  "EMPLOYMENT_LOCATION",
+  "EMPLOYMENT_START_DATE",
+  "EMPLOYMENT_END_DATE",
   "EMPLOYMENT_DATES",
+  "EMPLOYMENT_TYPE",
+  "CURRENTLY_EMPLOYED",
+  "COMPANY_INDUSTRY",
+  "POSITION_FUNCTION",
   "EMPLOYMENT_RESPONSIBILITIES",
 ]);
 const eeoTypes = new Set<SemanticType>([
@@ -895,17 +979,42 @@ function inferApplicationState(input: {
   return "QUESTIONS";
 }
 
+const repeatableSemanticTypes = new Set<SemanticType>([
+  ...educationTypes,
+  ...experienceTypes,
+  "CERTIFICATIONS",
+  "LICENSES",
+  "CERTIFICATION_ISSUER",
+  "CERTIFICATION_ISSUE_DATE",
+  "CERTIFICATION_EXPIRATION_DATE",
+  "CREDENTIAL_ID",
+  "CREDENTIAL_URL",
+  "LANGUAGES",
+  "LANGUAGE_PROFICIENCY",
+]);
+
 export function scanDocument(): ApplicationPage {
   const entries = scanControlEntries();
   const controls = entries.map((entry) => entry.control);
   const questions: Question[] = [];
   const seenQuestions = new Set<string>();
+  const occurrence = new Map<string, number>();
   for (const entry of entries) {
-    const question = createQuestion(entry.control);
+    const question = createQuestion(entry);
     if (!question) continue;
     const identity = questionIdentity(entry, question);
     if (seenQuestions.has(identity)) continue;
     seenQuestions.add(identity);
+
+    if (
+      repeatableSemanticTypes.has(question.semanticType) &&
+      (question.repeatIndex === null || question.repeatIndex === undefined)
+    ) {
+      const key = `${question.semanticType}|${normalized(question.contextText)}`;
+      const index = occurrence.get(key) ?? 0;
+      occurrence.set(key, index + 1);
+      question.repeatIndex = index;
+    }
     questions.push(question);
   }
   const url = new URL(window.location.href);
