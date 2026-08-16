@@ -6,7 +6,8 @@ const candidateRegistrationIntent =
   /(?:^|[\s/_?=&#.-])(register|registration|candidate)(?:$|[\s/_?=&#.-])/i;
 const careerOrJobContext =
   /(?:^|[\s/_.-])(career|careers|job|jobs|recruiting|recruitment)(?:$|[\s/_.-])/i;
-const strongJobRegistrationRoute = /\/(?:jobs?|careers?)\/register(?:\/|$)/i;
+const strongJobRegistrationRoute =
+  /\/(?:jobs?|careers?)\/register(?:\/|$)/i;
 const resumeLabel = /\b(resume|résumé|cv)\b/i;
 const applicationNavigation = /\b(apply|application)\b/i;
 
