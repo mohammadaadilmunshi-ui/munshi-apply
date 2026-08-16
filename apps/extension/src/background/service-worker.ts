@@ -114,6 +114,10 @@ let profileSyncConflict: {
   detectedAt: string;
 } | null = null;
 
+function runSafely(task: Promise<unknown>): void {
+  void task.catch(() => undefined);
+}
+
 function rememberProfileConflict(error: ProtectedProfileConflictError): void {
   profileSyncConflict = {
     keys: [...error.keys],
@@ -327,47 +331,54 @@ const autoPilotController = new AutoPilotController({
 });
 
 async function initialize(): Promise<void> {
-  if (supportsSidePanel) {
-    await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  if (!initialized) {
+    initialized = true;
+    try {
+      await autoPilotController.recover();
+    } catch {
+      // Runtime recovery is fail-closed inside the controller. The side panel can
+      // still open for diagnostics if native messaging is temporarily unavailable.
+    }
   }
-  if (initialized) return;
-  initialized = true;
-  try {
-    await autoPilotController.recover();
-  } catch {
-    // Runtime recovery is fail-closed inside the controller. The side panel can
-    // still open for diagnostics if native messaging is temporarily unavailable.
+  if (supportsSidePanel) {
+    try {
+      await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+    } catch {
+      // Side-panel behavior is non-critical. Avoid leaving an unhandled service-worker rejection.
+    }
   }
 }
 
 if (chrome.webNavigation?.onCommitted) {
   chrome.webNavigation.onCommitted.addListener((details) => {
     if (details.tabId < 0) return;
-    if (details.frameId === 0) {
-      void clearPagesForTab(details.tabId);
-    } else {
-      void deletePage(details.tabId, details.frameId);
-    }
+    runSafely(
+      details.frameId === 0
+        ? clearPagesForTab(details.tabId)
+        : deletePage(details.tabId, details.frameId),
+    );
   });
 }
 
 if (!supportsSidePanel) {
   chrome.action.onClicked.addListener(() => {
-    void chrome.tabs.create({
-      url: chrome.runtime.getURL("sidepanel/index.html"),
-    });
+    runSafely(
+      chrome.tabs.create({
+        url: chrome.runtime.getURL("sidepanel/index.html"),
+      }),
+    );
   });
 }
 
 chrome.runtime.onInstalled.addListener(() => {
-  void initialize();
+  runSafely(initialize());
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  void initialize();
+  runSafely(initialize());
 });
 
-void initialize();
+runSafely(initialize());
 
 async function getActivePage(): Promise<unknown> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -644,7 +655,15 @@ chrome.runtime.onMessage.addListener(
     sender,
     sendResponse: (response: ExtensionResponse) => void,
   ) => {
-    void routeMessage(request, sender).then(sendResponse);
+    runSafely(
+      routeMessage(request, sender).then((response) => {
+        try {
+          sendResponse(response);
+        } catch {
+          // The sender can disappear during navigation or extension reload.
+        }
+      }),
+    );
     return true;
   },
 );
