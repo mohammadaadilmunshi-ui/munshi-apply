@@ -43,7 +43,7 @@ describe("content runtime recovery", () => {
     );
   });
 
-  it("does not inject while the receiver is healthy", async () => {
+  it("does not inject while a direct receiver is healthy", async () => {
     const runtime = fakeApi();
     runtime.sendMessage.mockResolvedValue({ ok: true });
     await expect(
@@ -96,6 +96,24 @@ describe("content runtime recovery", () => {
     expect(runtime.executeScript).not.toHaveBeenCalled();
   });
 
+  it("refreshes every accessible frame even when the top receiver is already healthy", async () => {
+    const runtime = fakeApi();
+    runtime.sendMessage.mockResolvedValue({ ok: true });
+    runtime.executeScript.mockResolvedValue([{ frameId: 0 }, { frameId: 3 }]);
+
+    await ensureTabContentRuntime(runtime, 11);
+
+    expect(runtime.executeScript).toHaveBeenCalledWith({
+      target: { tabId: 11, allFrames: true },
+      files: ["content/bootstrap.js"],
+    });
+    expect(runtime.sendMessage).toHaveBeenCalledWith(
+      11,
+      { type: "CONTENT_SCAN_NOW" },
+      { frameId: 3 },
+    );
+  });
+
   it("restores accessible frames after extension reload and forces scans", async () => {
     const runtime = fakeApi();
     runtime.sendMessage
@@ -132,10 +150,11 @@ describe("content runtime recovery", () => {
         ok: false,
         error: "Background rejected page snapshot",
       });
+    runtime.executeScript.mockResolvedValue([{ frameId: 0 }]);
 
     await expect(ensureTabContentRuntime(runtime, 11)).rejects.toThrow(
       "Background rejected page snapshot",
     );
-    expect(runtime.executeScript).not.toHaveBeenCalled();
+    expect(runtime.executeScript).toHaveBeenCalledTimes(1);
   });
 });
