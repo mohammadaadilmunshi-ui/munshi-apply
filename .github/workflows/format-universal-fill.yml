@@ -1,0 +1,50 @@
+name: Format universal fill candidate
+
+on:
+  push:
+    branches:
+      - feat/v3-foundation-alignment
+    paths:
+      - .github/workflows/format-universal-fill.yml
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Format universal fill files
+        run: |
+          npx prettier --write --ignore-path /dev/null \
+            apps/extension/src/content/adaptive.ts \
+            apps/extension/src/content/scanner.ts \
+            packages/application-model/src/resolver.ts \
+            packages/application-model/src/universal-application-resolver.test.ts \
+            packages/semantic-engine/src/application-fields.test.ts \
+            packages/semantic-engine/src/index.ts
+      - name: Commit formatted files
+        run: |
+          if git diff --quiet; then
+            echo "No formatting changes required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            apps/extension/src/content/adaptive.ts \
+            apps/extension/src/content/scanner.ts \
+            packages/application-model/src/resolver.ts \
+            packages/application-model/src/universal-application-resolver.test.ts \
+            packages/semantic-engine/src/application-fields.test.ts \
+            packages/semantic-engine/src/index.ts
+          git commit -m "style: format universal fill candidate"
+          git push origin HEAD:feat/v3-foundation-alignment
