@@ -1,6 +1,7 @@
 import type {
-  FillInstruction,
   ExtensionRequest,
+  ExtensionResponse,
+  FillInstruction,
 } from "@munshi-apply/contracts";
 import { applyFillInstructions, assistFilePicker } from "./fill";
 import { refreshFileFingerprint } from "./adaptive";
@@ -22,19 +23,23 @@ let scanQueue: Promise<void> = Promise.resolve();
 let disposed = false;
 const listenerAbortController = new AbortController();
 
+function runSnapshot(force: boolean): void {
+  void enqueueSnapshot(force).catch(() => undefined);
+}
+
 async function publishSnapshot(force = false): Promise<void> {
   if (disposed) return;
   const page = scanDocument();
   const fingerprint = snapshotFingerprint(page);
   if (!force && fingerprint === previousFingerprint) return;
-  previousFingerprint = fingerprint;
   const request: ExtensionRequest = { type: "PAGE_SNAPSHOT", payload: page };
-  try {
-    await chrome.runtime.sendMessage(request);
-  } catch {
-    // The extension may be restarting. The background runtime re-establishes
-    // the sensor before the next page read or owner action.
+  const response = (await chrome.runtime.sendMessage(
+    request,
+  )) as ExtensionResponse | undefined;
+  if (!response?.ok) {
+    throw new Error(response?.error || "Background rejected page snapshot");
   }
+  previousFingerprint = fingerprint;
 }
 
 function enqueueSnapshot(force: boolean): Promise<void> {
@@ -55,7 +60,7 @@ function scheduleScan(force = false): void {
   if (force) {
     clearPendingScan();
     debounceStartedAt = 0;
-    void enqueueSnapshot(true);
+    runSnapshot(true);
     return;
   }
 
@@ -65,7 +70,7 @@ function scheduleScan(force = false): void {
   if (elapsed >= MAX_SCAN_DEBOUNCE_MS) {
     clearPendingScan();
     debounceStartedAt = 0;
-    void enqueueSnapshot(false);
+    runSnapshot(false);
     return;
   }
 
@@ -74,7 +79,7 @@ function scheduleScan(force = false): void {
     () => {
       pending = undefined;
       debounceStartedAt = 0;
-      void enqueueSnapshot(false);
+      runSnapshot(false);
     },
     Math.min(SCAN_DEBOUNCE_MS, MAX_SCAN_DEBOUNCE_MS - elapsed),
   );
@@ -86,41 +91,56 @@ function wrapHistoryMethod(method: "pushState" | "replaceState"): () => void {
     original.apply(history, args);
     scheduleScan();
   }) as History["pushState"];
-  history[method] = wrapped;
+  try {
+    history[method] = wrapped;
+  } catch {
+    return () => undefined;
+  }
   return () => {
-    if (history[method] === wrapped) {
-      history[method] = original as History["pushState"];
+    try {
+      if (history[method] === wrapped) {
+        history[method] = original as History["pushState"];
+      }
+    } catch {
+      // Some applications lock the History object after initialization.
     }
   };
 }
 
-const observer = new MutationObserver(() => scheduleScan());
-observer.observe(document.documentElement, {
-  attributes: true,
-  childList: true,
-  subtree: true,
-  attributeFilter: [
-    "aria-activedescendant",
-    "aria-busy",
-    "aria-checked",
-    "aria-expanded",
-    "aria-hidden",
-    "aria-invalid",
-    "aria-label",
-    "aria-labelledby",
-    "aria-required",
-    "aria-selected",
-    "aria-valuetext",
-    "class",
-    "data-value",
-    "disabled",
-    "hidden",
-    "name",
-    "placeholder",
-    "required",
-    "style",
-  ],
-});
+let observer: MutationObserver | null = null;
+try {
+  if (document.documentElement) {
+    observer = new MutationObserver(() => scheduleScan());
+    observer.observe(document.documentElement, {
+      attributes: true,
+      childList: true,
+      subtree: true,
+      attributeFilter: [
+        "aria-activedescendant",
+        "aria-busy",
+        "aria-checked",
+        "aria-expanded",
+        "aria-hidden",
+        "aria-invalid",
+        "aria-label",
+        "aria-labelledby",
+        "aria-required",
+        "aria-selected",
+        "aria-valuetext",
+        "class",
+        "data-value",
+        "disabled",
+        "hidden",
+        "name",
+        "placeholder",
+        "required",
+        "style",
+      ],
+    });
+  }
+} catch {
+  observer = null;
+}
 
 const listenerOptions = { signal: listenerAbortController.signal };
 const captureListenerOptions = {
@@ -138,7 +158,9 @@ document.addEventListener(
   (event) => {
     const target = event.target;
     if (target instanceof HTMLInputElement && target.type === "file") {
-      void refreshFileFingerprint(target).finally(() => scheduleScan(true));
+      void refreshFileFingerprint(target)
+        .catch(() => undefined)
+        .finally(() => scheduleScan(true));
       return;
     }
     scheduleScan();
@@ -163,7 +185,7 @@ window.addEventListener("popstate", () => scheduleScan(), listenerOptions);
 window.addEventListener("hashchange", () => scheduleScan(), listenerOptions);
 const restorePushState = wrapHistoryMethod("pushState");
 const restoreReplaceState = wrapHistoryMethod("replaceState");
-void enqueueSnapshot(false);
+runSnapshot(false);
 
 const runtimeMessageListener = (
   message: {
@@ -182,32 +204,42 @@ const runtimeMessageListener = (
   if (message.type === "CONTENT_SCAN_NOW") {
     void enqueueSnapshot(true)
       .then(() => sendResponse({ ok: true }))
-      .catch((error: unknown) =>
-        sendResponse({
-          ok: false,
-          error: error instanceof Error ? error.message : "Scan failed",
-        }),
-      );
+      .catch((error: unknown) => {
+        try {
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : "Scan failed",
+          });
+        } catch {
+          // The requesting port may have disappeared during an extension reload.
+        }
+      });
     return true;
   }
   if (message.type === "APPLY_FILL_INSTRUCTIONS" && message.instructions) {
     void applyFillInstructions(message.instructions)
       .then((results) => {
-        sendResponse({ results });
-        scheduleScan(true);
+        try {
+          sendResponse({ results });
+        } finally {
+          scheduleScan(true);
+        }
       })
       .catch((error: unknown) => {
-        sendResponse({
-          results: message.instructions!.map((instruction) => ({
-            controlId: instruction.controlId,
-            status: "FAILED",
-            reason:
-              error instanceof Error
-                ? error.message
-                : "Guarded fill failed unexpectedly",
-          })),
-        });
-        scheduleScan(true);
+        try {
+          sendResponse({
+            results: message.instructions!.map((instruction) => ({
+              controlId: instruction.controlId,
+              status: "FAILED",
+              reason:
+                error instanceof Error
+                  ? error.message
+                  : "Guarded fill failed unexpectedly",
+            })),
+          });
+        } finally {
+          scheduleScan(true);
+        }
       });
     return true;
   }
@@ -230,7 +262,7 @@ registerContentRuntime(() => {
   disposed = true;
   clearPendingScan();
   debounceStartedAt = 0;
-  observer.disconnect();
+  observer?.disconnect();
   listenerAbortController.abort();
   restorePushState();
   restoreReplaceState();
