@@ -68,24 +68,29 @@ export async function ensureTabContentRuntime(
   api: ContentRuntimeApi,
   tabId: number,
 ): Promise<void> {
-  let framesToScan = [0];
+  let topFrameHealthy = false;
   try {
     await api.sendMessage(tabId, { type: "CONTENT_PING" }, { frameId: 0 });
+    topFrameHealthy = true;
   } catch (error) {
     if (!isMissingContentReceiverError(error)) throw error;
-    try {
-      const injected = await api.executeScript({
-        target: { tabId, allFrames: true },
-        files: [CONTENT_SCRIPT_FILE],
-      });
-      framesToScan = [...new Set([0, ...injectedFrameIds(injected)])];
-    } catch {
+  }
+
+  let framesToScan = [0];
+  try {
+    const injected = await api.executeScript({
+      target: { tabId, allFrames: true },
+      files: [CONTENT_SCRIPT_FILE],
+    });
+    framesToScan = [...new Set([0, ...injectedFrameIds(injected)])];
+  } catch (error) {
+    if (!topFrameHealthy) {
       await api.executeScript({
         target: { tabId, frameIds: [0] },
         files: [CONTENT_SCRIPT_FILE],
       });
-      framesToScan = [0];
     }
+    framesToScan = [0];
   }
 
   for (const frameId of framesToScan) {
