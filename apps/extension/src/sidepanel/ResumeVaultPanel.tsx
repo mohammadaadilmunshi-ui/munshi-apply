@@ -39,10 +39,13 @@ export function ResumeVaultPanel({
   const resumes = useMemo(
     () =>
       [...(snapshot?.resumes ?? [])].sort((left, right) => {
-        const leftRank = left.source === "MASTER" ? 0 : left.source === "TAILORED" ? 1 : 2;
+        const leftRank =
+          left.source === "MASTER" ? 0 : left.source === "TAILORED" ? 1 : 2;
         const rightRank =
           right.source === "MASTER" ? 0 : right.source === "TAILORED" ? 1 : 2;
-        return leftRank - rightRank || right.addedAt.localeCompare(left.addedAt);
+        return (
+          leftRank - rightRank || right.addedAt.localeCompare(left.addedAt)
+        );
       }),
     [snapshot],
   );
@@ -124,10 +127,14 @@ export function ResumeVaultPanel({
     try {
       await deleteEncryptedResume(connection, resume);
       if (selectedResumeId === resume.resumeId) onSelected("");
-      onNotice(`${resume.name} removed from the active encrypted résumé vault.`);
+      onNotice(
+        `${resume.name} removed from the active encrypted résumé vault.`,
+      );
       await onRefresh();
     } catch (error) {
-      onNotice(error instanceof Error ? error.message : "Résumé removal failed");
+      onNotice(
+        error instanceof Error ? error.message : "Résumé removal failed",
+      );
       await onRefresh().catch(() => undefined);
     } finally {
       setBusy(false);
