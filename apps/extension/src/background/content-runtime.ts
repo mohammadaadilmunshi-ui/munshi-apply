@@ -12,9 +12,14 @@ export type ContentRuntimeApi = {
 
 const CONTENT_SCRIPT_FILE = "content/bootstrap.js";
 
+type ContentScanResponse = {
+  ok?: boolean;
+  error?: string;
+};
+
 export function isMissingContentReceiverError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error ?? "");
-  return /could not establish connection|receiving end does not exist/i.test(
+  return /could not establish connection|receiving end does not exist|message port closed|message channel closed|extension context invalidated|context invalidated/i.test(
     message,
   );
 }
@@ -28,6 +33,16 @@ function injectedFrameIds(result: unknown): number[] {
         : Number.NaN,
     )
     .filter((frameId) => Number.isSafeInteger(frameId) && frameId >= 0);
+}
+
+function assertSuccessfulScan(
+  response: ContentScanResponse | undefined,
+  frameId: number,
+): void {
+  if (response?.ok === true) return;
+  throw new Error(
+    response?.error || `Content scan did not complete for frame ${frameId}`,
+  );
 }
 
 export async function sendWithContentRecovery<T>(
@@ -75,9 +90,13 @@ export async function ensureTabContentRuntime(
 
   for (const frameId of framesToScan) {
     try {
-      await sendWithContentRecovery(api, tabId, frameId, {
-        type: "CONTENT_SCAN_NOW",
-      });
+      const response = await sendWithContentRecovery<ContentScanResponse>(
+        api,
+        tabId,
+        frameId,
+        { type: "CONTENT_SCAN_NOW" },
+      );
+      assertSuccessfulScan(response, frameId);
     } catch (error) {
       if (frameId === 0) throw error;
     }
