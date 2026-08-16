@@ -20,13 +20,21 @@ function fakeApi(): ContentRuntimeApi & {
 }
 
 describe("content runtime recovery", () => {
-  it("recognizes Chromium's missing receiver error", () => {
+  it("recognizes Chromium's missing and stale receiver errors", () => {
     expect(
       isMissingContentReceiverError(
         new Error(
           "Could not establish connection. Receiving end does not exist.",
         ),
       ),
+    ).toBe(true);
+    expect(
+      isMissingContentReceiverError(
+        new Error("The message port closed before a response was received."),
+      ),
+    ).toBe(true);
+    expect(
+      isMissingContentReceiverError(new Error("Extension context invalidated.")),
     ).toBe(true);
     expect(isMissingContentReceiverError(new Error("Permission denied"))).toBe(
       false,
@@ -60,6 +68,21 @@ describe("content runtime recovery", () => {
       target: { tabId: 7, frameIds: [2] },
       files: ["content/bootstrap.js"],
     });
+  });
+
+  it("recovers a stale message port the same way as a missing receiver", async () => {
+    const runtime = fakeApi();
+    runtime.sendMessage
+      .mockRejectedValueOnce(
+        new Error("The message port closed before a response was received."),
+      )
+      .mockResolvedValueOnce({ result: "recovered" });
+    runtime.executeScript.mockResolvedValue([{ frameId: 0 }]);
+
+    await expect(
+      sendWithContentRecovery(runtime, 7, 0, { type: "TEST" }),
+    ).resolves.toEqual({ result: "recovered" });
+    expect(runtime.executeScript).toHaveBeenCalledTimes(1);
   });
 
   it("does not hide unrelated messaging failures", async () => {
@@ -97,5 +120,20 @@ describe("content runtime recovery", () => {
       { type: "CONTENT_SCAN_NOW" },
       { frameId: 4 },
     );
+  });
+
+  it("surfaces a top-frame snapshot rejection instead of pretending the scan succeeded", async () => {
+    const runtime = fakeApi();
+    runtime.sendMessage
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({
+        ok: false,
+        error: "Background rejected page snapshot",
+      });
+
+    await expect(ensureTabContentRuntime(runtime, 11)).rejects.toThrow(
+      "Background rejected page snapshot",
+    );
+    expect(runtime.executeScript).not.toHaveBeenCalled();
   });
 });
