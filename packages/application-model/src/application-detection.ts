@@ -88,8 +88,7 @@ function hasExplicitIntent(page: ApplicationPage): boolean {
 function hasCandidateRegistrationIntent(page: ApplicationPage): boolean {
   try {
     const url = new URL(page.url);
-    const context =
-      `${url.hostname} ${url.pathname} ${url.search} ${url.hash} ${page.title}`;
+    const context = `${url.hostname} ${url.pathname} ${url.search} ${url.hash} ${page.title}`;
     return (
       candidateRegistrationIntent.test(context) &&
       careerOrJobContext.test(context)
