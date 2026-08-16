@@ -28,6 +28,10 @@ The scanner is now section-aware. It supplies nearby headings and group context 
 - certification issue date
 - certification expiration date
 
+### Ambiguous title labels
+
+A bare `Title` label is no longer globally assumed to mean job title. In Personal / Basic Information it resolves as an honorific, while in Work History it resolves as job title. A context-free bare `Title` remains unresolved rather than risking a cross-section misfill.
+
 ### Native month controls
 
 Profile dates are stored as full dates when available. Many ATS forms use native month inputs. A stored value such as `2024-07-01` is now deterministically normalized to `2024-07` when the employer control is `input[type=month]`.
@@ -44,7 +48,7 @@ Employment and education records are repeatable. Resolution now respects the rep
 
 ### Profile coverage gaps
 
-The extension Profile UI now exposes additional fields needed by real applications, including education start date, company industry, position function, employment type, current-employment state, security clearance, common disclosure answers, protected-veteran status, and EEO self-identification.
+The extension Profile UI now exposes additional fields needed by real applications, including honorific, education start date, company industry, position function, employment type, current-employment state, security clearance, common disclosure answers, protected-veteran status, and EEO self-identification.
 
 ## Universal capability matrix
 
@@ -70,6 +74,7 @@ The scanner observes broadly, while the application eligibility gate continues t
 
 Semantic coverage includes:
 
+- honorific / personal title
 - first name
 - middle name or initial
 - last name / surname
@@ -423,6 +428,7 @@ New tests cover:
 - Toyota employer identity to `Automotive & Mobility`
 - HR role evidence to `Human Capital`
 - education start-date resolution from an education record
+- Personal Information `Title` versus Work History `Title`
 
 Existing runtime, scanner, fill, semantic, resolver, AutoPilot, profile, security, migration, and owner-workspace tests continue to run alongside these additions.
 
@@ -431,6 +437,7 @@ Existing runtime, scanner, fill, semantic, resolver, AutoPilot, profile, securit
 The physical browser run should verify all of the following on a fresh 0.2.3 build:
 
 - application detected on the Bain registration flow
+- Personal Information Title uses the saved honorific rather than an employment job title
 - State / Province filled from the saved profile
 - highest education level filled
 - school filled when a matching employer option exists
