@@ -37,6 +37,7 @@ export type NativeRuntimeHealth = {
     profile_vault?: boolean;
     application_checkpoints?: boolean;
     interaction_learning?: boolean;
+    teach_munshi?: boolean;
     ai_settings?: boolean;
     ai_governance?: boolean;
     ai_draft_lifecycle?: boolean;
@@ -63,6 +64,8 @@ export function nativeRuntimeCompatibility(
   const requiredCapabilities = [
     "profile_vault",
     "application_checkpoints",
+    "interaction_learning",
+    "teach_munshi",
     "ai_settings",
     "ai_governance",
     "ai_draft_lifecycle",
@@ -126,6 +129,18 @@ type AutoPilotRuntimeRequest =
   | {
       type: "AUTOPILOT_ASSIST_FILE";
       payload: { frameId: number; controlId: string };
+    }
+  | {
+      type: "TEACH_BEGIN";
+      payload: { frameId: number; controlId: string; applicationId: string };
+    }
+  | {
+      type: "TEACH_FINISH";
+      payload: { frameId: number; sessionId: string; applicationId: string };
+    }
+  | {
+      type: "TEACH_CANCEL";
+      payload: { frameId: number; sessionId: string };
     };
 
 type ProfileSaveWaiter = {
@@ -272,4 +287,56 @@ export async function requestFilePickerAssist(
     type: "AUTOPILOT_ASSIST_FILE",
     payload: { frameId, controlId },
   })) as { status: string; reason: string };
+}
+
+export type TeachMunshiStart = {
+  sessionId: string;
+  controlId: string;
+  label: string;
+  componentFingerprint: string;
+  startedAt: string;
+};
+
+export type TeachMunshiResult = {
+  sessionId: string;
+  controlId: string;
+  changed: boolean;
+  reusable: boolean;
+  eventTypes: string[];
+  recipe: null | {
+    recipeId: string;
+    state: "SHADOW" | "PROMOTED" | "ROLLED_BACK";
+    version: number;
+    verifiedAttempts?: number;
+    verifiedSuccesses?: number;
+  };
+};
+
+export async function beginTeachMunshi(
+  frameId: number,
+  controlId: string,
+  applicationId: string,
+): Promise<TeachMunshiStart> {
+  return (await send({
+    type: "TEACH_BEGIN",
+    payload: { frameId, controlId, applicationId },
+  })) as TeachMunshiStart;
+}
+
+export async function finishTeachMunshi(
+  frameId: number,
+  sessionId: string,
+  applicationId: string,
+): Promise<TeachMunshiResult> {
+  return (await send({
+    type: "TEACH_FINISH",
+    payload: { frameId, sessionId, applicationId },
+  })) as TeachMunshiResult;
+}
+
+export async function cancelTeachMunshi(
+  frameId: number,
+  sessionId: string,
+): Promise<void> {
+  await send({ type: "TEACH_CANCEL", payload: { frameId, sessionId } });
 }

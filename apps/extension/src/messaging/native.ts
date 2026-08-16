@@ -694,7 +694,8 @@ export type InteractionRecipeStrategy =
   | "ARIA_RADIO"
   | "ARIA_BOOLEAN"
   | "CUSTOM_DATE"
-  | "CUSTOM_MULTI_SELECT";
+  | "CUSTOM_MULTI_SELECT"
+  | "TAUGHT_RECIPE";
 
 export type InteractionRecipeStatus = {
   recipeId: string;
@@ -721,6 +722,7 @@ function parseInteractionRecipe(
     "ARIA_BOOLEAN",
     "CUSTOM_DATE",
     "CUSTOM_MULTI_SELECT",
+    "TAUGHT_RECIPE",
   ]);
   const states = new Set(["SHADOW", "PROMOTED", "ROLLED_BACK"]);
   if (
@@ -788,7 +790,7 @@ export async function recordInteractionRecipeAttempt(input: {
   siteOrigin: string;
   componentFingerprint: string;
   semanticType: string;
-  strategy: InteractionRecipeStrategy;
+  strategy: Exclude<InteractionRecipeStrategy, "TAUGHT_RECIPE">;
   success: boolean;
   verified: boolean;
   failureReason: string | null;
@@ -800,5 +802,41 @@ export async function recordInteractionRecipeAttempt(input: {
     }),
   );
   if (!result) throw new Error("Native recipe attempt returned no recipe");
+  return result;
+}
+
+export async function teachInteractionRecipe(input: {
+  attemptId: string;
+  applicationId?: string | null;
+  siteOrigin: string;
+  componentFingerprint: string;
+  semanticType: string;
+  actions: unknown[];
+}): Promise<InteractionRecipeStatus> {
+  const result = parseInteractionRecipe(
+    await sendNative<unknown>({
+      type: "TEACH_INTERACTION_RECIPE",
+      payload: input,
+    }),
+  );
+  if (!result) throw new Error("Teach MUNSHI returned no candidate recipe");
+  return result;
+}
+
+export async function recordInteractionRecipeOutcome(input: {
+  recipeId: string;
+  attemptId: string;
+  applicationId?: string | null;
+  success: boolean;
+  verified: boolean;
+  failureReason: string | null;
+}): Promise<InteractionRecipeStatus> {
+  const result = parseInteractionRecipe(
+    await sendNative<unknown>({
+      type: "RECORD_INTERACTION_RECIPE_OUTCOME",
+      payload: input,
+    }),
+  );
+  if (!result) throw new Error("Recipe outcome returned no recipe");
   return result;
 }

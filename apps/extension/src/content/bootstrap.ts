@@ -3,7 +3,16 @@ import type {
   ExtensionResponse,
   FillInstruction,
 } from "@munshi-apply/contracts";
-import { applyFillInstructions, assistFilePicker } from "./fill";
+import {
+  applyFillInstructions,
+  assistFilePicker,
+  type PreferredInteractionRecipe,
+} from "./fill";
+import {
+  beginTeachInteraction,
+  cancelTeachInteraction,
+  finishTeachInteraction,
+} from "./teach";
 import { refreshFileFingerprint } from "./adaptive";
 import { applyNavigationAction } from "./navigation";
 import { scanDocument, snapshotFingerprint } from "./scanner";
@@ -190,7 +199,9 @@ const runtimeMessageListener = (
   message: {
     type?: string;
     instructions?: FillInstruction[];
+    preferredRecipes?: Record<string, PreferredInteractionRecipe>;
     controlId?: string;
+    sessionId?: string;
   },
   _sender: chrome.runtime.MessageSender,
   sendResponse: (response?: unknown) => void,
@@ -216,7 +227,11 @@ const runtimeMessageListener = (
     return true;
   }
   if (message.type === "APPLY_FILL_INSTRUCTIONS" && message.instructions) {
-    void applyFillInstructions(message.instructions)
+    void applyFillInstructions(
+      message.instructions,
+      {},
+      message.preferredRecipes ?? {},
+    )
       .then((results) => {
         try {
           sendResponse({ results });
@@ -241,6 +256,42 @@ const runtimeMessageListener = (
         }
       });
     return true;
+  }
+  if (
+    message.type === "TEACH_BEGIN" &&
+    message.controlId &&
+    message.sessionId
+  ) {
+    try {
+      sendResponse({
+        result: beginTeachInteraction(message.sessionId, message.controlId),
+      });
+    } catch (error) {
+      sendResponse({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Teach MUNSHI could not start",
+      });
+    }
+    return false;
+  }
+  if (message.type === "TEACH_FINISH" && message.sessionId) {
+    try {
+      sendResponse({ result: finishTeachInteraction(message.sessionId) });
+    } catch (error) {
+      sendResponse({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Teach MUNSHI could not finish",
+      });
+    }
+    return false;
+  }
+  if (message.type === "TEACH_CANCEL" && message.sessionId) {
+    sendResponse({ result: cancelTeachInteraction(message.sessionId) });
+    return false;
   }
   if (message.type === "APPLY_FILE_PICKER_ASSIST" && message.controlId) {
     sendResponse({ result: assistFilePicker(message.controlId) });

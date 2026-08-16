@@ -630,10 +630,15 @@ export class AutoPilotController {
       candidate.controlId,
     );
     if (result.status !== "NAVIGATED") {
-      return this.fail(
-        current,
-        `Navigation was not verified for dispatch: ${result.reason}`,
-      );
+      const recoverable = parseAutoPilotRuntimeState({
+        ...current,
+        actionDeadlineAt: null,
+        navigationDispatchAttempted: false,
+      });
+      return this.persistPause(recoverable, observationFor(recoverable, page), {
+        type: "REVIEW",
+        reason: `MUNSHI could not complete this forward navigation automatically: ${result.reason}. Click the employer's forward control once, then Resume AutoPilot. If the control itself is unusual, use Teach MUNSHI first.`,
+      });
     }
 
     current = parseAutoPilotRuntimeState({
@@ -725,9 +730,24 @@ export class AutoPilotController {
           results,
         );
         if (!verification.success) {
-          return this.fail(
-            armed,
-            `Fill verification failed: ${verification.reason}`,
+          const failedResult =
+            results.find(
+              (result) => result.controlId === fillInstruction.controlId,
+            ) ?? null;
+          const recoverable = parseAutoPilotRuntimeState({
+            ...armed,
+            dispatchingFillControlId: null,
+            pendingDraftUsageId: null,
+            actionDeadlineAt: null,
+            lastFillResult: failedResult,
+          });
+          return this.persistPause(
+            recoverable,
+            observationFor(recoverable, page),
+            {
+              type: "REVIEW",
+              reason: `MUNSHI could not verify this control: ${verification.reason}. You can correct it manually or use Teach MUNSHI, then Resume AutoPilot without losing the application.`,
+            },
           );
         }
 
@@ -1202,9 +1222,20 @@ export class AutoPilotController {
     );
 
     if (runtime.dispatchingFillControlId) {
-      runtime = await this.fail(
-        runtime,
-        "A field fill was interrupted before verification; owner review is required",
+      const interruptedControlId = runtime.dispatchingFillControlId;
+      const recoverable = parseAutoPilotRuntimeState({
+        ...runtime,
+        dispatchingFillControlId: null,
+        pendingDraftUsageId: null,
+        actionDeadlineAt: null,
+      });
+      runtime = await this.persistPause(
+        recoverable,
+        observationFor(recoverable, page),
+        {
+          type: "REVIEW",
+          reason: `The browser interrupted ${interruptedControlId} before verification. Check that field once, then Resume AutoPilot; progress and the durable checkpoint were preserved.`,
+        },
       );
       return this.statusFromRuntime(runtime);
     }
@@ -1372,10 +1403,28 @@ export class AutoPilotController {
       if (Date.parse(this.now()) < Date.parse(runtime.actionDeadlineAt)) {
         return this.statusFromRuntime(runtime);
       }
-      runtime = await this.fail(
-        runtime,
-        "AutoPilot action timed out before verification",
-      );
+      const page = await this.dependencies.getPage(runtime.tabId);
+      if (page) {
+        runtime = await this.persistPause(
+          parseAutoPilotRuntimeState({
+            ...runtime,
+            dispatchingFillControlId: null,
+            actionDeadlineAt: null,
+            navigationDispatchAttempted: false,
+          }),
+          observationFor(runtime, page),
+          {
+            type: "REVIEW",
+            reason:
+              "The employer page did not reach a verifiable state before the timeout. Check the active control, use Teach MUNSHI if needed, then Resume AutoPilot.",
+          },
+        );
+      } else {
+        runtime = await this.fail(
+          runtime,
+          "AutoPilot timed out and the application page is unavailable",
+        );
+      }
       return this.statusFromRuntime(runtime);
     });
   }

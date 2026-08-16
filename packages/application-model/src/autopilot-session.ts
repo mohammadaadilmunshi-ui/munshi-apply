@@ -331,18 +331,10 @@ function withObservation(
       updatedAt: at,
     };
   }
-  if (observation.validationErrorCount > 0) {
-    return {
-      ...session,
-      status: "PAUSED_REVIEW",
-      securityCheckpoint: null,
-      pauseReason: "Current page contains validation errors",
-      lastApplicationState: observation.state,
-      lastPageId: observation.pageId,
-      lastPageFingerprint: observation.pageFingerprint,
-      updatedAt: at,
-    };
-  }
+  // Application forms commonly expose required-field validation while they are
+  // still incomplete. Do not treat those messages as a session-level stop before
+  // AutoPilot has had a chance to fill the approved fields. The step planner checks
+  // validation again after safe fill work is exhausted and before navigation.
   return {
     ...session,
     status,

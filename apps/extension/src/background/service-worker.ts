@@ -44,6 +44,8 @@ import {
   getPromotedInteractionRecipe,
   markAIDraftUsed,
   recordInteractionRecipeAttempt,
+  recordInteractionRecipeOutcome,
+  teachInteractionRecipe,
   type InteractionRecipeStrategy,
   saveNativeApplicationCheckpoint,
 } from "../messaging/native";
@@ -108,6 +110,18 @@ type AutoPilotRuntimeRequest =
   | {
       type: "AUTOPILOT_ASSIST_FILE";
       payload: { frameId: number; controlId: string };
+    }
+  | {
+      type: "TEACH_BEGIN";
+      payload: { frameId: number; controlId: string; applicationId: string };
+    }
+  | {
+      type: "TEACH_FINISH";
+      payload: { frameId: number; sessionId: string; applicationId: string };
+    }
+  | {
+      type: "TEACH_CANCEL";
+      payload: { frameId: number; sessionId: string };
     };
 
 type RuntimeRequest = ExtensionRequest | AutoPilotRuntimeRequest;
@@ -208,17 +222,60 @@ async function sendFillInstruction(
     }
   }
 
+  const preferredRecipes =
+    promotedRecipe?.strategy === "TAUGHT_RECIPE" &&
+    promotedRecipe.state !== "ROLLED_BACK"
+      ? {
+          [instruction.controlId]: {
+            recipeId: promotedRecipe.recipeId,
+            strategy: "TAUGHT_RECIPE" as const,
+            actions: promotedRecipe.actions,
+            state: promotedRecipe.state,
+            version: promotedRecipe.version,
+          },
+        }
+      : {};
   const response = await sendWithContentRecovery<
     { results?: FillResult[] } | undefined
   >(contentRuntimeApi, tabId, instruction.frameId, {
     type: "APPLY_FILL_INSTRUCTIONS",
     instructions: [instruction],
+    preferredRecipes,
   });
   const results = response?.results ?? [];
 
   return Promise.all(
     results.map(async (result) => {
-      const strategy = result.strategy as InteractionRecipeStrategy | undefined;
+      if (
+        promotedRecipe &&
+        result.recipeAttempted &&
+        result.recipeId === promotedRecipe.recipeId
+      ) {
+        try {
+          const learned = await recordInteractionRecipeOutcome({
+            recipeId: promotedRecipe.recipeId,
+            attemptId: crypto.randomUUID(),
+            applicationId: null,
+            success:
+              result.status === "FILLED" && result.recipeSucceeded === true,
+            verified: true,
+            failureReason:
+              result.status === "FILLED" && result.recipeSucceeded === true
+                ? null
+                : result.reason,
+          });
+          return {
+            ...result,
+            recipeId: learned.recipeId,
+            recipeAttempted: true,
+            recipeSucceeded: result.recipeSucceeded === true,
+          };
+        } catch {
+          return result;
+        }
+      }
+      const strategy = result.strategy as
+        Exclude<InteractionRecipeStrategy, "TAUGHT_RECIPE"> | undefined;
       if (
         !siteOrigin ||
         !control?.componentFingerprint ||
@@ -286,6 +343,105 @@ async function sendNavigationAction(
     };
   }
   return response.result;
+}
+
+async function activeHttpTab(): Promise<chrome.tabs.Tab> {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id === undefined || !/^https?:\/\//.test(tab.url ?? "")) {
+    throw new Error("No active browser application tab found");
+  }
+  return tab;
+}
+
+async function beginTeach(
+  frameId: number,
+  controlId: string,
+): Promise<unknown> {
+  const tab = await activeHttpTab();
+  await ensureTabContentRuntime(contentRuntimeApi, tab.id!);
+  const sessionId = `teach-${crypto.randomUUID()}`;
+  const response = await sendWithContentRecovery<
+    { result?: unknown; error?: string } | undefined
+  >(contentRuntimeApi, tab.id!, frameId, {
+    type: "TEACH_BEGIN",
+    sessionId,
+    controlId,
+  });
+  if (response?.error) throw new Error(response.error);
+  if (!response?.result)
+    throw new Error("Teach MUNSHI did not start in the employer page");
+  return response.result;
+}
+
+async function finishTeach(
+  frameId: number,
+  sessionId: string,
+  applicationId: string,
+): Promise<unknown> {
+  const tab = await activeHttpTab();
+  const response = await sendWithContentRecovery<
+    | {
+        result?: {
+          sessionId: string;
+          controlId: string;
+          componentFingerprint: string;
+          changed: boolean;
+          reusable: boolean;
+          actions: unknown[];
+          eventTypes: string[];
+          startedAt: string;
+          finishedAt: string;
+        };
+        error?: string;
+      }
+    | undefined
+  >(contentRuntimeApi, tab.id!, frameId, {
+    type: "TEACH_FINISH",
+    sessionId,
+  });
+  if (response?.error) throw new Error(response.error);
+  const capture = response?.result;
+  if (!capture)
+    throw new Error("Teach MUNSHI returned no demonstration capture");
+  if (!capture.reusable) return { ...capture, recipe: null };
+
+  const page = await getMergedPageForTab(tab.id!);
+  if (!page)
+    throw new Error(
+      "Application page changed before the demonstration was saved",
+    );
+  const control = page.controls.find(
+    (item) => item.controlId === capture.controlId,
+  );
+  const question = page.questions.find(
+    (item) => item.controlId === capture.controlId,
+  );
+  if (!control || !control.componentFingerprint) {
+    throw new Error(
+      "The demonstrated control changed before its recipe could be saved",
+    );
+  }
+  await ensureNativeApplication(applicationId, page.observedAt);
+  const recipe = await teachInteractionRecipe({
+    attemptId: `demo-${crypto.randomUUID()}`,
+    applicationId,
+    siteOrigin: new URL(page.url).origin,
+    componentFingerprint: control.componentFingerprint,
+    semanticType: question?.semanticType ?? "UNKNOWN",
+    actions: capture.actions,
+  });
+  return { ...capture, recipe };
+}
+
+async function cancelTeach(
+  frameId: number,
+  sessionId: string,
+): Promise<unknown> {
+  const tab = await activeHttpTab();
+  const response = await sendWithContentRecovery<
+    { result?: unknown } | undefined
+  >(contentRuntimeApi, tab.id!, frameId, { type: "TEACH_CANCEL", sessionId });
+  return response?.result ?? { cancelled: false };
 }
 
 async function sendFilePickerAssist(
@@ -594,6 +750,31 @@ async function routeMessage(
           ),
         };
       }
+      case "TEACH_BEGIN":
+        return {
+          ok: true,
+          data: await beginTeach(
+            request.payload.frameId,
+            request.payload.controlId,
+          ),
+        };
+      case "TEACH_FINISH":
+        return {
+          ok: true,
+          data: await finishTeach(
+            request.payload.frameId,
+            request.payload.sessionId,
+            request.payload.applicationId,
+          ),
+        };
+      case "TEACH_CANCEL":
+        return {
+          ok: true,
+          data: await cancelTeach(
+            request.payload.frameId,
+            request.payload.sessionId,
+          ),
+        };
       case "AUTOPILOT_STOP":
         return {
           ok: true,

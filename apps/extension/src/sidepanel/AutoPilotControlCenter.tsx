@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ApplicationPage } from "@munshi-apply/contracts";
+import { TeachMunshiPanel } from "./TeachMunshiPanel";
 import {
   getAutoPilotStatus,
   pauseAutoPilot,
@@ -228,6 +229,13 @@ export function AutoPilotControlCenter({
                   will pause before navigation for the remaining review.
                 </span>
               )}
+              {plan.optionalReviewCount > 0 && (
+                <span>
+                  {plan.optionalReviewCount} optional answer
+                  {plan.optionalReviewCount === 1 ? "" : "s"} saved for review ·
+                  they do not block page progress
+                </span>
+              )}
               {plan.optionalUnansweredCount > 0 && (
                 <span>
                   {plan.optionalUnansweredCount} optional questions left blank
@@ -278,6 +286,17 @@ export function AutoPilotControlCenter({
               ))}
             </div>
           ) : null}
+
+          <TeachMunshiPanel
+            page={page}
+            applicationId={applicationId}
+            nativeAvailable={nativeAvailable}
+            suggestedControlId={
+              status?.lastFillResult?.status === "FAILED"
+                ? status.lastFillResult.controlId
+                : null
+            }
+          />
 
           <div className="record-actions">
             <button

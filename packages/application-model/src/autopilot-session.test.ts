@@ -112,7 +112,7 @@ describe("AutoPilot session model", () => {
     ).toBe("WAITING_RESCAN");
   });
 
-  it("pauses on security, validation, final submission, and wrong application", () => {
+  it("pauses on security/final boundaries but lets incomplete-form validation reach the step planner", () => {
     const session = freshSession();
     expect(
       reduceAutoPilotSession(session, {
@@ -127,7 +127,7 @@ describe("AutoPilot session model", () => {
         observation: { ...observation, validationErrorCount: 1 },
         at: "2026-08-14T21:00:01.000Z",
       }).status,
-    ).toBe("PAUSED_REVIEW");
+    ).toBe("RUNNING");
     expect(
       reduceAutoPilotSession(session, {
         type: "START",

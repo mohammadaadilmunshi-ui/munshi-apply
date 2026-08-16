@@ -17,6 +17,8 @@ export type AutoPilotLaunchPlan = {
   fillInstructions: FillInstruction[];
   manualControls: Control[];
   optionalUnansweredCount: number;
+  requiredReviewCount: number;
+  optionalReviewCount: number;
 };
 
 const fillableKinds = new Set([
@@ -64,7 +66,8 @@ export function buildAutoPilotLaunchPlan(
   );
   const instructions: FillInstruction[] = [];
   const manual = new Map<string, Control>();
-  let reviewCount = 0;
+  let requiredReviewCount = 0;
+  let optionalReviewCount = 0;
   let unresolvedCount = 0;
   let optionalUnansweredCount = 0;
 
@@ -109,7 +112,8 @@ export function buildAutoPilotLaunchPlan(
       continue;
     }
     if (!answer?.approved) {
-      reviewCount += 1;
+      if (control.required) requiredReviewCount += 1;
+      else optionalReviewCount += 1;
       continue;
     }
     instructions.push({
@@ -140,13 +144,13 @@ export function buildAutoPilotLaunchPlan(
   const state =
     blockedCount > 0
       ? "BLOCKED"
-      : reviewCount > 0 || unresolvedCount > 0 || manualCount > 0
+      : requiredReviewCount > 0 || unresolvedCount > 0 || manualCount > 0
         ? "REVIEW"
         : "READY";
   const preflight: PreflightGateSummary = {
     state,
     readyCount: instructions.length,
-    reviewCount: reviewCount + manualCount,
+    reviewCount: requiredReviewCount + optionalReviewCount + manualCount,
     unresolvedCount,
     blockedCount,
     canAct: state === "READY",
@@ -156,5 +160,7 @@ export function buildAutoPilotLaunchPlan(
     fillInstructions: instructions,
     manualControls: [...manual.values()],
     optionalUnansweredCount,
+    requiredReviewCount,
+    optionalReviewCount,
   };
 }

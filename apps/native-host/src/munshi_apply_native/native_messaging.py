@@ -22,6 +22,7 @@ NATIVE_CAPABILITIES: dict[str, bool] = {
     "profile_vault": True,
     "application_checkpoints": True,
     "interaction_learning": True,
+    "teach_munshi": True,
     "ai_settings": True,
     "ai_governance": True,
     "ai_draft_lifecycle": True,
@@ -133,6 +134,16 @@ def handle(
         return {
             "ok": True,
             "data": InteractionRecipeService(database).record(message.get("payload")),
+        }
+    if message_type == "TEACH_INTERACTION_RECIPE":
+        return {
+            "ok": True,
+            "data": InteractionRecipeService(database).teach(message.get("payload")),
+        }
+    if message_type == "RECORD_INTERACTION_RECIPE_OUTCOME":
+        return {
+            "ok": True,
+            "data": InteractionRecipeService(database).record_outcome(message.get("payload")),
         }
 
     if message_type in {

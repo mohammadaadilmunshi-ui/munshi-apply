@@ -1,3 +1,4 @@
+import type { RecipeAction } from "@munshi-apply/application-model";
 import type { FillInstruction, FillResult } from "@munshi-apply/contracts";
 import { fillNativeMultiSelect } from "./multi-select";
 import {
@@ -26,6 +27,14 @@ export type FillInteractionOptions = {
   verificationTimeoutMs?: number;
   stabilityQuietMs?: number;
   stabilityTimeoutMs?: number;
+};
+
+export type PreferredInteractionRecipe = {
+  recipeId: string;
+  strategy: "TAUGHT_RECIPE";
+  actions: readonly RecipeAction[];
+  state: "SHADOW" | "PROMOTED";
+  version: number;
 };
 
 const DEFAULT_OPTION_TIMEOUT_MS = 1_200;
@@ -428,6 +437,176 @@ function radioVerified(element: HTMLInputElement, value: string): boolean {
   return checked.length === 1 && radioMatches(checked[0]!, value);
 }
 
+function recipeValueCommitted(element: HTMLElement, value: string): boolean {
+  const context = interactionContext(element);
+  if (element instanceof HTMLSelectElement) {
+    const selected = Array.from(element.selectedOptions).flatMap((option) => [
+      option.value,
+      option.text,
+    ]);
+    return selected.some((candidate) =>
+      optionEquivalent(candidate, value, context),
+    );
+  }
+  if (element instanceof HTMLInputElement) {
+    if (element.type === "radio") return radioVerified(element, value);
+    if (element.type === "checkbox") {
+      const requested = normalized(value);
+      const shouldCheck = ["true", "yes", "1", "checked"].includes(requested);
+      return element.checked === shouldCheck;
+    }
+    return (
+      optionEquivalent(element.value, value, context) || element.value === value
+    );
+  }
+  if (element instanceof HTMLTextAreaElement) return element.value === value;
+  if (element.isContentEditable)
+    return compactText(element.textContent) === compactText(value);
+  const ariaChecked = element.getAttribute("aria-checked");
+  if (ariaChecked !== null) {
+    const requested = normalized(value);
+    if (["true", "yes", "1", "checked"].includes(requested))
+      return ariaChecked === "true";
+    if (["false", "no", "0", "unchecked"].includes(requested))
+      return ariaChecked === "false";
+  }
+  return optionEquivalent(element.textContent ?? "", value, context);
+}
+
+function typeRecipeValue(element: HTMLElement, value: string): boolean {
+  if (
+    element instanceof HTMLInputElement ||
+    element instanceof HTMLTextAreaElement
+  ) {
+    setNativeValue(element, value);
+    dispatchInputEvent(element);
+    return true;
+  }
+  if (element.isContentEditable) {
+    element.textContent = value;
+    dispatchInputEvent(element);
+    return true;
+  }
+  return false;
+}
+
+function dispatchRecipeKey(element: HTMLElement, key: string): void {
+  element.dispatchEvent(
+    new KeyboardEvent("keydown", { key, bubbles: true, composed: true }),
+  );
+  element.dispatchEvent(
+    new KeyboardEvent("keyup", { key, bubbles: true, composed: true }),
+  );
+}
+
+async function executeInteractionRecipe(
+  element: HTMLElement,
+  value: string,
+  recipe: PreferredInteractionRecipe,
+  options: Required<FillInteractionOptions>,
+): Promise<boolean> {
+  if (recipe.actions.length === 0 || recipe.actions.length > 16) return false;
+  for (const action of recipe.actions) {
+    if (action.type === "FOCUS") {
+      element.focus();
+      continue;
+    }
+    if (action.type === "CLICK") {
+      if (element instanceof HTMLInputElement && element.type === "radio") {
+        if (!fillRadio(element, value)) return false;
+        continue;
+      }
+      if (element instanceof HTMLInputElement && element.type === "checkbox") {
+        if (!fillCheckbox(element, value)) return false;
+        continue;
+      }
+      const ariaRadio = await fillAriaRadioControl(element, value, options);
+      if (ariaRadio !== null) {
+        if (!ariaRadio) return false;
+        continue;
+      }
+      const ariaBoolean = await fillAriaBooleanControl(element, value, options);
+      if (ariaBoolean !== null) {
+        if (!ariaBoolean) return false;
+        continue;
+      }
+      element.click();
+      continue;
+    }
+    if (action.type === "TYPE") {
+      if (!typeRecipeValue(element, value)) return false;
+      continue;
+    }
+    if (action.type === "KEY") {
+      dispatchRecipeKey(element, action.key);
+      continue;
+    }
+    if (action.type === "SELECT_EXACT_OPTION") {
+      if (element instanceof HTMLSelectElement) {
+        const context = interactionContext(element);
+        const option = uniqueOptionCandidate(
+          value,
+          Array.from(element.options)
+            .filter((candidate) => !candidate.disabled)
+            .map((candidate) => ({
+              item: candidate,
+              values: [candidate.value, candidate.text],
+            })),
+          context,
+        );
+        if (!option) return false;
+        element.value = option.value;
+        dispatchValueEvents(element);
+        continue;
+      }
+      const option = await waitForExactComboboxOption(
+        element,
+        value,
+        options.optionTimeoutMs,
+        options.pollIntervalMs,
+      );
+      if (!option) return false;
+      option.click();
+      element.dispatchEvent(
+        new Event("change", { bubbles: true, composed: true }),
+      );
+      continue;
+    }
+    if (
+      action.type === "WAIT_FOR_STATE" &&
+      action.state === "OPTIONS_VISIBLE"
+    ) {
+      if (element instanceof HTMLSelectElement) continue;
+      const option = await waitForExactComboboxOption(
+        element,
+        value,
+        options.optionTimeoutMs,
+        options.pollIntervalMs,
+      );
+      if (!option) return false;
+      continue;
+    }
+    if (
+      action.type === "WAIT_FOR_STATE" &&
+      action.state === "VALUE_COMMITTED"
+    ) {
+      const committed = await waitForVerification(
+        () => recipeValueCommitted(element, value),
+        options.verificationTimeoutMs,
+        options.pollIntervalMs,
+      );
+      if (!committed) return false;
+      continue;
+    }
+    return false;
+  }
+  return waitForVerification(
+    () => recipeValueCommitted(element, value),
+    options.verificationTimeoutMs,
+    options.pollIntervalMs,
+  );
+}
+
 async function fillElement(
   element: Element,
   value: string,
@@ -730,6 +909,7 @@ async function resolveWithRetry(
 export async function applyFillInstructions(
   instructions: FillInstruction[],
   interactionOptions: FillInteractionOptions = {},
+  preferredRecipes: Record<string, PreferredInteractionRecipe> = {},
 ): Promise<FillResult[]> {
   const adaptive = defaultAdaptiveTiming();
   const options: Required<FillInteractionOptions> = {
@@ -775,11 +955,30 @@ export async function applyFillInstructions(
     }
 
     let filled = false;
-    const strategy = strategyFor(element);
-    try {
-      filled = await fillElement(element, instruction.value, options);
-    } catch {
-      filled = false;
+    const fallbackStrategy = strategyFor(element);
+    const recipe = preferredRecipes[instruction.controlId];
+    let recipeAttempted = false;
+    let recipeSucceeded = false;
+    if (recipe) {
+      recipeAttempted = true;
+      try {
+        recipeSucceeded = await executeInteractionRecipe(
+          element as HTMLElement,
+          instruction.value,
+          recipe,
+          options,
+        );
+      } catch {
+        recipeSucceeded = false;
+      }
+      filled = recipeSucceeded;
+    }
+    if (!filled) {
+      try {
+        filled = await fillElement(element, instruction.value, options);
+      } catch {
+        filled = false;
+      }
     }
     const stabilized = filled
       ? await waitForDomStability(
@@ -795,11 +994,14 @@ export async function applyFillInstructions(
           ? "Value applied, verified, and the dependent DOM reached a quiet state"
           : "Value applied and verified; the dependent DOM was still changing at the stability timeout"
         : `${validationFailureReason(element, instruction.value)}; the control may also be unsupported or ambiguous`,
-      strategy,
+      strategy: recipeSucceeded ? recipe!.strategy : fallbackStrategy,
       verification: filled ? "POST_ACTION_DOM_VERIFIED" : "FAILED_CLOSED",
       rebound: resolved?.rebound ?? false,
       stabilized,
       componentFingerprint: resolved?.control.componentFingerprint,
+      recipeId: recipe?.recipeId,
+      recipeAttempted,
+      recipeSucceeded: recipeAttempted ? recipeSucceeded : undefined,
     });
   }
 

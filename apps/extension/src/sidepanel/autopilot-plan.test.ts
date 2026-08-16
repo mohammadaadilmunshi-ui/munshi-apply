@@ -121,6 +121,32 @@ describe("buildAutoPilotLaunchPlan", () => {
     expect(canAutoPilotMakeProgress(result)).toBe(false);
   });
 
+  it("does not block page progress for an optional answer that has not been approved", () => {
+    const current = page();
+    current.controls = [{ ...current.controls[0]!, required: false }];
+    current.questions = [current.questions[0]!];
+    const result = buildAutoPilotLaunchPlan(current, {
+      "q-name": { value: "Optional note", approved: false, sensitive: false },
+    });
+    expect(result.preflight.state).toBe("READY");
+    expect(result.preflight.canAct).toBe(true);
+    expect(result.requiredReviewCount).toBe(0);
+    expect(result.optionalReviewCount).toBe(1);
+  });
+
+  it("still blocks navigation for a required answer that has not been approved", () => {
+    const current = page();
+    current.controls = [current.controls[0]!];
+    current.questions = [current.questions[0]!];
+    const result = buildAutoPilotLaunchPlan(current, {
+      "q-name": { value: "Required value", approved: false, sensitive: false },
+    });
+    expect(result.preflight.state).toBe("REVIEW");
+    expect(result.preflight.canAct).toBe(false);
+    expect(result.requiredReviewCount).toBe(1);
+    expect(result.optionalReviewCount).toBe(0);
+  });
+
   it("carries an approved AI draft identity into the AutoPilot fill instruction", () => {
     const current = page();
     current.controls = [current.controls[0]!];
