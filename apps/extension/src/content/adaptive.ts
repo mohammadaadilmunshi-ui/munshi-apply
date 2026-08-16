@@ -45,7 +45,8 @@ function normalizedToken(value: string): string {
     .replace(/[.'’]/g, "")
     .replace(/&/g, " and ")
     .replace(/[()]/g, " ")
-    .replace(/[\/_-]+/g, " ")
+    .replaceAll("/", " ")
+    .replace(/[_-]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
