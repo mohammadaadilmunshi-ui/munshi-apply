@@ -192,6 +192,21 @@ describe("application page eligibility", () => {
     );
   });
 
+  it("keeps a Bain work-history step tracked even when its Next control is not currently scannable", () => {
+    const result = applicationPageEligibility(
+      page({
+        url: "https://careers.bain.com/jobs/Register?folderId=108235&source=Linked-In",
+        title: "Coordinator, Consultant Recruiting",
+        semantics: ["EMPLOYER_NAME", "JOB_TITLE", "START_DATE"],
+        applicationState: "EXPERIENCE",
+      }),
+    );
+    expect(result.eligible).toBe(true);
+    expect(result.reasons).toContain(
+      "careers/job registration flow with candidate form evidence",
+    );
+  });
+
   it("does not loosen ordinary account registration pages into job applications", () => {
     expect(
       applicationPageEligibility(
