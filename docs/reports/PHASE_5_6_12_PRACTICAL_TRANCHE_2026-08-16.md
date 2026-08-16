@@ -2,6 +2,8 @@
 
 **Date:** 2026-08-16  
 **Candidate:** 0.2.4  
+**Functional implementation commit:** `515f916738c069ef191cf3a3b52795a789f73ef8`  
+**Verified branch head before this report-only commit:** `5419b61c1f0b1de1b92d4551ef6fd6ba0bab9141`  
 **Architecture source:** Complete Master Architecture Plan 2.0
 
 ## Goal
@@ -45,3 +47,34 @@ The capture stores interaction mechanics and event classes, not the selected ans
 ## Practical operating principle
 
 Guardrails should prevent incorrect claims, irreversible submission, credential/security abuse, and silent changes to protected facts. They should not turn routine application friction into a dead end. Recoverable form failures therefore pause with an obvious next action: correct manually, Teach MUNSHI, or Resume.
+
+## Automated verification
+
+At verified head `5419b61c1f0b1de1b92d4551ef6fd6ba0bab9141`, all normal PR workflows passed:
+
+- CI ✅
+- Browser tests ✅
+- Security ✅
+- Migration tests ✅
+- Owner workspace ✅
+
+The verification stack included:
+
+- TypeScript/JavaScript: **46 test files / 286 tests passed**
+- Native companion: Ruff passed / **92 Pytest tests passed**
+- Prettier ✅
+- ESLint ✅
+- TypeScript type checking ✅
+- Production extension build ✅
+- Desktop/mobile artifact verification ✅
+- Repository safety and secret scan ✅
+
+Fresh unpacked Edge artifact from the verified CI run:
+
+- name: `munshi-apply-edge-unpacked`
+- artifact ID: `9260564407`
+- SHA-256: `9185de3107dd210ee0226daa9fd29678fc753757a729bd87fc3b1cf0148253ef`
+
+## Release gate
+
+Automated verification establishes source/build integrity; it does not replace the physical Edge acceptance gate. Candidate 0.2.4 must still be exercised on real multi-page applications to validate practical page progression, recoverable pauses, taught recipe capture/reuse, and the existing broad universal-fill interactions under real employer runtime behavior.
