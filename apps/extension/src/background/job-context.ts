@@ -5,8 +5,10 @@ const storagePrefix = "job-context-v1:";
 const maxListingCharacters = 12_000;
 const maxApplicationCharacters = 7_000;
 const maxAgeMilliseconds = 2 * 60 * 60 * 1_000;
-const careerContextPattern = /\b(career|careers|job|jobs|recruit|recruiting|position|vacancy|opportunit)/i;
-const descriptionSignalPattern = /\b(responsibilit|qualification|requirements?|what you(?:'|’)ll do|what we(?:'|’)re looking for|about the role|job description|role overview|preferred qualifications?)\b/i;
+const careerContextPattern =
+  /\b(career|careers|job|jobs|recruit|recruiting|position|vacancy|opportunit)/i;
+const descriptionSignalPattern =
+  /\b(responsibilit|qualification|requirements?|what you(?:'|’)ll do|what we(?:'|’)re looking for|about the role|job description|role overview|preferred qualifications?)\b/i;
 
 export type StoredJobContext = {
   url: string;
@@ -35,7 +37,10 @@ export function shouldRememberJobContext(page: ApplicationPage): boolean {
     return false;
   }
   const combined = `${urlContext} ${page.title} ${context.slice(0, 8_000)}`;
-  return careerContextPattern.test(combined) && descriptionSignalPattern.test(combined);
+  return (
+    careerContextPattern.test(combined) &&
+    descriptionSignalPattern.test(combined)
+  );
 }
 
 export function mergeJobContext(
