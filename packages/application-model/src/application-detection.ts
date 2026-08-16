@@ -6,6 +6,7 @@ const candidateRegistrationIntent =
   /(?:^|[\s/_?=&#.-])(register|registration|candidate)(?:$|[\s/_?=&#.-])/i;
 const careerOrJobContext =
   /(?:^|[\s/_.-])(career|careers|job|jobs|recruiting|recruitment)(?:$|[\s/_.-])/i;
+const strongJobRegistrationRoute = /\/(?:jobs?|careers?)\/register(?:\/|$)/i;
 const resumeLabel = /\b(resume|résumé|cv)\b/i;
 const applicationNavigation = /\b(apply|application)\b/i;
 
@@ -98,6 +99,18 @@ function hasCandidateRegistrationIntent(page: ApplicationPage): boolean {
   }
 }
 
+function hasStrongJobRegistrationRoute(page: ApplicationPage): boolean {
+  try {
+    const url = new URL(page.url);
+    return (
+      strongJobRegistrationRoute.test(url.pathname) &&
+      careerOrJobContext.test(`${url.hostname} ${url.pathname} ${page.title}`)
+    );
+  } catch {
+    return false;
+  }
+}
+
 function meaningfulQuestionCount(page: ApplicationPage): number {
   const questions = Array.isArray(page.questions) ? page.questions : [];
   return questions.filter((question) => question.semanticType !== "UNKNOWN")
@@ -173,6 +186,7 @@ export function applicationPageEligibility(
   const knownAts = Boolean(page.atsFamily && page.atsFamily !== "GENERIC");
   const explicitIntent = hasExplicitIntent(page);
   const candidateRegistration = hasCandidateRegistrationIntent(page);
+  const strongJobRegistration = hasStrongJobRegistrationRoute(page);
   const meaningfulQuestions = meaningfulQuestionCount(page);
   const specificQuestions = applicationSpecificQuestionCount(page);
   const candidateIdentityQuestions = candidateIdentityQuestionCount(page);
@@ -215,6 +229,9 @@ export function applicationPageEligibility(
     reasons.push(
       "explicit application context with multiple classified questions",
     );
+  }
+  if (strongJobRegistration && interactiveFields >= 2) {
+    reasons.push("explicit careers job-registration route with candidate fields");
   }
   if (
     page.applicationState !== "AUTH" &&
