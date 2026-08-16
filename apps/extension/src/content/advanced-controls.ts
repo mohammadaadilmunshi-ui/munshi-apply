@@ -57,6 +57,23 @@ function validMonth(value: string): boolean {
   );
 }
 
+function monthValue(value: string): string | null {
+  const requested = value.trim();
+  if (validMonth(requested)) return requested;
+  const fullDate = requested.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (
+    fullDate &&
+    validDateParts(
+      Number(fullDate[1]),
+      Number(fullDate[2]),
+      Number(fullDate[3]),
+    )
+  ) {
+    return `${fullDate[1]}-${fullDate[2]}`;
+  }
+  return null;
+}
+
 function validTime(value: string): boolean {
   const match = value.match(/^(\d{2}):(\d{2})(?::(\d{2}))?$/);
   if (!match) return false;
@@ -114,7 +131,9 @@ export function fillStrictTemporalInput(
   const type = element.type as StrictTemporalKind;
   if (!["month", "time", "datetime-local", "week"].includes(type)) return null;
   if (element.disabled || element.readOnly) return false;
-  const requested = value.trim();
+  const raw = value.trim();
+  const requested = type === "month" ? monthValue(raw) : raw;
+  if (!requested) return false;
   const valid =
     (type === "month" && validMonth(requested)) ||
     (type === "time" && validTime(requested)) ||
@@ -206,11 +225,21 @@ function exactTargets(
   const options = optionElements(container);
   const targets: HTMLElement[] = [];
   for (const requestedValue of requested) {
-    const matches = options.filter((option) =>
-      optionValues(option).some((candidate) =>
-        optionEquivalent(candidate, requestedValue, context),
+    const exact = options.filter((option) =>
+      optionValues(option).some(
+        (candidate) =>
+          candidate.trim().toLocaleLowerCase("en-US") ===
+          requestedValue.trim().toLocaleLowerCase("en-US"),
       ),
     );
+    const matches =
+      exact.length > 0
+        ? exact
+        : options.filter((option) =>
+            optionValues(option).some((candidate) =>
+              optionEquivalent(candidate, requestedValue, context),
+            ),
+          );
     if (matches.length !== 1) return null;
     if (targets.includes(matches[0]!)) return null;
     targets.push(matches[0]!);
