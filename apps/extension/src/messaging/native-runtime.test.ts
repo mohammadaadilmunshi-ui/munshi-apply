@@ -33,6 +33,7 @@ describe("native runtime compatibility", () => {
             profile_vault: true,
             application_checkpoints: true,
             interaction_learning: true,
+            teach_munshi: true,
             ai_settings: true,
             ai_governance: true,
             ai_draft_lifecycle: true,
