@@ -28,6 +28,23 @@ jobs:
           python-version: "3.12"
       - name: Apply practical Phase 5/6/12 tranche
         run: python scripts/phase_5_6_12_practical_tranche.py
+      - name: Normalize generated native test names
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("apps/native-host/tests/test_interaction_recipe_service.py")
+          content = path.read_text(encoding="utf-8")
+          content = content.replace(
+              "def test_teach_munshi_saves_value_free_shadow_recipe_and_promotes_after_trial(tmp_path: Path) -> None:",
+              "def test_taught_recipe_promotes_after_verified_trial(tmp_path: Path) -> None:",
+          )
+          content = content.replace(
+              "def test_learning_mechanics_is_allowed_for_consequential_answer_types_but_not_security_controls(tmp_path: Path) -> None:",
+              "def test_consequential_widgets_learn_but_security_controls_do_not(tmp_path: Path) -> None:",
+          )
+          path.write_text(content, encoding="utf-8")
+          PY
       - name: Install locked Node dependencies
         run: npm ci
       - name: Format generated implementation
