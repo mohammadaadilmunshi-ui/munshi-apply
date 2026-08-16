@@ -192,6 +192,57 @@ describe("application page eligibility", () => {
     );
   });
 
+  it("tracks a Bain job registration route even before field semantics are classified", () => {
+    const candidate = page({
+      url: "https://careers.bain.com/jobs/Register?folderId=108235&source=Linked-In",
+      title: "Coordinator, Consultant Recruiting",
+    });
+    candidate.controls = [
+      {
+        controlId: "ctl-raw-1",
+        frameId: 0,
+        kind: "TEXT",
+        tagName: "input",
+        name: "first",
+        label: "",
+        placeholder: "",
+        ariaLabel: "",
+        required: true,
+        disabled: false,
+        visible: true,
+        options: [],
+        multiple: false,
+        autocomplete: "",
+        invalid: false,
+        validationMessage: "",
+      },
+      {
+        controlId: "ctl-raw-2",
+        frameId: 0,
+        kind: "TEXT",
+        tagName: "input",
+        name: "last",
+        label: "",
+        placeholder: "",
+        ariaLabel: "",
+        required: true,
+        disabled: false,
+        visible: true,
+        options: [],
+        multiple: false,
+        autocomplete: "",
+        invalid: false,
+        validationMessage: "",
+      },
+    ];
+
+    const result = applicationPageEligibility(candidate);
+    expect(result.eligible).toBe(true);
+    expect(result.reasons).toContain(
+      "explicit careers job-registration route with candidate fields",
+    );
+  });
+
   it("keeps a Bain work-history step tracked even when its Next control is not currently scannable", () => {
     const result = applicationPageEligibility(
       page({
