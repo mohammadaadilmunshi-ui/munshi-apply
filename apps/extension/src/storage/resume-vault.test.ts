@@ -17,9 +17,7 @@ function resume(input: Partial<ResumeRecord> = {}): ResumeRecord {
 describe("resume vault classification helpers", () => {
   it("uses one durable master family", () => {
     expect(resumeFamilyFor("MASTER", null)).toBe("master");
-    expect(resumeKindLabel(resume({ source: "MASTER" }))).toBe(
-      "Master résumé",
-    );
+    expect(resumeKindLabel(resume({ source: "MASTER" }))).toBe("Master résumé");
   });
 
   it("normalizes job and niche labels into tailored families", () => {
