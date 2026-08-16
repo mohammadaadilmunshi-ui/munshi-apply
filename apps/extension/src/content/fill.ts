@@ -15,6 +15,7 @@ import {
   interactionContext,
   isPopupChoiceControl,
   optionEquivalent,
+  uniqueOptionCandidate,
   validationFailureReason,
   waitForDomStability,
 } from "./adaptive";
@@ -259,29 +260,38 @@ function exactComboboxOption(
   requested: string,
 ): ExactOptionResult {
   const context = interactionContext(element);
-  const controlled = controlledComboboxOptions(element).filter(
-    (option) =>
-      optionAvailable(option) &&
-      comboboxOptionValues(option).some((value) =>
-        optionEquivalent(value, requested, context),
-      ),
+  const controlled = controlledComboboxOptions(element).filter(optionAvailable);
+  const controlledMatch = uniqueOptionCandidate(
+    requested,
+    controlled.map((option) => ({
+      item: option,
+      values: comboboxOptionValues(option),
+    })),
+    context,
   );
-  if (controlled.length === 1) {
-    return { status: "FOUND", option: controlled[0]! };
+  if (controlledMatch) {
+    return { status: "FOUND", option: controlledMatch };
   }
-  if (controlled.length > 1) return { status: "AMBIGUOUS" };
 
-  const portaled = portaledComboboxOptions(element).filter(
-    (option) =>
-      optionAvailable(option) &&
-      comboboxOptionValues(option).some((value) =>
-        optionEquivalent(value, requested, context),
-      ),
+  const portaled = portaledComboboxOptions(element).filter(optionAvailable);
+  const portaledMatch = uniqueOptionCandidate(
+    requested,
+    portaled.map((option) => ({
+      item: option,
+      values: comboboxOptionValues(option),
+    })),
+    context,
   );
-  if (portaled.length === 1) {
-    return { status: "FOUND", option: portaled[0]! };
+  if (portaledMatch) {
+    return { status: "FOUND", option: portaledMatch };
   }
-  return portaled.length > 1 ? { status: "AMBIGUOUS" } : { status: "WAIT" };
+
+  const hasSemanticCandidates = [...controlled, ...portaled].some((option) =>
+    comboboxOptionValues(option).some((value) =>
+      optionEquivalent(value, requested, context),
+    ),
+  );
+  return hasSemanticCandidates ? { status: "AMBIGUOUS" } : { status: "WAIT" };
 }
 
 function comboboxVerified(
@@ -546,14 +556,17 @@ async function fillElement(
   if (element instanceof HTMLSelectElement) {
     if (element.multiple) return fillNativeMultiSelect(element, value);
     const context = interactionContext(element);
-    const matches = Array.from(element.options).filter(
-      (candidate) =>
-        !candidate.disabled &&
-        (optionEquivalent(candidate.value, value, context) ||
-          optionEquivalent(candidate.text, value, context)),
+    const option = uniqueOptionCandidate(
+      value,
+      Array.from(element.options)
+        .filter((candidate) => !candidate.disabled)
+        .map((candidate) => ({
+          item: candidate,
+          values: [candidate.value, candidate.text],
+        })),
+      context,
     );
-    if (matches.length !== 1) return false;
-    const option = matches[0]!;
+    if (!option) return false;
     const original = element.value;
     element.focus();
     element.value = option.value;
