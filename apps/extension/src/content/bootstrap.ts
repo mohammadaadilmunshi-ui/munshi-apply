@@ -33,9 +33,8 @@ async function publishSnapshot(force = false): Promise<void> {
   const fingerprint = snapshotFingerprint(page);
   if (!force && fingerprint === previousFingerprint) return;
   const request: ExtensionRequest = { type: "PAGE_SNAPSHOT", payload: page };
-  const response = (await chrome.runtime.sendMessage(
-    request,
-  )) as ExtensionResponse | undefined;
+  const response = (await chrome.runtime.sendMessage(request)) as
+    ExtensionResponse | undefined;
   if (!response?.ok) {
     throw new Error(response?.error || "Background rejected page snapshot");
   }
