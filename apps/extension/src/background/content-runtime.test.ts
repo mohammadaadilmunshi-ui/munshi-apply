@@ -34,7 +34,9 @@ describe("content runtime recovery", () => {
       ),
     ).toBe(true);
     expect(
-      isMissingContentReceiverError(new Error("Extension context invalidated.")),
+      isMissingContentReceiverError(
+        new Error("Extension context invalidated."),
+      ),
     ).toBe(true);
     expect(isMissingContentReceiverError(new Error("Permission denied"))).toBe(
       false,
