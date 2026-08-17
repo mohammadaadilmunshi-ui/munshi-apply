@@ -637,10 +637,7 @@ function finalizeDimensions(
     WORKLOAD_PRESSURE: finalizeDimension("WORKLOAD_PRESSURE", dimensions),
     SCHEDULE_INTENSITY: finalizeDimension("SCHEDULE_INTENSITY", dimensions),
     TRAVEL_BURDEN: finalizeDimension("TRAVEL_BURDEN", dimensions),
-    COMPENSATION_CLARITY: finalizeDimension(
-      "COMPENSATION_CLARITY",
-      dimensions,
-    ),
+    COMPENSATION_CLARITY: finalizeDimension("COMPENSATION_CLARITY", dimensions),
     SENIORITY_ALIGNMENT: finalizeDimension("SENIORITY_ALIGNMENT", dimensions),
     ROLE_STABILITY: finalizeDimension("ROLE_STABILITY", dimensions),
     LOCATION_CONSTRAINTS: finalizeDimension("LOCATION_CONSTRAINTS", dimensions),
