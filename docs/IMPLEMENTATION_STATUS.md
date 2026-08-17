@@ -79,7 +79,7 @@ MUNSHI Apply is currently in **build-only mode**. Source changes are committed a
 
 ## Current verification
 
-The account-orchestration + employer-pre-flight code head `50370fc8d29142ee20331bbff472dc668163933d` passed all five standard PR workflows before the documentation-only status commit:
+The account-orchestration + employer-pre-flight code head `50370fc8d29142ee20331bbff472dc668163933d` passed all five standard PR workflows:
 
 - CI ✅
 - Browser tests ✅
