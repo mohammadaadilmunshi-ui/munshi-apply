@@ -46,6 +46,8 @@ export type NativeRuntimeHealth = {
     ollama_fallback?: boolean;
     writing_style_learning?: boolean;
     teach_munshi_state_capture?: boolean;
+    account_orchestration?: boolean;
+    job_signal_intelligence?: boolean;
   };
 };
 
@@ -77,6 +79,8 @@ export function nativeRuntimeCompatibility(
     "document_evidence_ingestion",
     "provider_routing",
     "writing_style_learning",
+    "account_orchestration",
+    "job_signal_intelligence",
   ] as const;
   const missing = requiredCapabilities.filter(
     (capability) => health.capabilities?.[capability] !== true,
