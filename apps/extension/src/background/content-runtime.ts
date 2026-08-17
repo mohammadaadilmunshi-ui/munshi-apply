@@ -11,16 +11,51 @@ export type ContentRuntimeApi = {
 };
 
 const CONTENT_SCRIPT_FILE = "content/bootstrap.js";
+export const DEFAULT_CONTENT_MESSAGE_TIMEOUT_MS = 10_000;
 
 type ContentScanResponse = {
   ok?: boolean;
   error?: string;
 };
 
+type ContentRecoveryOptions = {
+  timeoutMs?: number;
+};
+
 export function isMissingContentReceiverError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error ?? "");
-  return /could not establish connection|receiving end does not exist|message port closed|message channel closed|extension context invalidated|context invalidated/i.test(
+  return /could not establish connection|receiving end does not exist|message port closed|message channel closed|extension context invalidated|context invalidated|content message timed out/i.test(
     message,
+  );
+}
+
+async function withContentMessageTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`Content message timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
+
+function sendMessageWithTimeout<T>(
+  api: ContentRuntimeApi,
+  tabId: number,
+  frameId: number,
+  message: unknown,
+  timeoutMs: number,
+): Promise<T> {
+  return withContentMessageTimeout(
+    api.sendMessage<T>(tabId, message, { frameId }),
+    timeoutMs,
   );
 }
 
@@ -50,9 +85,20 @@ export async function sendWithContentRecovery<T>(
   tabId: number,
   frameId: number,
   message: unknown,
+  options: ContentRecoveryOptions = {},
 ): Promise<T> {
+  const timeoutMs = Math.max(
+    1,
+    options.timeoutMs ?? DEFAULT_CONTENT_MESSAGE_TIMEOUT_MS,
+  );
   try {
-    return await api.sendMessage<T>(tabId, message, { frameId });
+    return await sendMessageWithTimeout<T>(
+      api,
+      tabId,
+      frameId,
+      message,
+      timeoutMs,
+    );
   } catch (error) {
     if (!isMissingContentReceiverError(error)) throw error;
   }
@@ -61,7 +107,7 @@ export async function sendWithContentRecovery<T>(
     target: { tabId, frameIds: [frameId] },
     files: [CONTENT_SCRIPT_FILE],
   });
-  return api.sendMessage<T>(tabId, message, { frameId });
+  return sendMessageWithTimeout<T>(api, tabId, frameId, message, timeoutMs);
 }
 
 export async function ensureTabContentRuntime(
@@ -70,17 +116,24 @@ export async function ensureTabContentRuntime(
 ): Promise<void> {
   let topFrameHealthy = false;
   try {
-    await api.sendMessage(tabId, { type: "CONTENT_PING" }, { frameId: 0 });
+    await sendMessageWithTimeout(
+      api,
+      tabId,
+      0,
+      { type: "CONTENT_PING" },
+      DEFAULT_CONTENT_MESSAGE_TIMEOUT_MS,
+    );
     topFrameHealthy = true;
   } catch (error) {
     if (!isMissingContentReceiverError(error)) throw error;
   }
 
   if (topFrameHealthy) {
-    const response = await api.sendMessage<ContentScanResponse>(
+    const response = await sendWithContentRecovery<ContentScanResponse>(
+      api,
       tabId,
+      0,
       { type: "CONTENT_SCAN_NOW" },
-      { frameId: 0 },
     );
     assertSuccessfulScan(response, 0);
     return;
