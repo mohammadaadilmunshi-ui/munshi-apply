@@ -130,7 +130,7 @@ describe("AutoPilot forward navigation safety integration", () => {
   it("does not navigate when the employer résumé field contains a different verified file", async () => {
     const test = harness(
       page({
-        applicationState: "DOCUMENTS",
+        applicationState: "RESUME",
         controls: [resumeControl("b".repeat(64))],
       }),
     );
