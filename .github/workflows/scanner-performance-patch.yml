@@ -1,0 +1,224 @@
+name: Guarded scanner performance optimization
+on:
+  push:
+    branches: [feat/v3-foundation-alignment]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Apply per-scan scanner caches with exact-match guards
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("apps/extension/src/content/scanner.ts")
+          source = path.read_text()
+
+          def replace_once(old: str, new: str, label: str) -> None:
+              global source
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label} guard matched {count} times")
+              source = source.replace(old, new, 1)
+
+          import_anchor = 'import { createBoundedHintStore } from "./bounded-hint-store";\n\n'
+          caches = import_anchor + '''let sectionHeadingCache = new WeakMap<Document | ShadowRoot, Element[]>();
+          let computedStyleCache = new WeakMap<HTMLElement, CSSStyleDeclaration>();
+          let hiddenStateCache = new WeakMap<HTMLElement, boolean>();
+
+          function resetScanCaches(): void {
+            sectionHeadingCache = new WeakMap<Document | ShadowRoot, Element[]>();
+            computedStyleCache = new WeakMap<HTMLElement, CSSStyleDeclaration>();
+            hiddenStateCache = new WeakMap<HTMLElement, boolean>();
+          }
+
+          function computedStyleFor(element: HTMLElement): CSSStyleDeclaration {
+            const cached = computedStyleCache.get(element);
+            if (cached) return cached;
+            const style = window.getComputedStyle(element);
+            computedStyleCache.set(element, style);
+            return style;
+          }
+
+          '''
+          replace_once(import_anchor, caches, "scanner cache insertion")
+
+          old_hidden = '''function hiddenBySelfOrAncestor(element: HTMLElement): boolean {
+            let current: HTMLElement | null = element;
+            while (current) {
+              const style = window.getComputedStyle(current);
+              const opacity = Number.parseFloat(style.opacity || "1");
+              if (
+                current.hidden ||
+                current.getAttribute("aria-hidden") === "true" ||
+                style.display === "none" ||
+                style.visibility === "hidden" ||
+                style.visibility === "collapse" ||
+                (Number.isFinite(opacity) && opacity <= 0.01)
+              ) {
+                return true;
+              }
+              current = current.parentElement;
+            }
+            return false;
+          }
+          '''
+          new_hidden = '''function hiddenBySelfOrAncestor(element: HTMLElement): boolean {
+            const cached = hiddenStateCache.get(element);
+            if (cached !== undefined) return cached;
+            const style = computedStyleFor(element);
+            const opacity = Number.parseFloat(style.opacity || "1");
+            const hiddenBySelf =
+              element.hidden ||
+              element.getAttribute("aria-hidden") === "true" ||
+              style.display === "none" ||
+              style.visibility === "hidden" ||
+              style.visibility === "collapse" ||
+              (Number.isFinite(opacity) && opacity <= 0.01);
+            const hidden =
+              hiddenBySelf ||
+              (element.parentElement
+                ? hiddenBySelfOrAncestor(element.parentElement)
+                : false);
+            hiddenStateCache.set(element, hidden);
+            return hidden;
+          }
+          '''
+          replace_once(old_hidden, new_hidden, "hidden ancestor cache")
+          replace_once(
+              '  const style = window.getComputedStyle(element);\n',
+              '  const style = computedStyleFor(element);\n',
+              "visible style cache",
+          )
+
+          old_section = '''  const root = element.getRootNode();
+            if (!(root instanceof Document || root instanceof ShadowRoot)) return "";
+            const preceding = Array.from(
+              root.querySelectorAll("h1, h2, h3, h4, h5, h6, [role='heading'], legend"),
+            )
+              .filter(
+                (candidate) =>
+                  candidate !== element &&
+                  isVisible(candidate) &&
+                  Boolean(
+                    candidate.compareDocumentPosition(element) &
+                      Node.DOCUMENT_POSITION_FOLLOWING,
+                  ),
+              )
+              .map((candidate) => ({ candidate, text: headingText(candidate) }))
+              .filter((item) => Boolean(item.text));
+            return preceding.at(-1)?.text ?? "";
+          }
+          '''
+          new_section = '''  const root = element.getRootNode();
+            if (!(root instanceof Document || root instanceof ShadowRoot)) return "";
+            let headings = sectionHeadingCache.get(root);
+            if (!headings) {
+              headings = Array.from(
+                root.querySelectorAll("h1, h2, h3, h4, h5, h6, [role='heading'], legend"),
+              ).filter(isVisible);
+              sectionHeadingCache.set(root, headings);
+            }
+            const preceding = headings
+              .filter(
+                (candidate) =>
+                  candidate !== element &&
+                  Boolean(
+                    candidate.compareDocumentPosition(element) &
+                      Node.DOCUMENT_POSITION_FOLLOWING,
+                  ),
+              )
+              .map((candidate) => ({ candidate, text: headingText(candidate) }))
+              .filter((item) => Boolean(item.text));
+            return preceding.at(-1)?.text ?? "";
+          }
+          '''
+          replace_once(old_section, new_section, "section heading cache")
+
+          old_signature = '''function stableControlSignature(element: Element): string {
+            const url = new URL(window.location.href);
+            const type = element instanceof HTMLInputElement ? element.type : "";
+            const optionValue =
+              element instanceof HTMLInputElement &&
+              (element.type === "radio" ||
+                element.type === "checkbox" ||
+                ["button", "submit", "reset"].includes(element.type))
+                ? element.value
+                : "";
+            return [
+              url.origin,
+              url.pathname,
+              element.tagName,
+              element.id,
+              compactText(element.getAttribute("name")),
+              type,
+              labelFor(element),
+          '''
+          new_signature = '''function stableControlSignature(element: Element, label: string): string {
+            const url = new URL(window.location.href);
+            const type = element instanceof HTMLInputElement ? element.type : "";
+            const optionValue =
+              element instanceof HTMLInputElement &&
+              (element.type === "radio" ||
+                element.type === "checkbox" ||
+                ["button", "submit", "reset"].includes(element.type))
+                ? element.value
+                : "";
+            return [
+              url.origin,
+              url.pathname,
+              element.tagName,
+              element.id,
+              compactText(element.getAttribute("name")),
+              type,
+              label,
+          '''
+          replace_once(old_signature, new_signature, "stable signature label reuse")
+
+          old_create = '''  const kind = kindFor(element);
+            const options = optionsFor(element);
+            return {
+              controlId: `ctl-${hash(stableControlSignature(element))}`,
+          '''
+          new_create = '''  const kind = kindFor(element);
+            const options = optionsFor(element);
+            const label = labelFor(element);
+            return {
+              controlId: `ctl-${hash(stableControlSignature(element, label))}`,
+          '''
+          replace_once(old_create, new_create, "create control label reuse")
+          replace_once('    label: labelFor(element),\n', '    label,\n', "control label assignment")
+
+          old_scan = '''function scanControlEntries(): ControlEntry[] {
+            const duplicateCounts = new Map<string, number>();
+          '''
+          new_scan = '''function scanControlEntries(): ControlEntry[] {
+            resetScanCaches();
+            const duplicateCounts = new Map<string, number>();
+          '''
+          replace_once(old_scan, new_scan, "per-scan cache reset")
+
+          path.write_text(source)
+          PY
+          npx prettier apps/extension/src/content/scanner.ts --write
+          npx vitest run \
+            apps/extension/src/content/scanner.test.ts \
+            apps/extension/src/content/ats-endurance.test.ts \
+            apps/extension/src/background/autopilot-navigation-safety.integration.test.ts
+          git diff --check
+          git rm .github/workflows/scanner-performance-patch.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/extension/src/content/scanner.ts
+          git commit -m "perf: cache scanner hot-path metadata per scan"
+          git push origin HEAD:feat/v3-foundation-alignment
