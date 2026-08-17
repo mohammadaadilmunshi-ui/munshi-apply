@@ -9,8 +9,8 @@ function health(input: Partial<NativeRuntimeHealth> = {}): NativeRuntimeHealth {
   return {
     status: "healthy",
     database: "healthy",
-    migration_count: 6,
-    schema_version: "006_ai_budget_reservations.sql",
+    migration_count: 10,
+    schema_version: "010_job_signal_intelligence.sql",
     outbox: {},
     ...input,
   };
@@ -40,6 +40,8 @@ describe("native runtime compatibility", () => {
             document_evidence_ingestion: true,
             provider_routing: true,
             writing_style_learning: true,
+            account_orchestration: true,
+            job_signal_intelligence: true,
           },
         }),
       ),
