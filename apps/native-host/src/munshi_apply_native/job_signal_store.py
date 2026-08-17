@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from datetime import datetime
 from typing import Any
 
 from .database import Database
@@ -46,6 +47,17 @@ def _confidence(value: object, label: str) -> float:
     return result
 
 
+def _timestamp(value: object, label: str) -> str:
+    normalized = _required_text(value, label)
+    try:
+        parsed = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError(f"{label} must be an ISO timestamp") from error
+    if parsed.tzinfo is None:
+        raise ValueError(f"{label} must include a timezone")
+    return normalized
+
+
 def _string_list(value: object, label: str) -> list[str]:
     if not isinstance(value, list):
         raise ValueError(f"{label} must be an array")
@@ -65,10 +77,14 @@ def _parse_payload(payload: object) -> dict[str, object]:
     if overall_signal not in _OVERALL_SIGNALS:
         raise ValueError("overallSignal is invalid")
     overall_score = _bounded_integer(payload.get("overallScore"), "overallScore")
+    if overall_signal == "INSUFFICIENT_DATA" and overall_score is not None:
+        raise ValueError("INSUFFICIENT_DATA reports must not include overallScore")
+    if overall_signal != "INSUFFICIENT_DATA" and overall_score is None:
+        raise ValueError("Scored Job Signal reports require overallScore")
     source_fingerprint = _required_text(
         payload.get("sourceFingerprint"), "sourceFingerprint"
     )
-    evaluated_at = _required_text(payload.get("evaluatedAt"), "evaluatedAt")
+    evaluated_at = _timestamp(payload.get("evaluatedAt"), "evaluatedAt")
 
     raw_dimensions = payload.get("dimensions")
     if not isinstance(raw_dimensions, dict):
@@ -238,6 +254,19 @@ class JobSignalStore:
                 """,
                 (parsed["applicationId"], parsed["sourceFingerprint"]),
             ).fetchone()
+            if existing is None:
+                conflicting_identity = connection.execute(
+                    """
+                    SELECT application_id, source_fingerprint
+                    FROM job_signal_reports
+                    WHERE report_id = ?
+                    """,
+                    (parsed["reportId"],),
+                ).fetchone()
+                if conflicting_identity is not None:
+                    raise ValueError(
+                        "reportId is already bound to another application/source fingerprint"
+                    )
             report_id = existing["report_id"] if existing else parsed["reportId"]
             connection.execute(
                 """
