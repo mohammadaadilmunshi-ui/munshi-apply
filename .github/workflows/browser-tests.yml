@@ -8,6 +8,7 @@ on:
 permissions:
   contents: read
 
+# Tasks 1-5 final verification boundary: ATS endurance, performance, Job Signals, and analytics.
 jobs:
   synthetic-browser:
     runs-on: ubuntu-latest
