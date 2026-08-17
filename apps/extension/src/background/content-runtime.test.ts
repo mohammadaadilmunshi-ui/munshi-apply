@@ -19,8 +19,12 @@ function fakeApi(): ContentRuntimeApi & {
   };
 }
 
+function never<T>(): Promise<T> {
+  return new Promise(() => undefined);
+}
+
 describe("content runtime recovery", () => {
-  it("recognizes Chromium's missing and stale receiver errors", () => {
+  it("recognizes Chromium's missing, stale, and timed-out receiver errors", () => {
     expect(
       isMissingContentReceiverError(
         new Error(
@@ -36,6 +40,11 @@ describe("content runtime recovery", () => {
     expect(
       isMissingContentReceiverError(
         new Error("Extension context invalidated."),
+      ),
+    ).toBe(true);
+    expect(
+      isMissingContentReceiverError(
+        new Error("Content message timed out after 20ms"),
       ),
     ).toBe(true);
     expect(isMissingContentReceiverError(new Error("Permission denied"))).toBe(
@@ -84,6 +93,42 @@ describe("content runtime recovery", () => {
     await expect(
       sendWithContentRecovery(runtime, 7, 0, { type: "TEST" }),
     ).resolves.toEqual({ result: "recovered" });
+    expect(runtime.executeScript).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds a hung receiver, reinjects once, and accepts the recovered response", async () => {
+    const runtime = fakeApi();
+    runtime.sendMessage
+      .mockImplementationOnce(() => never())
+      .mockResolvedValueOnce({ result: "recovered-after-timeout" });
+    runtime.executeScript.mockResolvedValue([{ frameId: 3 }]);
+
+    await expect(
+      sendWithContentRecovery(
+        runtime,
+        8,
+        3,
+        { type: "TEST" },
+        { timeoutMs: 10 },
+      ),
+    ).resolves.toEqual({ result: "recovered-after-timeout" });
+    expect(runtime.executeScript).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed when both the original and recovered receiver stay hung", async () => {
+    const runtime = fakeApi();
+    runtime.sendMessage.mockImplementation(() => never());
+    runtime.executeScript.mockResolvedValue([{ frameId: 3 }]);
+
+    await expect(
+      sendWithContentRecovery(
+        runtime,
+        8,
+        3,
+        { type: "TEST" },
+        { timeoutMs: 10 },
+      ),
+    ).rejects.toThrow("Content message timed out after 10ms");
     expect(runtime.executeScript).toHaveBeenCalledTimes(1);
   });
 
