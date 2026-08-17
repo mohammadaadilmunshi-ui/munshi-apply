@@ -1,4 +1,5 @@
 import type { ApplicationPage } from "@munshi-apply/contracts";
+import { applicationUrlIdentityKey } from "./application-url";
 import type { JobSignalInput } from "./job-signals";
 
 export type PageJobSignalOptions = {
@@ -24,12 +25,6 @@ function stableHash(value: string): string {
   return (result >>> 0).toString(36);
 }
 
-function sourceUrl(rawUrl: string): string {
-  const url = new URL(rawUrl);
-  url.hash = "";
-  return `${url.origin.toLocaleLowerCase("en-US")}${url.pathname}`;
-}
-
 function normalizedManualCount(value: number | undefined): number {
   return Number.isSafeInteger(value) && Number(value) > 0 ? Number(value) : 0;
 }
@@ -47,7 +42,6 @@ export function buildPageJobSignalSource(
 ): PageJobSignalSource {
   const jobContext =
     page.applicationState === "JOB_CONTEXT" ? compact(page.pageContext) : "";
-  const pageIdentity = compact(page.pageFingerprint) || sourceUrl(page.url);
   const manualRequiredControls = normalizedManualCount(
     options.manualRequiredControls,
   );
@@ -55,12 +49,17 @@ export function buildPageJobSignalSource(
   const validationErrors = page.validationErrorCount;
   const hasObservedFriction =
     accountRequired || manualRequiredControls > 0 || validationErrors > 0;
+  const frictionIdentity = hasObservedFriction
+    ? [accountRequired ? "account" : "no-account", manualRequiredControls, validationErrors].join(
+        ":",
+      )
+    : "no-observed-friction";
   const fingerprintMaterial = [
-    "job-signal-page-v1",
-    sourceUrl(page.url),
+    "job-signal-page-v2",
+    applicationUrlIdentityKey(page.url),
     page.applicationState,
-    pageIdentity,
     jobContext,
+    frictionIdentity,
   ].join("\n");
 
   return {
