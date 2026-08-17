@@ -3,7 +3,14 @@ import type {
   Control,
   FillInstruction,
 } from "@munshi-apply/contracts";
-import type { PreflightGateSummary } from "@munshi-apply/application-model";
+import {
+  accountPreflightItem,
+  buildAccountOrchestrationPlan,
+  evaluateCurrentPageKnockouts,
+  type AccountOrchestrationPlan,
+  type EmployerPreflightFinding,
+  type PreflightGateSummary,
+} from "@munshi-apply/application-model";
 
 export type AutoPilotAnswer = {
   value: string;
@@ -19,6 +26,8 @@ export type AutoPilotLaunchPlan = {
   optionalUnansweredCount: number;
   requiredReviewCount: number;
   optionalReviewCount: number;
+  accountPlan: AccountOrchestrationPlan;
+  employerKnockoutFindings: EmployerPreflightFinding[];
 };
 
 const fillableKinds = new Set([
@@ -138,8 +147,19 @@ export function buildAutoPilotLaunchPlan(
     }
   }
 
+  const accountPlan = buildAccountOrchestrationPlan({ page });
+  const accountBlocked = accountPreflightItem(accountPlan).state === "BLOCKED";
+  const employerKnockoutFindings = evaluateCurrentPageKnockouts(page, answers);
+  const employerBlockedCount = employerKnockoutFindings.filter(
+    (finding) => finding.state === "BLOCKED",
+  ).length;
+  const securityOrAccountBoundary = Boolean(
+    page.securityCheckpoint || accountBlocked,
+  );
   const blockedCount =
-    (page.securityCheckpoint ? 1 : 0) + (page.finalSubmissionBoundary ? 1 : 0);
+    (securityOrAccountBoundary ? 1 : 0) +
+    (page.finalSubmissionBoundary ? 1 : 0) +
+    employerBlockedCount;
   const manualCount = manual.size;
   const state =
     blockedCount > 0
@@ -162,5 +182,7 @@ export function buildAutoPilotLaunchPlan(
     optionalUnansweredCount,
     requiredReviewCount,
     optionalReviewCount,
+    accountPlan,
+    employerKnockoutFindings,
   };
 }
