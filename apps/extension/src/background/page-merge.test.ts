@@ -201,4 +201,57 @@ describe("multi-frame application page aggregation", () => {
       ),
     ).toEqual(["q-email"]);
   });
+
+  it("withholds automatic questions when the same control ID exists in multiple frames", () => {
+    const duplicateControl = (frameId: number) => ({
+      controlId: "ctl-same-signature",
+      frameId,
+      kind: "TEXT" as const,
+      tagName: "input",
+      name: "email",
+      label: "Email",
+      placeholder: "",
+      ariaLabel: "",
+      required: true,
+      disabled: false,
+      visible: true,
+      options: [],
+      multiple: false,
+      autocomplete: "email",
+      invalid: false,
+      validationMessage: "",
+    });
+    const duplicateQuestion = (suffix: string) => ({
+      questionId: `q-email-${suffix}`,
+      controlId: "ctl-same-signature",
+      rawText: "Email",
+      semanticType: "EMAIL" as const,
+      confidence: 0.99,
+      sensitive: false,
+      requiresReview: false,
+    });
+    const top = page(0, {
+      controls: [duplicateControl(0)],
+      questions: [duplicateQuestion("top")],
+    });
+    const child = page(3, {
+      controls: [duplicateControl(3)],
+      questions: [duplicateQuestion("child")],
+      navigationCandidates: [
+        {
+          controlId: "continue-child",
+          frameId: 3,
+          action: "NEXT",
+          label: "Continue",
+          disabled: false,
+        },
+      ],
+    });
+
+    const merged = mergeApplicationPages([top, child]);
+
+    expect(merged?.controls).toHaveLength(2);
+    expect(merged?.questions).toEqual([]);
+    expect(merged?.navigationCandidates).toEqual(child.navigationCandidates);
+  });
 });
