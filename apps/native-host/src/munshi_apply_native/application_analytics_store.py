@@ -58,6 +58,18 @@ def _optional_label(value: object, label: str) -> str | None:
     return normalized
 
 
+def _ensure_application(connection: Any, application_id: str, observed_at: str) -> None:
+    connection.execute(
+        """
+        INSERT OR IGNORE INTO applications (
+            application_id, job_id, status, resume_id, job_signal_score,
+            submitted_at, created_at, updated_at
+        ) VALUES (?, NULL, 'DETECTED', NULL, NULL, NULL, ?, ?)
+        """,
+        (application_id, observed_at, observed_at),
+    )
+
+
 class ApplicationAnalyticsStore:
     def __init__(self, database: Database) -> None:
         self.database = database
@@ -79,6 +91,7 @@ class ApplicationAnalyticsStore:
 
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            _ensure_application(connection, application_id, occurred_at)
             existing = connection.execute(
                 "SELECT * FROM application_events WHERE event_id = ?",
                 (event_id,),
@@ -110,9 +123,7 @@ class ApplicationAnalyticsStore:
         if not isinstance(payload, dict):
             raise ValueError("Attribution context payload must be an object")
         event_id = _required_text(payload, "eventId", "Attribution eventId")
-        application_id = _required_text(
-            payload, "applicationId", "Attribution applicationId"
-        )
+        application_id = _required_text(payload, "applicationId", "Attribution applicationId")
         captured_at = _timestamp(payload, "capturedAt", "Attribution capturedAt")
         metadata = {
             "jobSource": _optional_label(payload.get("jobSource"), "jobSource"),
@@ -121,6 +132,7 @@ class ApplicationAnalyticsStore:
         }
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            _ensure_application(connection, application_id, captured_at)
             existing = connection.execute(
                 "SELECT * FROM application_events WHERE event_id = ?",
                 (event_id,),
@@ -162,6 +174,7 @@ class ApplicationAnalyticsStore:
 
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            _ensure_application(connection, application_id, occurred_at)
             existing = connection.execute(
                 "SELECT * FROM application_outcomes WHERE outcome_event_id = ?",
                 (event_id,),

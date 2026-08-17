@@ -10,6 +10,7 @@ from .account_store import AccountStore
 from .ai_draft_store import AIDraftStore
 from .ai_governance import AIGovernanceService
 from .ai_settings import AIConfiguration, AISettingsStore
+from .application_analytics_store import ApplicationAnalyticsStore
 from .application_store import ApplicationStore
 from .checkpoint_store import ApplicationCheckpointStore
 from .database import Database
@@ -37,6 +38,7 @@ NATIVE_CAPABILITIES: dict[str, bool] = {
     "writing_style_learning": True,
     "account_orchestration": True,
     "job_signal_intelligence": True,
+    "application_analytics": True,
 }
 
 
@@ -182,6 +184,17 @@ def handle(
             "ok": True,
             "data": JobSignalStore(database).latest(application_id),
         }
+    if message_type == "RECORD_APPLICATION_ANALYTICS_EVENT":
+        created = ApplicationAnalyticsStore(database).record_event(message.get("payload"))
+        return {"ok": True, "data": {"created": created}}
+    if message_type == "RECORD_APPLICATION_ATTRIBUTION_CONTEXT":
+        created = ApplicationAnalyticsStore(database).record_context(message.get("payload"))
+        return {"ok": True, "data": {"created": created}}
+    if message_type == "RECORD_APPLICATION_OUTCOME":
+        created = ApplicationAnalyticsStore(database).record_outcome(message.get("payload"))
+        return {"ok": True, "data": {"created": created}}
+    if message_type == "GET_APPLICATION_ANALYTICS_SNAPSHOT":
+        return {"ok": True, "data": ApplicationAnalyticsStore(database).snapshot()}
     if message_type == "SAVE_APPLICATION_CHECKPOINT":
         checkpoint = ApplicationCheckpointPayload.model_validate(message.get("payload"))
         created = ApplicationCheckpointStore(database).save(checkpoint.database_record())
