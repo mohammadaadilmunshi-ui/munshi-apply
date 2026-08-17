@@ -6,7 +6,6 @@ from munshi_apply_native.account_store import AccountStore, portal_identity
 from munshi_apply_native.application_store import ApplicationStore
 from munshi_apply_native.database import Database
 
-
 NOW = "2026-08-17T19:00:00+00:00"
 
 
