@@ -1,0 +1,78 @@
+name: Guarded Task 5 UI and formatting
+on:
+  push:
+    branches: [feat/v3-foundation-alignment]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Wire analytics panel and canonically format Tasks 3-5
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("apps/extension/src/sidepanel/AutoPilotControlCenter.tsx")
+          text = path.read_text()
+          import_anchor = 'import { JobSignalPanel } from "./JobSignalPanel";\n'
+          if text.count(import_anchor) != 1:
+              raise SystemExit("analytics import guard did not match exactly once")
+          text = text.replace(
+              import_anchor,
+              'import { ApplicationAnalyticsPanel } from "./ApplicationAnalyticsPanel";\n' + import_anchor,
+              1,
+          )
+          anchor = '''          {plan && (\n            <JobSignalPanel\n              page={page}\n              applicationId={applicationId}\n              nativeAvailable={nativeAvailable}\n              preflightState={plan.preflight.state}\n              accountRequired={plan.accountPlan.flow !== "NONE"}\n              manualRequiredControls={plan.manualControls.length}\n            />\n          )}\n\n'''
+          insertion = anchor + '''          {plan && (\n            <ApplicationAnalyticsPanel\n              page={page}\n              applicationId={applicationId}\n              selectedResumeId={selectedResumeId}\n              nativeAvailable={nativeAvailable}\n              autoPilotStatus={status}\n            />\n          )}\n\n'''
+          if text.count(anchor) != 1:
+              raise SystemExit(f"analytics panel guard matched {text.count(anchor)} times")
+          path.write_text(text.replace(anchor, insertion, 1))
+          PY
+          npx prettier \
+            apps/extension/src/messaging/client.ts \
+            apps/extension/src/messaging/native-application-analytics.ts \
+            apps/extension/src/messaging/native-application-analytics.test.ts \
+            apps/extension/src/messaging/native-runtime.test.ts \
+            apps/extension/src/sidepanel/ApplicationAnalyticsPanel.tsx \
+            apps/extension/src/sidepanel/AutoPilotControlCenter.tsx \
+            apps/extension/src/sidepanel/job-signal-view.test.ts \
+            apps/extension/src/sidepanel/job-signal-view.ts \
+            apps/extension/src/sidepanel/JobSignalPanel.tsx \
+            packages/application-model/src/application-analytics.test.ts \
+            packages/application-model/src/application-analytics.ts \
+            packages/application-model/src/job-opportunity.test.ts \
+            packages/application-model/src/job-opportunity.ts \
+            packages/application-model/src/job-signal-page.test.ts \
+            packages/application-model/src/job-signal-page.ts \
+            --write
+          git diff --check
+          git rm .github/workflows/task5-ui-format.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            apps/extension/src/messaging/client.ts \
+            apps/extension/src/messaging/native-application-analytics.ts \
+            apps/extension/src/messaging/native-application-analytics.test.ts \
+            apps/extension/src/messaging/native-runtime.test.ts \
+            apps/extension/src/sidepanel/ApplicationAnalyticsPanel.tsx \
+            apps/extension/src/sidepanel/AutoPilotControlCenter.tsx \
+            apps/extension/src/sidepanel/job-signal-view.test.ts \
+            apps/extension/src/sidepanel/job-signal-view.ts \
+            apps/extension/src/sidepanel/JobSignalPanel.tsx \
+            packages/application-model/src/application-analytics.test.ts \
+            packages/application-model/src/application-analytics.ts \
+            packages/application-model/src/job-opportunity.test.ts \
+            packages/application-model/src/job-opportunity.ts \
+            packages/application-model/src/job-signal-page.test.ts \
+            packages/application-model/src/job-signal-page.ts
+          git commit -m "feat: complete Tasks 3-5 UI and analytics wiring"
+          git push origin HEAD:feat/v3-foundation-alignment
