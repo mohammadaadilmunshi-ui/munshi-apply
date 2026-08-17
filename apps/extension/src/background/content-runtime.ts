@@ -2,11 +2,7 @@ import {
   recoverHistoryStateChange,
   type HistoryStateRecoveryDependencies,
 } from "./history-state-recovery";
-import {
-  clearPagesForTab,
-  deletePage,
-  getPagesForTab,
-} from "../storage/vault";
+import { clearPagesForTab, deletePage, getPagesForTab } from "../storage/vault";
 
 export type ContentRuntimeApi = {
   sendMessage<T>(
