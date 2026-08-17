@@ -1,0 +1,45 @@
+name: Guarded Job Signal UI patch
+on:
+  push:
+    branches: [feat/v3-foundation-alignment]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Wire Job Signal panel with exact-match guards
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("apps/extension/src/sidepanel/AutoPilotControlCenter.tsx")
+          text = path.read_text()
+          old_import = 'import { TeachMunshiPanel } from "./TeachMunshiPanel";\n'
+          new_import = 'import { JobSignalPanel } from "./JobSignalPanel";\n' + old_import
+          if text.count(old_import) != 1:
+              raise SystemExit("TeachMunshi import guard did not match exactly once")
+          text = text.replace(old_import, new_import, 1)
+          anchor = '''          )}\n\n          {plan?.manualControls.length ? (\n'''
+          insertion = '''          )}\n\n          {plan && (\n            <JobSignalPanel\n              page={page}\n              applicationId={applicationId}\n              nativeAvailable={nativeAvailable}\n              preflightState={plan.preflight.state}\n              accountRequired={plan.accountPlan.flow !== "NONE"}\n              manualRequiredControls={plan.manualControls.length}\n            />\n          )}\n\n          {plan?.manualControls.length ? (\n'''
+          if text.count(anchor) != 1:
+              raise SystemExit(f"Job Signal insertion guard matched {text.count(anchor)} times")
+          text = text.replace(anchor, insertion, 1)
+          path.write_text(text)
+          PY
+          npx prettier apps/extension/src/sidepanel/AutoPilotControlCenter.tsx --write
+          git diff --check
+          git rm .github/workflows/task4-ui-patch.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/extension/src/sidepanel/AutoPilotControlCenter.tsx
+          git commit -m "feat: wire Job Signal panel into AutoPilot"
+          git push origin HEAD:feat/v3-foundation-alignment
