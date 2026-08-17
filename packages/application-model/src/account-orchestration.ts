@@ -143,7 +143,6 @@ export function detectAccountFlow(page: ApplicationPage): AccountFlow {
   }
 
   if (
-    page.securityCheckpoint === "AUTHENTICATION" ||
     /\b(sign in|signin|log in|login|existing account|returning candidate)\b/.test(
       text,
     )
@@ -151,7 +150,7 @@ export function detectAccountFlow(page: ApplicationPage): AccountFlow {
     return "AUTH_LOGIN";
   }
 
-  return page.applicationState === "AUTH" ? "AUTH_UNKNOWN" : "NONE";
+  return accountContext ? "AUTH_UNKNOWN" : "NONE";
 }
 
 export function selectKnownAccount(
@@ -306,8 +305,13 @@ export function buildAccountOrchestrationPlan(input: {
 export function accountPreflightItem(
   plan: AccountOrchestrationPlan,
 ): PreflightGateItem {
+  const hardBlocked =
+    plan.state === "DUPLICATE_RISK" ||
+    plan.flow === "AUTH_RECOVERY" ||
+    plan.flow === "AUTH_VERIFY" ||
+    plan.flow === "AUTH_UNKNOWN";
   return {
     id: `account:${plan.scopeKey}`,
-    state: plan.requiresOwner ? "BLOCKED" : "READY",
+    state: !plan.requiresOwner ? "READY" : hardBlocked ? "BLOCKED" : "REVIEW",
   };
 }
