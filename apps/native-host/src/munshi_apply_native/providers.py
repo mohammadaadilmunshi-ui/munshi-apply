@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
@@ -8,6 +9,8 @@ from urllib import error as urllib_error
 from urllib import request as urllib_request
 
 _OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
+_OLLAMA_CHAT_URL = "http://127.0.0.1:11434/api/chat"
+_OLLAMA_TAGS_URL = "http://127.0.0.1:11434/api/tags"
 
 
 @dataclass(frozen=True)
@@ -26,6 +29,8 @@ class ProviderGenerationRequest:
     context: tuple[ProviderContextItem, ...]
     max_words: int | None = None
     max_output_tokens: int = 512
+    response_intent: str = "OTHER_NARRATIVE"
+    style_instructions: str = ""
 
 
 @dataclass(frozen=True)
@@ -65,11 +70,11 @@ def _default_transport(request: urllib_request.Request, timeout: float) -> dict[
         with urllib_request.urlopen(request, timeout=timeout) as response:  # noqa: S310
             payload = json.loads(response.read().decode("utf-8"))
     except urllib_error.HTTPError as error:
-        raise ValueError(f"OpenAI generation failed (HTTP {error.code})") from error
+        raise ValueError(f"Provider generation failed (HTTP {error.code})") from error
     except (urllib_error.URLError, TimeoutError, json.JSONDecodeError) as error:
-        raise ValueError("OpenAI generation failed") from error
+        raise ValueError("Provider generation failed") from error
     if not isinstance(payload, dict):
-        raise ValueError("OpenAI returned an invalid response")
+        raise ValueError("Provider returned an invalid response")
     return payload
 
 
@@ -100,7 +105,7 @@ def _structured_output_schema() -> dict[str, object]:
     }
 
 
-def _input_text(request: ProviderGenerationRequest) -> str:
+def _input_payload(request: ProviderGenerationRequest) -> dict[str, object]:
     evidence = [
         {
             "evidenceId": item.evidence_id,
@@ -113,11 +118,53 @@ def _input_text(request: ProviderGenerationRequest) -> str:
     payload: dict[str, object] = {
         "question": request.question,
         "semanticType": request.semantic_type,
+        "responseIntent": request.response_intent,
         "evidence": evidence,
     }
     if request.max_words is not None:
         payload["maxWords"] = request.max_words
-    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    if request.style_instructions:
+        payload["styleInstructions"] = request.style_instructions
+    return payload
+
+
+def _input_text(request: ProviderGenerationRequest) -> str:
+    return json.dumps(_input_payload(request), ensure_ascii=False, separators=(",", ":"))
+
+
+def _instructions(request: ProviderGenerationRequest) -> str:
+    style = (
+        f" Writing style: {request.style_instructions}"
+        if request.style_instructions.strip()
+        else ""
+    )
+    return (
+        "Answer the exact job-application question directly, naturally, and professionally. "
+        "Treat evidence sourced from the current employer page or captured job listing as the "
+        "authoritative description of the role and company. Use verified candidate evidence "
+        "only when it supports the statement. For why-company and why-role questions, connect "
+        "specific job/company evidence with relevant candidate evidence rather than writing "
+        "generic enthusiasm. For experience and behavioral answers, prioritize concrete actions "
+        "and verified results. For career-transition answers, stay constructive and future-focused. "
+        "Do not invent facts, metrics, employers, dates, credentials, immigration facts, motives, "
+        "or claims. If evidence does not support a personal claim, omit it. Avoid generic filler, "
+        "clichés, robotic headings, and references to the evidence system. Every factual claim "
+        "must cite supplied evidenceId values in the structured claims array."
+        + style
+    )
+
+
+def _validate_request(request: ProviderGenerationRequest) -> None:
+    if not request.model.strip():
+        raise ValueError("AI model is required")
+    if not request.question.strip():
+        raise ValueError("Application question is required")
+    if not request.context:
+        raise ValueError("Verified evidence context is required")
+    if request.max_words is not None and request.max_words < 1:
+        raise ValueError("max_words must be positive")
+    if not 1 <= request.max_output_tokens <= 4096:
+        raise ValueError("max_output_tokens must be between 1 and 4096")
 
 
 def _validate_response_status(payload: dict[str, object]) -> None:
@@ -178,16 +225,16 @@ def _parse_structured_draft(value: str) -> tuple[str, tuple[ProviderClaim, ...]]
     try:
         payload = json.loads(value)
     except json.JSONDecodeError as error:
-        raise ValueError("OpenAI structured output is not valid JSON") from error
+        raise ValueError("Structured output is not valid JSON") from error
     if not isinstance(payload, dict) or not isinstance(payload.get("text"), str):
-        raise ValueError("OpenAI structured output is incomplete")
+        raise ValueError("Structured output is incomplete")
     raw_claims = payload.get("claims")
     if not isinstance(raw_claims, list):
-        raise ValueError("OpenAI structured output does not include claims")
+        raise ValueError("Structured output does not include claims")
     claims: list[ProviderClaim] = []
     for item in raw_claims:
         if not isinstance(item, dict):
-            raise ValueError("OpenAI claim is invalid")
+            raise ValueError("Provider claim is invalid")
         claim_id = item.get("claimId")
         text = item.get("text")
         evidence_ids = item.get("evidenceIds")
@@ -199,7 +246,7 @@ def _parse_structured_draft(value: str) -> tuple[str, tuple[ProviderClaim, ...]]
             or not isinstance(evidence_ids, list)
             or not all(isinstance(evidence_id, str) and evidence_id for evidence_id in evidence_ids)
         ):
-            raise ValueError("OpenAI claim is incomplete")
+            raise ValueError("Provider claim is incomplete")
         claims.append(
             ProviderClaim(
                 claim_id=claim_id,
@@ -211,6 +258,8 @@ def _parse_structured_draft(value: str) -> tuple[str, tuple[ProviderClaim, ...]]
 
 
 class OpenAIResponsesProvider:
+    provider_name = "openai"
+
     def __init__(
         self,
         api_key: str,
@@ -227,42 +276,12 @@ class OpenAIResponsesProvider:
         self._timeout_seconds = timeout_seconds
 
     def generate_structured(self, request: ProviderGenerationRequest) -> ProviderGenerationResult:
-        if not request.model.strip():
-            raise ValueError("OpenAI model is required")
-        if not request.question.strip():
-            raise ValueError("Application question is required")
-        if not request.context:
-            raise ValueError("Verified evidence context is required")
-        if request.max_words is not None and request.max_words < 1:
-            raise ValueError("max_words must be positive")
-        if not 1 <= request.max_output_tokens <= 4096:
-            raise ValueError("max_output_tokens must be between 1 and 4096")
-
+        _validate_request(request)
         body = {
             "model": request.model,
             "store": False,
             "max_output_tokens": request.max_output_tokens,
-            "instructions": (
-                "Answer the exact job-application question directly, naturally, "
-                "and professionally. Treat evidence sourced from the current "
-                "employer page or captured job listing as the authoritative "
-                "description of the role and company. For questions asking what "
-                "the role means or what its responsibilities are, explain those "
-                "responsibilities specifically from the supplied job context "
-                "instead of giving a generic definition. Use verified candidate "
-                "evidence to personalize motivation, fit, relevant experience, "
-                "and examples only when that evidence supports the statement. "
-                "For motivation questions, connect concrete role responsibilities "
-                "to one or two supported candidate experiences, skills, or goals "
-                "when available. Do not invent facts, metrics, employers, dates, "
-                "credentials, immigration facts, motives, or claims. If candidate "
-                "evidence does not support a personal claim, omit that claim rather "
-                "than guessing. For career-transition questions, stay constructive "
-                "and future-focused and do not criticize an employer unless evidence "
-                "explicitly requires it. Avoid generic filler, clichés, and references "
-                "to the evidence system. Every factual claim must cite supplied "
-                "evidenceId values in the structured claims array."
-            ),
+            "instructions": _instructions(request),
             "input": _input_text(request),
             "text": {
                 "format": {
@@ -281,7 +300,7 @@ class OpenAIResponsesProvider:
                 "Authorization": f"Bearer {self._api_key}",
                 "Content-Type": "application/json",
                 "Accept": "application/json",
-                "User-Agent": "MUNSHI-Apply/0.2.1",
+                "User-Agent": "MUNSHI-Apply/0.2.5",
             },
         )
         payload = self._transport(http_request, self._timeout_seconds)
@@ -300,3 +319,79 @@ class OpenAIResponsesProvider:
             claims=claims,
             usage=_parse_usage(payload),
         )
+
+
+class OllamaChatProvider:
+    """Local structured-output provider. Endpoint is intentionally fixed to loopback."""
+
+    provider_name = "ollama"
+
+    def __init__(
+        self,
+        *,
+        transport: Transport = _default_transport,
+        timeout_seconds: float = 60.0,
+    ) -> None:
+        if timeout_seconds <= 0:
+            raise ValueError("Provider timeout must be positive")
+        self._transport = transport
+        self._timeout_seconds = timeout_seconds
+
+    def generate_structured(self, request: ProviderGenerationRequest) -> ProviderGenerationResult:
+        _validate_request(request)
+        body = {
+            "model": request.model,
+            "stream": False,
+            "format": _structured_output_schema(),
+            "options": {"num_predict": request.max_output_tokens, "temperature": 0.2},
+            "messages": [
+                {"role": "system", "content": _instructions(request)},
+                {"role": "user", "content": _input_text(request)},
+            ],
+        }
+        http_request = urllib_request.Request(  # noqa: S310
+            _OLLAMA_CHAT_URL,
+            data=json.dumps(body, separators=(",", ":")).encode("utf-8"),
+            method="POST",
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+        )
+        payload = self._transport(http_request, self._timeout_seconds)
+        message = payload.get("message")
+        if not isinstance(message, dict) or not isinstance(message.get("content"), str):
+            raise ValueError("Ollama response does not include message content")
+        draft_text, claims = _parse_structured_draft(message["content"])
+        input_tokens = payload.get("prompt_eval_count", 0)
+        output_tokens = payload.get("eval_count", 0)
+        if not isinstance(input_tokens, int) or input_tokens < 0:
+            input_tokens = 0
+        if not isinstance(output_tokens, int) or output_tokens < 0:
+            output_tokens = 0
+        return ProviderGenerationResult(
+            response_id=f"ollama-{uuid.uuid4()}",
+            model=str(payload.get("model") or request.model),
+            text=draft_text,
+            claims=claims,
+            usage=ProviderUsage(
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=input_tokens + output_tokens,
+            ),
+        )
+
+
+def list_ollama_models(*, transport: Transport = _default_transport) -> list[str]:
+    request = urllib_request.Request(  # noqa: S310
+        _OLLAMA_TAGS_URL,
+        method="GET",
+        headers={"Accept": "application/json"},
+    )
+    payload = transport(request, 5.0)
+    models = payload.get("models")
+    if not isinstance(models, list):
+        raise ValueError("Ollama model list is unavailable")
+    names = [
+        item.get("name")
+        for item in models
+        if isinstance(item, dict) and isinstance(item.get("name"), str) and item.get("name")
+    ]
+    return sorted(set(names))
