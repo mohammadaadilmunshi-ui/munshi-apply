@@ -7,6 +7,7 @@ on:
     paths:
       - scripts/phase_3_8_9_teach_finalize.py
       - scripts/phase_3_8_9_extension_wiring.py
+      - scripts/phase_3_8_9_typecheck_fix.py
       - .github/workflows/phase-3-8-9-teach-finalize.yml
 
 permissions:
@@ -31,6 +32,7 @@ jobs:
         run: |
           python scripts/phase_3_8_9_teach_finalize.py
           python scripts/phase_3_8_9_extension_wiring.py
+          python scripts/phase_3_8_9_typecheck_fix.py
       - name: Install locked Node dependencies
         run: npm ci
       - name: Format generated implementation
