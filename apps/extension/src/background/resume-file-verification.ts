@@ -27,7 +27,9 @@ function fileContext(control: Control): string {
 export function isResumeFileControl(control: Control): boolean {
   if (control.kind !== "FILE" || control.disabled) return false;
   const context = fileContext(control);
-  return resumePattern.test(context) && !nonResumeAttachmentPattern.test(context);
+  return (
+    resumePattern.test(context) && !nonResumeAttachmentPattern.test(context)
+  );
 }
 
 export function verifySelectedResumeFile(input: {
@@ -38,7 +40,8 @@ export function verifySelectedResumeFile(input: {
   if (!expected) {
     return {
       state: "NOT_APPLICABLE",
-      reason: "No application résumé digest is selected for this AutoPilot session",
+      reason:
+        "No application résumé digest is selected for this AutoPilot session",
       controlIds: [],
     };
   }
