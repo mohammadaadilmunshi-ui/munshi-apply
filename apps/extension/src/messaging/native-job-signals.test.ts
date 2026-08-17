@@ -59,7 +59,8 @@ describe("native Job Signal parsing", () => {
 
   it("rejects incomplete dimension ontologies", () => {
     const candidate = validReport();
-    const { ROLE_AMBIGUITY: _removed, ...dimensions } = candidate.dimensions;
+    const dimensions: Record<string, unknown> = { ...candidate.dimensions };
+    delete dimensions.ROLE_AMBIGUITY;
     expect(() =>
       parsePersistedJobSignalReport({ ...candidate, dimensions }),
     ).toThrow(/complete canonical ontology/);
