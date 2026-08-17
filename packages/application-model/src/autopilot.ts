@@ -85,6 +85,12 @@ function assertIsoTimestamp(value: string, name: string): void {
   }
 }
 
+export function isHardSecurityCheckpoint(
+  checkpoint: SecurityCheckpointKind | null,
+): boolean {
+  return checkpoint !== null && checkpoint !== "AUTHENTICATION";
+}
+
 export function parseAutoPilotCheckpoint(value: unknown): AutoPilotCheckpoint {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("Checkpoint payload must be an object");
@@ -182,7 +188,10 @@ export function planAutoPilotStep(input: {
   completedControlIds?: readonly string[];
 }): AutoPilotPlan {
   const { observation, preflight } = input;
-  if (observation.securityCheckpoint) {
+  if (
+    observation.securityCheckpoint &&
+    isHardSecurityCheckpoint(observation.securityCheckpoint)
+  ) {
     return {
       action: {
         type: "PAUSE_SECURITY",
@@ -223,6 +232,18 @@ export function planAutoPilotStep(input: {
       checkpointRequired: false,
       reason:
         "Apply one approved visible instruction and verify before continuing",
+    };
+  }
+
+  if (observation.securityCheckpoint === "AUTHENTICATION") {
+    return {
+      action: {
+        type: "PAUSE_REVIEW",
+        reason: "Authentication credential entry requires owner action",
+      },
+      checkpointRequired: true,
+      reason:
+        "Approved non-secret authentication preparation is complete; credentials and navigation remain owner controlled",
     };
   }
 
