@@ -1,4 +1,5 @@
 name: Scanner hot-path patch
+run-name: Scanner hot-path patch on latest branch
 on:
   push:
     branches: [feat/v3-foundation-alignment]
@@ -33,23 +34,43 @@ jobs:
 
           old_section = (
               '  const root = element.getRootNode();\n'
-              '  if (root instanceof Document || root instanceof ShadowRoot) {\n'
-              '    const headings = [...root.querySelectorAll("h1,h2,h3,h4,h5,h6,[role=heading]")]\n'
-              '      .filter((candidate): candidate is Element => candidate instanceof Element)\n'
-              '      .filter(isVisible);\n'
-              '    let previous = "";\n'
+              '  if (!(root instanceof Document || root instanceof ShadowRoot)) return "";\n'
+              '  const preceding = Array.from(\n'
+              '    root.querySelectorAll("h1, h2, h3, h4, h5, h6, [role=heading], legend"),\n'
+              '  )\n'
+              '    .filter(\n'
+              '      (candidate) =>\n'
+              '        candidate !== element &&\n'
+              '        isVisible(candidate) &&\n'
+              '        Boolean(\n'
+              '          candidate.compareDocumentPosition(element) &\n'
+              '          Node.DOCUMENT_POSITION_FOLLOWING,\n'
+              '        ),\n'
+              '    )\n'
+              '    .map((candidate) => ({ candidate, text: headingText(candidate) }))\n'
+              '    .filter((item) => Boolean(item.text));\n'
           )
           new_section = (
               '  const root = element.getRootNode();\n'
-              '  if (root instanceof Document || root instanceof ShadowRoot) {\n'
-              '    let headings = sectionHeadingCache.get(root);\n'
-              '    if (!headings) {\n'
-              '      headings = [...root.querySelectorAll("h1,h2,h3,h4,h5,h6,[role=heading]")]\n'
-              '        .filter((candidate): candidate is Element => candidate instanceof Element)\n'
-              '        .filter(isVisible);\n'
-              '      sectionHeadingCache.set(root, headings);\n'
-              '    }\n'
-              '    let previous = "";\n'
+              '  if (!(root instanceof Document || root instanceof ShadowRoot)) return "";\n'
+              '  let headings = sectionHeadingCache.get(root);\n'
+              '  if (!headings) {\n'
+              '    headings = Array.from(\n'
+              '      root.querySelectorAll("h1, h2, h3, h4, h5, h6, [role=heading], legend"),\n'
+              '    ).filter(isVisible);\n'
+              '    sectionHeadingCache.set(root, headings);\n'
+              '  }\n'
+              '  const preceding = headings\n'
+              '    .filter(\n'
+              '      (candidate) =>\n'
+              '        candidate !== element &&\n'
+              '        Boolean(\n'
+              '          candidate.compareDocumentPosition(element) &\n'
+              '          Node.DOCUMENT_POSITION_FOLLOWING,\n'
+              '        ),\n'
+              '    )\n'
+              '    .map((candidate) => ({ candidate, text: headingText(candidate) }))\n'
+              '    .filter((item) => Boolean(item.text));\n'
           )
           if source.count(old_section) != 1:
               raise SystemExit("Expected one section heading query block")
