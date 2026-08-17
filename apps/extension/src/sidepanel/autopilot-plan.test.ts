@@ -162,20 +162,26 @@ describe("buildAutoPilotLaunchPlan", () => {
     expect(result.fillInstructions[0]?.sourceDraftId).toBe("draft-1");
   });
 
-  it("hard-blocks AutoPilot on a detected account creation boundary", () => {
+  it("allows safe identity preparation on recognized account creation, then stops before navigation", () => {
     const current = page();
     current.controls = [current.controls[0]!];
     current.questions = [current.questions[0]!];
     current.url = "https://example.com/candidate/register";
     current.applicationState = "ACCOUNT_CREATE";
+    current.securityCheckpoint = "AUTHENTICATION";
     current.pageContext = "Create account for a new candidate";
     const result = buildAutoPilotLaunchPlan(current, {
       "q-name": { value: "Aadil", approved: true, sensitive: false },
     });
     expect(result.accountPlan.flow).toBe("AUTH_CREATE");
-    expect(result.preflight.blockedCount).toBe(1);
-    expect(result.preflight.state).toBe("BLOCKED");
-    expect(canAutoPilotMakeProgress(result)).toBe(false);
+    expect(result.preflight.blockedCount).toBe(0);
+    expect(result.preflight.reviewCount).toBe(1);
+    expect(result.preflight.state).toBe("REVIEW");
+    expect(result.fillInstructions.map((item) => item.controlId)).toEqual([
+      "name",
+    ]);
+    expect(canAutoPilotMakeProgress(result)).toBe(true);
+    expect(canAutoPilotMakeProgress(result, ["name"])).toBe(false);
   });
 
   it("recognizes a known portal account and prevents duplicate creation", () => {
@@ -184,6 +190,7 @@ describe("buildAutoPilotLaunchPlan", () => {
     current.questions = [current.questions[0]!];
     current.url = "https://example.com/candidate/register";
     current.applicationState = "ACCOUNT_CREATE";
+    current.securityCheckpoint = "AUTHENTICATION";
     current.pageContext = "Create account for a new candidate";
     const result = buildAutoPilotLaunchPlan(
       current,
@@ -239,7 +246,46 @@ describe("buildAutoPilotLaunchPlan", () => {
     });
     expect(result.employerKnockoutFindings).toHaveLength(1);
     expect(result.employerKnockoutFindings[0]?.state).toBe("BLOCKED");
+    expect(result.fillInstructions).toHaveLength(0);
     expect(result.preflight.state).toBe("BLOCKED");
     expect(canAutoPilotMakeProgress(result)).toBe(false);
+  });
+
+  it("withholds an unresolved knockout answer while allowing unrelated safe fields first", () => {
+    const current = page();
+    current.controls = [
+      current.controls[0]!,
+      {
+        ...current.controls[0]!,
+        controlId: "sponsor",
+        name: "sponsor",
+        label: "Sponsorship",
+      },
+    ];
+    current.questions = [
+      current.questions[0]!,
+      {
+        questionId: "q-sponsor",
+        controlId: "sponsor",
+        rawText: "Will you now or in the future require sponsorship?",
+        semanticType: "SPONSORSHIP_FUTURE",
+        confidence: 1,
+        sensitive: true,
+        requiresReview: true,
+      },
+    ];
+    current.pageContext = "This employer does not offer visa sponsorship.";
+    const result = buildAutoPilotLaunchPlan(current, {
+      "q-name": { value: "Aadil", approved: true, sensitive: false },
+      "q-sponsor": { value: "Maybe", approved: true, sensitive: true },
+    });
+    expect(result.employerKnockoutFindings[0]?.state).toBe("UNRESOLVED");
+    expect(result.preflight.state).toBe("REVIEW");
+    expect(result.preflight.unresolvedCount).toBe(1);
+    expect(result.fillInstructions.map((item) => item.controlId)).toEqual([
+      "name",
+    ]);
+    expect(canAutoPilotMakeProgress(result)).toBe(true);
+    expect(canAutoPilotMakeProgress(result, ["name"])).toBe(false);
   });
 });
