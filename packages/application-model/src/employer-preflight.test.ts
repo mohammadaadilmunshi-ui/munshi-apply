@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type {
-  ApplicationPage,
-  ProfileFact,
-} from "@munshi-apply/contracts";
+import type { ApplicationPage, ProfileFact } from "@munshi-apply/contracts";
 import type { ProfileSnapshot } from "@munshi-apply/contracts/profile-vault";
 import {
   buildEmployerPreflightReport,
@@ -93,7 +90,8 @@ describe("employer preflight intelligence", () => {
       requirements.find((item) => item.kind === "SPONSORSHIP")?.expectedValues,
     ).toEqual(["No"]);
     expect(
-      requirements.find((item) => item.kind === "WORK_AUTHORIZATION")?.expectedValues,
+      requirements.find((item) => item.kind === "WORK_AUTHORIZATION")
+        ?.expectedValues,
     ).toEqual(["Yes"]);
   });
 
@@ -214,7 +212,9 @@ describe("employer preflight intelligence", () => {
     });
     const report = buildEmployerPreflightReport(
       current,
-      profile([fact("salary_expectation", "Salary expectation: $90,000 annually")]),
+      profile([
+        fact("salary_expectation", "Salary expectation: $90,000 annually"),
+      ]),
     );
     expect(report.findings[0]?.state).toBe("REVIEW");
     expect(report.findings[0]?.reason).toMatch(/overlap/i);

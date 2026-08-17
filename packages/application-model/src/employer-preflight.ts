@@ -44,10 +44,7 @@ export type EmployerRequirement = {
 };
 
 export type EmployerPreflightFindingState =
-  | "READY"
-  | "REVIEW"
-  | "UNRESOLVED"
-  | "BLOCKED";
+  "READY" | "REVIEW" | "UNRESOLVED" | "BLOCKED";
 
 export type EmployerPreflightFinding = {
   requirement: EmployerRequirement;
@@ -119,7 +116,9 @@ function pageSegments(page: ApplicationPage): SourceSegment[] {
   return [...contextSegments, ...questions];
 }
 
-function requirement(input: Omit<EmployerRequirement, "requirementId">): EmployerRequirement {
+function requirement(
+  input: Omit<EmployerRequirement, "requirementId">,
+): EmployerRequirement {
   const identity = [
     input.kind,
     input.sourceKind,
@@ -147,7 +146,9 @@ function moneyValue(raw: string, suffix: string | undefined): number | null {
 
 export function parseSalaryRange(text: string): SalaryRange | null {
   const normalized = normalize(text);
-  if (!/\b(salary|pay|compensation|base|hourly|annual|yearly)\b/.test(normalized)) {
+  if (
+    !/\b(salary|pay|compensation|base|hourly|annual|yearly)\b/.test(normalized)
+  ) {
     return null;
   }
   const values = Array.from(
@@ -159,7 +160,8 @@ export function parseSalaryRange(text: string): SalaryRange | null {
 
   const period: SalaryRange["period"] =
     /\b(hour|hourly|per hour|\/hr|hr\.)\b/i.test(text) ? "HOUR" : "YEAR";
-  const currency = /\b(?:usd|us dollars?)\b/i.test(text) || text.includes("$") ? "USD" : "USD";
+  const currency =
+    /\b(?:usd|us dollars?)\b/i.test(text) || text.includes("$") ? "USD" : "USD";
   const minimum = values[0] ?? null;
   const maximum = values.length >= 2 ? values[1]! : null;
   if (minimum !== null && maximum !== null && minimum > maximum) {
@@ -262,7 +264,10 @@ export function extractEmployerRequirements(
     const clearance = text.match(
       /\b(?:active |current )?((?:top secret|secret|public trust|ts\/sci)[^.;,]{0,40})\s+(?:clearance )?(?:is )?(?:required|mandatory)\b/,
     );
-    if (clearance || /\bmust (?:hold|have|possess)\b.{0,50}\bsecurity clearance\b/.test(text)) {
+    if (
+      clearance ||
+      /\bmust (?:hold|have|possess)\b.{0,50}\bsecurity clearance\b/.test(text)
+    ) {
       addRequirement(
         requirements,
         requirement({
@@ -291,7 +296,9 @@ export function extractEmployerRequirements(
           sourceKind: segment.sourceKind,
           sourceText: segment.text,
           semanticType: "DEGREE",
-          expectedValues: [compact(degree[0].match(/^[^.;,]{0,80}/)?.[0] ?? degree[0])],
+          expectedValues: [
+            compact(degree[0].match(/^[^.;,]{0,80}/)?.[0] ?? degree[0]),
+          ],
           numericValue: null,
           unit: null,
           confidence: 0.95,
@@ -304,7 +311,10 @@ export function extractEmployerRequirements(
     const experience = text.match(
       /\b(?:minimum (?:of )?|at least |requires? |required:?\s*)?(\d+(?:\.\d+)?)\+?\s+years?\b.{0,100}\b(?:experience|professional|work)\b/,
     );
-    if (experience && /\b(required|minimum|at least|must|requires?)\b/.test(text)) {
+    if (
+      experience &&
+      /\b(required|minimum|at least|must|requires?)\b/.test(text)
+    ) {
       addRequirement(
         requirements,
         requirement({
@@ -323,7 +333,10 @@ export function extractEmployerRequirements(
     }
 
     const salary = parseSalaryRange(segment.text);
-    if (salary && /\b(?:salary|pay|compensation|base|hourly|annual|yearly)\b/.test(text)) {
+    if (
+      salary &&
+      /\b(?:salary|pay|compensation|base|hourly|annual|yearly)\b/.test(text)
+    ) {
       addRequirement(
         requirements,
         requirement({
@@ -362,7 +375,11 @@ export function extractEmployerRequirements(
       );
     }
 
-    if (/\b(?:must be willing to|required to|must)\b.{0,50}\brelocat(?:e|ion)\b/.test(text)) {
+    if (
+      /\b(?:must be willing to|required to|must)\b.{0,50}\brelocat(?:e|ion)\b/.test(
+        text,
+      )
+    ) {
       addRequirement(
         requirements,
         requirement({
@@ -380,7 +397,11 @@ export function extractEmployerRequirements(
       );
     }
 
-    if (/\b(?:onsite|on-site|in office)\b.{0,45}\b(?:required|mandatory|must)\b/.test(text)) {
+    if (
+      /\b(?:onsite|on-site|in office)\b.{0,45}\b(?:required|mandatory|must)\b/.test(
+        text,
+      )
+    ) {
       addRequirement(
         requirements,
         requirement({
@@ -432,7 +453,10 @@ function factValue(fact: ProfileFact | undefined): string | null {
   return Array.isArray(fact.value) ? fact.value.join(", ") : String(fact.value);
 }
 
-function authoritativeFact(profile: ProfileLike, key: string): ProfileFact | null {
+function authoritativeFact(
+  profile: ProfileLike,
+  key: string,
+): ProfileFact | null {
   const fact = profile.facts.find((candidate) => candidate.key === key);
   if (!fact || !authoritativeTrust.has(fact.trustLevel)) return null;
   if (fact.protected && !fact.confirmedAt) return null;
@@ -455,9 +479,16 @@ function syntheticQuestion(requirement: EmployerRequirement): Question | null {
 function booleanValue(value: string | null): "YES" | "NO" | "UNKNOWN" {
   const text = normalize(value ?? "");
   if (/^(yes|true|authorized|eligible|will|willing)$/.test(text)) return "YES";
-  if (/^(no|false|not authorized|not eligible|none|never)$/.test(text)) return "NO";
-  if (/\b(?:do not|don['’]t|does not|doesn['’]t|will not|won['’]t|no)\b/.test(text)) return "NO";
-  if (/\b(?:yes|require|requires|authorized|eligible|willing)\b/.test(text)) return "YES";
+  if (/^(no|false|not authorized|not eligible|none|never)$/.test(text))
+    return "NO";
+  if (
+    /\b(?:do not|don['’]t|does not|doesn['’]t|will not|won['’]t|no)\b/.test(
+      text,
+    )
+  )
+    return "NO";
+  if (/\b(?:yes|require|requires|authorized|eligible|willing)\b/.test(text))
+    return "YES";
   return "UNKNOWN";
 }
 
@@ -518,7 +549,10 @@ export function evaluateEmployerRequirement(
   requirement: EmployerRequirement,
   profile: ProfileLike,
 ): EmployerPreflightFinding {
-  if (requirement.kind === "WORK_AUTHORIZATION" || requirement.kind === "SPONSORSHIP") {
+  if (
+    requirement.kind === "WORK_AUTHORIZATION" ||
+    requirement.kind === "SPONSORSHIP"
+  ) {
     const resolution = resolveMappedRequirement(requirement, profile);
     if (!resolution?.value) {
       return finding(
@@ -639,7 +673,9 @@ export function evaluateEmployerRequirement(
   if (requirement.kind === "SALARY") {
     const employer = parseSalaryRange(requirement.sourceText);
     const candidateFact = authoritativeFact(profile, "salary_expectation");
-    const candidate = parseSalaryRange(factValue(candidateFact ?? undefined) ?? "");
+    const candidate = parseSalaryRange(
+      factValue(candidateFact ?? undefined) ?? "",
+    );
     const evaluation = evaluateSalaryRanges(candidate, employer);
     return finding(
       requirement,
