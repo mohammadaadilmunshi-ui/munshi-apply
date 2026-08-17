@@ -7,6 +7,7 @@ import {
 import {
   canResumeFromCheckpoint,
   createAutoPilotCheckpoint,
+  isHardSecurityCheckpoint,
   parseAutoPilotCheckpoint,
   verifyNavigationAction,
   type AutoPilotCheckpoint,
@@ -307,7 +308,10 @@ function withObservation(
       updatedAt: at,
     };
   }
-  if (observation.securityCheckpoint) {
+  if (
+    observation.securityCheckpoint &&
+    isHardSecurityCheckpoint(observation.securityCheckpoint)
+  ) {
     return {
       ...session,
       status: "PAUSED_SECURITY",
