@@ -119,7 +119,9 @@ describe("multi-frame application page aggregation", () => {
     expect(merged?.finalSubmissionBoundary).toBe(true);
     expect(merged?.atsFamily).toBe("WORKDAY");
     expect(merged?.pageContext).toContain("Candidate application");
-    expect(merged?.pageContext).toContain("Verification and navigation controls");
+    expect(merged?.pageContext).toContain(
+      "Verification and navigation controls",
+    );
     expect(merged?.observedAt).toBe(child.observedAt);
   });
 
