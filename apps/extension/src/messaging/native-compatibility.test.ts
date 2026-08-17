@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  nativeRuntimeCompatibility,
-  type NativeRuntimeHealth,
-} from "./client";
+import { nativeRuntimeCompatibility, type NativeRuntimeHealth } from "./client";
 
 function health(
   capabilities: NonNullable<NativeRuntimeHealth["capabilities"]>,
@@ -18,9 +15,7 @@ function health(
   };
 }
 
-const currentCapabilities: NonNullable<
-  NativeRuntimeHealth["capabilities"]
-> = {
+const currentCapabilities: NonNullable<NativeRuntimeHealth["capabilities"]> = {
   profile_vault: true,
   application_checkpoints: true,
   interaction_learning: true,
