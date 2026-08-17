@@ -62,11 +62,11 @@ describe("Job Signal page adapter", () => {
     });
   });
 
-  it("normalizes invalid manual-control counts to zero", () => {
+  it("keeps friction unknown when no friction evidence has been observed", () => {
     const source = buildPageJobSignalSource(page(), {
       manualRequiredControls: -4,
     });
-    expect(source.input.applicationFriction?.manualRequiredControls).toBe(0);
+    expect(source.input.applicationFriction).toBeNull();
   });
 
   it("keeps a stable fingerprint across timestamps and query/hash tracking changes", () => {
