@@ -189,9 +189,9 @@ export function buildAutoPilotLaunchPlan(
     (instruction) => !unsafeEmployerControlIds.has(instruction.controlId),
   );
 
-  const hardSecurityCheckpoint = Boolean(
-    page.securityCheckpoint && page.securityCheckpoint !== "AUTHENTICATION",
-  );
+  const hardSecurityCheckpoint =
+    page.securityCheckpoint !== null &&
+    page.securityCheckpoint !== "AUTHENTICATION";
   const securityOrAccountBoundary = hardSecurityCheckpoint || accountBlocked;
   const blockedCount =
     (securityOrAccountBoundary ? 1 : 0) +
@@ -201,14 +201,18 @@ export function buildAutoPilotLaunchPlan(
   const manualCount = manual.size;
   const blockingReviewCount =
     requiredReviewCount + accountReviewCount + employerReviewCount;
-  const state =
-    blockedCount > 0
-      ? "BLOCKED"
-      : blockingReviewCount > 0 ||
-          totalUnresolvedCount > 0 ||
-          manualCount > 0
-        ? "REVIEW"
-        : "READY";
+
+  let state: PreflightGateSummary["state"] = "READY";
+  if (blockedCount > 0) {
+    state = "BLOCKED";
+  } else if (
+    blockingReviewCount > 0 ||
+    totalUnresolvedCount > 0 ||
+    manualCount > 0
+  ) {
+    state = "REVIEW";
+  }
+
   const preflight: PreflightGateSummary = {
     state,
     readyCount: guardedInstructions.length,
