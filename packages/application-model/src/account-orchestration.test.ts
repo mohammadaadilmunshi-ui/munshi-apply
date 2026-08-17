@@ -72,7 +72,7 @@ describe("account orchestration", () => {
     expect(plan.state).toBe("OWNER_ACTION_REQUIRED");
     expect(plan.actions).toContain("PREPARE_IDENTITY");
     expect(plan.actions).toContain("SECURE_CREDENTIAL_HANDOFF");
-    expect(accountPreflightItem(plan).state).toBe("BLOCKED");
+    expect(accountPreflightItem(plan).state).toBe("REVIEW");
   });
 
   it("uses an exact portal-scope account for login without exposing credentials", () => {
@@ -98,6 +98,7 @@ describe("account orchestration", () => {
       "SECURE_CREDENTIAL_HANDOFF",
     ]);
     expect(plan.canAutoAct).toBe(false);
+    expect(accountPreflightItem(plan).state).toBe("REVIEW");
   });
 
   it("blocks duplicate account creation when a matching account exists", () => {
@@ -114,6 +115,7 @@ describe("account orchestration", () => {
     expect(plan.state).toBe("DUPLICATE_RISK");
     expect(plan.actions).not.toContain("RECORD_ACCOUNT");
     expect(plan.requiresOwner).toBe(true);
+    expect(accountPreflightItem(plan).state).toBe("BLOCKED");
   });
 
   it("treats recovery and verification as owner security checkpoints", () => {
@@ -123,9 +125,9 @@ describe("account orchestration", () => {
       pageContext: "Forgot your password? Recover your account",
     });
     expect(detectAccountFlow(recovery)).toBe("AUTH_RECOVERY");
-    expect(buildAccountOrchestrationPlan({ page: recovery }).actions).toContain(
-      "RECOVER_ACCOUNT",
-    );
+    const recoveryPlan = buildAccountOrchestrationPlan({ page: recovery });
+    expect(recoveryPlan.actions).toContain("RECOVER_ACCOUNT");
+    expect(accountPreflightItem(recoveryPlan).state).toBe("BLOCKED");
 
     const verification = page({
       applicationState: "VERIFY_ACCOUNT",
@@ -133,9 +135,25 @@ describe("account orchestration", () => {
       pageContext: "Enter the verification code we sent",
     });
     expect(detectAccountFlow(verification)).toBe("AUTH_VERIFY");
-    expect(
-      buildAccountOrchestrationPlan({ page: verification }).actions,
-    ).toEqual(["VERIFY_ACCOUNT"]);
+    const verificationPlan = buildAccountOrchestrationPlan({
+      page: verification,
+    });
+    expect(verificationPlan.actions).toEqual(["VERIFY_ACCOUNT"]);
+    expect(accountPreflightItem(verificationPlan).state).toBe("BLOCKED");
+  });
+
+  it("hard-blocks an unrecognized authentication surface", () => {
+    const current = page({
+      url: "https://example.com/candidate/session",
+      applicationState: "AUTH",
+      securityCheckpoint: "AUTHENTICATION",
+      title: "Candidate access",
+      pageContext: "Continue to your candidate workspace",
+    });
+    expect(detectAccountFlow(current)).toBe("AUTH_UNKNOWN");
+    const plan = buildAccountOrchestrationPlan({ page: current });
+    expect(plan.actions).toEqual(["SECURE_CREDENTIAL_HANDOFF"]);
+    expect(accountPreflightItem(plan).state).toBe("BLOCKED");
   });
 
   it("separates Workday tenant accounts that share the same host", () => {
