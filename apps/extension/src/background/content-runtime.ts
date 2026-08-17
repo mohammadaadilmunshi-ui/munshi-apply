@@ -1,3 +1,13 @@
+import {
+  recoverHistoryStateChange,
+  type HistoryStateRecoveryDependencies,
+} from "./history-state-recovery";
+import {
+  clearPagesForTab,
+  deletePage,
+  getPagesForTab,
+} from "../storage/vault";
+
 export type ContentRuntimeApi = {
   sendMessage<T>(
     tabId: number,
@@ -21,6 +31,8 @@ type ContentScanResponse = {
 type ContentRecoveryOptions = {
   timeoutMs?: number;
 };
+
+let historyStateRecoveryInstalled = false;
 
 export function isMissingContentReceiverError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error ?? "");
@@ -110,10 +122,46 @@ export async function sendWithContentRecovery<T>(
   return sendMessageWithTimeout<T>(api, tabId, frameId, message, timeoutMs);
 }
 
+function installHistoryStateRecovery(api: ContentRuntimeApi): void {
+  if (historyStateRecoveryInstalled) return;
+  if (
+    typeof chrome === "undefined" ||
+    !chrome.webNavigation?.onHistoryStateUpdated
+  ) {
+    return;
+  }
+
+  const dependencies: HistoryStateRecoveryDependencies = {
+    getPages: getPagesForTab,
+    clearTab: clearPagesForTab,
+    deleteFrame: deletePage,
+    scanFrame: async (tabId, frameId) => {
+      const response = await sendWithContentRecovery<ContentScanResponse>(
+        api,
+        tabId,
+        frameId,
+        { type: "CONTENT_SCAN_NOW" },
+      );
+      assertSuccessfulScan(response, frameId);
+    },
+  };
+
+  chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
+    if (details.tabId < 0) return;
+    void recoverHistoryStateChange(
+      details.tabId,
+      details.frameId,
+      dependencies,
+    ).catch(() => undefined);
+  });
+  historyStateRecoveryInstalled = true;
+}
+
 export async function ensureTabContentRuntime(
   api: ContentRuntimeApi,
   tabId: number,
 ): Promise<void> {
+  installHistoryStateRecovery(api);
   let topFrameHealthy = false;
   try {
     await sendMessageWithTimeout(
