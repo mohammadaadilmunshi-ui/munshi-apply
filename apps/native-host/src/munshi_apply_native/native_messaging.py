@@ -12,20 +12,27 @@ from .ai_settings import AIConfiguration, AISettingsStore
 from .application_store import ApplicationStore
 from .checkpoint_store import ApplicationCheckpointStore
 from .database import Database
+from .document_ingestion import DocumentIngestionService
 from .interaction_recipe_service import InteractionRecipeService
 from .models import ApplicationCheckpointPayload, EventEnvelope
 from .profile_store import ProfileStore
 from .settings import Settings
+from .writing_style import WritingStyleStore
 
-NATIVE_PROTOCOL_VERSION = 2
+NATIVE_PROTOCOL_VERSION = 3
 NATIVE_CAPABILITIES: dict[str, bool] = {
     "profile_vault": True,
     "application_checkpoints": True,
     "interaction_learning": True,
     "teach_munshi": True,
+    "teach_munshi_state_capture": True,
     "ai_settings": True,
     "ai_governance": True,
     "ai_draft_lifecycle": True,
+    "document_evidence_ingestion": True,
+    "provider_routing": True,
+    "ollama_fallback": True,
+    "writing_style_learning": True,
 }
 
 
@@ -147,13 +154,31 @@ def handle(
         }
 
     if message_type in {
+        "BEGIN_DOCUMENT_INGESTION",
+        "APPEND_DOCUMENT_CHUNK",
+        "FINISH_DOCUMENT_INGESTION",
+        "CANCEL_DOCUMENT_INGESTION",
+    }:
+        ingestion = DocumentIngestionService(database)
+        if message_type == "BEGIN_DOCUMENT_INGESTION":
+            return {"ok": True, "data": ingestion.begin(message.get("payload"))}
+        if message_type == "APPEND_DOCUMENT_CHUNK":
+            return {"ok": True, "data": ingestion.append(message.get("payload"))}
+        if message_type == "FINISH_DOCUMENT_INGESTION":
+            return {"ok": True, "data": ingestion.finish(message.get("payload"))}
+        return {"ok": True, "data": ingestion.cancel(message.get("payload"))}
+
+    if message_type in {
         "GET_AI_SETTINGS",
         "SAVE_AI_SETTINGS",
         "SET_OPENAI_API_KEY",
         "DELETE_OPENAI_API_KEY",
         "TEST_OPENAI_CONNECTION",
         "LIST_OPENAI_MODELS",
+        "TEST_OLLAMA_CONNECTION",
+        "LIST_OLLAMA_MODELS",
         "GET_AI_CONTROL_STATUS",
+        "GET_WRITING_STYLE",
         "PREVIEW_AI_DRAFT",
         "GENERATE_AI_DRAFT",
         "LIST_AI_DRAFTS",
@@ -185,6 +210,13 @@ def handle(
             return {"ok": True, "data": {"modelCount": len(models)}}
         if message_type == "LIST_OPENAI_MODELS":
             return {"ok": True, "data": {"models": ai_store.list_models()}}
+        if message_type == "TEST_OLLAMA_CONNECTION":
+            models = ai_store.list_ollama_models()
+            return {"ok": True, "data": {"modelCount": len(models)}}
+        if message_type == "LIST_OLLAMA_MODELS":
+            return {"ok": True, "data": {"models": ai_store.list_ollama_models()}}
+        if message_type == "GET_WRITING_STYLE":
+            return {"ok": True, "data": WritingStyleStore(ai_store.runtime_root).status()}
         if message_type in {
             "LIST_AI_DRAFTS",
             "GET_APPROVED_AI_DRAFT",
@@ -225,14 +257,12 @@ def handle(
                     ),
                 }
             if message_type == "APPROVE_AI_DRAFT":
-                return {
-                    "ok": True,
-                    "data": drafts.approve(
-                        draft_id,
-                        payload.get("expectedSha256"),
-                        at,
-                    ),
-                }
+                before = drafts.get(draft_id)
+                approved = drafts.approve(draft_id, payload.get("expectedSha256"), at)
+                WritingStyleStore(ai_store.runtime_root).learn_from_approved_edit(
+                    str(before["originalText"]), str(approved["currentText"])
+                )
+                return {"ok": True, "data": approved}
             if message_type == "REJECT_AI_DRAFT":
                 return {"ok": True, "data": drafts.reject(draft_id, at)}
             return {"ok": True, "data": drafts.mark_used(draft_id, at)}
