@@ -5,8 +5,7 @@ import {
 } from "./resume-file-verification";
 
 export type ForwardNavigationSafety =
-  | { safe: true }
-  | { safe: false; reason: string };
+  { safe: true } | { safe: false; reason: string };
 
 export function evaluateForwardNavigationSafety(input: {
   page: ApplicationPage;

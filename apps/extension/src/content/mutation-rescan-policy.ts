@@ -33,7 +33,10 @@ export function shouldRescanFromMutations(
 
     const attribute = record.attributeName ?? "";
     if (attribute !== "class" && attribute !== "style") return true;
-    if (record.target instanceof Element && elementTouchesApplication(record.target)) {
+    if (
+      record.target instanceof Element &&
+      elementTouchesApplication(record.target)
+    ) {
       return true;
     }
   }

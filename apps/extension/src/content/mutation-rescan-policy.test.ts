@@ -3,7 +3,10 @@
 import { describe, expect, it } from "vitest";
 import { shouldRescanFromMutations } from "./mutation-rescan-policy";
 
-function attributeRecord(target: Element, attributeName: string): MutationRecord {
+function attributeRecord(
+  target: Element,
+  attributeName: string,
+): MutationRecord {
   return {
     type: "attributes",
     target,
@@ -46,9 +49,9 @@ describe("mutation rescan policy", () => {
   it("rescans when class or style can affect a control subtree", () => {
     const section = document.createElement("section");
     section.innerHTML = `<label for="email">Email</label><input id="email">`;
-    expect(
-      shouldRescanFromMutations([attributeRecord(section, "class")]),
-    ).toBe(true);
+    expect(shouldRescanFromMutations([attributeRecord(section, "class")])).toBe(
+      true,
+    );
   });
 
   it("always rescans structural child-list changes", () => {

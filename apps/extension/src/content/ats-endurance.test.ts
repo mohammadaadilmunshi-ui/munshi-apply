@@ -148,9 +148,11 @@ describe("ATS-shaped browser endurance matrix", () => {
     document.body.innerHTML = html;
     const page = scanDocument();
     expect(page.controls.length).toBeGreaterThan(0);
-    expect(page.navigationCandidates.some((candidate) => candidate.action === action)).toBe(
-      true,
-    );
+    expect(
+      page.navigationCandidates.some(
+        (candidate) => candidate.action === action,
+      ),
+    ).toBe(true);
     uniqueControlIds();
   });
 
@@ -212,11 +214,12 @@ describe("ATS-shaped browser endurance matrix", () => {
     expect((document.getElementById("email") as HTMLInputElement).value).toBe(
       "candidate@example.com",
     );
-    expect((document.getElementById("country") as HTMLSelectElement).value).toBe(
-      "United States",
-    );
     expect(
-      document.querySelector<HTMLInputElement>("input[name='sponsor']:checked")?.value,
+      (document.getElementById("country") as HTMLSelectElement).value,
+    ).toBe("United States");
+    expect(
+      document.querySelector<HTMLInputElement>("input[name='sponsor']:checked")
+        ?.value,
     ).toBe("No");
     uniqueControlIds();
   });
@@ -259,7 +262,9 @@ describe("ATS-shaped browser endurance matrix", () => {
           portal.innerHTML = `<div id="phl" role="option">Philadelphia</div>`;
           document.getElementById("phl")!.addEventListener("click", () => {
             input.value = "Philadelphia";
-            document.getElementById("phl")!.setAttribute("aria-selected", "true");
+            document
+              .getElementById("phl")!
+              .setAttribute("aria-selected", "true");
           });
         }, 10);
       },
@@ -293,9 +298,11 @@ describe("ATS-shaped browser endurance matrix", () => {
     const page = scanDocument();
     expect(page.securityCheckpoint).toBe("OTP");
     expect(page.finalSubmissionBoundary).toBe(true);
-    expect(page.navigationCandidates.some((candidate) => candidate.action === "FINAL_SUBMIT")).toBe(
-      true,
-    );
+    expect(
+      page.navigationCandidates.some(
+        (candidate) => candidate.action === "FINAL_SUBMIT",
+      ),
+    ).toBe(true);
   });
 
   it("scans a very large application form while preserving unique stable identifiers", () => {
@@ -309,7 +316,9 @@ describe("ATS-shaped browser endurance matrix", () => {
     const first = scanDocument();
     const second = scanDocument();
     expect(first.controls).toHaveLength(301);
-    expect(new Set(first.controls.map((control) => control.controlId)).size).toBe(301);
+    expect(
+      new Set(first.controls.map((control) => control.controlId)).size,
+    ).toBe(301);
     expect(second.controls.map((control) => control.controlId)).toEqual(
       first.controls.map((control) => control.controlId),
     );

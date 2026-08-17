@@ -42,10 +42,12 @@ function resumeControl(fileSha256: string): Control {
   };
 }
 
-function page(input: {
-  applicationState?: ApplicationPage["applicationState"];
-  controls?: Control[];
-} = {}): ApplicationPage {
+function page(
+  input: {
+    applicationState?: ApplicationPage["applicationState"];
+    controls?: Control[];
+  } = {},
+): ApplicationPage {
   return {
     pageId: "page-navigation-safety",
     tabId: 7,
