@@ -66,4 +66,23 @@ content = content.replace(
     1,
 )
 content = content.replace("  semanticType?: string;", "  semanticType?: SemanticType;", 1)
+content = content.replace(
+    '''const trustWeight: Record<TrustLevel, number> = {
+  VERIFIED: 1,
+  USER_CONFIRMED: 0.96,
+  DOCUMENT_CONFIRMED: 0.94,
+  IMPORTED: 0.62,
+  GENERATED: 0.15,
+};''',
+    '''const trustWeight: Record<TrustLevel, number> = {
+  VERIFIED: 1,
+  USER_CONFIRMED: 0.96,
+  DOCUMENT_CONFIRMED: 0.94,
+  DERIVED: 0.7,
+  LEARNED: 0.72,
+  GENERATED: 0.15,
+  UNKNOWN: 0.05,
+};''',
+    1,
+)
 write(path, content)
