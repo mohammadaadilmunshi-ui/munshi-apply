@@ -33,43 +33,51 @@ jobs:
               contracts_import + 'import { applicationUrlIdentityKey } from "./application-url";\n',
               1,
           )
-          old_identity = '''  const url = new URL(input.url);
-          url.hash = "";
-          url.search = "";
-          const externalJobId = input.externalJobId?.trim() ?? "";
-          const canonical = [
-            url.origin.toLocaleLowerCase("en-US"),
-            url.pathname.replace(/\\/+$/, "") || "/",
-            externalJobId,
-          ].join("|");'''
-          new_identity = '''  const externalJobId = input.externalJobId?.trim() ?? "";
-          const canonical = [applicationUrlIdentityKey(input.url), externalJobId].join(
-            "|",
-          );'''
+          old_identity = (
+              '  const url = new URL(input.url);\n'
+              '  url.hash = "";\n'
+              '  url.search = "";\n'
+              '  const externalJobId = input.externalJobId?.trim() ?? "";\n'
+              '  const canonical = [\n'
+              '    url.origin.toLocaleLowerCase("en-US"),\n'
+              '    url.pathname.replace(/\\/+$/, "") || "/",\n'
+              '    externalJobId,\n'
+              '  ].join("|");'
+          )
+          new_identity = (
+              '  const externalJobId = input.externalJobId?.trim() ?? "";\n'
+              '  const canonical = [applicationUrlIdentityKey(input.url), externalJobId].join(\n'
+              '    "|",\n'
+              '  );'
+          )
           if session.count(old_identity) != 1:
               raise SystemExit("deriveApplicationIdentity source drifted")
           session_path.write_text(session.replace(old_identity, new_identity, 1))
 
           controller_path = Path("apps/extension/src/background/autopilot-controller.ts")
           controller = controller_path.read_text()
-          import_anchor = '''  restoreSessionFromCheckpoint,
-          verifyFillAction,'''
-          import_replacement = '''  restoreSessionFromCheckpoint,
-          sameApplicationUrlLocation,
-          sameExplicitApplicationIdentity,
-          verifyFillAction,'''
+          import_anchor = (
+              '  restoreSessionFromCheckpoint,\n'
+              '  verifyFillAction,'
+          )
+          import_replacement = (
+              '  restoreSessionFromCheckpoint,\n'
+              '  sameApplicationUrlLocation,\n'
+              '  sameExplicitApplicationIdentity,\n'
+              '  verifyFillAction,'
+          )
           if controller.count(import_anchor) != 1:
               raise SystemExit("AutoPilot import anchor drifted")
           controller = controller.replace(import_anchor, import_replacement, 1)
 
-          canonical_function = '''function canonicalUrl(value: string): string {
-            const url = new URL(value);
-            url.hash = "";
-            url.search = "";
-            return url.href;
-          }
-
-          '''
+          canonical_function = (
+              'function canonicalUrl(value: string): string {\n'
+              '  const url = new URL(value);\n'
+              '  url.hash = "";\n'
+              '  url.search = "";\n'
+              '  return url.href;\n'
+              '}\n\n'
+          )
           if controller.count(canonical_function) != 1:
               raise SystemExit("canonicalUrl helper drifted")
           controller = controller.replace(canonical_function, "", 1)
@@ -81,16 +89,20 @@ jobs:
               '!sameApplicationUrlLocation(page.url, runtime.lastUrl)',
           )
 
-          old_resume = '''      if (new URL(page.url).origin !== new URL(runtime.lastUrl).origin) {
-                throw new Error(
-                  "Application origin changed while AutoPilot was paused",
-                );
-              }'''
-          new_resume = '''      if (!sameExplicitApplicationIdentity(page.url, runtime.lastUrl)) {
-                throw new Error(
-                  "Application identity changed while AutoPilot was paused",
-                );
-              }'''
+          old_resume = (
+              '      if (new URL(page.url).origin !== new URL(runtime.lastUrl).origin) {\n'
+              '        throw new Error(\n'
+              '          "Application origin changed while AutoPilot was paused",\n'
+              '        );\n'
+              '      }'
+          )
+          new_resume = (
+              '      if (!sameExplicitApplicationIdentity(page.url, runtime.lastUrl)) {\n'
+              '        throw new Error(\n'
+              '          "Application identity changed while AutoPilot was paused",\n'
+              '        );\n'
+              '      }'
+          )
           if controller.count(old_resume) != 1:
               raise SystemExit("AutoPilot resume identity guard drifted")
           controller_path.write_text(controller.replace(old_resume, new_resume, 1))
@@ -98,10 +110,12 @@ jobs:
           scanner_path = Path("apps/extension/src/content/scanner.ts")
           scanner = scanner_path.read_text()
           old_scanner_import = 'import { componentFingerprint } from "@munshi-apply/application-model";'
-          new_scanner_import = '''import {
-            applicationUrlIdentityKey,
-            componentFingerprint,
-          } from "@munshi-apply/application-model";'''
+          new_scanner_import = (
+              'import {\n'
+              '  applicationUrlIdentityKey,\n'
+              '  componentFingerprint,\n'
+              '} from "@munshi-apply/application-model";'
+          )
           if scanner.count(old_scanner_import) != 1:
               raise SystemExit("scanner application-model import drifted")
           scanner = scanner.replace(old_scanner_import, new_scanner_import, 1)
