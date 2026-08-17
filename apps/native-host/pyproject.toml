@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Local persistence and integration companion for MUNSHI Apply."
 requires-python = ">=3.12"
 dependencies = [
+  "defusedxml>=0.7,<1",
   "fastapi>=0.116,<1",
   "pydantic>=2.11,<3",
   "pypdf>=6,<7",
