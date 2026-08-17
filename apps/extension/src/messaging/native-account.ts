@@ -3,8 +3,7 @@ import type { AccountRecord } from "@munshi-apply/application-model";
 const nativeHostName = "systems.munshi.apply";
 
 type NativeResponse =
-  | { ok: true; data?: unknown }
-  | { ok: false; error: string };
+  { ok: true; data?: unknown } | { ok: false; error: string };
 
 function objectValue(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
