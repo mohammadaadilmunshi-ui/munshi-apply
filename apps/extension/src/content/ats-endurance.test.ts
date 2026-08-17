@@ -305,30 +305,26 @@ describe("ATS-shaped browser endurance matrix", () => {
     ).toBe(true);
   });
 
-  it(
-    "scans a very large application form while preserving unique stable identifiers",
-    () => {
-      const startedAt = performance.now();
-      const fields = Array.from(
-        { length: 300 },
-        (_, index) =>
-          `<label for="field-${index}">Application field ${index}</label><input id="field-${index}">`,
-      ).join("");
-      document.body.innerHTML = `<main>${fields}<button type="button">Continue</button></main>`;
+  it("scans a very large application form while preserving unique stable identifiers", () => {
+    const startedAt = performance.now();
+    const fields = Array.from(
+      { length: 300 },
+      (_, index) =>
+        `<label for="field-${index}">Application field ${index}</label><input id="field-${index}">`,
+    ).join("");
+    document.body.innerHTML = `<main>${fields}<button type="button">Continue</button></main>`;
 
-      const first = scanDocument();
-      const second = scanDocument();
-      expect(first.controls).toHaveLength(301);
-      expect(
-        new Set(first.controls.map((control) => control.controlId)).size,
-      ).toBe(301);
-      expect(second.controls.map((control) => control.controlId)).toEqual(
-        first.controls.map((control) => control.controlId),
-      );
-      if (process.env.MUNSHI_PERF_STRICT === "1") {
-        expect(performance.now() - startedAt).toBeLessThan(5_000);
-      }
-    },
-    10_000,
-  );
+    const first = scanDocument();
+    const second = scanDocument();
+    expect(first.controls).toHaveLength(301);
+    expect(
+      new Set(first.controls.map((control) => control.controlId)).size,
+    ).toBe(301);
+    expect(second.controls.map((control) => control.controlId)).toEqual(
+      first.controls.map((control) => control.controlId),
+    );
+    if (process.env.MUNSHI_PERF_STRICT === "1") {
+      expect(performance.now() - startedAt).toBeLessThan(5_000);
+    }
+  }, 10_000);
 });
