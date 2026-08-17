@@ -332,8 +332,9 @@ export function AutoPilotControlCenter({
                   }
                   key={finding.requirement.requirementId}
                 >
-                  Employer rule · {finding.requirement.kind.replaceAll("_", " ")}
-                  : {finding.reason}
+                  Employer rule ·{" "}
+                  {finding.requirement.kind.replaceAll("_", " ")}:{" "}
+                  {finding.reason}
                 </span>
               ))}
               <span>{plan.preflight.readyCount} approved fill actions</span>
