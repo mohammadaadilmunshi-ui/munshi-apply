@@ -69,26 +69,42 @@ describe("Job Signal page adapter", () => {
     expect(source.input.applicationFriction).toBeNull();
   });
 
-  it("keeps a stable fingerprint across timestamps and query/hash tracking changes", () => {
+  it("keeps a stable fingerprint across timestamps, tracking, and DOM-only changes", () => {
     const first = buildPageJobSignalSource(page()).sourceFingerprint;
     const second = buildPageJobSignalSource(
       page({
         observedAt: "2026-08-17T20:41:00.000Z",
         url: "https://jobs.example.com/job/people-analyst?source=other#details",
+        pageFingerprint: "page-fingerprint-2",
       }),
     ).sourceFingerprint;
     expect(second).toBe(first);
   });
 
-  it("changes the fingerprint when analyzed job evidence changes", () => {
+  it("changes the fingerprint when analyzed job evidence or friction changes", () => {
     const first = buildPageJobSignalSource(page()).sourceFingerprint;
     const changedContext = buildPageJobSignalSource(
       page({ pageContext: "Role requires up to 60% travel." }),
     ).sourceFingerprint;
-    const changedStructure = buildPageJobSignalSource(
-      page({ pageFingerprint: "page-fingerprint-2" }),
-    ).sourceFingerprint;
+    const changedFriction = buildPageJobSignalSource(page(), {
+      accountRequired: true,
+      manualRequiredControls: 2,
+    }).sourceFingerprint;
     expect(changedContext).not.toBe(first);
-    expect(changedStructure).not.toBe(first);
+    expect(changedFriction).not.toBe(first);
+  });
+
+  it("distinguishes recognized job identifiers that exist only in the query string", () => {
+    const first = buildPageJobSignalSource(
+      page({ url: "https://jobs.example.com/apply?jobId=123&utm_source=a" }),
+    ).sourceFingerprint;
+    const sameJob = buildPageJobSignalSource(
+      page({ url: "https://jobs.example.com/apply?utm_source=b&jobId=123" }),
+    ).sourceFingerprint;
+    const differentJob = buildPageJobSignalSource(
+      page({ url: "https://jobs.example.com/apply?jobId=456" }),
+    ).sourceFingerprint;
+    expect(sameJob).toBe(first);
+    expect(differentJob).not.toBe(first);
   });
 });
