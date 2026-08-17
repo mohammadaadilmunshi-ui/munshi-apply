@@ -39,11 +39,16 @@ export function parseProfileSaveAck(value: unknown): ProfileSaveAck {
     throw new Error("Profile save returned no acknowledgement");
   }
   const candidate = value as Partial<ProfileSaveAck>;
-  if (candidate.localSaved !== true || typeof candidate.cloudSynced !== "boolean") {
+  if (
+    candidate.localSaved !== true ||
+    typeof candidate.cloudSynced !== "boolean"
+  ) {
     throw new Error("Profile save acknowledgement is invalid");
   }
   if (candidate.cloudSynced && candidate.conflict) {
-    throw new Error("Profile save cannot be synced while a conflict is unresolved");
+    throw new Error(
+      "Profile save cannot be synced while a conflict is unresolved",
+    );
   }
   return {
     localSaved: true,
