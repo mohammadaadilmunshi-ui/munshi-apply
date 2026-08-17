@@ -110,7 +110,7 @@ describe("planAutoPilotStep", () => {
     expect(plan.checkpointRequired).toBe(true);
   });
 
-  it("allows safe preparation on generic authentication but never navigates past it", () => {
+  it("prepares safe authentication fields but never navigates past auth", () => {
     const authentication = {
       ...observation,
       state: "AUTH" as const,
