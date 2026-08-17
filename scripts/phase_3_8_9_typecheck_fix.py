@@ -25,13 +25,58 @@ def replace_once(path: str, old: str, new: str) -> None:
 
 replace_once(
     "apps/extension/src/content/teach-strengthened.test.ts",
+    'import { afterEach, describe, expect, it } from "vitest";',
+    '// @vitest-environment jsdom\n\nimport { afterEach, beforeEach, describe, expect, it, vi } from "vitest";',
+)
+replace_once(
+    "apps/extension/src/content/teach-strengthened.test.ts",
     '  const page = scanDocument("https://careers.example.com/apply", "Apply");',
     "  const page = scanDocument();",
 )
 replace_once(
     "apps/extension/src/content/teach-strengthened.test.ts",
+    "afterEach(() => {",
+    '''beforeEach(() => {
+  window.history.replaceState({}, "", "/apply");
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+    bottom: 40,
+    height: 30,
+    left: 10,
+    right: 210,
+    top: 10,
+    width: 200,
+    x: 10,
+    y: 10,
+    toJSON: () => ({}),
+  });
+});
+
+afterEach(() => {''',
+)
+replace_once(
+    "apps/extension/src/content/teach-strengthened.test.ts",
     "  cancelTeachInteraction();",
     '  cancelTeachInteraction("cleanup-session");',
+)
+
+replace_once(
+    "apps/extension/src/content/teach.test.ts",
+    '''    const started = beginTeachInteraction("teach-1", control.controlId);
+    input.dispatchEvent(new Event("input", { bubbles: true }));''',
+    '''    const started = beginTeachInteraction("teach-1", control.controlId);
+    input.value = "United States";
+    input.dispatchEvent(new Event("input", { bubbles: true }));''',
+)
+
+replace_once(
+    "apps/extension/src/messaging/native-runtime.test.ts",
+    '''            ai_draft_lifecycle: true,
+          },''',
+    '''            ai_draft_lifecycle: true,
+            document_evidence_ingestion: true,
+            provider_routing: true,
+            writing_style_learning: true,
+          },''',
 )
 
 replace_once(
@@ -57,6 +102,20 @@ replace_once(
     "            sha256: resume.sha256,",
     '            sha256: resume.sha256 ?? "",',
 )
+
+path = "apps/extension/src/messaging/native.ts"
+content = read(path)
+content = content.replace(
+    '    "allowResumeEvidence",\n    "preferLocalFallback",\n    "keyConfigured",',
+    '    "allowResumeEvidence",\n    "keyConfigured",',
+    1,
+)
+content = content.replace(
+    "    preferLocalFallback: candidate.preferLocalFallback as boolean,",
+    "    preferLocalFallback: candidate.preferLocalFallback !== false,",
+    1,
+)
+write(path, content)
 
 path = "packages/application-model/src/retrieval.ts"
 content = read(path)
