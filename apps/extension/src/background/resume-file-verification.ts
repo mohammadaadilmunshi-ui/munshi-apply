@@ -56,15 +56,19 @@ export function verifySelectedResumeFile(input: {
     };
   }
 
+  const missingRequired = controls.filter(
+    (control) => control.required && control.fileSelected !== true,
+  );
+  if (missingRequired.length > 0) {
+    return {
+      state: "REQUIRED_MISSING",
+      reason: "A required résumé upload field has no selected file",
+      controlIds: missingRequired.map((control) => control.controlId),
+    };
+  }
+
   const selected = controls.filter((control) => control.fileSelected === true);
   if (selected.length === 0) {
-    if (controls.some((control) => control.required)) {
-      return {
-        state: "REQUIRED_MISSING",
-        reason: "The required résumé upload field has no selected file",
-        controlIds,
-      };
-    }
     return {
       state: "OPTIONAL_EMPTY",
       reason: "The résumé upload field is optional and no file is selected",
