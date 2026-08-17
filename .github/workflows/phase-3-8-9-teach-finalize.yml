@@ -67,4 +67,6 @@ jobs:
             exit 1
           fi
           git commit -m 'feat: complete evidence intelligence and response tranche'
+          git fetch origin feat/v3-foundation-alignment
+          git rebase origin/feat/v3-foundation-alignment
           git push origin HEAD:feat/v3-foundation-alignment
