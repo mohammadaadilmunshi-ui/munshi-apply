@@ -13,6 +13,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: feat/v3-foundation-alignment
+          fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -47,4 +48,6 @@ jobs:
           git add apps/extension/src/content/scanner.ts
           git diff --cached --check
           git commit -m "fix: bound scanner rebound hint cache"
+          git fetch origin feat/v3-foundation-alignment
+          git rebase origin/feat/v3-foundation-alignment
           git push origin HEAD:feat/v3-foundation-alignment
