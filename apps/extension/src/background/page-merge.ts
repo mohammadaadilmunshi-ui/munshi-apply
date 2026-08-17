@@ -71,7 +71,8 @@ function ambiguousCrossFrameControlIds(
   const frameIdsByControl = new Map<string, Set<number>>();
   for (const page of pages) {
     for (const control of page.controls) {
-      const frameIds = frameIdsByControl.get(control.controlId) ?? new Set<number>();
+      const frameIds =
+        frameIdsByControl.get(control.controlId) ?? new Set<number>();
       frameIds.add(page.frameId);
       frameIdsByControl.set(control.controlId, frameIds);
     }
