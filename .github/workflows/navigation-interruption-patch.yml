@@ -1,0 +1,70 @@
+name: Guarded navigation interruption patch
+on:
+  push:
+    branches: [feat/v3-foundation-alignment]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
+          fetch-depth: 1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Make uncertain navigation fail closed
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("apps/extension/src/background/autopilot-controller.ts")
+          text = path.read_text()
+          old = (
+              "    const result = await this.dependencies.navigate(\n"
+              "      current.tabId,\n"
+              "      candidate.frameId,\n"
+              "      candidate.controlId,\n"
+              "    );\n"
+              "    if (result.status !== \"NAVIGATED\") {"
+          )
+          new = (
+              "    let result: NavigationResult;\n"
+              "    try {\n"
+              "      result = await this.dependencies.navigate(\n"
+              "        current.tabId,\n"
+              "        candidate.frameId,\n"
+              "        candidate.controlId,\n"
+              "      );\n"
+              "    } catch (error) {\n"
+              "      result = {\n"
+              "        status: \"FAILED\",\n"
+              "        reason: `The browser could not confirm the navigation dispatch after an interruption: ${\n"
+              "          error instanceof Error ? error.message : \"unknown error\"\n"
+              "        }`,\n"
+              "      };\n"
+              "    }\n"
+              "    if (result.status !== \"NAVIGATED\") {"
+          )
+          if text.count(old) != 1:
+              raise SystemExit("navigation dispatch source drifted; refusing blind patch")
+          path.write_text(text.replace(old, new, 1))
+          PY
+          npx prettier apps/extension/src/background/autopilot-controller.ts apps/extension/src/background/autopilot-navigation-interruption.test.ts --write
+          npx vitest run apps/extension/src/background/autopilot-controller.test.ts apps/extension/src/background/autopilot-navigation-interruption.test.ts
+          git diff --check
+      - name: Commit patch and remove one-shot workflow
+        shell: bash
+        run: |
+          rm .github/workflows/navigation-interruption-patch.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/extension/src/background/autopilot-controller.ts apps/extension/src/background/autopilot-navigation-interruption.test.ts .github/workflows/navigation-interruption-patch.yml
+          git diff --cached --check
+          git commit -m "fix: fail closed on uncertain AutoPilot navigation"
+          git push origin HEAD:feat/v3-foundation-alignment
