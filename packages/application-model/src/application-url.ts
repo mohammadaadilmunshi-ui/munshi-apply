@@ -44,7 +44,9 @@ function identityQueryPairs(url: URL): Array<[string, string]> {
 export function applicationIdentityQuery(value: string): string {
   const url = new URL(value);
   return identityQueryPairs(url)
-    .map(([key, item]) => `${encodeURIComponent(key)}=${encodeURIComponent(item)}`)
+    .map(
+      ([key, item]) => `${encodeURIComponent(key)}=${encodeURIComponent(item)}`,
+    )
     .join("&");
 }
 
@@ -60,4 +62,18 @@ export function sameApplicationUrlLocation(
   rightValue: string,
 ): boolean {
   return applicationUrlIdentityKey(leftValue) === applicationUrlIdentityKey(rightValue);
+}
+
+export function sameExplicitApplicationIdentity(
+  leftValue: string,
+  rightValue: string,
+): boolean {
+  const left = new URL(leftValue);
+  const right = new URL(rightValue);
+  if (left.origin !== right.origin) return false;
+
+  const leftIdentity = applicationIdentityQuery(left.href);
+  const rightIdentity = applicationIdentityQuery(right.href);
+  if (!leftIdentity && !rightIdentity) return true;
+  return Boolean(leftIdentity && rightIdentity && leftIdentity === rightIdentity);
 }
