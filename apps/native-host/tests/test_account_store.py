@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from munshi_apply_native.account_store import AccountStore, portal_identity
 from munshi_apply_native.application_store import ApplicationStore
 from munshi_apply_native.database import Database
@@ -78,7 +76,7 @@ def test_account_registry_has_no_secret_columns_and_rejects_secret_payloads(
         "otp",
     }.intersection(columns)
 
-    with pytest.raises(ValueError, match="refuses passwords"):
+    try:
         AccountStore(db).upsert(
             {
                 "portalUrl": "https://example.com/login",
@@ -87,6 +85,10 @@ def test_account_registry_has_no_secret_columns_and_rejects_secret_payloads(
                 "observedAt": NOW,
             }
         )
+    except ValueError as error:
+        assert "refuses passwords" in str(error)
+    else:
+        raise AssertionError("Account registry accepted password material")
 
 
 def test_workday_tenant_scope_isolated(tmp_path: Path) -> None:
@@ -113,7 +115,11 @@ def test_workday_tenant_scope_isolated(tmp_path: Path) -> None:
 
 def test_embedded_credentials_in_portal_url_are_rejected(tmp_path: Path) -> None:
     db = database(tmp_path)
-    with pytest.raises(ValueError, match="embedded credentials"):
+    try:
         AccountStore(db).lookup(
             {"portalUrl": "https://user:password@example.com/candidate/login"}
         )
+    except ValueError as error:
+        assert "embedded credentials" in str(error)
+    else:
+        raise AssertionError("Account registry accepted embedded credentials")
