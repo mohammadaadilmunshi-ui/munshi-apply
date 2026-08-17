@@ -79,7 +79,7 @@ MUNSHI Apply is currently in **build-only mode**. Source changes are committed a
 
 ## Current verification
 
-At canonical head `50370fc8d29142ee20331bbff472dc668163933d`, all five standard PR workflows passed before this documentation-only status update:
+The account-orchestration + employer-pre-flight code head `50370fc8d29142ee20331bbff472dc668163933d` passed all five standard PR workflows before the documentation-only status commit:
 
 - CI ✅
 - Browser tests ✅
@@ -87,7 +87,7 @@ At canonical head `50370fc8d29142ee20331bbff472dc668163933d`, all five standard 
 - Migration tests ✅
 - Owner workspace ✅
 
-Verified results at that source head:
+Verified results at that code head:
 
 - **54 TypeScript/JavaScript test files / 326 tests passed.**
 - **113 native Python tests passed; Ruff passed.**
