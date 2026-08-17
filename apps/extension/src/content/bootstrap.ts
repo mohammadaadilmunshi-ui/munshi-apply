@@ -20,6 +20,7 @@ import {
   disposePreviousContentRuntime,
   registerContentRuntime,
 } from "./runtime-lifecycle";
+import { createSnapshotRetryController } from "./snapshot-retry";
 
 disposePreviousContentRuntime();
 
@@ -31,9 +32,12 @@ let debounceStartedAt = 0;
 let scanQueue: Promise<void> = Promise.resolve();
 let disposed = false;
 const listenerAbortController = new AbortController();
+const snapshotRetry = createSnapshotRetryController();
 
 function runSnapshot(force: boolean): void {
-  void enqueueSnapshot(force).catch(() => undefined);
+  void enqueueSnapshot(force).catch(() => {
+    snapshotRetry.failed(() => runSnapshot(true));
+  });
 }
 
 async function publishSnapshot(force = false): Promise<void> {
@@ -48,6 +52,7 @@ async function publishSnapshot(force = false): Promise<void> {
     throw new Error(response?.error || "Background rejected page snapshot");
   }
   previousFingerprint = fingerprint;
+  snapshotRetry.succeeded();
 }
 
 function enqueueSnapshot(force: boolean): Promise<void> {
@@ -310,6 +315,7 @@ chrome.runtime.onMessage.addListener(runtimeMessageListener);
 
 registerContentRuntime(() => {
   disposed = true;
+  snapshotRetry.dispose();
   clearPendingScan();
   debounceStartedAt = 0;
   observer?.disconnect();
