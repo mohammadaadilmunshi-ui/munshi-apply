@@ -159,36 +159,72 @@ export function buildAutoPilotLaunchPlan(
     knownAccounts: options.knownAccounts,
     preferredEmail: options.preferredEmail,
   });
-  const accountBlocked = accountPreflightItem(accountPlan).state === "BLOCKED";
+  const accountItem = accountPreflightItem(accountPlan);
+  const accountBlocked = accountItem.state === "BLOCKED";
+  const accountReviewCount = accountItem.state === "REVIEW" ? 1 : 0;
+
   const employerKnockoutFindings = evaluateCurrentPageKnockouts(page, answers);
   const employerBlockedCount = employerKnockoutFindings.filter(
     (finding) => finding.state === "BLOCKED",
   ).length;
-  const securityOrAccountBoundary = Boolean(
-    page.securityCheckpoint || accountBlocked,
+  const employerReviewCount = employerKnockoutFindings.filter(
+    (finding) => finding.state === "REVIEW",
+  ).length;
+  const employerUnresolvedCount = employerKnockoutFindings.filter(
+    (finding) => finding.state === "UNRESOLVED",
+  ).length;
+  const unsafeEmployerSemanticTypes = new Set(
+    employerKnockoutFindings
+      .filter((finding) => finding.state !== "READY")
+      .map((finding) => finding.requirement.semanticType),
   );
+  const unsafeEmployerControlIds = new Set(
+    page.questions
+      .filter((question) =>
+        unsafeEmployerSemanticTypes.has(question.semanticType),
+      )
+      .map((question) => question.controlId),
+  );
+  const guardedInstructions = instructions.filter(
+    (instruction) => !unsafeEmployerControlIds.has(instruction.controlId),
+  );
+
+  const hardSecurityCheckpoint = Boolean(
+    page.securityCheckpoint && page.securityCheckpoint !== "AUTHENTICATION",
+  );
+  const securityOrAccountBoundary = hardSecurityCheckpoint || accountBlocked;
   const blockedCount =
     (securityOrAccountBoundary ? 1 : 0) +
     (page.finalSubmissionBoundary ? 1 : 0) +
     employerBlockedCount;
+  const totalUnresolvedCount = unresolvedCount + employerUnresolvedCount;
   const manualCount = manual.size;
+  const blockingReviewCount =
+    requiredReviewCount + accountReviewCount + employerReviewCount;
   const state =
     blockedCount > 0
       ? "BLOCKED"
-      : requiredReviewCount > 0 || unresolvedCount > 0 || manualCount > 0
+      : blockingReviewCount > 0 ||
+          totalUnresolvedCount > 0 ||
+          manualCount > 0
         ? "REVIEW"
         : "READY";
   const preflight: PreflightGateSummary = {
     state,
-    readyCount: instructions.length,
-    reviewCount: requiredReviewCount + optionalReviewCount + manualCount,
-    unresolvedCount,
+    readyCount: guardedInstructions.length,
+    reviewCount:
+      requiredReviewCount +
+      optionalReviewCount +
+      manualCount +
+      accountReviewCount +
+      employerReviewCount,
+    unresolvedCount: totalUnresolvedCount,
     blockedCount,
     canAct: state === "READY",
   };
   return {
     preflight,
-    fillInstructions: instructions,
+    fillInstructions: guardedInstructions,
     manualControls: [...manual.values()],
     optionalUnansweredCount,
     requiredReviewCount,
