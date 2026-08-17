@@ -1,0 +1,126 @@
+name: Scanner hot-path patch
+on:
+  push:
+    branches: [feat/v3-foundation-alignment]
+    paths:
+      - .github/workflows/scanner-hotpath-patch.yml
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Apply scan-local hot-path caches
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("apps/extension/src/content/scanner.ts")
+          source = path.read_text()
+          old_store = 'const controlHints = createBoundedHintStore<Control>();\n'
+          new_store = old_store + 'let sectionHeadingCache = new WeakMap<Document | ShadowRoot, Element[]>();\n'
+          if source.count(old_store) != 1:
+              raise SystemExit("Expected one bounded control hint declaration")
+          source = source.replace(old_store, new_store, 1)
+
+          old_section = (
+              '  const root = element.getRootNode();\n'
+              '  if (root instanceof Document || root instanceof ShadowRoot) {\n'
+              '    const headings = [...root.querySelectorAll("h1,h2,h3,h4,h5,h6,[role=heading]")]\n'
+              '      .filter((candidate): candidate is Element => candidate instanceof Element)\n'
+              '      .filter(isVisible);\n'
+              '    let previous = "";\n'
+          )
+          new_section = (
+              '  const root = element.getRootNode();\n'
+              '  if (root instanceof Document || root instanceof ShadowRoot) {\n'
+              '    let headings = sectionHeadingCache.get(root);\n'
+              '    if (!headings) {\n'
+              '      headings = [...root.querySelectorAll("h1,h2,h3,h4,h5,h6,[role=heading]")]\n'
+              '        .filter((candidate): candidate is Element => candidate instanceof Element)\n'
+              '        .filter(isVisible);\n'
+              '      sectionHeadingCache.set(root, headings);\n'
+              '    }\n'
+              '    let previous = "";\n'
+          )
+          if source.count(old_section) != 1:
+              raise SystemExit("Expected one section heading query block")
+          source = source.replace(old_section, new_section, 1)
+
+          old_signature = (
+              'function stableControlSignature(element: Element): string {\n'
+              '  const ancestry = stableAncestry(element);\n'
+              '  return [\n'
+              '    element.tagName.toLowerCase(),\n'
+              '    element.getAttribute("type") ?? "",\n'
+              '    element.getAttribute("name") ?? "",\n'
+              '    labelFor(element),\n'
+          )
+          new_signature = (
+              'function stableControlSignature(element: Element, label: string): string {\n'
+              '  const ancestry = stableAncestry(element);\n'
+              '  return [\n'
+              '    element.tagName.toLowerCase(),\n'
+              '    element.getAttribute("type") ?? "",\n'
+              '    element.getAttribute("name") ?? "",\n'
+              '    label,\n'
+          )
+          if source.count(old_signature) != 1:
+              raise SystemExit("Expected one stable control signature")
+          source = source.replace(old_signature, new_signature, 1)
+
+          old_create = (
+              '  const validation = validationFor(element);\n'
+              '  const controlId = hash(`ctl:${stableControlSignature(element)}`);\n'
+              '  const kind = kindFor(element);\n'
+          )
+          new_create = (
+              '  const validation = validationFor(element);\n'
+              '  const label = labelFor(element);\n'
+              '  const controlId = hash(`ctl:${stableControlSignature(element, label)}`);\n'
+              '  const kind = kindFor(element);\n'
+          )
+          if source.count(old_create) != 1:
+              raise SystemExit("Expected one createControl identity block")
+          source = source.replace(old_create, new_create, 1)
+          old_label = '    label: labelFor(element),\n'
+          new_label = '    label,\n'
+          if source.count(old_label) != 1:
+              raise SystemExit("Expected one createControl label assignment")
+          source = source.replace(old_label, new_label, 1)
+
+          old_scan = 'export function scanDocument(): ApplicationPage {\n  const context = scanControlEntries();\n'
+          new_scan = (
+              'export function scanDocument(): ApplicationPage {\n'
+              '  sectionHeadingCache = new WeakMap<Document | ShadowRoot, Element[]>();\n'
+              '  const context = scanControlEntries();\n'
+          )
+          if source.count(old_scan) != 1:
+              raise SystemExit("Expected one scanDocument entry point")
+          path.write_text(source.replace(old_scan, new_scan, 1))
+          PY
+          npx prettier apps/extension/src/content/scanner.ts --write
+      - name: Verify scanner endurance
+        run: |
+          npx vitest run apps/extension/src/content/scanner.test.ts apps/extension/src/content/ats-endurance.test.ts
+      - name: Commit and self-remove
+        run: |
+          git config user.name "MUNSHI Apply CI"
+          git config user.email "actions@users.noreply.github.com"
+          git add apps/extension/src/content/scanner.ts
+          git diff --cached --check
+          git commit -m "perf: reduce repeated scanner DOM work"
+          git fetch origin feat/v3-foundation-alignment
+          git rebase origin/feat/v3-foundation-alignment
+          rm .github/workflows/scanner-hotpath-patch.yml
+          git add .github/workflows/scanner-hotpath-patch.yml
+          git commit --amend --no-edit
+          git push origin HEAD:feat/v3-foundation-alignment
