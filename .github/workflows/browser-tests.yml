@@ -18,7 +18,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: Run ATS, lifecycle, and performance endurance suite
+      - name: Run ATS, lifecycle, intelligence, and performance endurance suite
         run: |
           ./node_modules/.bin/vitest run \
             apps/extension/src/content/scanner.test.ts \
@@ -37,7 +37,12 @@ jobs:
             apps/extension/src/background/autopilot-application-identity.test.ts \
             apps/extension/src/background/autopilot-controller.test.ts \
             apps/extension/src/background/autopilot-navigation-interruption.test.ts \
-            apps/extension/src/background/autopilot-navigation-safety.integration.test.ts
+            apps/extension/src/background/autopilot-navigation-safety.integration.test.ts \
+            apps/extension/src/messaging/native-application-analytics.test.ts \
+            apps/extension/src/sidepanel/job-signal-view.test.ts \
+            packages/application-model/src/job-opportunity.test.ts \
+            packages/application-model/src/application-analytics.test.ts \
+            packages/application-model/src/job-signal-page.test.ts
       - run: npm run build
       - run: npm run verify
       - uses: actions/upload-artifact@v7
