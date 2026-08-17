@@ -61,7 +61,10 @@ export function sameApplicationUrlLocation(
   leftValue: string,
   rightValue: string,
 ): boolean {
-  return applicationUrlIdentityKey(leftValue) === applicationUrlIdentityKey(rightValue);
+  return (
+    applicationUrlIdentityKey(leftValue) ===
+    applicationUrlIdentityKey(rightValue)
+  );
 }
 
 export function sameExplicitApplicationIdentity(
@@ -75,5 +78,7 @@ export function sameExplicitApplicationIdentity(
   const leftIdentity = applicationIdentityQuery(left.href);
   const rightIdentity = applicationIdentityQuery(right.href);
   if (!leftIdentity && !rightIdentity) return true;
-  return Boolean(leftIdentity && rightIdentity && leftIdentity === rightIdentity);
+  return Boolean(
+    leftIdentity && rightIdentity && leftIdentity === rightIdentity,
+  );
 }

@@ -4,6 +4,7 @@ import {
   type ApplicationState,
   type SecurityCheckpointKind,
 } from "@munshi-apply/contracts";
+import { applicationUrlIdentityKey } from "./application-url";
 import {
   canResumeFromCheckpoint,
   createAutoPilotCheckpoint,
@@ -157,15 +158,10 @@ export function deriveApplicationIdentity(input: {
   url: string;
   externalJobId?: string | null;
 }): string {
-  const url = new URL(input.url);
-  url.hash = "";
-  url.search = "";
   const externalJobId = input.externalJobId?.trim() ?? "";
-  const canonical = [
-    url.origin.toLocaleLowerCase("en-US"),
-    url.pathname.replace(/\/+$/, "") || "/",
-    externalJobId,
-  ].join("|");
+  const canonical = [applicationUrlIdentityKey(input.url), externalJobId].join(
+    "|",
+  );
   return `app-${stableHash(canonical)}`;
 }
 

@@ -6,6 +6,8 @@ import {
   prepareSessionCheckpoint,
   reduceAutoPilotSession,
   restoreSessionFromCheckpoint,
+  sameApplicationUrlLocation,
+  sameExplicitApplicationIdentity,
   verifyFillAction,
   type AutoPilotCheckpoint,
   type AutoPilotObservation,
@@ -133,13 +135,6 @@ function nullableString(value: unknown, name: string): string | null {
 
 function validTimestamp(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}T/.test(value) && !Number.isNaN(Date.parse(value));
-}
-
-function canonicalUrl(value: string): string {
-  const url = new URL(value);
-  url.hash = "";
-  url.search = "";
-  return url.href;
 }
 
 function parsePreflight(value: unknown): PreflightGateSummary {
@@ -698,7 +693,7 @@ export class AutoPilotController {
         reason: runtime.ownerPauseReason ?? "Paused by owner",
       });
     }
-    if (canonicalUrl(page.url) !== canonicalUrl(runtime.lastUrl)) {
+    if (!sameApplicationUrlLocation(page.url, runtime.lastUrl)) {
       return this.fail(
         runtime,
         "Active tab changed to a different application URL without verified navigation",
@@ -1042,9 +1037,9 @@ export class AutoPilotController {
       }
       const page = await this.dependencies.getPage(runtime.tabId);
       if (!page) throw new Error("No active application page is available");
-      if (new URL(page.url).origin !== new URL(runtime.lastUrl).origin) {
+      if (!sameExplicitApplicationIdentity(page.url, runtime.lastUrl)) {
         throw new Error(
-          "Application origin changed while AutoPilot was paused",
+          "Application identity changed while AutoPilot was paused",
         );
       }
       const preflight = parsePreflight(input.preflight);
@@ -1136,7 +1131,7 @@ export class AutoPilotController {
       const after = observationFor(runtime, page);
       if (runtime.session.status === "WAITING_RESCAN") {
         if (runtime.waitingFor === "FILL") {
-          if (canonicalUrl(page.url) !== canonicalUrl(runtime.lastUrl)) {
+          if (!sameApplicationUrlLocation(page.url, runtime.lastUrl)) {
             runtime = await this.fail(
               runtime,
               "Application URL changed while waiting to verify a field fill",
@@ -1190,7 +1185,7 @@ export class AutoPilotController {
           );
         }
       } else if (runtime.session.status === "RUNNING") {
-        if (canonicalUrl(page.url) !== canonicalUrl(runtime.lastUrl)) {
+        if (!sameApplicationUrlLocation(page.url, runtime.lastUrl)) {
           runtime = await this.fail(
             runtime,
             "Application page changed without a verified AutoPilot action",
@@ -1383,7 +1378,7 @@ export class AutoPilotController {
     }
 
     if (runtime.session.status === "RUNNING") {
-      if (canonicalUrl(page.url) !== canonicalUrl(runtime.lastUrl)) {
+      if (!sameApplicationUrlLocation(page.url, runtime.lastUrl)) {
         runtime = await this.fail(
           runtime,
           "Application URL changed while the service worker was suspended",

@@ -9,7 +9,10 @@ import type {
   SecurityCheckpointKind,
   SemanticType,
 } from "@munshi-apply/contracts";
-import { componentFingerprint } from "@munshi-apply/application-model";
+import {
+  applicationUrlIdentityKey,
+  componentFingerprint,
+} from "@munshi-apply/application-model";
 import { classifyQuestion } from "@munshi-apply/semantic-engine";
 import {
   classifyValidationMessage,
@@ -1022,7 +1025,7 @@ export function scanDocument(): ApplicationPage {
     questions.push(question);
   }
   const url = new URL(window.location.href);
-  const pageSignature = `${url.origin}${url.pathname}|${document.title}`;
+  const pageSignature = `${applicationUrlIdentityKey(url.href)}|${document.title}`;
   const navigation = navigationCandidates(entries);
   const securityCheckpoint = detectSecurityCheckpoint();
   const finalSubmissionBoundary = navigation.some(

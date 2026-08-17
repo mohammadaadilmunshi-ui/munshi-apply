@@ -33,9 +33,9 @@ describe("application-aware URL identity", () => {
       "req-id=123",
     ];
     for (const query of cases) {
-      expect(applicationIdentityQuery(`https://jobs.example.com/apply?${query}`)).not.toBe(
-        "",
-      );
+      expect(
+        applicationIdentityQuery(`https://jobs.example.com/apply?${query}`),
+      ).not.toBe("");
     }
   });
 
