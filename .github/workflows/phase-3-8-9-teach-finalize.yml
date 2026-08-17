@@ -43,6 +43,10 @@ jobs:
         run: npm run check
       - name: Install native companion
         run: python -m pip install -e './apps/native-host[dev]'
+      - name: Normalize native Python
+        run: |
+          python -m ruff format apps/native-host
+          python -m ruff check apps/native-host --fix
       - name: Verify native companion
         run: |
           python -m ruff check apps/native-host
