@@ -52,26 +52,16 @@ update(
     ],
 )
 
-for path in (
-    "apps/native-host/tests/test_document_ingestion.py",
-    "apps/native-host/tests/test_resume_parser.py",
-):
-    update(
-        path,
-        [
-            (
-                '            f\'<w:document xmlns:w="urn:w"><w:body><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:body></w:document>\',\n',
-                '            (\n'
-                '                f\'<w:document xmlns:w="urn:w"><w:body><w:p><w:r><w:t>{text}</w:t></w:r>\'\n'
-                '                "</w:p></w:body></w:document>"\n'
-                '            ),\n',
-            )
-        ],
-    )
-
 update(
     "apps/native-host/tests/test_document_ingestion.py",
     [
+        (
+            '            f\'<w:document xmlns:w="urn:w"><w:body><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:body></w:document>\',\n',
+            '            (\n'
+            '                f\'<w:document xmlns:w="urn:w"><w:body><w:p><w:r><w:t>{text}</w:t></w:r>\'\n'
+            '                "</w:p></w:body></w:document>"\n'
+            '            ),\n',
+        ),
         (
             '        "Recruiting operations experience improved onboarding and candidate coordination with Excel analytics."\n',
             '        "Recruiting operations experience improved onboarding and candidate coordination "\n'
@@ -82,6 +72,20 @@ update(
             '            "SELECT kind, trust_level, source FROM evidence_nodes "\n'
             '            "WHERE source LIKE \'resume:resume-1:%\'"\n',
         ),
+    ],
+)
+
+update(
+    "apps/native-host/tests/test_resume_parser.py",
+    [
+        (
+            '        archive.writestr("word/document.xml", f\'<w:document xmlns:w="urn:w"><w:body><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:body></w:document>\')\n',
+            '        xml = (\n'
+            '            f\'<w:document xmlns:w="urn:w"><w:body><w:p><w:r><w:t>{text}</w:t></w:r>\'\n'
+            '            "</w:p></w:body></w:document>"\n'
+            '        )\n'
+            '        archive.writestr("word/document.xml", xml)\n',
+        )
     ],
 )
 
