@@ -178,6 +178,40 @@ describe("buildAutoPilotLaunchPlan", () => {
     expect(canAutoPilotMakeProgress(result)).toBe(false);
   });
 
+  it("recognizes a known portal account and prevents duplicate creation", () => {
+    const current = page();
+    current.controls = [current.controls[0]!];
+    current.questions = [current.questions[0]!];
+    current.url = "https://example.com/candidate/register";
+    current.applicationState = "ACCOUNT_CREATE";
+    current.pageContext = "Create account for a new candidate";
+    const result = buildAutoPilotLaunchPlan(
+      current,
+      {
+        "q-name": { value: "Aadil", approved: true, sensitive: false },
+      },
+      {
+        knownAccounts: [
+          {
+            accountId: "account-1",
+            employer: "Example",
+            domain: "example.com",
+            scopeKey: "example.com",
+            portalUrl: "https://example.com/candidate/login",
+            email: "aadil@example.com",
+            exists: true,
+            createdAt: "2026-08-01T12:00:00.000Z",
+            lastUsed: "2026-08-17T12:00:00.000Z",
+            applicationIds: [],
+          },
+        ],
+      },
+    );
+    expect(result.accountPlan.state).toBe("DUPLICATE_RISK");
+    expect(result.accountPlan.knownAccount?.email).toBe("aadil@example.com");
+    expect(result.preflight.state).toBe("BLOCKED");
+  });
+
   it("hard-blocks an approved answer that violates an explicit employer knockout", () => {
     const current = page();
     current.controls = [
