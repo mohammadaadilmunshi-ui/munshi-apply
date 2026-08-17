@@ -65,6 +65,24 @@ function mergedFingerprint(pages: readonly ApplicationPage[]): string {
   return `merged-${hash(material)}`;
 }
 
+function ambiguousCrossFrameControlIds(
+  pages: readonly ApplicationPage[],
+): Set<string> {
+  const frameIdsByControl = new Map<string, Set<number>>();
+  for (const page of pages) {
+    for (const control of page.controls) {
+      const frameIds = frameIdsByControl.get(control.controlId) ?? new Set<number>();
+      frameIds.add(page.frameId);
+      frameIdsByControl.set(control.controlId, frameIds);
+    }
+  }
+  return new Set(
+    [...frameIdsByControl.entries()]
+      .filter(([, frameIds]) => frameIds.size > 1)
+      .map(([controlId]) => controlId),
+  );
+}
+
 export function mergeApplicationPages(
   pages: readonly ApplicationPage[],
 ): ApplicationPage | null {
@@ -74,12 +92,15 @@ export function mergeApplicationPages(
   if (!base) return null;
 
   const controls = pages.flatMap((page) => page.controls);
+  const ambiguousControlIds = ambiguousCrossFrameControlIds(pages);
   const questions = pages.flatMap((page) => {
     const localControlIds = new Set(
       page.controls.map((control) => control.controlId),
     );
-    return page.questions.filter((question) =>
-      localControlIds.has(question.controlId),
+    return page.questions.filter(
+      (question) =>
+        localControlIds.has(question.controlId) &&
+        !ambiguousControlIds.has(question.controlId),
     );
   });
   const navigationCandidates = pages.flatMap(
