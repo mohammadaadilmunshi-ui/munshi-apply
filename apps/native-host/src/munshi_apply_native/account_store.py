@@ -31,7 +31,8 @@ def _reject_secret_material(value: object, path: str = "payload") -> None:
             normalized_key = str(key).lower().replace("_", "").replace("-", "")
             if any(part in normalized_key for part in _SECRET_KEY_PARTS):
                 raise ValueError(
-                    "Account registry refuses passwords, tokens, credentials, OTPs, and other secrets"
+                    "Account registry refuses passwords, tokens, credentials, "
+                    "OTPs, and other secrets"
                 )
             _reject_secret_material(nested, f"{path}.{key}")
     elif isinstance(value, list):
