@@ -99,31 +99,39 @@ class ProgressiveMemoryStore:
     ) -> list[dict[str, Any]]:
         if limit < 1 or limit > 500:
             raise ValueError("Memory candidate limit must be between 1 and 500")
-        clauses = ["state = 'ACTIVE'"]
-        parameters: list[Any] = []
-        if semantic_type is not None:
-            clauses.append("(semantic_type IS NULL OR semantic_type = ?)")
-            parameters.append(semantic_type)
-        if site_origin is not None:
-            clauses.append("(site_origin IS NULL OR site_origin = ?)")
-            parameters.append(site_origin)
-        if component_fingerprint is not None:
-            clauses.append(
-                "(component_fingerprint IS NULL OR component_fingerprint = ?)"
-            )
-            parameters.append(component_fingerprint)
-        if question_fingerprint is not None:
-            clauses.append("(question_fingerprint IS NULL OR question_fingerprint = ?)")
-            parameters.append(question_fingerprint)
-        parameters.append(limit)
-        query = f"""
-            SELECT * FROM progressive_memories
-            WHERE {' AND '.join(clauses)}
-            ORDER BY confidence DESC, last_observed_at DESC, memory_id
-            LIMIT ?
-        """
+        parameters = (
+            semantic_type,
+            semantic_type,
+            site_origin,
+            site_origin,
+            component_fingerprint,
+            component_fingerprint,
+            question_fingerprint,
+            question_fingerprint,
+            limit,
+        )
         with self.database.connect() as connection:
-            rows = connection.execute(query, tuple(parameters)).fetchall()
+            rows = connection.execute(
+                """
+                SELECT * FROM progressive_memories
+                WHERE state = 'ACTIVE'
+                  AND (? IS NULL OR semantic_type IS NULL OR semantic_type = ?)
+                  AND (? IS NULL OR site_origin IS NULL OR site_origin = ?)
+                  AND (
+                    ? IS NULL
+                    OR component_fingerprint IS NULL
+                    OR component_fingerprint = ?
+                  )
+                  AND (
+                    ? IS NULL
+                    OR question_fingerprint IS NULL
+                    OR question_fingerprint = ?
+                  )
+                ORDER BY confidence DESC, last_observed_at DESC, memory_id
+                LIMIT ?
+                """,
+                parameters,
+            ).fetchall()
         return [dict(row) for row in rows]
 
     def record_observation(self, observation: dict[str, Any]) -> bool:
@@ -201,7 +209,11 @@ class ProgressiveMemoryStore:
         version = memory.get("version")
         if not isinstance(version, int) or isinstance(version, bool) or version < 1:
             raise ValueError("Memory version must be a positive integer")
-        for field in ("verified_successes", "verified_failures", "owner_corrections"):
+        for field in (
+            "verified_successes",
+            "verified_failures",
+            "owner_corrections",
+        ):
             value = memory.get(field)
             if not isinstance(value, int) or isinstance(value, bool) or value < 0:
                 raise ValueError("Memory counters must be non-negative integers")

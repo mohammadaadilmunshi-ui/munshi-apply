@@ -77,12 +77,12 @@ describe("progressive memory", () => {
     expect(after.version).toBe(before.version);
   });
 
-  it("ages old memory instead of treating it as permanently authoritative", () => {
+  it("ages old memory instead of keeping it permanently authoritative", () => {
     const old = memory({ lastObservedAt: "2026-04-19T18:00:00.000Z" });
     expect(progressiveMemoryDecay(old, now, 120)).toBeCloseTo(0.5, 2);
   });
 
-  it("ranks exact site, question, and component memory above a global pattern", () => {
+  it("ranks exact memory above a global pattern", () => {
     const exact = memory({ memoryId: "exact" });
     const global = memory({
       memoryId: "global",

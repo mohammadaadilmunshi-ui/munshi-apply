@@ -53,6 +53,12 @@ export type RankedProgressiveMemory = {
   reasons: string[];
 };
 
+export type ProgressiveMemoryConflictResolution = {
+  winner: ProgressiveMemory | null;
+  reviewRequired: boolean;
+  reason: string;
+};
+
 const kindPriorities: Record<ProgressiveMemoryKind, number> = {
   USER_CORRECTION: 1,
   SITE: 0.9,
@@ -110,7 +116,7 @@ export function validateProgressiveMemory(memory: ProgressiveMemory): void {
     memory.kind === "GLOBAL_PATTERN" &&
     (memory.siteOrigin !== null || memory.questionFingerprint !== null)
   ) {
-    throw new Error("Global pattern memory cannot be bound to one site or question");
+    throw new Error("Global memory cannot be site/question bound");
   }
   if (memory.kind === "SITE" && !memory.siteOrigin) {
     throw new Error("Site memory requires a site origin");
@@ -146,9 +152,12 @@ export function applyProgressiveMemoryObservation(
     return { ...memory, lastObservedAt: observation.observedAt };
   }
 
-  const verifiedSuccesses = memory.verifiedSuccesses + (observation.success ? 1 : 0);
-  const verifiedFailures = memory.verifiedFailures + (observation.success ? 0 : 1);
-  const ownerCorrections = memory.ownerCorrections + (observation.ownerCorrected ? 1 : 0);
+  const successDelta = observation.success ? 1 : 0;
+  const failureDelta = observation.success ? 0 : 1;
+  const correctionDelta = observation.ownerCorrected ? 1 : 0;
+  const verifiedSuccesses = memory.verifiedSuccesses + successDelta;
+  const verifiedFailures = memory.verifiedFailures + failureDelta;
+  const ownerCorrections = memory.ownerCorrections + correctionDelta;
 
   const evidenceTotal = verifiedSuccesses + verifiedFailures;
   const empirical = evidenceTotal === 0 ? 0.5 : verifiedSuccesses / evidenceTotal;
@@ -193,7 +202,8 @@ export function progressiveMemoryDecay(
 }
 
 function memoryExpired(memory: ProgressiveMemory, now: string): boolean {
-  return memory.expiresAt !== null && Date.parse(memory.expiresAt) <= Date.parse(now);
+  const expiresAt = memory.expiresAt;
+  return expiresAt !== null && Date.parse(expiresAt) <= Date.parse(now);
 }
 
 function compatibleWithQuery(
@@ -271,7 +281,9 @@ export function rankProgressiveMemory(
   if (!Number.isSafeInteger(limit) || limit < 1) {
     throw new Error("Memory result limit must be a positive integer");
   }
-  if (!validIsoDate(query.now)) throw new Error("Current time must be a valid date");
+  if (!validIsoDate(query.now)) {
+    throw new Error("Current time must be a valid date");
+  }
 
   return memories
     .map((memory) => {
@@ -303,7 +315,7 @@ export function rankProgressiveMemory(
 export function resolveProgressiveMemoryConflict(
   ranked: readonly RankedProgressiveMemory[],
   minimumMargin = 0.15,
-): { winner: ProgressiveMemory | null; reviewRequired: boolean; reason: string } {
+): ProgressiveMemoryConflictResolution {
   if (!Number.isFinite(minimumMargin) || minimumMargin < 0) {
     throw new Error("Memory conflict margin must be non-negative");
   }

@@ -10,6 +10,21 @@ export type ComponentFingerprintInput = {
   hasPopup: string | null;
 };
 
+export type PopupOwnerKind =
+  | "ARIA_CONTROLS"
+  | "ARIA_OWNS"
+  | "DOM_DESCENDANT"
+  | "PORTAL"
+  | "UNKNOWN";
+
+export type ComponentFrameworkHint =
+  | "NATIVE"
+  | "REACT"
+  | "ANGULAR"
+  | "VUE"
+  | "CUSTOM_ELEMENT"
+  | "UNKNOWN";
+
 export type ComponentFingerprintV2Input = ComponentFingerprintInput & {
   multiple?: boolean;
   contentEditable?: boolean;
@@ -17,15 +32,18 @@ export type ComponentFingerprintV2Input = ComponentFingerprintInput & {
   frameDepth?: number;
   portaledPopup?: boolean;
   virtualizedOptions?: boolean;
-  popupOwnerKind?: "ARIA_CONTROLS" | "ARIA_OWNS" | "DOM_DESCENDANT" | "PORTAL" | "UNKNOWN";
-  frameworkHint?: "NATIVE" | "REACT" | "ANGULAR" | "VUE" | "CUSTOM_ELEMENT" | "UNKNOWN";
+  popupOwnerKind?: PopupOwnerKind;
+  frameworkHint?: ComponentFrameworkHint;
 };
 
 export type RecipeAction =
   | { type: "FOCUS" }
   | { type: "CLICK" }
   | { type: "TYPE"; valueSource: "ANSWER" }
-  | { type: "KEY"; key: "ArrowDown" | "ArrowUp" | "Enter" | "Tab" | "Escape" }
+  | {
+      type: "KEY";
+      key: "ArrowDown" | "ArrowUp" | "Enter" | "Tab" | "Escape";
+    }
   | { type: "SELECT_EXACT_OPTION" }
   | { type: "WAIT_FOR_STATE"; state: "OPTIONS_VISIBLE" | "VALUE_COMMITTED" };
 

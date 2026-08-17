@@ -82,7 +82,7 @@ describe("interaction escalation", () => {
     expect(plan.blockReason).toMatch(/Final employer submission/);
   });
 
-  it("removes unavailable recipe, keyboard, and popup paths without stopping ordinary recovery", () => {
+  it("skips unavailable recipe, keyboard, and popup paths", () => {
     const steps = executableEscalationSteps(
       buildInteractionEscalationPlan(
         context({
