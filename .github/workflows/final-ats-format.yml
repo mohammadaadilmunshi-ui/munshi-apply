@@ -1,0 +1,31 @@
+name: Final ATS test formatter
+on:
+  push:
+    branches: [feat/v3-foundation-alignment]
+permissions:
+  contents: write
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Format, verify strict budget, build, and self-remove
+        run: |
+          set -euo pipefail
+          npx prettier apps/extension/src/content/ats-endurance.test.ts --write
+          MUNSHI_PERF_STRICT=1 npx vitest run apps/extension/src/content/ats-endurance.test.ts
+          npm run build
+          git diff --check
+          git rm .github/workflows/final-ats-format.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/extension/src/content/ats-endurance.test.ts
+          git commit -m "style: format final ATS endurance gate"
+          git push origin HEAD:feat/v3-foundation-alignment
