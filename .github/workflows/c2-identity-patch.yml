@@ -82,8 +82,8 @@ jobs:
               raise SystemExit("canonicalUrl helper drifted")
           controller = controller.replace(canonical_function, "", 1)
           old_compare = 'canonicalUrl(page.url) !== canonicalUrl(runtime.lastUrl)'
-          if controller.count(old_compare) != 3:
-              raise SystemExit(f"expected 3 AutoPilot URL guards, found {controller.count(old_compare)}")
+          if controller.count(old_compare) != 4:
+              raise SystemExit(f"expected 4 AutoPilot URL guards, found {controller.count(old_compare)}")
           controller = controller.replace(
               old_compare,
               '!sameApplicationUrlLocation(page.url, runtime.lastUrl)',
