@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ApplicationPage } from "@munshi-apply/contracts";
 import {
+  hasJobContextAffinity,
   mergeJobContext,
   shouldRememberJobContext,
   type StoredJobContext,
@@ -113,7 +114,7 @@ describe("job listing context carryover", () => {
     expect(shouldRememberJobContext(application)).toBe(false);
   });
 
-  it("merges a recent listing into the later application context", () => {
+  it("merges a recent listing into the later same-origin application context", () => {
     const stored: StoredJobContext = {
       url: "https://careers.example.test/jobs/recruiter-123",
       title: "Recruiter",
@@ -139,6 +140,54 @@ describe("job listing context carryover", () => {
     expect(merged.pageContext).toContain(
       "Work history Company Title Start date",
     );
+  });
+
+  it("allows a cross-origin ATS handoff when the employer identity is present", () => {
+    const stored: StoredJobContext = {
+      url: "https://careers.acme.test/jobs/people-analytics-associate",
+      title: "People Analytics Associate at Acme",
+      pageContext:
+        "Responsibilities include workforce reporting and people analytics partnership.",
+      capturedAt: "2026-08-16T00:00:00.000Z",
+    };
+    const application = page({
+      url: "https://acme.wd5.myworkdayjobs.com/en-US/jobs/apply/people-analytics-associate",
+      title: "People Analytics Associate application",
+      pageContext: "Personal information Work history",
+    });
+
+    expect(hasJobContextAffinity(application, stored)).toBe(true);
+    expect(
+      mergeJobContext(
+        application,
+        stored,
+        Date.parse("2026-08-16T00:10:00.000Z"),
+      ).pageContext,
+    ).toContain("workforce reporting and people analytics partnership");
+  });
+
+  it("refuses stale context from a different employer reused in the same tab", () => {
+    const stored: StoredJobContext = {
+      url: "https://careers.acme.test/jobs/people-analytics-associate",
+      title: "People Analytics Associate at Acme",
+      pageContext:
+        "Responsibilities include workforce reporting and people analytics partnership.",
+      capturedAt: "2026-08-16T00:00:00.000Z",
+    };
+    const application = page({
+      url: "https://differentco.wd5.myworkdayjobs.com/en-US/jobs/apply/coordinator",
+      title: "Candidate application",
+      pageContext: "Personal information Work history Contact information",
+    });
+
+    expect(hasJobContextAffinity(application, stored)).toBe(false);
+    expect(
+      mergeJobContext(
+        application,
+        stored,
+        Date.parse("2026-08-16T00:10:00.000Z"),
+      ).pageContext,
+    ).toBe("Personal information Work history Contact information");
   });
 
   it("ignores stale listing context", () => {
