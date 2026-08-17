@@ -9,9 +9,7 @@ import {
 
 const now = "2026-08-17T18:00:00.000Z";
 
-function memory(
-  overrides: Partial<ProgressiveMemory> = {},
-): ProgressiveMemory {
+function memory(overrides: Partial<ProgressiveMemory> = {}): ProgressiveMemory {
   return {
     memoryId: "memory-1",
     kind: "SITE",

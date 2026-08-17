@@ -11,19 +11,10 @@ export type ComponentFingerprintInput = {
 };
 
 export type PopupOwnerKind =
-  | "ARIA_CONTROLS"
-  | "ARIA_OWNS"
-  | "DOM_DESCENDANT"
-  | "PORTAL"
-  | "UNKNOWN";
+  "ARIA_CONTROLS" | "ARIA_OWNS" | "DOM_DESCENDANT" | "PORTAL" | "UNKNOWN";
 
 export type ComponentFrameworkHint =
-  | "NATIVE"
-  | "REACT"
-  | "ANGULAR"
-  | "VUE"
-  | "CUSTOM_ELEMENT"
-  | "UNKNOWN";
+  "NATIVE" | "REACT" | "ANGULAR" | "VUE" | "CUSTOM_ELEMENT" | "UNKNOWN";
 
 export type ComponentFingerprintV2Input = ComponentFingerprintInput & {
   multiple?: boolean;

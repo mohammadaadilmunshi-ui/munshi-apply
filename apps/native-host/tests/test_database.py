@@ -17,12 +17,13 @@ def test_migrations_are_idempotent(tmp_path: Path) -> None:
         "005_profile_snapshot_ordering.sql",
         "006_ai_budget_reservations.sql",
         "007_ai_draft_reviews.sql",
+        "008_progressive_memory.sql",
     ]
     assert database.migrate() == []
     health = database.health()
     assert health["status"] == "healthy"
-    assert health["migration_count"] == 7
-    assert health["schema_version"] == "007_ai_draft_reviews.sql"
+    assert health["migration_count"] == 8
+    assert health["schema_version"] == "008_progressive_memory.sql"
 
 
 def test_architecture_tables_are_created_with_integrity_constraints(tmp_path: Path) -> None:
@@ -55,6 +56,8 @@ def test_architecture_tables_are_created_with_integrity_constraints(tmp_path: Pa
             "experiment_variants",
             "experiment_assignments",
             "profile_record_tombstones",
+            "progressive_memories",
+            "progressive_memory_observations",
         }.issubset(tables)
 
         now = datetime.now(UTC).isoformat()

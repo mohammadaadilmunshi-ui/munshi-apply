@@ -160,7 +160,8 @@ export function applyProgressiveMemoryObservation(
   const ownerCorrections = memory.ownerCorrections + correctionDelta;
 
   const evidenceTotal = verifiedSuccesses + verifiedFailures;
-  const empirical = evidenceTotal === 0 ? 0.5 : verifiedSuccesses / evidenceTotal;
+  const empirical =
+    evidenceTotal === 0 ? 0.5 : verifiedSuccesses / evidenceTotal;
   const evidenceWeight = Math.min(0.82, evidenceTotal / (evidenceTotal + 4));
   const priorWeight = 1 - evidenceWeight;
   let confidence = priorWeight * memory.confidence + evidenceWeight * empirical;

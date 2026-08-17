@@ -74,9 +74,7 @@ describe("interaction escalation", () => {
   });
 
   it("blocks the entire ladder at final submission", () => {
-    const plan = buildInteractionEscalationPlan(
-      context({ finalSubmit: true }),
-    );
+    const plan = buildInteractionEscalationPlan(context({ finalSubmit: true }));
 
     expect(plan.blocked).toBe(true);
     expect(plan.blockReason).toMatch(/Final employer submission/);

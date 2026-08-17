@@ -26,7 +26,7 @@ def test_health_and_event_round_trip(tmp_path: Path) -> None:
         health = client.get("/health")
         assert health.status_code == 200
         assert health.json()["status"] == "healthy"
-        assert health.json()["schema_version"] == "007_ai_draft_reviews.sql"
+        assert health.json()["schema_version"] == "008_progressive_memory.sql"
         assert health.json()["outbox_worker"] == "disabled"
 
         accepted = client.post(
