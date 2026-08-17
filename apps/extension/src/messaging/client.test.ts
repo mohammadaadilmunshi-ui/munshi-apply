@@ -16,9 +16,33 @@ function profile(displayName: string, updatedAt: string): ProfileSnapshot {
   };
 }
 
+const localAck = {
+  localSaved: true as const,
+  cloudSynced: false,
+  conflict: null,
+};
+
+const syncedAck = {
+  localSaved: true as const,
+  cloudSynced: true,
+  conflict: null,
+};
+
 describe("profile save queue", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("returns the service-worker acknowledgement for a single save", async () => {
+    const sendMessage = vi.fn().mockResolvedValue({
+      ok: true,
+      data: localAck,
+    });
+    vi.stubGlobal("chrome", { runtime: { sendMessage } });
+
+    await expect(
+      saveProfile(profile("local", "2026-08-14T12:00:00.000Z")),
+    ).resolves.toEqual(localAck);
   });
 
   it("coalesces rapid edits and resolves only after the newest save finishes", async () => {
@@ -35,7 +59,7 @@ describe("profile save queue", () => {
     const second = saveProfile(profile("newest", "2026-08-14T12:00:01.000Z"));
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
-    responders[0]?.({ ok: true });
+    responders[0]?.({ ok: true, data: localAck });
 
     await vi.waitFor(() => {
       expect(sendMessage).toHaveBeenCalledTimes(2);
@@ -53,8 +77,20 @@ describe("profile save queue", () => {
       payload: { displayName: "newest" },
     });
 
-    responders[1]?.({ ok: true });
-    await Promise.all([first, second]);
+    responders[1]?.({ ok: true, data: syncedAck });
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      syncedAck,
+      syncedAck,
+    ]);
     expect(firstResolved).toBe(true);
+  });
+
+  it("rejects a malformed save acknowledgement instead of assuming success", async () => {
+    const sendMessage = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("chrome", { runtime: { sendMessage } });
+
+    await expect(
+      saveProfile(profile("invalid", "2026-08-14T12:00:02.000Z")),
+    ).rejects.toThrow("Profile save returned no acknowledgement");
   });
 });
