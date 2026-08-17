@@ -23,6 +23,7 @@ import {
   repeatMetadataFor,
   validationMessageFor,
 } from "./adaptive";
+import { createBoundedHintStore } from "./bounded-hint-store";
 
 const selector = [
   "input",
@@ -637,7 +638,7 @@ function createControl(element: Element): Control | null {
 
 type ControlEntry = { element: Element; control: Control };
 
-const controlHints = new Map<string, Control>();
+const controlHints = createBoundedHintStore<Control>();
 
 function scanControlEntries(): ControlEntry[] {
   const duplicateCounts = new Map<string, number>();
