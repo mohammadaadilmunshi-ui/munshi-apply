@@ -9,6 +9,7 @@ export * from "./employer-preflight";
 export * from "./evidence";
 export * from "./interaction-escalation";
 export * from "./job-response";
+export * from "./job-signal-page";
 export * from "./job-signals";
 export * from "./learning";
 export * from "./policies";
