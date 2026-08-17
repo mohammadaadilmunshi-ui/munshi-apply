@@ -3,6 +3,7 @@ import {
   applicationIdentityQuery,
   applicationUrlIdentityKey,
   sameApplicationUrlLocation,
+  sameExplicitApplicationIdentity,
 } from "./application-url";
 
 describe("application-aware URL identity", () => {
@@ -54,6 +55,42 @@ describe("application-aware URL identity", () => {
       sameApplicationUrlLocation(
         "https://jobs.example.com/apply?job=123",
         "https://jobs.example.com/apply",
+      ),
+    ).toBe(false);
+  });
+
+  it("allows paused-session route changes when the explicit job identity is unchanged", () => {
+    expect(
+      sameExplicitApplicationIdentity(
+        "https://jobs.example.com/login?job=123",
+        "https://jobs.example.com/apply?job=123&utm_source=resume",
+      ),
+    ).toBe(true);
+  });
+
+  it("blocks paused-session resume when an explicit job identity changes", () => {
+    expect(
+      sameExplicitApplicationIdentity(
+        "https://jobs.example.com/login?job=123",
+        "https://jobs.example.com/apply?job=456",
+      ),
+    ).toBe(false);
+  });
+
+  it("allows route changes when neither URL carries an explicit job identity", () => {
+    expect(
+      sameExplicitApplicationIdentity(
+        "https://jobs.example.com/login",
+        "https://jobs.example.com/apply?utm_source=direct",
+      ),
+    ).toBe(true);
+  });
+
+  it("never treats different origins as the same explicit application", () => {
+    expect(
+      sameExplicitApplicationIdentity(
+        "https://jobs-a.example.com/apply?job=123",
+        "https://jobs-b.example.com/apply?job=123",
       ),
     ).toBe(false);
   });
