@@ -6,6 +6,7 @@ on:
       - feat/v3-foundation-alignment
     paths:
       - scripts/phase_3_8_9_teach_finalize.py
+      - scripts/phase_3_8_9_extension_wiring.py
       - .github/workflows/phase-3-8-9-teach-finalize.yml
 
 permissions:
@@ -27,7 +28,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Apply Phase 3 8 9 and Teach integration
-        run: python scripts/phase_3_8_9_teach_finalize.py
+        run: |
+          python scripts/phase_3_8_9_teach_finalize.py
+          python scripts/phase_3_8_9_extension_wiring.py
       - name: Install locked Node dependencies
         run: npm ci
       - name: Format generated implementation
@@ -45,7 +48,7 @@ jobs:
       - name: Commit verified integration
         run: |
           git config user.name 'github-actions[bot]'
-          git config user.email '4189824+github-actions[bot]@users.noreply.github.com'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add apps packages docs
           if git diff --cached --quiet; then
             echo 'No integration changes were produced.'
