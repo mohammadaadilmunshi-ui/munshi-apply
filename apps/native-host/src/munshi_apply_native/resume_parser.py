@@ -6,8 +6,8 @@ import re
 import zipfile
 from dataclasses import dataclass
 from pathlib import PurePath
-from xml.etree import ElementTree
 
+from defusedxml import ElementTree
 from pypdf import PdfReader
 
 _MAX_TEXT_CHARACTERS = 120_000
@@ -53,13 +53,19 @@ def _docx_text(data: bytes) -> str:
 
 
 def _chunks(text: str) -> tuple[str, ...]:
-    paragraphs = [re.sub(r"\s+", " ", item).strip() for item in re.split(r"\n+", text)]
+    paragraphs = [
+        re.sub(r"\s+", " ", item).strip() for item in re.split(r"\n+", text)
+    ]
     paragraphs = [item for item in paragraphs if item]
     chunks: list[str] = []
     current = ""
     for paragraph in paragraphs:
         if len(paragraph) > _CHUNK_HARD_MAX:
-            sentences = [item.strip() for item in re.split(r"(?<=[.!?])\s+", paragraph) if item.strip()]
+            sentences = [
+                item.strip()
+                for item in re.split(r"(?<=[.!?])\s+", paragraph)
+                if item.strip()
+            ]
         else:
             sentences = [paragraph]
         for sentence in sentences:
@@ -94,7 +100,8 @@ def parse_resume_bytes(filename: str, data: bytes) -> ParsedResume:
             parser = "text"
         elif suffix == ".doc":
             raise ValueError(
-                "Legacy .doc parsing is not deterministic in the native companion; convert it to PDF or DOCX"
+                "Legacy .doc parsing is not deterministic in the native companion; "
+                "convert it to PDF or DOCX"
             )
         else:
             raise ValueError("Supported evidence parsing formats are PDF, DOCX, TXT, and MD")
@@ -105,7 +112,8 @@ def parse_resume_bytes(filename: str, data: bytes) -> ParsedResume:
     text = _normalize(raw)
     if len(text) < 40:
         raise ValueError(
-            "Résumé contains too little extractable text; scanned/image-only documents need a text-readable version"
+            "Résumé contains too little extractable text; scanned/image-only documents "
+            "need a text-readable version"
         )
     if len(raw) > _MAX_TEXT_CHARACTERS:
         warnings.append("Extracted résumé text was truncated to the evidence ingestion limit")
@@ -118,13 +126,44 @@ def parse_resume_bytes(filename: str, data: bytes) -> ParsedResume:
 def _semantic_types(text: str) -> list[str]:
     lowered = text.lower()
     types: set[str] = set()
-    if any(term in lowered for term in ("experience", "recruit", "human resources", "hr ", "talent", "workforce", "people analytics", "onboarding")):
+    experience_terms = (
+        "experience",
+        "recruit",
+        "human resources",
+        "hr ",
+        "talent",
+        "workforce",
+        "people analytics",
+        "onboarding",
+    )
+    if any(term in lowered for term in experience_terms):
         types.update({"RELEVANT_EXPERIENCE", "WHY_ROLE", "MOTIVATION"})
-    if any(term in lowered for term in ("achieved", "improved", "reduced", "increased", "%", "result", "delivered", "managed", "led")):
+    result_terms = (
+        "achieved",
+        "improved",
+        "reduced",
+        "increased",
+        "%",
+        "result",
+        "delivered",
+        "managed",
+        "led",
+    )
+    if any(term in lowered for term in result_terms):
         types.add("BEHAVIORAL_EXAMPLE")
-    if any(term in lowered for term in ("education", "university", "master", "bachelor", "degree", "gpa")):
+    education_terms = ("education", "university", "master", "bachelor", "degree", "gpa")
+    if any(term in lowered for term in education_terms):
         types.add("EDUCATION")
-    if any(term in lowered for term in ("project", "dashboard", "python", "tableau", "power bi", "excel", "analytics")):
+    project_terms = (
+        "project",
+        "dashboard",
+        "python",
+        "tableau",
+        "power bi",
+        "excel",
+        "analytics",
+    )
+    if any(term in lowered for term in project_terms):
         types.update({"PROJECT", "RELEVANT_EXPERIENCE"})
     return sorted(types)
 
