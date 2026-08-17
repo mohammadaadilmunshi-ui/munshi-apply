@@ -45,7 +45,7 @@ function page(controls: Control[]): ApplicationPage {
     observedAt: "2026-08-17T22:00:00.000Z",
     controls,
     questions: [],
-    applicationState: "DOCUMENTS",
+    applicationState: "RESUME",
     pageFingerprint: "fingerprint-resume",
     securityCheckpoint: null,
     validationErrorCount: 0,
