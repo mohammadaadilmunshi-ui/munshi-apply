@@ -16,210 +16,149 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: Apply per-scan scanner caches with exact-match guards
+      - name: Apply bounded scanner hot-path optimization
         run: |
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
-          from textwrap import dedent
 
           path = Path("apps/extension/src/content/scanner.ts")
           source = path.read_text()
 
-          def replace_once(old: str, new: str, label: str) -> None:
+          def splice_function(name: str, next_name: str, replacement: str) -> None:
               global source
-              count = source.count(old)
-              if count != 1:
-                  raise SystemExit(f"{label} guard matched {count} times")
-              source = source.replace(old, new, 1)
+              start_marker = f"function {name}"
+              end_marker = f"\n\nfunction {next_name}"
+              if source.count(start_marker) != 1 or source.count(end_marker) != 1:
+                  raise SystemExit(f"function guard failed for {name}")
+              start = source.index(start_marker)
+              end = source.index(end_marker, start)
+              source = source[:start] + replacement + source[end:]
 
           import_anchor = 'import { createBoundedHintStore } from "./bounded-hint-store";\n\n'
-          caches = import_anchor + dedent('''\
-          let sectionHeadingCache = new WeakMap<Document | ShadowRoot, Element[]>();
-          let computedStyleCache = new WeakMap<HTMLElement, CSSStyleDeclaration>();
-          let hiddenStateCache = new WeakMap<HTMLElement, boolean>();
+          if source.count(import_anchor) != 1:
+              raise SystemExit("scanner import guard failed")
+          if "let sectionHeadingCache" not in source:
+              cache_lines = [
+                  'let sectionHeadingCache = new WeakMap<Document | ShadowRoot, Element[]>();',
+                  'let computedStyleCache = new WeakMap<HTMLElement, CSSStyleDeclaration>();',
+                  'let hiddenStateCache = new WeakMap<HTMLElement, boolean>();',
+                  '',
+                  'function resetScanCaches(): void {',
+                  '  sectionHeadingCache = new WeakMap<Document | ShadowRoot, Element[]>();',
+                  '  computedStyleCache = new WeakMap<HTMLElement, CSSStyleDeclaration>();',
+                  '  hiddenStateCache = new WeakMap<HTMLElement, boolean>();',
+                  '}',
+                  '',
+                  'function computedStyleFor(element: HTMLElement): CSSStyleDeclaration {',
+                  '  const cached = computedStyleCache.get(element);',
+                  '  if (cached) return cached;',
+                  '  const style = window.getComputedStyle(element);',
+                  '  computedStyleCache.set(element, style);',
+                  '  return style;',
+                  '}',
+                  '',
+              ]
+              source = source.replace(import_anchor, import_anchor + "\n".join(cache_lines), 1)
 
-          function resetScanCaches(): void {
-            sectionHeadingCache = new WeakMap<Document | ShadowRoot, Element[]>();
-            computedStyleCache = new WeakMap<HTMLElement, CSSStyleDeclaration>();
-            hiddenStateCache = new WeakMap<HTMLElement, boolean>();
-          }
+          hidden_lines = [
+              'function hiddenBySelfOrAncestor(element: HTMLElement): boolean {',
+              '  const cached = hiddenStateCache.get(element);',
+              '  if (cached !== undefined) return cached;',
+              '  const style = computedStyleFor(element);',
+              '  const opacity = Number.parseFloat(style.opacity || "1");',
+              '  const hiddenBySelf =',
+              '    element.hidden ||',
+              '    element.getAttribute("aria-hidden") === "true" ||',
+              '    style.display === "none" ||',
+              '    style.visibility === "hidden" ||',
+              '    style.visibility === "collapse" ||',
+              '    (Number.isFinite(opacity) && opacity <= 0.01);',
+              '  const hidden =',
+              '    hiddenBySelf ||',
+              '    (element.parentElement',
+              '      ? hiddenBySelfOrAncestor(element.parentElement)',
+              '      : false);',
+              '  hiddenStateCache.set(element, hidden);',
+              '  return hidden;',
+              '}',
+          ]
+          splice_function("hiddenBySelfOrAncestor(element: HTMLElement): boolean {", "isVisible", "\n".join(hidden_lines))
 
-          function computedStyleFor(element: HTMLElement): CSSStyleDeclaration {
-            const cached = computedStyleCache.get(element);
-            if (cached) return cached;
-            const style = window.getComputedStyle(element);
-            computedStyleCache.set(element, style);
-            return style;
-          }
+          visible_start = source.index("function isVisible(element: Element): boolean {")
+          visible_end = source.index("\n\nfunction hash", visible_start)
+          visible = source[visible_start:visible_end]
+          if visible.count("window.getComputedStyle(element)") != 1:
+              raise SystemExit("isVisible style guard failed")
+          visible = visible.replace("window.getComputedStyle(element)", "computedStyleFor(element)", 1)
+          source = source[:visible_start] + visible + source[visible_end:]
 
-          ''')
-          replace_once(import_anchor, caches, "scanner cache insertion")
+          section_start = source.index("function sectionContextFor(element: Element): string {")
+          section_end = source.index("\n\nfunction kindFor", section_start)
+          section = source[section_start:section_end]
+          root_marker = '  const root = element.getRootNode();\n  if (!(root instanceof Document || root instanceof ShadowRoot)) return "";\n'
+          return_marker = '  return preceding.at(-1)?.text ?? "";\n}'
+          if section.count(root_marker) != 1 or section.count(return_marker) != 1:
+              raise SystemExit("section context guard failed")
+          root_start = section.index(root_marker)
+          root_end = section.index(return_marker, root_start) + len(return_marker)
+          cached_section = "\n".join([
+              '  const root = element.getRootNode();',
+              '  if (!(root instanceof Document || root instanceof ShadowRoot)) return "";',
+              '  let headings = sectionHeadingCache.get(root);',
+              '  if (!headings) {',
+              '    headings = Array.from(',
+              '      root.querySelectorAll("h1, h2, h3, h4, h5, h6, [role=\'heading\'], legend"),',
+              '    ).filter(isVisible);',
+              '    sectionHeadingCache.set(root, headings);',
+              '  }',
+              '  const preceding = headings',
+              '    .filter(',
+              '      (candidate) =>',
+              '        candidate !== element &&',
+              '        Boolean(',
+              '          candidate.compareDocumentPosition(element) &',
+              '            Node.DOCUMENT_POSITION_FOLLOWING,',
+              '        ),',
+              '    )',
+              '    .map((candidate) => ({ candidate, text: headingText(candidate) }))',
+              '    .filter((item) => Boolean(item.text));',
+              '  return preceding.at(-1)?.text ?? "";',
+              '}',
+          ])
+          section = section[:root_start] + cached_section + section[root_end:]
+          source = source[:section_start] + section + source[section_end:]
 
-          old_hidden = dedent('''\
-          function hiddenBySelfOrAncestor(element: HTMLElement): boolean {
-            let current: HTMLElement | null = element;
-            while (current) {
-              const style = window.getComputedStyle(current);
-              const opacity = Number.parseFloat(style.opacity || "1");
-              if (
-                current.hidden ||
-                current.getAttribute("aria-hidden") === "true" ||
-                style.display === "none" ||
-                style.visibility === "hidden" ||
-                style.visibility === "collapse" ||
-                (Number.isFinite(opacity) && opacity <= 0.01)
-              ) {
-                return true;
-              }
-              current = current.parentElement;
-            }
-            return false;
-          }
-          ''')
-          new_hidden = dedent('''\
-          function hiddenBySelfOrAncestor(element: HTMLElement): boolean {
-            const cached = hiddenStateCache.get(element);
-            if (cached !== undefined) return cached;
-            const style = computedStyleFor(element);
-            const opacity = Number.parseFloat(style.opacity || "1");
-            const hiddenBySelf =
-              element.hidden ||
-              element.getAttribute("aria-hidden") === "true" ||
-              style.display === "none" ||
-              style.visibility === "hidden" ||
-              style.visibility === "collapse" ||
-              (Number.isFinite(opacity) && opacity <= 0.01);
-            const hidden =
-              hiddenBySelf ||
-              (element.parentElement
-                ? hiddenBySelfOrAncestor(element.parentElement)
-                : false);
-            hiddenStateCache.set(element, hidden);
-            return hidden;
-          }
-          ''')
-          replace_once(old_hidden, new_hidden, "hidden ancestor cache")
-          replace_once(
-              '  const style = window.getComputedStyle(element);\n',
-              '  const style = computedStyleFor(element);\n',
-              "visible style cache",
-          )
+          signature_start = source.index("function stableControlSignature(element: Element): string {")
+          signature_end = source.index("\n\nfunction controlSatisfied", signature_start)
+          signature = source[signature_start:signature_end]
+          if signature.count("labelFor(element)") != 1:
+              raise SystemExit("stable signature label guard failed")
+          signature = signature.replace(
+              "function stableControlSignature(element: Element): string {",
+              "function stableControlSignature(element: Element, label: string): string {",
+              1,
+          ).replace("    labelFor(element),", "    label,", 1)
+          source = source[:signature_start] + signature + source[signature_end:]
 
-          old_section = dedent('''\
-            const root = element.getRootNode();
-            if (!(root instanceof Document || root instanceof ShadowRoot)) return "";
-            const preceding = Array.from(
-              root.querySelectorAll("h1, h2, h3, h4, h5, h6, [role='heading'], legend"),
-            )
-              .filter(
-                (candidate) =>
-                  candidate !== element &&
-                  isVisible(candidate) &&
-                  Boolean(
-                    candidate.compareDocumentPosition(element) &
-                      Node.DOCUMENT_POSITION_FOLLOWING,
-                  ),
-              )
-              .map((candidate) => ({ candidate, text: headingText(candidate) }))
-              .filter((item) => Boolean(item.text));
-            return preceding.at(-1)?.text ?? "";
-          }
-          ''')
-          new_section = dedent('''\
-            const root = element.getRootNode();
-            if (!(root instanceof Document || root instanceof ShadowRoot)) return "";
-            let headings = sectionHeadingCache.get(root);
-            if (!headings) {
-              headings = Array.from(
-                root.querySelectorAll("h1, h2, h3, h4, h5, h6, [role='heading'], legend"),
-              ).filter(isVisible);
-              sectionHeadingCache.set(root, headings);
-            }
-            const preceding = headings
-              .filter(
-                (candidate) =>
-                  candidate !== element &&
-                  Boolean(
-                    candidate.compareDocumentPosition(element) &
-                      Node.DOCUMENT_POSITION_FOLLOWING,
-                  ),
-              )
-              .map((candidate) => ({ candidate, text: headingText(candidate) }))
-              .filter((item) => Boolean(item.text));
-            return preceding.at(-1)?.text ?? "";
-          }
-          ''')
-          replace_once(old_section, new_section, "section heading cache")
+          create_start = source.index("function createControl(element: Element): Control | null {")
+          create_end = source.index("\n\ntype ControlEntry", create_start)
+          create = source[create_start:create_end]
+          if create.count("stableControlSignature(element)") != 1 or create.count("labelFor(element)") != 1:
+              raise SystemExit("createControl label guard failed")
+          options_marker = "  const options = optionsFor(element);\n"
+          if create.count(options_marker) != 1:
+              raise SystemExit("createControl options guard failed")
+          create = create.replace(options_marker, options_marker + "  const label = labelFor(element);\n", 1)
+          create = create.replace("stableControlSignature(element)", "stableControlSignature(element, label)", 1)
+          create = create.replace("    label: labelFor(element),", "    label,", 1)
+          source = source[:create_start] + create + source[create_end:]
 
-          old_signature = dedent('''\
-          function stableControlSignature(element: Element): string {
-            const url = new URL(window.location.href);
-            const type = element instanceof HTMLInputElement ? element.type : "";
-            const optionValue =
-              element instanceof HTMLInputElement &&
-              (element.type === "radio" ||
-                element.type === "checkbox" ||
-                ["button", "submit", "reset"].includes(element.type))
-                ? element.value
-                : "";
-            return [
-              url.origin,
-              url.pathname,
-              element.tagName,
-              element.id,
-              compactText(element.getAttribute("name")),
-              type,
-              labelFor(element),
-          ''')
-          new_signature = dedent('''\
-          function stableControlSignature(element: Element, label: string): string {
-            const url = new URL(window.location.href);
-            const type = element instanceof HTMLInputElement ? element.type : "";
-            const optionValue =
-              element instanceof HTMLInputElement &&
-              (element.type === "radio" ||
-                element.type === "checkbox" ||
-                ["button", "submit", "reset"].includes(element.type))
-                ? element.value
-                : "";
-            return [
-              url.origin,
-              url.pathname,
-              element.tagName,
-              element.id,
-              compactText(element.getAttribute("name")),
-              type,
-              label,
-          ''')
-          replace_once(old_signature, new_signature, "stable signature label reuse")
-
-          old_create = dedent('''\
-            const kind = kindFor(element);
-            const options = optionsFor(element);
-            return {
-              controlId: `ctl-${hash(stableControlSignature(element))}`,
-          ''')
-          new_create = dedent('''\
-            const kind = kindFor(element);
-            const options = optionsFor(element);
-            const label = labelFor(element);
-            return {
-              controlId: `ctl-${hash(stableControlSignature(element, label))}`,
-          ''')
-          replace_once(old_create, new_create, "create control label reuse")
-          replace_once('    label: labelFor(element),\n', '    label,\n', "control label assignment")
-
-          old_scan = dedent('''\
-          function scanControlEntries(): ControlEntry[] {
-            const duplicateCounts = new Map<string, number>();
-          ''')
-          new_scan = dedent('''\
-          function scanControlEntries(): ControlEntry[] {
-            resetScanCaches();
-            const duplicateCounts = new Map<string, number>();
-          ''')
-          replace_once(old_scan, new_scan, "per-scan cache reset")
+          scan_marker = "function scanControlEntries(): ControlEntry[] {\n"
+          if source.count(scan_marker) != 1:
+              raise SystemExit("scanControlEntries guard failed")
+          if "function scanControlEntries(): ControlEntry[] {\n  resetScanCaches();\n" not in source:
+              source = source.replace(scan_marker, scan_marker + "  resetScanCaches();\n", 1)
 
           path.write_text(source)
           PY
