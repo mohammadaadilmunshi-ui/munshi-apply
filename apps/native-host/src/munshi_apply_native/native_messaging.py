@@ -6,6 +6,7 @@ import sys
 from datetime import UTC, datetime
 from typing import BinaryIO
 
+from .account_store import AccountStore
 from .ai_draft_store import AIDraftStore
 from .ai_governance import AIGovernanceService
 from .ai_settings import AIConfiguration, AISettingsStore
@@ -33,6 +34,7 @@ NATIVE_CAPABILITIES: dict[str, bool] = {
     "provider_routing": True,
     "ollama_fallback": True,
     "writing_style_learning": True,
+    "account_orchestration": True,
 }
 
 
@@ -118,6 +120,23 @@ def handle(
         application_id, observed_at = ensure_application_payload(message)
         created = ApplicationStore(database).ensure(application_id, observed_at)
         return {"ok": True, "data": {"created": created}}
+    if message_type == "LOOKUP_ACCOUNTS":
+        return {
+            "ok": True,
+            "data": AccountStore(database).lookup(message.get("payload")),
+        }
+    if message_type == "UPSERT_ACCOUNT":
+        payload = message.get("payload")
+        if not isinstance(payload, dict):
+            raise ValueError("Account upsert payload must be an object")
+        application_id = payload.get("applicationId")
+        if application_id is not None:
+            normalized_application_id, observed_at = ensure_application_payload(message)
+            ApplicationStore(database).ensure(normalized_application_id, observed_at)
+        return {
+            "ok": True,
+            "data": AccountStore(database).upsert(payload),
+        }
     if message_type == "SAVE_APPLICATION_CHECKPOINT":
         checkpoint = ApplicationCheckpointPayload.model_validate(message.get("payload"))
         created = ApplicationCheckpointStore(database).save(checkpoint.database_record())
