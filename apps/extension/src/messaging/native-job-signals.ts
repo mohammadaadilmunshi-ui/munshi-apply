@@ -102,13 +102,18 @@ function parseDimensionResult(
   value: unknown,
   expectedDimension: JobSignalDimension,
 ): JobSignalDimensionResult {
-  const candidate = objectValue(value, `Job Signal dimension ${expectedDimension}`);
+  const candidate = objectValue(
+    value,
+    `Job Signal dimension ${expectedDimension}`,
+  );
   const dimension = dimensionValue(
     candidate.dimension,
     `Job Signal dimension ${expectedDimension}.dimension`,
   );
   if (dimension !== expectedDimension) {
-    throw new Error(`Job Signal dimension ${expectedDimension} does not match its key`);
+    throw new Error(
+      `Job Signal dimension ${expectedDimension} does not match its key`,
+    );
   }
   return {
     dimension,
@@ -136,7 +141,9 @@ function parseDimensions(
     keys.length !== jobSignalDimensions.length ||
     keys.some((key) => !dimensionSet.has(key))
   ) {
-    throw new Error("Job Signal dimensions must contain the complete canonical ontology");
+    throw new Error(
+      "Job Signal dimensions must contain the complete canonical ontology",
+    );
   }
   return {
     ROLE_AMBIGUITY: parseDimensionResult(
@@ -240,14 +247,20 @@ function validateEvidenceLinks(
   for (const dimension of jobSignalDimensions) {
     for (const signalId of dimensions[dimension].evidenceIds) {
       const signal = byId.get(signalId);
-      if (!signal || signal.dimension !== dimension || referenced.has(signalId)) {
+      if (
+        !signal ||
+        signal.dimension !== dimension ||
+        referenced.has(signalId)
+      ) {
         throw new Error("Job Signal evidence links are inconsistent");
       }
       referenced.add(signalId);
     }
   }
   if (referenced.size !== signals.length) {
-    throw new Error("Every Job Signal evidence item must be referenced exactly once");
+    throw new Error(
+      "Every Job Signal evidence item must be referenced exactly once",
+    );
   }
 }
 
@@ -267,7 +280,9 @@ export function parsePersistedJobSignalReport(
     "Job Signal overallScore",
   );
   if (overallSignal === "INSUFFICIENT_DATA" && overallScore !== null) {
-    throw new Error("INSUFFICIENT_DATA Job Signal report must not include a score");
+    throw new Error(
+      "INSUFFICIENT_DATA Job Signal report must not include a score",
+    );
   }
   if (overallSignal !== "INSUFFICIENT_DATA" && overallScore === null) {
     throw new Error("Scored Job Signal report requires overallScore");
