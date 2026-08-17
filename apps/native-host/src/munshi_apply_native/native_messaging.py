@@ -15,6 +15,7 @@ from .checkpoint_store import ApplicationCheckpointStore
 from .database import Database
 from .document_ingestion import DocumentIngestionService
 from .interaction_recipe_service import InteractionRecipeService
+from .job_signal_store import JobSignalStore
 from .models import ApplicationCheckpointPayload, EventEnvelope
 from .profile_store import ProfileStore
 from .settings import Settings
@@ -35,6 +36,7 @@ NATIVE_CAPABILITIES: dict[str, bool] = {
     "ollama_fallback": True,
     "writing_style_learning": True,
     "account_orchestration": True,
+    "job_signal_intelligence": True,
 }
 
 
@@ -93,6 +95,36 @@ def ensure_application_payload(message: dict[str, object]) -> tuple[str, str]:
     return application_id.strip(), normalized_observed_at
 
 
+def job_signal_application_payload(message: dict[str, object]) -> tuple[str, str]:
+    payload = message.get("payload")
+    if not isinstance(payload, dict):
+        raise ValueError("Job signal payload must be an object")
+    application_id = payload.get("applicationId")
+    evaluated_at = payload.get("evaluatedAt")
+    if not isinstance(application_id, str) or not application_id.strip():
+        raise ValueError("Job signal report requires applicationId")
+    if not isinstance(evaluated_at, str) or not evaluated_at.strip():
+        raise ValueError("Job signal report requires evaluatedAt")
+    normalized_evaluated_at = evaluated_at.strip()
+    try:
+        parsed = datetime.fromisoformat(normalized_evaluated_at.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError("Job signal evaluatedAt must be an ISO timestamp") from error
+    if parsed.tzinfo is None:
+        raise ValueError("Job signal evaluatedAt must include a timezone")
+    return application_id.strip(), normalized_evaluated_at
+
+
+def job_signal_lookup_application_id(message: dict[str, object]) -> str:
+    payload = message.get("payload")
+    if not isinstance(payload, dict):
+        raise ValueError("Job signal lookup payload must be an object")
+    application_id = payload.get("applicationId")
+    if not isinstance(application_id, str) or not application_id.strip():
+        raise ValueError("Job signal lookup requires applicationId")
+    return application_id.strip()
+
+
 def handle(
     message: dict[str, object],
     database: Database,
@@ -136,6 +168,19 @@ def handle(
         return {
             "ok": True,
             "data": AccountStore(database).upsert(payload),
+        }
+    if message_type == "SAVE_JOB_SIGNAL_REPORT":
+        application_id, evaluated_at = job_signal_application_payload(message)
+        ApplicationStore(database).ensure(application_id, evaluated_at)
+        return {
+            "ok": True,
+            "data": JobSignalStore(database).save(message.get("payload")),
+        }
+    if message_type == "GET_LATEST_JOB_SIGNAL_REPORT":
+        application_id = job_signal_lookup_application_id(message)
+        return {
+            "ok": True,
+            "data": JobSignalStore(database).latest(application_id),
         }
     if message_type == "SAVE_APPLICATION_CHECKPOINT":
         checkpoint = ApplicationCheckpointPayload.model_validate(message.get("payload"))
