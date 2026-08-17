@@ -33,6 +33,8 @@ def database(tmp_path: Path) -> Database:
 def report_payload(
     *,
     report_id: str = "report-1",
+    application_id: str = "application-1",
+    source_fingerprint: str = "source-fingerprint-1",
     score: int = 41,
     evidence: str = "Up to 40% travel",
 ) -> dict[str, object]:
@@ -47,10 +49,10 @@ def report_payload(
     }
     return {
         "reportId": report_id,
-        "applicationId": "application-1",
+        "applicationId": application_id,
         "overallSignal": "MODERATE",
         "overallScore": score,
-        "sourceFingerprint": "source-fingerprint-1",
+        "sourceFingerprint": source_fingerprint,
         "evaluatedAt": NOW,
         "dimensions": dimensions,
         "signals": [
@@ -116,6 +118,41 @@ def test_same_source_fingerprint_replaces_report_content_without_duplicate_ident
         assert connection.execute("SELECT COUNT(*) FROM job_signal_evidence").fetchone()[0] == 1
 
 
+def test_report_id_cannot_cross_application_or_source_identity(tmp_path: Path) -> None:
+    db = database(tmp_path)
+    ApplicationStore(db).ensure("application-1", NOW)
+    ApplicationStore(db).ensure("application-2", NOW)
+    store = JobSignalStore(db)
+    store.save(report_payload())
+
+    conflicting = report_payload(
+        report_id="report-1",
+        application_id="application-2",
+        source_fingerprint="source-fingerprint-2",
+    )
+    try:
+        store.save(conflicting)
+    except ValueError as error:
+        assert "already bound" in str(error)
+    else:
+        raise AssertionError("Job Signal reportId crossed application/source identity")
+
+    with db.connect() as connection:
+        stored = connection.execute(
+            """
+            SELECT application_id, source_fingerprint
+            FROM job_signal_reports
+            WHERE report_id = 'report-1'
+            """
+        ).fetchone()
+        assert stored["application_id"] == "application-1"
+        assert stored["source_fingerprint"] == "source-fingerprint-1"
+        assert connection.execute(
+            "SELECT job_signal_score FROM applications WHERE application_id = ?",
+            ("application-2",),
+        ).fetchone()[0] is None
+
+
 def test_invalid_cross_dimension_evidence_is_rejected_without_partial_write(
     tmp_path: Path,
 ) -> None:
@@ -154,3 +191,27 @@ def test_report_requires_complete_canonical_dimension_set(tmp_path: Path) -> Non
         assert "complete canonical Job Signal ontology" in str(error)
     else:
         raise AssertionError("Incomplete Job Signal ontology was accepted")
+
+
+def test_report_rejects_score_state_or_timestamp_inconsistency(tmp_path: Path) -> None:
+    db = database(tmp_path)
+    ApplicationStore(db).ensure("application-1", NOW)
+    store = JobSignalStore(db)
+
+    insufficient = report_payload()
+    insufficient["overallSignal"] = "INSUFFICIENT_DATA"
+    try:
+        store.save(insufficient)
+    except ValueError as error:
+        assert "must not include overallScore" in str(error)
+    else:
+        raise AssertionError("INSUFFICIENT_DATA report accepted a score")
+
+    timezone_less = report_payload()
+    timezone_less["evaluatedAt"] = "2026-08-17T20:15:00"
+    try:
+        store.save(timezone_less)
+    except ValueError as error:
+        assert "must include a timezone" in str(error)
+    else:
+        raise AssertionError("Timezone-less Job Signal report was accepted")
