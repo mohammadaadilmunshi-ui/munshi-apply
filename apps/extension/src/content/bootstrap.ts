@@ -14,6 +14,7 @@ import {
   finishTeachInteraction,
 } from "./teach";
 import { refreshFileFingerprint } from "./adaptive";
+import { shouldRescanFromMutations } from "./mutation-rescan-policy";
 import { applyNavigationAction } from "./navigation";
 import { scanDocument, snapshotFingerprint } from "./scanner";
 import {
@@ -121,7 +122,9 @@ function wrapHistoryMethod(method: "pushState" | "replaceState"): () => void {
 let observer: MutationObserver | null = null;
 try {
   if (document.documentElement) {
-    observer = new MutationObserver(() => scheduleScan());
+    observer = new MutationObserver((records) => {
+      if (shouldRescanFromMutations(records)) scheduleScan();
+    });
     observer.observe(document.documentElement, {
       attributes: true,
       childList: true,
