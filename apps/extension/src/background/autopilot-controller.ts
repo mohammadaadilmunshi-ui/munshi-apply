@@ -624,11 +624,21 @@ export class AutoPilotController {
     });
     await this.persist(current);
 
-    const result = await this.dependencies.navigate(
-      current.tabId,
-      candidate.frameId,
-      candidate.controlId,
-    );
+    let result: NavigationResult;
+    try {
+      result = await this.dependencies.navigate(
+        current.tabId,
+        candidate.frameId,
+        candidate.controlId,
+      );
+    } catch (error) {
+      result = {
+        status: "FAILED",
+        reason: `The browser could not confirm the navigation dispatch after an interruption: ${
+          error instanceof Error ? error.message : "unknown error"
+        }`,
+      };
+    }
     if (result.status !== "NAVIGATED") {
       const recoverable = parseAutoPilotRuntimeState({
         ...current,
