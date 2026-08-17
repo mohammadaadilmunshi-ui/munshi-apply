@@ -1,0 +1,34 @@
+name: Resume verifier format fix
+on:
+  push:
+    branches: [feat/v3-foundation-alignment]
+    paths:
+      - .github/workflows/resume-verifier-format-fix.yml
+permissions:
+  contents: write
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx prettier apps/extension/src/background/resume-file-verification.ts --write
+      - run: |
+          git config user.name "MUNSHI Apply CI"
+          git config user.email "actions@users.noreply.github.com"
+          git add apps/extension/src/background/resume-file-verification.ts
+          git diff --cached --check
+          git commit -m "style: format resume file verification"
+          git fetch origin feat/v3-foundation-alignment
+          git rebase origin/feat/v3-foundation-alignment
+          rm .github/workflows/resume-verifier-format-fix.yml
+          git add .github/workflows/resume-verifier-format-fix.yml
+          git commit --amend --no-edit
+          git push origin HEAD:feat/v3-foundation-alignment
