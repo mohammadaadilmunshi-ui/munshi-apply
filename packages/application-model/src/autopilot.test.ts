@@ -110,6 +110,31 @@ describe("planAutoPilotStep", () => {
     expect(plan.checkpointRequired).toBe(true);
   });
 
+  it("allows safe preparation on generic authentication but never navigates past it", () => {
+    const authentication = {
+      ...observation,
+      state: "AUTH" as const,
+      securityCheckpoint: "AUTHENTICATION" as const,
+    };
+    const first = planAutoPilotStep({
+      observation: authentication,
+      preflight: reviewGate,
+      fillInstructions: [instruction],
+    });
+    expect(first.action).toEqual({ type: "FILL", instruction });
+    expect(first.checkpointRequired).toBe(false);
+
+    const afterFill = planAutoPilotStep({
+      observation: authentication,
+      preflight: readyGate,
+      fillInstructions: [instruction],
+      completedControlIds: ["control-1"],
+    });
+    expect(afterFill.action.type).toBe("PAUSE_REVIEW");
+    expect(afterFill.reason).toMatch(/credentials and navigation remain owner/i);
+    expect(afterFill.checkpointRequired).toBe(true);
+  });
+
   it("never plans an automatic final submission", () => {
     const plan = planAutoPilotStep({
       observation: {
