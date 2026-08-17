@@ -493,15 +493,17 @@ export function App() {
       () => {
         setSaveState("saving");
         void saveProfile(profile)
-          .then(async () => {
-            const status = await getProfileSyncStatus();
+          .then((acknowledgement) => {
+            const status: ProfileSyncStatus = {
+              conflict: acknowledgement.conflict,
+            };
             setProfileSyncStatus(status);
             if (profileRevision.current !== revision) return;
             setProfileDirty(false);
             setSaveState(
               status.conflict
                 ? "conflict"
-                : cloud.status === "connected" && cloud.data.encryptionReady
+                : acknowledgement.cloudSynced
                   ? "synced"
                   : "local",
             );
@@ -522,7 +524,7 @@ export function App() {
       retryTick === 0 ? 800 : 0,
     );
     return () => window.clearTimeout(timer);
-  }, [cloud, profile, profileDirty, profileLoaded, retryTick]);
+  }, [profile, profileDirty, profileLoaded, retryTick]);
 
   useEffect(() => {
     if (!page) {
@@ -886,18 +888,27 @@ export function App() {
     setSaveState("saving");
     const revision = profileRevision.current;
     try {
-      await saveProfile(profile);
-      const syncStatus = await getProfileSyncStatus();
+      const acknowledgement = await saveProfile(profile);
+      const syncStatus: ProfileSyncStatus = {
+        conflict: acknowledgement.conflict,
+      };
       setProfileSyncStatus(syncStatus);
       if (profileRevision.current === revision) {
         setProfileDirty(false);
         setSaveState(
           syncStatus.conflict
             ? "conflict"
-            : cloud.status === "connected" && cloud.data.encryptionReady
+            : acknowledgement.cloudSynced
               ? "synced"
               : "local",
         );
+        if (!syncStatus.conflict) {
+          setNotice(
+            acknowledgement.cloudSynced
+              ? "Profile saved locally and acknowledged by the encrypted workspace."
+              : "Profile saved locally. The encrypted workspace has not acknowledged this save yet.",
+          );
+        }
       }
     } catch (error) {
       const syncStatus = await getProfileSyncStatus().catch(() => ({
