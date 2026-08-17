@@ -8,6 +8,7 @@ import {
   buildAccountOrchestrationPlan,
   evaluateCurrentPageKnockouts,
   type AccountOrchestrationPlan,
+  type AccountRecord,
   type EmployerPreflightFinding,
   type PreflightGateSummary,
 } from "@munshi-apply/application-model";
@@ -28,6 +29,12 @@ export type AutoPilotLaunchPlan = {
   optionalReviewCount: number;
   accountPlan: AccountOrchestrationPlan;
   employerKnockoutFindings: EmployerPreflightFinding[];
+};
+
+export type AutoPilotLaunchPlanOptions = {
+  expectedResumeSha256?: string | null;
+  knownAccounts?: readonly AccountRecord[];
+  preferredEmail?: string | null;
 };
 
 const fillableKinds = new Set([
@@ -68,7 +75,7 @@ export function canAutoPilotMakeProgress(
 export function buildAutoPilotLaunchPlan(
   page: ApplicationPage,
   answers: Record<string, AutoPilotAnswer>,
-  options: { expectedResumeSha256?: string | null } = {},
+  options: AutoPilotLaunchPlanOptions = {},
 ): AutoPilotLaunchPlan {
   const controls = new Map(
     page.controls.map((control) => [control.controlId, control]),
@@ -147,7 +154,11 @@ export function buildAutoPilotLaunchPlan(
     }
   }
 
-  const accountPlan = buildAccountOrchestrationPlan({ page });
+  const accountPlan = buildAccountOrchestrationPlan({
+    page,
+    knownAccounts: options.knownAccounts,
+    preferredEmail: options.preferredEmail,
+  });
   const accountBlocked = accountPreflightItem(accountPlan).state === "BLOCKED";
   const employerKnockoutFindings = evaluateCurrentPageKnockouts(page, answers);
   const employerBlockedCount = employerKnockoutFindings.filter(
