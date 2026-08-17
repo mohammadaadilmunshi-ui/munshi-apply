@@ -161,4 +161,51 @@ describe("buildAutoPilotLaunchPlan", () => {
     });
     expect(result.fillInstructions[0]?.sourceDraftId).toBe("draft-1");
   });
+
+  it("hard-blocks AutoPilot on a detected account creation boundary", () => {
+    const current = page();
+    current.controls = [current.controls[0]!];
+    current.questions = [current.questions[0]!];
+    current.url = "https://example.com/candidate/register";
+    current.applicationState = "ACCOUNT_CREATE";
+    current.pageContext = "Create account for a new candidate";
+    const result = buildAutoPilotLaunchPlan(current, {
+      "q-name": { value: "Aadil", approved: true, sensitive: false },
+    });
+    expect(result.accountPlan.flow).toBe("AUTH_CREATE");
+    expect(result.preflight.blockedCount).toBe(1);
+    expect(result.preflight.state).toBe("BLOCKED");
+    expect(canAutoPilotMakeProgress(result)).toBe(false);
+  });
+
+  it("hard-blocks an approved answer that violates an explicit employer knockout", () => {
+    const current = page();
+    current.controls = [
+      {
+        ...current.controls[0]!,
+        controlId: "sponsor",
+        name: "sponsor",
+        label: "Sponsorship",
+      },
+    ];
+    current.questions = [
+      {
+        questionId: "q-sponsor",
+        controlId: "sponsor",
+        rawText: "Will you now or in the future require sponsorship?",
+        semanticType: "SPONSORSHIP_FUTURE",
+        confidence: 1,
+        sensitive: true,
+        requiresReview: true,
+      },
+    ];
+    current.pageContext = "This employer does not offer visa sponsorship.";
+    const result = buildAutoPilotLaunchPlan(current, {
+      "q-sponsor": { value: "Yes", approved: true, sensitive: true },
+    });
+    expect(result.employerKnockoutFindings).toHaveLength(1);
+    expect(result.employerKnockoutFindings[0]?.state).toBe("BLOCKED");
+    expect(result.preflight.state).toBe("BLOCKED");
+    expect(canAutoPilotMakeProgress(result)).toBe(false);
+  });
 });
