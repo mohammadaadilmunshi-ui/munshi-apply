@@ -16,6 +16,22 @@ function health(input: Partial<NativeRuntimeHealth> = {}): NativeRuntimeHealth {
   };
 }
 
+const currentCapabilities: NonNullable<NativeRuntimeHealth["capabilities"]> = {
+  profile_vault: true,
+  application_checkpoints: true,
+  interaction_learning: true,
+  teach_munshi: true,
+  ai_settings: true,
+  ai_governance: true,
+  ai_draft_lifecycle: true,
+  document_evidence_ingestion: true,
+  provider_routing: true,
+  writing_style_learning: true,
+  account_orchestration: true,
+  job_signal_intelligence: true,
+  application_analytics: true,
+};
+
 describe("native runtime compatibility", () => {
   it("rejects a legacy PING that has no protocol version", () => {
     expect(nativeRuntimeCompatibility(health())).toEqual({
@@ -29,22 +45,23 @@ describe("native runtime compatibility", () => {
       nativeRuntimeCompatibility(
         health({
           protocol_version: REQUIRED_NATIVE_PROTOCOL_VERSION,
-          capabilities: {
-            profile_vault: true,
-            application_checkpoints: true,
-            interaction_learning: true,
-            teach_munshi: true,
-            ai_settings: true,
-            ai_governance: true,
-            ai_draft_lifecycle: true,
-            document_evidence_ingestion: true,
-            provider_routing: true,
-            writing_style_learning: true,
-            account_orchestration: true,
-            job_signal_intelligence: true,
-          },
+          capabilities: currentCapabilities,
         }),
       ),
     ).toEqual({ compatible: true });
+  });
+
+  it("rejects protocol v3 companions that predate application analytics", () => {
+    expect(
+      nativeRuntimeCompatibility(
+        health({
+          protocol_version: REQUIRED_NATIVE_PROTOCOL_VERSION,
+          capabilities: { ...currentCapabilities, application_analytics: false },
+        }),
+      ),
+    ).toEqual({
+      compatible: false,
+      reason: "Native companion is missing required capabilities: application_analytics.",
+    });
   });
 });
