@@ -84,6 +84,28 @@ describe("résumé file verification", () => {
     expect(resumeVerificationBlocksNavigation(result)).toBe(true);
   });
 
+  it("requires every mandatory résumé field when an ATS exposes more than one", () => {
+    const result = verifySelectedResumeFile({
+      page: page([
+        fileControl({
+          controlId: "resume-primary",
+          fileSelected: true,
+          fileFingerprintState: "READY",
+          fileSha256: digest,
+        }),
+        fileControl({
+          controlId: "resume-secondary",
+          name: "cv",
+          label: "CV",
+        }),
+      ]),
+      selectedResumeSha256: digest,
+    });
+    expect(result.state).toBe("REQUIRED_MISSING");
+    expect(result.controlIds).toEqual(["resume-secondary"]);
+    expect(resumeVerificationBlocksNavigation(result)).toBe(true);
+  });
+
   it("allows an optional résumé field to remain empty", () => {
     const result = verifySelectedResumeFile({
       page: page([fileControl({ required: false })]),
