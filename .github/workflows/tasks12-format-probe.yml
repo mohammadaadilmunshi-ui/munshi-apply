@@ -1,21 +1,24 @@
-name: Tasks 1-2 format probe
+name: Tasks 1-2 canonical formatter
 on:
   push:
     branches: [feat/v3-foundation-alignment]
 permissions:
-  contents: read
+  contents: write
 jobs:
-  probe:
+  format:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: Show canonical Prettier diff
+      - name: Apply guarded canonical formatting and self-remove
         run: |
+          set -euo pipefail
           npx prettier \
             apps/extension/src/background/autopilot-navigation-safety.integration.test.ts \
             apps/extension/src/background/forward-navigation-safety.ts \
@@ -23,9 +26,15 @@ jobs:
             apps/extension/src/content/mutation-rescan-policy.test.ts \
             apps/extension/src/content/mutation-rescan-policy.ts \
             --write
-          git diff -- \
+          git rm .github/workflows/tasks12-format-probe.yml
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
             apps/extension/src/background/autopilot-navigation-safety.integration.test.ts \
             apps/extension/src/background/forward-navigation-safety.ts \
             apps/extension/src/content/ats-endurance.test.ts \
             apps/extension/src/content/mutation-rescan-policy.test.ts \
             apps/extension/src/content/mutation-rescan-policy.ts
+          git commit -m "style: format endurance and navigation hardening"
+          git push origin HEAD:feat/v3-foundation-alignment
