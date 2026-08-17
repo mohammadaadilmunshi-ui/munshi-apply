@@ -21,6 +21,8 @@ jobs:
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
+          from textwrap import dedent
+
           path = Path("apps/extension/src/content/scanner.ts")
           source = path.read_text()
 
@@ -32,7 +34,8 @@ jobs:
               source = source.replace(old, new, 1)
 
           import_anchor = 'import { createBoundedHintStore } from "./bounded-hint-store";\n\n'
-          caches = import_anchor + '''let sectionHeadingCache = new WeakMap<Document | ShadowRoot, Element[]>();
+          caches = import_anchor + dedent('''\
+          let sectionHeadingCache = new WeakMap<Document | ShadowRoot, Element[]>();
           let computedStyleCache = new WeakMap<HTMLElement, CSSStyleDeclaration>();
           let hiddenStateCache = new WeakMap<HTMLElement, boolean>();
 
@@ -50,10 +53,11 @@ jobs:
             return style;
           }
 
-          '''
+          ''')
           replace_once(import_anchor, caches, "scanner cache insertion")
 
-          old_hidden = '''function hiddenBySelfOrAncestor(element: HTMLElement): boolean {
+          old_hidden = dedent('''\
+          function hiddenBySelfOrAncestor(element: HTMLElement): boolean {
             let current: HTMLElement | null = element;
             while (current) {
               const style = window.getComputedStyle(current);
@@ -72,8 +76,9 @@ jobs:
             }
             return false;
           }
-          '''
-          new_hidden = '''function hiddenBySelfOrAncestor(element: HTMLElement): boolean {
+          ''')
+          new_hidden = dedent('''\
+          function hiddenBySelfOrAncestor(element: HTMLElement): boolean {
             const cached = hiddenStateCache.get(element);
             if (cached !== undefined) return cached;
             const style = computedStyleFor(element);
@@ -93,7 +98,7 @@ jobs:
             hiddenStateCache.set(element, hidden);
             return hidden;
           }
-          '''
+          ''')
           replace_once(old_hidden, new_hidden, "hidden ancestor cache")
           replace_once(
               '  const style = window.getComputedStyle(element);\n',
@@ -101,7 +106,8 @@ jobs:
               "visible style cache",
           )
 
-          old_section = '''  const root = element.getRootNode();
+          old_section = dedent('''\
+            const root = element.getRootNode();
             if (!(root instanceof Document || root instanceof ShadowRoot)) return "";
             const preceding = Array.from(
               root.querySelectorAll("h1, h2, h3, h4, h5, h6, [role='heading'], legend"),
@@ -119,8 +125,9 @@ jobs:
               .filter((item) => Boolean(item.text));
             return preceding.at(-1)?.text ?? "";
           }
-          '''
-          new_section = '''  const root = element.getRootNode();
+          ''')
+          new_section = dedent('''\
+            const root = element.getRootNode();
             if (!(root instanceof Document || root instanceof ShadowRoot)) return "";
             let headings = sectionHeadingCache.get(root);
             if (!headings) {
@@ -142,10 +149,11 @@ jobs:
               .filter((item) => Boolean(item.text));
             return preceding.at(-1)?.text ?? "";
           }
-          '''
+          ''')
           replace_once(old_section, new_section, "section heading cache")
 
-          old_signature = '''function stableControlSignature(element: Element): string {
+          old_signature = dedent('''\
+          function stableControlSignature(element: Element): string {
             const url = new URL(window.location.href);
             const type = element instanceof HTMLInputElement ? element.type : "";
             const optionValue =
@@ -163,8 +171,9 @@ jobs:
               compactText(element.getAttribute("name")),
               type,
               labelFor(element),
-          '''
-          new_signature = '''function stableControlSignature(element: Element, label: string): string {
+          ''')
+          new_signature = dedent('''\
+          function stableControlSignature(element: Element, label: string): string {
             const url = new URL(window.location.href);
             const type = element instanceof HTMLInputElement ? element.type : "";
             const optionValue =
@@ -182,30 +191,34 @@ jobs:
               compactText(element.getAttribute("name")),
               type,
               label,
-          '''
+          ''')
           replace_once(old_signature, new_signature, "stable signature label reuse")
 
-          old_create = '''  const kind = kindFor(element);
+          old_create = dedent('''\
+            const kind = kindFor(element);
             const options = optionsFor(element);
             return {
               controlId: `ctl-${hash(stableControlSignature(element))}`,
-          '''
-          new_create = '''  const kind = kindFor(element);
+          ''')
+          new_create = dedent('''\
+            const kind = kindFor(element);
             const options = optionsFor(element);
             const label = labelFor(element);
             return {
               controlId: `ctl-${hash(stableControlSignature(element, label))}`,
-          '''
+          ''')
           replace_once(old_create, new_create, "create control label reuse")
           replace_once('    label: labelFor(element),\n', '    label,\n', "control label assignment")
 
-          old_scan = '''function scanControlEntries(): ControlEntry[] {
+          old_scan = dedent('''\
+          function scanControlEntries(): ControlEntry[] {
             const duplicateCounts = new Map<string, number>();
-          '''
-          new_scan = '''function scanControlEntries(): ControlEntry[] {
+          ''')
+          new_scan = dedent('''\
+          function scanControlEntries(): ControlEntry[] {
             resetScanCaches();
             const duplicateCounts = new Map<string, number>();
-          '''
+          ''')
           replace_once(old_scan, new_scan, "per-scan cache reset")
 
           path.write_text(source)
