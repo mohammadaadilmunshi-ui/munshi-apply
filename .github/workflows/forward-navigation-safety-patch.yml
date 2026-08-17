@@ -1,0 +1,80 @@
+name: Forward navigation safety patch
+on:
+  push:
+    branches: [feat/v3-foundation-alignment]
+    paths:
+      - .github/workflows/forward-navigation-safety-patch.yml
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Integrate forward navigation safety
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("apps/extension/src/background/autopilot-controller.ts")
+          source = path.read_text()
+          old_import = (
+              'import type {\n'
+              '  ApplicationPage,\n'
+              '  FillInstruction,\n'
+              '  FillResult,\n'
+              '  NavigationCandidate,\n'
+              '} from "@munshi-apply/contracts";\n'
+          )
+          new_import = old_import + (
+              'import { evaluateForwardNavigationSafety } from "./forward-navigation-safety";\n'
+          )
+          if source.count(old_import) != 1:
+              raise SystemExit("Expected exactly one AutoPilot contracts import anchor")
+          source = source.replace(old_import, new_import, 1)
+          old_navigation = (
+              '      case "NAVIGATE_NEXT": {\n'
+              '        const candidate = safeForwardCandidate(page);\n'
+          )
+          new_navigation = (
+              '      case "NAVIGATE_NEXT": {\n'
+              '        const navigationSafety = evaluateForwardNavigationSafety({\n'
+              '          page,\n'
+              '          selectedResumeSha256: runtime.session.selectedResumeSha256,\n'
+              '        });\n'
+              '        if (!navigationSafety.safe) {\n'
+              '          return this.persistPause(runtime, observation, {\n'
+              '            type: "REVIEW",\n'
+              '            reason: navigationSafety.reason,\n'
+              '          });\n'
+              '        }\n'
+              '        const candidate = safeForwardCandidate(page);\n'
+          )
+          if source.count(old_navigation) != 1:
+              raise SystemExit("Expected exactly one NAVIGATE_NEXT anchor")
+          path.write_text(source.replace(old_navigation, new_navigation, 1))
+          PY
+          npx prettier apps/extension/src/background/autopilot-controller.ts --write
+      - name: Verify navigation safety integration
+        run: |
+          npx vitest run apps/extension/src/background/resume-file-verification.test.ts apps/extension/src/background/forward-navigation-safety.test.ts apps/extension/src/background/autopilot-controller.test.ts
+      - name: Commit and remove patch workflow
+        run: |
+          git config user.name "MUNSHI Apply CI"
+          git config user.email "actions@users.noreply.github.com"
+          git add apps/extension/src/background/autopilot-controller.ts
+          git diff --cached --check
+          git commit -m "fix: guard AutoPilot forward navigation"
+          git fetch origin feat/v3-foundation-alignment
+          git rebase origin/feat/v3-foundation-alignment
+          rm .github/workflows/forward-navigation-safety-patch.yml
+          git add .github/workflows/forward-navigation-safety-patch.yml
+          git commit --amend --no-edit
+          git push origin HEAD:feat/v3-foundation-alignment
