@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   componentFingerprint,
+  componentFingerprintCandidates,
+  componentFingerprintV2,
   evaluateRecipePromotion,
   recipePerformance,
   shouldRollbackRecipe,
@@ -72,6 +74,50 @@ describe("componentFingerprint", () => {
       hasPopup: "listbox",
     });
     expect(second).not.toBe(first);
+  });
+
+  it("adds shadow, frame, portal, virtualization, and framework structure in v2", () => {
+    const base = {
+      kind: "COMBOBOX" as const,
+      tagName: "input",
+      role: "combobox",
+      inputType: "text",
+      optionCount: 50,
+      ariaAutocomplete: "list",
+      hasPopup: "listbox",
+      multiple: false,
+      contentEditable: false,
+      shadowDepth: 1,
+      frameDepth: 0,
+      portaledPopup: true,
+      virtualizedOptions: true,
+      popupOwnerKind: "ARIA_CONTROLS" as const,
+      frameworkHint: "REACT" as const,
+    };
+
+    expect(componentFingerprintV2(base)).not.toBe(
+      componentFingerprintV2({ ...base, virtualizedOptions: false }),
+    );
+    expect(componentFingerprintV2(base)).not.toBe(
+      componentFingerprintV2({ ...base, shadowDepth: 2 }),
+    );
+  });
+
+  it("returns v2 then legacy candidates for recipe migration compatibility", () => {
+    const input = {
+      kind: "COMBOBOX" as const,
+      tagName: "input",
+      role: "combobox",
+      inputType: "text",
+      optionCount: 5,
+      ariaAutocomplete: "list",
+      hasPopup: "listbox",
+      frameworkHint: "REACT" as const,
+    };
+    const candidates = componentFingerprintCandidates(input);
+
+    expect(candidates[0]).toMatch(/^cfp2-/);
+    expect(candidates[1]).toBe(componentFingerprint(input));
   });
 });
 

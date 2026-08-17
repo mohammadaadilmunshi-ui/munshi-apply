@@ -10,6 +10,17 @@ export type ComponentFingerprintInput = {
   hasPopup: string | null;
 };
 
+export type ComponentFingerprintV2Input = ComponentFingerprintInput & {
+  multiple?: boolean;
+  contentEditable?: boolean;
+  shadowDepth?: number;
+  frameDepth?: number;
+  portaledPopup?: boolean;
+  virtualizedOptions?: boolean;
+  popupOwnerKind?: "ARIA_CONTROLS" | "ARIA_OWNS" | "DOM_DESCENDANT" | "PORTAL" | "UNKNOWN";
+  frameworkHint?: "NATIVE" | "REACT" | "ANGULAR" | "VUE" | "CUSTOM_ELEMENT" | "UNKNOWN";
+};
+
 export type RecipeAction =
   | { type: "FOCUS" }
   | { type: "CLICK" }
@@ -63,6 +74,14 @@ function normalize(value: string | null): string {
   return (value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
 }
 
+function validateDepth(value: number | undefined, label: string): number {
+  const resolved = value ?? 0;
+  if (!Number.isSafeInteger(resolved) || resolved < 0 || resolved > 32) {
+    throw new Error(`${label} must be an integer between 0 and 32`);
+  }
+  return resolved;
+}
+
 export function componentFingerprint(input: ComponentFingerprintInput): string {
   if (!Number.isSafeInteger(input.optionCount) || input.optionCount < 0) {
     throw new Error("optionCount must be a non-negative integer");
@@ -77,6 +96,48 @@ export function componentFingerprint(input: ComponentFingerprintInput): string {
     normalize(input.hasPopup),
   ].join("|");
   return `cfp-${stableHash(signature)}`;
+}
+
+/**
+ * Richer structural fingerprint used for new learning without invalidating
+ * existing v1 recipes. It intentionally excludes element ids, labels, entered
+ * values, and other owner/job text so recipes describe component mechanics.
+ */
+export function componentFingerprintV2(
+  input: ComponentFingerprintV2Input,
+): string {
+  if (!Number.isSafeInteger(input.optionCount) || input.optionCount < 0) {
+    throw new Error("optionCount must be a non-negative integer");
+  }
+  const signature = [
+    "v2",
+    input.kind,
+    input.tagName.toLowerCase(),
+    normalize(input.role),
+    normalize(input.inputType),
+    String(input.optionCount),
+    normalize(input.ariaAutocomplete),
+    normalize(input.hasPopup),
+    String(input.multiple === true),
+    String(input.contentEditable === true),
+    String(validateDepth(input.shadowDepth, "shadowDepth")),
+    String(validateDepth(input.frameDepth, "frameDepth")),
+    String(input.portaledPopup === true),
+    String(input.virtualizedOptions === true),
+    input.popupOwnerKind ?? "UNKNOWN",
+    input.frameworkHint ?? "UNKNOWN",
+  ].join("|");
+  return `cfp2-${stableHash(signature)}`;
+}
+
+/**
+ * New runtimes query the richer fingerprint first and fall back to the legacy
+ * fingerprint so previously promoted recipes remain usable during migration.
+ */
+export function componentFingerprintCandidates(
+  input: ComponentFingerprintV2Input,
+): readonly [string, string] {
+  return [componentFingerprintV2(input), componentFingerprint(input)];
 }
 
 export function validateRecipe(recipe: InteractionRecipe): void {
