@@ -90,9 +90,7 @@ function organizationTokens(url: URL): Set<string> {
     url.hostname
       .toLocaleLowerCase("en-US")
       .split(/[.\-_]+/)
-      .filter(
-        (token) => token.length >= 3 && !genericHostTokens.has(token),
-      ),
+      .filter((token) => token.length >= 3 && !genericHostTokens.has(token)),
   );
 }
 
