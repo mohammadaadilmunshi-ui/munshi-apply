@@ -48,6 +48,13 @@ export function buildPageJobSignalSource(
   const jobContext =
     page.applicationState === "JOB_CONTEXT" ? compact(page.pageContext) : "";
   const pageIdentity = compact(page.pageFingerprint) || sourceUrl(page.url);
+  const manualRequiredControls = normalizedManualCount(
+    options.manualRequiredControls,
+  );
+  const accountRequired = options.accountRequired === true;
+  const validationErrors = page.validationErrorCount;
+  const hasObservedFriction =
+    accountRequired || manualRequiredControls > 0 || validationErrors > 0;
   const fingerprintMaterial = [
     "job-signal-page-v1",
     sourceUrl(page.url),
@@ -59,13 +66,13 @@ export function buildPageJobSignalSource(
   return {
     input: {
       description: jobContext || null,
-      applicationFriction: {
-        accountRequired: options.accountRequired === true,
-        manualRequiredControls: normalizedManualCount(
-          options.manualRequiredControls,
-        ),
-        validationErrors: page.validationErrorCount,
-      },
+      applicationFriction: hasObservedFriction
+        ? {
+            accountRequired,
+            manualRequiredControls,
+            validationErrors,
+          }
+        : null,
     },
     sourceFingerprint: `job-source-${stableHash(fingerprintMaterial)}`,
   };
