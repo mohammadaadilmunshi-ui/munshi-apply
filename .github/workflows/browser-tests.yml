@@ -18,6 +18,8 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Enforce isolated 300-field scanner performance budget
+        run: MUNSHI_PERF_STRICT=1 ./node_modules/.bin/vitest run apps/extension/src/content/ats-endurance.test.ts
       - name: Run ATS, lifecycle, intelligence, and performance endurance suite
         run: |
           ./node_modules/.bin/vitest run \
