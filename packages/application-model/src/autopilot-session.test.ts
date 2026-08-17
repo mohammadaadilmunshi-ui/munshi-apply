@@ -148,6 +148,40 @@ describe("AutoPilot session model", () => {
     ).toBe("PAUSED_ERROR");
   });
 
+  it("keeps generic authentication in guarded preparation mode across a verified rescan", () => {
+    const authentication: AutoPilotObservation = {
+      ...observation,
+      state: "AUTH",
+      securityCheckpoint: "AUTHENTICATION",
+    };
+    const started = reduceAutoPilotSession(freshSession(), {
+      type: "START",
+      observation: authentication,
+      at: "2026-08-14T21:00:01.000Z",
+    });
+    expect(started.status).toBe("RUNNING");
+    expect(started.securityCheckpoint).toBeNull();
+
+    const filled = reduceAutoPilotSession(started, {
+      type: "FILL_VERIFIED",
+      controlId: "control-1",
+      pendingControlIds: [],
+      at: "2026-08-14T21:00:02.000Z",
+    });
+    expect(filled.status).toBe("WAITING_RESCAN");
+
+    const rescanned = reduceAutoPilotSession(filled, {
+      type: "RESCAN_VERIFIED",
+      observation: {
+        ...authentication,
+        pageFingerprint: "fingerprint-auth-2",
+      },
+      at: "2026-08-14T21:00:03.000Z",
+    });
+    expect(rescanned.status).toBe("RUNNING");
+    expect(rescanned.securityCheckpoint).toBeNull();
+  });
+
   it("restores only a compatible checkpoint for the same application", () => {
     const checkpoint = createAutoPilotCheckpoint({
       checkpointId: "cp-2",
