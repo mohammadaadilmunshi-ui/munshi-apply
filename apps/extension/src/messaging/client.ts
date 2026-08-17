@@ -54,6 +54,7 @@ export type NativeRuntimeHealth = {
     teach_munshi_state_capture?: boolean;
     account_orchestration?: boolean;
     job_signal_intelligence?: boolean;
+    application_analytics?: boolean;
   };
 };
 
@@ -87,6 +88,7 @@ export function nativeRuntimeCompatibility(
     "writing_style_learning",
     "account_orchestration",
     "job_signal_intelligence",
+    "application_analytics",
   ] as const;
   const missing = requiredCapabilities.filter(
     (capability) => health.capabilities?.[capability] !== true,
@@ -179,60 +181,41 @@ async function drainProfileSaveQueue(): Promise<void> {
     while (queuedProfile) {
       const profile = queuedProfile;
       queuedProfile = null;
-      acknowledgement = parseProfileSaveAck(
-        await send({ type: "SAVE_PROFILE", payload: profile }),
-      );
+      const data = await send({ type: "SAVE_PROFILE", payload: profile });
+      acknowledgement = parseProfileSaveAck(data);
     }
   } catch (error) {
     failure = error;
-    queuedProfile = null;
   } finally {
     profileSaveRunning = false;
     const waiters = profileSaveWaiters;
     profileSaveWaiters = [];
-    for (const waiter of waiters) {
-      if (failure) {
-        waiter.reject(failure);
-      } else if (acknowledgement) {
-        waiter.resolve(acknowledgement);
-      } else {
-        waiter.reject(
-          new Error("Profile save completed without acknowledgement"),
-        );
-      }
-    }
-    if (queuedProfile && !profileSaveRunning) {
-      profileSaveRunning = true;
-      void drainProfileSaveQueue();
+    if (failure !== null) {
+      for (const waiter of waiters) waiter.reject(failure);
+    } else if (acknowledgement !== null) {
+      for (const waiter of waiters) waiter.resolve(acknowledgement);
+    } else {
+      const error = new Error("Profile save completed without an acknowledgement");
+      for (const waiter of waiters) waiter.reject(error);
     }
   }
 }
 
-export async function getActivePage(): Promise<ApplicationPage | null> {
-  return (await send({ type: "GET_ACTIVE_PAGE" })) as ApplicationPage | null;
+export async function getRuntimeHealth(): Promise<ExtensionRuntimeHealth> {
+  return (await send({ type: "RUNTIME_HEALTH" })) as ExtensionRuntimeHealth;
 }
 
-export async function getProfile(): Promise<ProfileSnapshot | null> {
-  const candidate = await send({ type: "GET_PROFILE" });
-  return candidate === null ? null : parseProfileSnapshot(candidate);
+export async function getNativeHealth(): Promise<NativeRuntimeHealth> {
+  return (await send({ type: "NATIVE_HEALTH" })) as NativeRuntimeHealth;
 }
 
-export async function getProfileSyncStatus(): Promise<ProfileSyncStatus> {
-  return (await send({ type: "GET_PROFILE_SYNC_STATUS" })) as ProfileSyncStatus;
+export async function getProfile(): Promise<ProfileSnapshot> {
+  return parseProfileSnapshot(await send({ type: "GET_PROFILE" }));
 }
 
-export async function resolveProfileSyncConflict(
-  winner: "local" | "remote",
-): Promise<ProfileSnapshot> {
-  return parseProfileSnapshot(
-    await send({
-      type: "RESOLVE_PROFILE_SYNC_CONFLICT",
-      payload: { winner },
-    }),
-  );
-}
-
-export function saveProfile(profile: ProfileSnapshot): Promise<ProfileSaveAck> {
+export async function saveProfile(
+  profile: ProfileSnapshot,
+): Promise<ProfileSaveAck> {
   queuedProfile = parseProfileSnapshot(profile);
   return new Promise((resolve, reject) => {
     profileSaveWaiters.push({ resolve, reject });
@@ -242,125 +225,72 @@ export function saveProfile(profile: ProfileSnapshot): Promise<ProfileSaveAck> {
   });
 }
 
-export async function getHealth(): Promise<ExtensionRuntimeHealth> {
-  return (await send({ type: "PING" })) as ExtensionRuntimeHealth;
+export async function getProfileSyncStatus(): Promise<ProfileSyncStatus> {
+  return (await send({ type: "GET_PROFILE_SYNC_STATUS" })) as ProfileSyncStatus;
 }
 
-export async function getNativeHealth(): Promise<NativeRuntimeHealth> {
-  return (await send({ type: "NATIVE_HEALTH" })) as NativeRuntimeHealth;
+export async function getActivePage(): Promise<ApplicationPage | null> {
+  return (await send({ type: "GET_ACTIVE_PAGE" })) as ApplicationPage | null;
 }
 
-export async function applyFillPlan(plan: FillPlan): Promise<FillResult[]> {
-  const result = (await send({ type: "APPLY_FILL_PLAN", payload: plan })) as {
-    results?: FillResult[];
-  };
-  return result.results ?? [];
+export async function resolveAnswers(page: ApplicationPage): Promise<FillPlan> {
+  return (await send({ type: "RESOLVE_ANSWERS", payload: page })) as FillPlan;
+}
+
+export async function fillPage(plan: FillPlan): Promise<FillResult[]> {
+  return (await send({ type: "FILL_PAGE", payload: plan })) as FillResult[];
 }
 
 export async function getAutoPilotStatus(): Promise<AutoPilotControllerStatus | null> {
-  return (await send({
-    type: "AUTOPILOT_STATUS",
-  })) as AutoPilotControllerStatus | null;
+  return (await send({ type: "AUTOPILOT_STATUS" })) as AutoPilotControllerStatus | null;
 }
 
 export async function startAutoPilot(
   payload: AutoPilotStartPayload,
 ): Promise<AutoPilotControllerStatus> {
-  return (await send({
-    type: "AUTOPILOT_START",
-    payload,
-  })) as AutoPilotControllerStatus;
+  return (await send({ type: "AUTOPILOT_START", payload })) as AutoPilotControllerStatus;
 }
 
-export async function pauseAutoPilot(
-  reason = "Paused by owner",
-): Promise<AutoPilotControllerStatus | null> {
-  return (await send({
-    type: "AUTOPILOT_PAUSE",
-    payload: { reason },
-  })) as AutoPilotControllerStatus | null;
+export async function pauseAutoPilot(reason = "Owner paused AutoPilot"): Promise<AutoPilotControllerStatus> {
+  return (await send({ type: "AUTOPILOT_PAUSE", payload: { reason } })) as AutoPilotControllerStatus;
 }
 
 export async function resumeAutoPilot(
   payload: AutoPilotResumePayload,
-): Promise<AutoPilotControllerStatus | null> {
-  return (await send({
-    type: "AUTOPILOT_RESUME",
-    payload,
-  })) as AutoPilotControllerStatus | null;
+): Promise<AutoPilotControllerStatus> {
+  return (await send({ type: "AUTOPILOT_RESUME", payload })) as AutoPilotControllerStatus;
 }
 
-export async function stopAutoPilot(
-  reason = "Stopped by owner",
-): Promise<AutoPilotControllerStatus | null> {
-  return (await send({
-    type: "AUTOPILOT_STOP",
-    payload: { reason },
-  })) as AutoPilotControllerStatus | null;
+export async function stopAutoPilot(reason = "Owner stopped AutoPilot"): Promise<AutoPilotControllerStatus | null> {
+  return (await send({ type: "AUTOPILOT_STOP", payload: { reason } })) as AutoPilotControllerStatus | null;
 }
 
-export async function requestFilePickerAssist(
-  frameId: number,
-  controlId: string,
-): Promise<{ status: string; reason: string }> {
-  return (await send({
-    type: "AUTOPILOT_ASSIST_FILE",
-    payload: { frameId, controlId },
-  })) as { status: string; reason: string };
-}
-
-export type TeachMunshiStart = {
-  sessionId: string;
+export async function requestFilePickerAssist(input: {
+  frameId: number;
   controlId: string;
-  label: string;
-  componentFingerprint: string;
-  startedAt: string;
-};
+}): Promise<unknown> {
+  return send({ type: "AUTOPILOT_ASSIST_FILE", payload: input });
+}
 
-export type TeachMunshiResult = {
-  sessionId: string;
+export async function beginTeach(input: {
+  frameId: number;
   controlId: string;
-  changed: boolean;
-  reusable: boolean;
-  eventTypes: string[];
-  eventSequence?: { type: string; target: string; atMs: number }[];
-  beforeState?: Record<string, unknown>;
-  afterState?: Record<string, unknown>;
-  quality?: { score: number; reasons: string[]; valueCommitted: boolean };
-  recipe: null | {
-    recipeId: string;
-    state: "SHADOW" | "PROMOTED" | "ROLLED_BACK";
-    version: number;
-    verifiedAttempts?: number;
-    verifiedSuccesses?: number;
-  };
-};
-
-export async function beginTeachMunshi(
-  frameId: number,
-  controlId: string,
-  applicationId: string,
-): Promise<TeachMunshiStart> {
-  return (await send({
-    type: "TEACH_BEGIN",
-    payload: { frameId, controlId, applicationId },
-  })) as TeachMunshiStart;
+  applicationId: string;
+}): Promise<unknown> {
+  return send({ type: "TEACH_BEGIN", payload: input });
 }
 
-export async function finishTeachMunshi(
-  frameId: number,
-  sessionId: string,
-  applicationId: string,
-): Promise<TeachMunshiResult> {
-  return (await send({
-    type: "TEACH_FINISH",
-    payload: { frameId, sessionId, applicationId },
-  })) as TeachMunshiResult;
+export async function finishTeach(input: {
+  frameId: number;
+  sessionId: string;
+  applicationId: string;
+}): Promise<unknown> {
+  return send({ type: "TEACH_FINISH", payload: input });
 }
 
-export async function cancelTeachMunshi(
-  frameId: number,
-  sessionId: string,
-): Promise<void> {
-  await send({ type: "TEACH_CANCEL", payload: { frameId, sessionId } });
+export async function cancelTeach(input: {
+  frameId: number;
+  sessionId: string;
+}): Promise<unknown> {
+  return send({ type: "TEACH_CANCEL", payload: input });
 }
