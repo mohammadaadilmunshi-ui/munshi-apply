@@ -68,7 +68,7 @@ def add_evidence(
             "semantic_types": [semantic_type],
             "trust_level": trust_level,
             "protected": protected,
-            "source": "test-evidence",
+            "source": "job-listing",
             "updated_at": FIXED_NOW.isoformat(),
         }
     )
@@ -330,3 +330,37 @@ def test_preview_uses_live_job_context_and_confirmed_profile_without_seeded_evid
     assert len(result["evidenceIds"]) >= 2
     assert any(item.startswith("job-context-") for item in result["evidenceIds"])
     assert any(item.startswith("profile-") for item in result["evidenceIds"])
+
+
+def test_why_role_requires_job_context_even_when_candidate_evidence_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = create_database(tmp_path)
+    store = configured_store(tmp_path, monkeypatch)
+    ArchitectureStore(database).upsert_evidence_node(
+        {
+            "evidence_id": "candidate-only",
+            "application_id": "app-1",
+            "kind": "EMPLOYMENT",
+            "text": "Verified recruiting operations experience",
+            "semantic_types": ["WHY_ROLE"],
+            "trust_level": "VERIFIED",
+            "protected": False,
+            "source": "profile",
+            "updated_at": FIXED_NOW.isoformat(),
+        }
+    )
+    with pytest.raises(ValueError, match="job/company context"):
+        service(database, store).preview(request())
+
+
+def test_consequential_semantic_type_cannot_be_overridden_by_why_role_wording(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = create_database(tmp_path)
+    store = configured_store(tmp_path, monkeypatch)
+    add_evidence(database, semantic_type="SPONSORSHIP_FUTURE")
+    payload = request("SPONSORSHIP_FUTURE")
+    payload["question"] = "Why this role, and will you require sponsorship in the future?"
+    with pytest.raises(ValueError, match="not eligible"):
+        service(database, store).preview(payload)

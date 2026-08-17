@@ -42,6 +42,7 @@ describe("Teach MUNSHI capture", () => {
     const control = page.controls.find((item) => item.label === "Country")!;
     const input = document.getElementById("country") as HTMLInputElement;
     const started = beginTeachInteraction("teach-1", control.controlId);
+    input.value = "United States";
     input.dispatchEvent(new Event("input", { bubbles: true }));
     input.dispatchEvent(new Event("change", { bubbles: true }));
     const learned = finishTeachInteraction(started.sessionId);

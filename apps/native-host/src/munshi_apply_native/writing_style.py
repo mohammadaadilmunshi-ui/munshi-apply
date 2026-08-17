@@ -4,7 +4,7 @@ import json
 import os
 import re
 import tempfile
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 
@@ -42,7 +42,9 @@ class WritingStyleProfile:
         )
 
 
-_CONTRACTIONS = re.compile(r"\b(?:i'm|i've|i'd|i'll|don't|can't|won't|it's|that's|there's|we're|i’ve|i’m)\b", re.I)
+_CONTRACTIONS = re.compile(
+    r"\b(?:i'm|i've|i'd|i'll|don't|can't|won't|it's|that's|there's|we're|i’ve|i’m)\b", re.I
+)
 _FIRST_PERSON = re.compile(r"\b(?:i|me|my|mine|i'm|i’ve|i'm)\b", re.I)
 
 
@@ -69,14 +71,21 @@ class WritingStyleStore:
             return WritingStyleProfile()
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
-            return WritingStyleProfile(**{key: raw[key] for key in asdict(WritingStyleProfile()) if key in raw})
+            return WritingStyleProfile(
+                **{key: raw[key] for key in asdict(WritingStyleProfile()) if key in raw}
+            )
         except (OSError, json.JSONDecodeError, TypeError, ValueError):
             return WritingStyleProfile()
 
     def _save(self, profile: WritingStyleProfile) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         with tempfile.NamedTemporaryFile(
-            "w", encoding="utf-8", dir=self.path.parent, prefix="style-", suffix=".tmp", delete=False
+            "w",
+            encoding="utf-8",
+            dir=self.path.parent,
+            prefix="style-",
+            suffix=".tmp",
+            delete=False,
         ) as handle:
             json.dump(asdict(profile), handle, indent=2, sort_keys=True)
             handle.write("\n")

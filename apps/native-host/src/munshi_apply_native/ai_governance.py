@@ -13,13 +13,17 @@ from .ai_settings import AIConfiguration, AISettingsStore
 from .application_store import ApplicationStore
 from .architecture_store import ArchitectureStore
 from .database import Database
+from .intelligence_router import IntelligenceRoute, choose_intelligence_route
 from .profile_store import ProfileStore
 from .providers import (
+    OllamaChatProvider,
     OpenAIResponsesProvider,
     ProviderContextItem,
     ProviderGenerationRequest,
     ProviderGenerationResult,
 )
+from .response_planner import JobResponsePlan, plan_job_response
+from .writing_style import WritingStyleStore
 
 _SAFE_DRAFT_SEMANTIC_TYPES = frozenset(
     {
@@ -28,6 +32,10 @@ _SAFE_DRAFT_SEMANTIC_TYPES = frozenset(
         "RELEVANT_EXPERIENCE",
         "CAREER_GOALS",
         "BEHAVIORAL_EXAMPLE",
+        "ROLE_RESPONSIBILITIES",
+        "ROLE_UNDERSTANDING",
+        "MOTIVATION",
+        "RECRUITMENT_MOTIVATION",
     }
 )
 _AUTHORITATIVE_TRUST = frozenset({"VERIFIED", "USER_CONFIRMED", "DOCUMENT_CONFIRMED"})
@@ -42,8 +50,8 @@ _PROFILE_EVIDENCE_KINDS = frozenset(
     }
 )
 _ALWAYS_ALLOWED_EVIDENCE_KINDS = frozenset({"JOB_REQUIREMENT", "COMPANY_CONTEXT"})
-_MAX_CONTEXT_ITEMS = 5
-_MAX_CONTEXT_CHARACTERS = 6_000
+_MAX_CONTEXT_ITEMS = 7
+_MAX_CONTEXT_CHARACTERS = 8_000
 _MAX_OUTPUT_TOKENS = 1_024
 _PRICING_MAX_AGE_DAYS = 30
 _PRICING_VERIFIED_AT = datetime(2026, 8, 14, tzinfo=UTC)
@@ -66,11 +74,16 @@ _PRICING = {
 }
 
 ProviderFactory = Callable[[str], OpenAIResponsesProvider]
+OllamaProviderFactory = Callable[[], OllamaChatProvider]
 Clock = Callable[[], datetime]
 
 
 def _default_provider_factory(api_key: str) -> OpenAIResponsesProvider:
     return OpenAIResponsesProvider(api_key)
+
+
+def _default_ollama_provider_factory() -> OllamaChatProvider:
+    return OllamaChatProvider()
 
 
 def _default_clock() -> datetime:
@@ -98,11 +111,13 @@ class AIGovernanceService:
         ai_store: AISettingsStore,
         *,
         provider_factory: ProviderFactory = _default_provider_factory,
+        ollama_provider_factory: OllamaProviderFactory = _default_ollama_provider_factory,
         clock: Clock = _default_clock,
     ) -> None:
         self.database = database
         self.ai_store = ai_store
         self.provider_factory = provider_factory
+        self.ollama_provider_factory = ollama_provider_factory
         self.clock = clock
         self.architecture = ArchitectureStore(database)
         self.applications = ApplicationStore(database)
@@ -152,7 +167,11 @@ class AIGovernanceService:
         return {
             "settings": settings,
             "usage": usage,
-            "pricing": self._pricing_status(config.model, now=now),
+            "pricing": (
+                self._pricing_status(config.openai_model_for_lane("CHEAP"), now=now)
+                if config.provider != "ollama"
+                else None
+            ),
             "guardrails": {
                 "safeDraftSemanticTypes": sorted(_SAFE_DRAFT_SEMANTIC_TYPES),
                 "consequentialQuestionsManual": True,
@@ -239,7 +258,8 @@ class AIGovernanceService:
         config: AIConfiguration,
     ) -> tuple[tuple[ProviderContextItem, ...], set[str], dict[str, object]]:
         graph = self.architecture.evidence_graph(application_id)
-        query_tokens = _words(question)
+        retrieval_terms = getattr(self, "_active_retrieval_terms", ())
+        query_tokens = _words(question + " " + " ".join(retrieval_terms))
         allowed_kinds = self._allowed_kinds(config)
         candidates: list[tuple[float, dict[str, object]]] = []
         if page_context:
@@ -380,6 +400,8 @@ class AIGovernanceService:
         )
         selected: list[ProviderContextItem] = []
         selected_ids: set[str] = set()
+        selected_texts: set[str] = set()
+        source_counts: dict[str, int] = {}
         characters = 0
         for _, node in candidates:
             if len(selected) >= _MAX_CONTEXT_ITEMS:
@@ -390,9 +412,14 @@ class AIGovernanceService:
             evidence_id = str(node.get("evidence_id", "")).strip()
             source = str(node.get("source", "")).strip()
             trust = str(node.get("trust_level", "")).strip()
-            if not evidence_id or not source or not trust:
+            normalized_text = " ".join(text.lower().split())
+            if not evidence_id or not source or not trust or normalized_text in selected_texts:
+                continue
+            if source_counts.get(source, 0) >= 3:
                 continue
             selected.append(ProviderContextItem(evidence_id, source, text, trust))
+            selected_texts.add(normalized_text)
+            source_counts[source] = source_counts.get(source, 0) + 1
             selected_ids.add(evidence_id)
             characters += len(text)
         if not selected:
@@ -427,49 +454,109 @@ class AIGovernanceService:
         if not config.allow_application_drafts:
             raise ValueError("AI application drafting is disabled by the owner")
         semantic_type = str(request["semanticType"])
+        plan = plan_job_response(
+            str(request["question"]),
+            semantic_type,
+            request["maxWords"] if isinstance(request["maxWords"], int) else None,
+        )
         if semantic_type not in _SAFE_DRAFT_SEMANTIC_TYPES:
             raise ValueError("This application question type is not eligible for AI generation")
-        if not config.model.strip():
-            raise ValueError("Select an AI model before generating application drafts")
-        if self.ai_store.key_source() == "none":
-            raise ValueError("OpenAI API key is not configured")
-        pricing = self._pricing(config.model, now=now)
-        context, evidence_ids, evidence_stats = self._context(
-            application_id=str(request["applicationId"]),
-            question=str(request["question"]),
-            semantic_type=semantic_type,
-            page_context=str(request.get("pageContext", "")),
-            config=config,
-        )
+        route = choose_intelligence_route(config, self.ai_store, plan)
+        self._active_retrieval_terms = plan.retrieval_terms
+        try:
+            context, evidence_ids, evidence_stats = self._context(
+                application_id=str(request["applicationId"]),
+                question=str(request["question"]),
+                semantic_type=semantic_type,
+                page_context=str(request.get("pageContext", "")),
+                config=config,
+            )
+        finally:
+            self._active_retrieval_terms = ()
+        if plan.requires_job_context and not any(
+            item.source == "current-employer-page" or "job" in item.source.lower()
+            for item in context
+        ):
+            raise ValueError(
+                "This response needs job/company context; open the job listing in this tab first"
+            )
+        style = WritingStyleStore(self.ai_store.runtime_root).load()
         estimated_input_tokens = 2_048 + len(str(request["question"]).encode("utf-8"))
         estimated_input_tokens += sum(len(item.text.encode("utf-8")) for item in context)
         max_output_tokens = int(request["maxOutputTokens"])
-        planned_cost = _cost(pricing, estimated_input_tokens, max_output_tokens)
-        budget_args = {
-            "planned_cost_usd": planned_cost,
-            "monthly_budget_usd": config.monthly_budget_usd,
-            "warning_budget_usd": config.warning_budget_usd,
-            "hard_stop": config.hard_stop,
-            "at": now.isoformat(),
-        }
-        if reserve:
-            reservation_id = f"ai-res-{uuid.uuid4()}"
-            decision = self.budget.reserve(
-                reservation_id=reservation_id,
-                provider="openai",
-                model=config.model,
-                correlation_id=str(request["correlationId"]),
-                **budget_args,
-            )
+        pricing: PricingSnapshot | None = None
+        reservation_id: str | None = None
+        if route.provider == "openai":
+            pricing = self._pricing(route.model, now=now)
+            planned_cost = _cost(pricing, estimated_input_tokens, max_output_tokens)
+            budget_args = {
+                "planned_cost_usd": planned_cost,
+                "monthly_budget_usd": config.monthly_budget_usd,
+                "warning_budget_usd": config.warning_budget_usd,
+                "hard_stop": config.hard_stop,
+                "at": now.isoformat(),
+            }
+            if reserve:
+                reservation_id = f"ai-res-{uuid.uuid4()}"
+                decision = self.budget.reserve(
+                    reservation_id=reservation_id,
+                    provider="openai",
+                    model=route.model,
+                    correlation_id=str(request["correlationId"]),
+                    **budget_args,
+                )
+            else:
+                decision = self.budget.evaluate(**budget_args)
+            if decision["state"] == "BLOCK":
+                if route.fallback_provider == "ollama" and route.fallback_model:
+                    route = IntelligenceRoute(
+                        provider="ollama",
+                        model=route.fallback_model,
+                        lane=route.lane,
+                        local=True,
+                        fallback_provider=None,
+                        fallback_model=None,
+                        reason="paid route blocked by budget; local Ollama fallback selected",
+                    )
+                    pricing = None
+                    reservation_id = None
+                    planned_cost = 0.0
+                    decision = {
+                        "state": "ALLOW",
+                        "month": now.strftime("%Y-%m"),
+                        "spentUsd": self.budget.usage_summary(
+                            at=now.isoformat(), monthly_budget_usd=config.monthly_budget_usd
+                        )["spentUsd"],
+                        "reservedUsd": 0.0,
+                        "plannedCostUsd": 0.0,
+                        "projectedUsd": 0.0,
+                        "remainingUsd": max(0.0, config.monthly_budget_usd),
+                        "reason": "local Ollama route has no provider API charge",
+                    }
+                else:
+                    raise ValueError(str(decision["reason"]))
         else:
-            reservation_id = None
-            decision = self.budget.evaluate(**budget_args)
-        if decision["state"] == "BLOCK":
-            raise ValueError(str(decision["reason"]))
+            planned_cost = 0.0
+            usage = self.budget.usage_summary(
+                at=now.isoformat(), monthly_budget_usd=config.monthly_budget_usd
+            )
+            decision = {
+                "state": "ALLOW",
+                "month": usage["month"],
+                "spentUsd": usage["spentUsd"],
+                "reservedUsd": usage["reservedUsd"],
+                "plannedCostUsd": 0.0,
+                "projectedUsd": usage["projectedUsd"],
+                "remainingUsd": usage["remainingUsd"],
+                "reason": "local Ollama route has no provider API charge",
+            }
         return {
             "request": request,
             "config": config,
             "pricing": pricing,
+            "route": route,
+            "responsePlan": plan,
+            "style": style,
             "context": context,
             "evidenceIds": evidence_ids,
             "evidenceStats": evidence_stats,
@@ -482,14 +569,22 @@ class AIGovernanceService:
 
     def preview(self, payload: object) -> dict[str, object]:
         prepared = self._prepare(payload, reserve=False)
-        pricing = prepared["pricing"]
-        assert isinstance(pricing, PricingSnapshot)
+        route = prepared["route"]
+        plan = prepared["responsePlan"]
+        style = prepared["style"]
         context = prepared["context"]
+        assert isinstance(route, IntelligenceRoute)
+        assert isinstance(plan, JobResponsePlan)
         assert isinstance(context, tuple)
         return {
             "state": "READY_FOR_PROVIDER",
             "providerCallMade": False,
-            "model": pricing.model,
+            "provider": route.provider,
+            "model": route.model,
+            "modelLane": route.lane,
+            "routeReason": route.reason,
+            "responseIntent": plan.intent,
+            "styleSamples": style.samples,
             "evidenceIds": [item.evidence_id for item in context],
             "evidenceStats": prepared["evidenceStats"],
             "estimatedInputTokens": prepared["estimatedInputTokens"],
@@ -532,72 +627,117 @@ class AIGovernanceService:
         request = prepared["request"]
         config = prepared["config"]
         pricing = prepared["pricing"]
+        route = prepared["route"]
+        plan = prepared["responsePlan"]
+        style = prepared["style"]
         context = prepared["context"]
         evidence_ids = prepared["evidenceIds"]
         reservation_id = prepared["reservationId"]
         now = prepared["now"]
         assert isinstance(request, dict)
         assert isinstance(config, AIConfiguration)
-        assert isinstance(pricing, PricingSnapshot)
+        assert isinstance(route, IntelligenceRoute)
+        assert isinstance(plan, JobResponsePlan)
         assert isinstance(context, tuple)
         assert isinstance(evidence_ids, set)
-        assert isinstance(reservation_id, str)
         assert isinstance(now, datetime)
         correlation_id = str(request["correlationId"])
         self.applications.ensure(str(request["applicationId"]), now.isoformat())
-        usage_id = f"ai-use-{reservation_id.removeprefix('ai-res-')}"
-        try:
+        provider_name = route.provider
+        model = route.model
+        if provider_name == "openai":
             provider = self.provider_factory(self.ai_store.get_api_key())
+        else:
+            provider = self.ollama_provider_factory()
+        try:
             result = provider.generate_structured(
                 ProviderGenerationRequest(
-                    model=config.model,
+                    model=model,
                     question=str(request["question"]),
                     semantic_type=str(request["semanticType"]),
                     context=context,
-                    max_words=request["maxWords"] if isinstance(request["maxWords"], int) else None,
+                    max_words=plan.default_max_words,
                     max_output_tokens=int(request["maxOutputTokens"]),
+                    response_intent=plan.intent,
+                    style_instructions=style.instructions(),
                 )
             )
         except Exception:
+            if provider_name == "openai" and isinstance(reservation_id, str):
+                estimated_usage_id = f"ai-use-{reservation_id.removeprefix('ai-res-')}"
+                self.budget.settle(
+                    reservation_id=reservation_id,
+                    usage_id=estimated_usage_id,
+                    provider="openai",
+                    model=model,
+                    input_tokens=int(prepared["estimatedInputTokens"]),
+                    output_tokens=int(request["maxOutputTokens"]),
+                    cost_usd=float(prepared["plannedCostUsd"]),
+                    correlation_id=f"{correlation_id}:estimated-provider-failure",
+                    at=self._now().isoformat(),
+                    estimated=True,
+                )
+                reservation_id = None
+                pricing = None
+            if route.fallback_provider == "ollama" and route.fallback_model:
+                provider_name = "ollama"
+                model = route.fallback_model
+                result = self.ollama_provider_factory().generate_structured(
+                    ProviderGenerationRequest(
+                        model=model,
+                        question=str(request["question"]),
+                        semantic_type=str(request["semanticType"]),
+                        context=context,
+                        max_words=plan.default_max_words,
+                        max_output_tokens=int(request["maxOutputTokens"]),
+                        response_intent=plan.intent,
+                        style_instructions=style.instructions(),
+                    )
+                )
+                reservation_id = None
+                pricing = None
+            else:
+                raise
+        if provider_name == "openai":
+            assert isinstance(pricing, PricingSnapshot)
+            assert isinstance(reservation_id, str)
+            actual_cost = _cost(pricing, result.usage.input_tokens, result.usage.output_tokens)
+            usage_id = f"ai-use-{reservation_id.removeprefix('ai-res-')}"
             self.budget.settle(
                 reservation_id=reservation_id,
                 usage_id=usage_id,
                 provider="openai",
-                model=config.model,
-                input_tokens=int(prepared["estimatedInputTokens"]),
-                output_tokens=int(request["maxOutputTokens"]),
-                cost_usd=float(prepared["plannedCostUsd"]),
-                correlation_id=f"{correlation_id}:estimated-provider-failure",
+                model=result.model,
+                input_tokens=result.usage.input_tokens,
+                output_tokens=result.usage.output_tokens,
+                cost_usd=actual_cost,
+                correlation_id=correlation_id,
                 at=self._now().isoformat(),
-                estimated=True,
+                estimated=False,
             )
-            raise
-        actual_cost = _cost(pricing, result.usage.input_tokens, result.usage.output_tokens)
-        self.budget.settle(
-            reservation_id=reservation_id,
-            usage_id=usage_id,
-            provider="openai",
-            model=result.model,
-            input_tokens=result.usage.input_tokens,
-            output_tokens=result.usage.output_tokens,
-            cost_usd=actual_cost,
-            correlation_id=correlation_id,
-            at=self._now().isoformat(),
-            estimated=False,
-        )
+        else:
+            actual_cost = 0.0
+            self.architecture.record_ai_usage(
+                {
+                    "usage_id": f"ai-use-local-{uuid.uuid4()}",
+                    "provider": "ollama",
+                    "model": result.model,
+                    "occurred_at": self._now().isoformat(),
+                    "input_tokens": result.usage.input_tokens,
+                    "output_tokens": result.usage.output_tokens,
+                    "cost_usd": 0.0,
+                    "correlation_id": correlation_id,
+                }
+            )
         graph = self.architecture.evidence_graph(str(request["applicationId"]))
         self._validate_result(
             result,
             evidence_ids=evidence_ids,
             graph=graph,
-            max_words=request["maxWords"] if isinstance(request["maxWords"], int) else None,
+            max_words=plan.default_max_words,
         )
         claims = [
-            {
-                "claimId": claim.claim_id,
-                "text": claim.text,
-                "evidenceIds": list(claim.evidence_ids),
-            }
+            {"claimId": claim.claim_id, "text": claim.text, "evidenceIds": list(claim.evidence_ids)}
             for claim in result.claims
         ]
         usage = {
@@ -616,7 +756,7 @@ class AIGovernanceService:
                 "controlId": request["controlId"],
                 "question": request["question"],
                 "semanticType": request["semanticType"],
-                "provider": "openai",
+                "provider": provider_name,
                 "model": result.model,
                 "responseId": result.response_id,
                 "text": result.text,
@@ -630,8 +770,12 @@ class AIGovernanceService:
             "status": "DRAFT_REVIEW_REQUIRED",
             "draftId": draft["draftId"],
             "draft": draft,
-            "provider": "openai",
+            "provider": provider_name,
             "model": result.model,
+            "modelLane": plan.model_lane,
+            "responseIntent": plan.intent,
+            "styleSamples": style.samples,
+            "routeReason": route.reason,
             "responseId": result.response_id,
             "text": result.text,
             "claims": claims,

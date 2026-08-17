@@ -53,18 +53,14 @@ def _docx_text(data: bytes) -> str:
 
 
 def _chunks(text: str) -> tuple[str, ...]:
-    paragraphs = [
-        re.sub(r"\s+", " ", item).strip() for item in re.split(r"\n+", text)
-    ]
+    paragraphs = [re.sub(r"\s+", " ", item).strip() for item in re.split(r"\n+", text)]
     paragraphs = [item for item in paragraphs if item]
     chunks: list[str] = []
     current = ""
     for paragraph in paragraphs:
         if len(paragraph) > _CHUNK_HARD_MAX:
             sentences = [
-                item.strip()
-                for item in re.split(r"(?<=[.!?])\s+", paragraph)
-                if item.strip()
+                item.strip() for item in re.split(r"(?<=[.!?])\s+", paragraph) if item.strip()
             ]
         else:
             sentences = [paragraph]

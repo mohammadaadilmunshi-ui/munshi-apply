@@ -239,8 +239,16 @@ export function AIDraftReview({
 
       {preview && (
         <div className="cloud-connection">
-          <strong>{preview.model}</strong>
-          <span>{preview.evidenceIds.length} authoritative evidence items</span>
+          <strong>
+            {preview.provider} · {preview.model} ·{" "}
+            {preview.modelLane.toLowerCase()} lane
+          </strong>
+          <span>
+            {preview.responseIntent.replaceAll("_", " ")} ·{" "}
+            {preview.evidenceIds.length} authoritative evidence items
+          </span>
+          <span>{preview.routeReason}</span>
+          <span>Writing-style samples: {preview.styleSamples}</span>
           <span>Planned maximum: ${preview.plannedCostUsd.toFixed(6)}</span>
           <span>Budget gate: {preview.budget.state}</span>
           <button
@@ -269,7 +277,9 @@ export function AIDraftReview({
             />
           </label>
           <div className="cloud-connection">
-            <span>Model: {draft.model}</span>
+            <span>
+              Provider / model: {draft.provider} · {draft.model}
+            </span>
             <span>Evidence: {draft.evidenceIds.join(", ")}</span>
             <span>
               Usage: {draft.usage.inputTokens} input +{" "}

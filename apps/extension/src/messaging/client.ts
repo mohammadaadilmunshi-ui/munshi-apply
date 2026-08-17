@@ -41,10 +41,15 @@ export type NativeRuntimeHealth = {
     ai_settings?: boolean;
     ai_governance?: boolean;
     ai_draft_lifecycle?: boolean;
+    document_evidence_ingestion?: boolean;
+    provider_routing?: boolean;
+    ollama_fallback?: boolean;
+    writing_style_learning?: boolean;
+    teach_munshi_state_capture?: boolean;
   };
 };
 
-export const REQUIRED_NATIVE_PROTOCOL_VERSION = 2;
+export const REQUIRED_NATIVE_PROTOCOL_VERSION = 3;
 
 export type NativeRuntimeCompatibility =
   { compatible: true } | { compatible: false; reason: string };
@@ -69,6 +74,9 @@ export function nativeRuntimeCompatibility(
     "ai_settings",
     "ai_governance",
     "ai_draft_lifecycle",
+    "document_evidence_ingestion",
+    "provider_routing",
+    "writing_style_learning",
   ] as const;
   const missing = requiredCapabilities.filter(
     (capability) => health.capabilities?.[capability] !== true,
@@ -303,6 +311,10 @@ export type TeachMunshiResult = {
   changed: boolean;
   reusable: boolean;
   eventTypes: string[];
+  eventSequence?: { type: string; target: string; atMs: number }[];
+  beforeState?: Record<string, unknown>;
+  afterState?: Record<string, unknown>;
+  quality?: { score: number; reasons: string[]; valueCommitted: boolean };
   recipe: null | {
     recipeId: string;
     state: "SHADOW" | "PROMOTED" | "ROLLED_BACK";

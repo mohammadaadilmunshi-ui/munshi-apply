@@ -155,6 +155,14 @@ class AIDraftStore:
             connection.commit()
         return self._wire(row)
 
+    def get(self, draft_id: str) -> dict[str, object]:
+        draft_id = _required(draft_id, "draftId")
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM ai_drafts WHERE draft_id = ?", (draft_id,)
+            ).fetchone()
+        return self._wire(row)
+
     def list_for_application(
         self, application_id: str, page_id: str | None = None
     ) -> list[dict[str, object]]:

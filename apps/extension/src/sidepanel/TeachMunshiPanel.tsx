@@ -102,12 +102,17 @@ export function TeachMunshiPanel({
       setActive(null);
       if (!learned.reusable || !learned.recipe) {
         setMessage(
-          "MUNSHI observed the interaction but could not infer a reusable safe recipe. You can continue manually; the application was not blocked.",
+          learned.quality
+            ? `MUNSHI observed the interaction, but capture quality was ${Math.round(learned.quality.score * 100)}%. Retry the one control slowly so its committed before/after state is visible; the application remains unblocked.`
+            : "MUNSHI observed the interaction but could not infer a reusable safe recipe. You can continue manually; the application was not blocked.",
         );
         return;
       }
+      const quality = learned.quality
+        ? ` · capture ${Math.round(learned.quality.score * 100)}%`
+        : "";
       setMessage(
-        `Candidate recipe v${learned.recipe.version} saved in ${learned.recipe.state.toLowerCase()} mode. MUNSHI will try it on the matching control and promote it after verified success.`,
+        `Candidate recipe v${learned.recipe.version} saved in ${learned.recipe.state.toLowerCase()} mode${quality}. MUNSHI will try it on the matching control and promote it after verified success.`,
       );
     } catch (error) {
       setMessage(

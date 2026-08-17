@@ -167,9 +167,7 @@ class ApplicationCheckpointPayload(BaseModel):
         created_at = self.created_at
         if created_at.tzinfo is not None:
             payload["createdAt"] = (
-                created_at.astimezone(UTC)
-                .isoformat(timespec="milliseconds")
-                .replace("+00:00", "Z")
+                created_at.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
             )
         return payload
 

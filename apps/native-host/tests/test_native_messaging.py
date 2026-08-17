@@ -24,7 +24,11 @@ def test_ping_advertises_current_protocol_and_capabilities(tmp_path: Path) -> No
     assert response["ok"] is True
     data = response["data"]
     assert isinstance(data, dict)
-    assert data["protocol_version"] == 2
+    assert data["protocol_version"] == 3
     assert data["capabilities"]["ai_governance"] is True
     assert data["capabilities"]["ai_draft_lifecycle"] is True
     assert data["capabilities"]["profile_vault"] is True
+    assert data["capabilities"]["document_evidence_ingestion"] is True
+    assert data["capabilities"]["provider_routing"] is True
+    assert data["capabilities"]["writing_style_learning"] is True
+    assert data["capabilities"]["teach_munshi_state_capture"] is True

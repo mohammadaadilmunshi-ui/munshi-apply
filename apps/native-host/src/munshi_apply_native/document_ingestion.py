@@ -48,10 +48,16 @@ class DocumentIngestionService:
         if not re.fullmatch(r"[a-f0-9]{64}", expected_sha256):
             raise ValueError("Résumé SHA-256 is invalid")
         size = payload.get("sizeBytes")
-        if not isinstance(size, int) or isinstance(size, bool) or not 1 <= size <= _MAX_DOCUMENT_BYTES:
+        if (
+            not isinstance(size, int)
+            or isinstance(size, bool)
+            or not 1 <= size <= _MAX_DOCUMENT_BYTES
+        ):
             raise ValueError("Résumé size must be between 1 byte and 12 MB")
         application_id = payload.get("applicationId")
-        if application_id is not None and (not isinstance(application_id, str) or not application_id.strip()):
+        if application_id is not None and (
+            not isinstance(application_id, str) or not application_id.strip()
+        ):
             raise ValueError("applicationId must be a non-empty string when provided")
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         meta_path, part_path = self._paths(session_id)
@@ -110,7 +116,11 @@ class DocumentIngestionService:
         metadata["receivedBytes"] = received
         meta_path.write_text(json.dumps(metadata, sort_keys=True), encoding="utf-8")
         os.chmod(meta_path, 0o600)
-        return {"sessionId": session_id, "receivedBytes": received, "complete": received == expected_size}
+        return {
+            "sessionId": session_id,
+            "receivedBytes": received,
+            "complete": received == expected_size,
+        }
 
     def finish(self, payload: object) -> dict[str, object]:
         if not isinstance(payload, dict):
@@ -118,7 +128,10 @@ class DocumentIngestionService:
         session_id = _required(payload, "sessionId")
         metadata, meta_path, part_path = self._load(session_id)
         expected_size = int(metadata["sizeBytes"])
-        if int(metadata.get("receivedBytes", -1)) != expected_size or part_path.stat().st_size != expected_size:
+        if (
+            int(metadata.get("receivedBytes", -1)) != expected_size
+            or part_path.stat().st_size != expected_size
+        ):
             raise ValueError("Résumé ingestion is incomplete")
         data = part_path.read_bytes()
         digest = hashlib.sha256(data).hexdigest()
@@ -136,7 +149,9 @@ class DocumentIngestionService:
         source_prefix = f"resume:{metadata['resumeId']}:"
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            connection.execute("DELETE FROM evidence_nodes WHERE source LIKE ?", (source_prefix + "%",))
+            connection.execute(
+                "DELETE FROM evidence_nodes WHERE source LIKE ?", (source_prefix + "%",)
+            )
         for node in nodes:
             self.architecture.upsert_evidence_node(node)
         self._cleanup(meta_path, part_path)

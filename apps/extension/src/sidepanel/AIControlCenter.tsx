@@ -2,18 +2,26 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   deleteOpenAIKey,
   getAIControlStatus,
+  getWritingStyle,
+  listOllamaModels,
   listOpenAIModels,
   saveAISettings,
   setOpenAIKey,
+  testOllamaConnection,
   testOpenAIConnection,
   type AIControlStatus,
   type AISettings,
+  type WritingStyleStatus,
 } from "../messaging/native";
 
 const defaultSettings: AISettings = {
-  provider: "openai",
+  provider: "auto",
   enabled: false,
   model: "",
+  cheapModel: "",
+  strongModel: "",
+  ollamaModel: "",
+  preferLocalFallback: true,
   monthlyBudgetUsd: 0,
   warningBudgetUsd: 0,
   hardStop: true,
@@ -42,7 +50,9 @@ export function AIControlCenter({
 }) {
   const [status, setStatus] = useState<AIControlStatus | null>(null);
   const [settings, setSettings] = useState<AISettings>(defaultSettings);
-  const [models, setModels] = useState<string[]>([]);
+  const [openAIModels, setOpenAIModels] = useState<string[]>([]);
+  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
+  const [style, setStyle] = useState<WritingStyleStatus | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -50,10 +60,14 @@ export function AIControlCenter({
 
   const refresh = useCallback(async () => {
     if (!nativeAvailable) return;
-    const next = await getAIControlStatus();
-    setMessageIsError(false);
+    const [next, nextStyle] = await Promise.all([
+      getAIControlStatus(),
+      getWritingStyle(),
+    ]);
     setStatus(next);
     setSettings(next.settings);
+    setStyle(nextStyle);
+    setMessageIsError(false);
   }, [nativeAvailable]);
 
   useEffect(() => {
@@ -73,87 +87,74 @@ export function AIControlCenter({
     );
   }, [settings.monthlyBudgetUsd, status]);
 
-  async function storeKey(): Promise<void> {
-    if (!apiKey.trim()) return;
+  async function run(task: () => Promise<void>): Promise<void> {
     setBusy(true);
     setMessage("");
     try {
+      await task();
+      setMessageIsError(false);
+    } catch (error) {
+      setMessageIsError(true);
+      setMessage(
+        error instanceof Error ? error.message : "AI control action failed",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function storeKey(): Promise<void> {
+    if (!apiKey.trim()) return;
+    await run(async () => {
       await setOpenAIKey(apiKey.trim());
       setApiKey("");
       await refresh();
-      setMessageIsError(false);
       setMessage(
-        "OpenAI credential stored in macOS Keychain. The saved secret is never displayed by MUNSHI.",
+        "OpenAI credential stored in macOS Keychain. MUNSHI never displays the saved secret.",
       );
-    } catch (error) {
-      setMessageIsError(true);
-      setMessage(
-        error instanceof Error ? error.message : "Unable to store API key",
-      );
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   async function removeKey(): Promise<void> {
-    setBusy(true);
-    setMessage("");
-    try {
+    await run(async () => {
       await deleteOpenAIKey();
-      setModels([]);
+      setOpenAIModels([]);
       await refresh();
-      setMessageIsError(false);
       setMessage("Stored OpenAI credential removed from macOS Keychain.");
-    } catch (error) {
-      setMessageIsError(true);
-      setMessage(
-        error instanceof Error ? error.message : "Unable to delete API key",
-      );
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
-  async function testConnection(): Promise<void> {
-    setBusy(true);
-    setMessage("Testing OpenAI connection…");
-    try {
+  async function testOpenAI(): Promise<void> {
+    await run(async () => {
       const connection = await testOpenAIConnection();
-      const availableModels = await listOpenAIModels();
-      setModels(availableModels);
-      setMessageIsError(false);
+      const models = await listOpenAIModels();
+      setOpenAIModels(models);
       setMessage(
-        `OpenAI connection verified. ${connection.modelCount} models are visible to this credential. No generation request was made.`,
+        `OpenAI verified. ${connection.modelCount} models visible; no generation request was made.`,
       );
-    } catch (error) {
-      setMessageIsError(true);
+    });
+  }
+
+  async function testOllama(): Promise<void> {
+    await run(async () => {
+      const connection = await testOllamaConnection();
+      const models = await listOllamaModels();
+      setOllamaModels(models);
       setMessage(
-        error instanceof Error
-          ? error.message
-          : "OpenAI connection test failed",
+        `Local Ollama verified. ${connection.modelCount} local models visible; no paid provider is involved.`,
       );
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   async function saveControls(): Promise<void> {
-    setBusy(true);
-    setMessage("");
-    try {
+    await run(async () => {
       const saved = await saveAISettings(settings);
       setSettings(saved);
       await refresh();
-      setMessageIsError(false);
-      setMessage("AI permissions and spending controls saved locally.");
-    } catch (error) {
-      setMessageIsError(true);
       setMessage(
-        error instanceof Error ? error.message : "Unable to save AI controls",
+        "Provider routing, evidence permissions, and budget controls saved locally.",
       );
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   if (!nativeAvailable) {
@@ -169,7 +170,7 @@ export function AIControlCenter({
           </strong>
           <span>
             {nativeIssue ??
-              "API credentials and paid-AI enforcement live in the local native companion. No browser-only fallback stores or uses your API key."}
+              "Provider credentials, local models, evidence indexing, and budget enforcement live in the native companion."}
           </span>
         </div>
       </section>
@@ -183,24 +184,127 @@ export function AIControlCenter({
           <p className="eyebrow">Owner-controlled intelligence</p>
           <h2>AI Control Center</h2>
         </div>
-        <span className={settings.keyConfigured ? "badge" : "badge review"}>
-          {settings.keyConfigured
-            ? "Keychain connected"
-            : "API key not configured"}
-        </span>
+        <span className="badge">{settings.provider.toUpperCase()}</span>
       </div>
 
       <p>
-        You control the provider, permissions, and budget. Connecting OpenAI
-        does not let MUNSHI invent facts or silently approve generated answers.
+        Choose automatic routing, OpenAI, or local Ollama. MUNSHI retrieves only
+        relevant evidence, routes routine questions cheaply, escalates harder
+        narrative questions, and always returns a reviewable draft.
       </p>
 
-      <h3>OpenAI connection</h3>
+      <h3>Provider routing</h3>
+      <div className="form-grid">
+        <label>
+          <span>Provider policy</span>
+          <select
+            value={settings.provider}
+            onChange={(event) =>
+              setSettings((current) => ({
+                ...current,
+                provider: event.target.value as AISettings["provider"],
+              }))
+            }
+          >
+            <option value="auto">Auto · prefer available local fallback</option>
+            <option value="openai">OpenAI</option>
+            <option value="ollama">Local Ollama</option>
+          </select>
+        </label>
+        <label className="answer-approval">
+          <input
+            type="checkbox"
+            checked={settings.preferLocalFallback}
+            onChange={(event) =>
+              setSettings((current) => ({
+                ...current,
+                preferLocalFallback: event.target.checked,
+              }))
+            }
+          />
+          Use local Ollama as fallback when configured
+        </label>
+        <label>
+          <span>Cheap / routine OpenAI model</span>
+          <input
+            type="text"
+            list="munshi-openai-models"
+            value={settings.cheapModel}
+            placeholder="e.g. configured low-cost model"
+            onChange={(event) =>
+              setSettings((current) => ({
+                ...current,
+                cheapModel: event.target.value,
+                model: current.model || event.target.value,
+              }))
+            }
+          />
+        </label>
+        <label>
+          <span>Strong reasoning OpenAI model</span>
+          <input
+            type="text"
+            list="munshi-openai-models"
+            value={settings.strongModel}
+            placeholder="e.g. configured strong model"
+            onChange={(event) =>
+              setSettings((current) => ({
+                ...current,
+                strongModel: event.target.value,
+              }))
+            }
+          />
+        </label>
+        <datalist id="munshi-openai-models">
+          {openAIModels.map((model) => (
+            <option key={model} value={model} />
+          ))}
+        </datalist>
+        <label>
+          <span>Local Ollama model</span>
+          <input
+            type="text"
+            list="munshi-ollama-models"
+            value={settings.ollamaModel}
+            placeholder="e.g. qwen / llama model installed locally"
+            onChange={(event) =>
+              setSettings((current) => ({
+                ...current,
+                ollamaModel: event.target.value,
+              }))
+            }
+          />
+        </label>
+        <datalist id="munshi-ollama-models">
+          {ollamaModels.map((model) => (
+            <option key={model} value={model} />
+          ))}
+        </datalist>
+      </div>
+      <div className="record-actions">
+        <button
+          className="quiet"
+          type="button"
+          disabled={busy}
+          onClick={() => void testOllama()}
+        >
+          Test local Ollama & load models
+        </button>
+        <button
+          className="quiet"
+          type="button"
+          disabled={busy || !settings.keyConfigured}
+          onClick={() => void testOpenAI()}
+        >
+          Test OpenAI & load models
+        </button>
+      </div>
+
+      <h3>OpenAI credential</h3>
       <div className="cloud-pairing">
         <p>
           Saved credential:{" "}
-          {settings.keyConfigured ? "•••••••• · secured" : "none"}
-          {settings.keyConfigured ? ` · ${settings.keySource}` : ""}
+          {settings.keyConfigured ? `•••••••• · ${settings.keySource}` : "none"}
         </p>
         <label>
           <span>
@@ -215,56 +319,30 @@ export function AIControlCenter({
             onChange={(event) => setApiKey(event.target.value)}
           />
         </label>
-        <button
-          className="primary"
-          type="button"
-          disabled={busy || !apiKey.trim()}
-          onClick={() => void storeKey()}
-        >
-          {settings.keyConfigured
-            ? "Replace Keychain key"
-            : "Store in macOS Keychain"}
-        </button>
-        <button
-          className="quiet"
-          type="button"
-          disabled={busy || !settings.keyConfigured}
-          onClick={() => void testConnection()}
-        >
-          Test connection & load models
-        </button>
-        <button
-          className="quiet destructive"
-          type="button"
-          disabled={busy || !settings.keyConfigured}
-          onClick={() => void removeKey()}
-        >
-          Delete stored key
-        </button>
+        <div className="record-actions">
+          <button
+            className="primary"
+            type="button"
+            disabled={busy || !apiKey.trim()}
+            onClick={() => void storeKey()}
+          >
+            {settings.keyConfigured
+              ? "Replace Keychain key"
+              : "Store in macOS Keychain"}
+          </button>
+          <button
+            className="quiet destructive"
+            type="button"
+            disabled={busy || !settings.keyConfigured}
+            onClick={() => void removeKey()}
+          >
+            Delete stored key
+          </button>
+        </div>
       </div>
 
-      <h3>Model & permissions</h3>
+      <h3>Draft permissions</h3>
       <div className="form-grid">
-        <label>
-          <span>Selected model</span>
-          <input
-            type="text"
-            list="munshi-ai-models"
-            value={settings.model}
-            placeholder="Test connection, then select a priced model"
-            onChange={(event) =>
-              setSettings((current) => ({
-                ...current,
-                model: event.target.value,
-              }))
-            }
-          />
-          <datalist id="munshi-ai-models">
-            {models.map((model) => (
-              <option key={model} value={model} />
-            ))}
-          </datalist>
-        </label>
         <label className="answer-approval">
           <input
             type="checkbox"
@@ -302,7 +380,7 @@ export function AIControlCenter({
               }))
             }
           />
-          Allow verified profile evidence
+          Use verified profile evidence
         </label>
         <label className="answer-approval">
           <input
@@ -315,11 +393,11 @@ export function AIControlCenter({
               }))
             }
           />
-          Allow verified résumé evidence
+          Use indexed résumé evidence
         </label>
       </div>
 
-      <h3>Spending controls</h3>
+      <h3>Paid-provider budget</h3>
       <div className="form-grid">
         <label>
           <span>Monthly maximum (USD)</span>
@@ -335,7 +413,10 @@ export function AIControlCenter({
               }))
             }
           />
-          <small>$0 means no paid provider request is authorized.</small>
+          <small>
+            $0 blocks paid-provider generation; local Ollama can still be used
+            when configured.
+          </small>
         </label>
         <label>
           <span>Warning threshold (USD)</span>
@@ -363,7 +444,7 @@ export function AIControlCenter({
               }))
             }
           />
-          Hard stop when projected spend exceeds the monthly maximum
+          Hard stop paid generation when projected spend exceeds maximum
         </label>
       </div>
 
@@ -372,7 +453,7 @@ export function AIControlCenter({
           <div className="metrics">
             <article>
               <strong>{money(status.usage.spentUsd)}</strong>
-              <span>spent this month</span>
+              <span>paid spend</span>
             </article>
             <article>
               <strong>{money(status.usage.reservedUsd)}</strong>
@@ -380,29 +461,27 @@ export function AIControlCenter({
             </article>
             <article>
               <strong>{status.usage.requestCount}</strong>
-              <span>requests</span>
+              <span>provider runs</span>
             </article>
           </div>
           <label>
             <span>
-              Monthly usage · {money(status.usage.projectedUsd)} projected ·{" "}
+              Paid usage · {money(status.usage.projectedUsd)} projected ·{" "}
               {money(status.usage.remainingUsd)} remaining
             </span>
             <progress max={100} value={budgetPercent} />
           </label>
-          <p>
-            {status.usage.inputTokens.toLocaleString()} input tokens ·{" "}
-            {status.usage.outputTokens.toLocaleString()} output tokens
-          </p>
-          {status.usage.estimatedCostUsd > 0 && (
-            <p className="diagnostic-error">
-              {money(status.usage.estimatedCostUsd)} is conservatively estimated
-              from provider failures where exact billable usage could not be
-              confirmed.
-            </p>
-          )}
         </>
       )}
+
+      <h3>Writing preference learning</h3>
+      <div className="cloud-connection">
+        <strong>{style?.samples ?? 0} approved owner edits learned</strong>
+        <span>
+          {style?.instructions ??
+            "MUNSHI will learn style only from generated drafts that you edit and explicitly approve."}
+        </span>
+      </div>
 
       <h3>Pricing gate</h3>
       {status?.pricing ? (
@@ -412,44 +491,50 @@ export function AIControlCenter({
             {money(status.pricing.inputUsdPerMillionTokens)} input / 1M ·{" "}
             {money(status.pricing.outputUsdPerMillionTokens)} output / 1M
           </span>
-          <span>
-            Pricing verified{" "}
-            {new Date(status.pricing.verifiedAt).toLocaleDateString()} · age{" "}
-            {status.pricing.ageDays} days
-          </span>
           {status.pricing.stale && (
             <span className="diagnostic-error">
-              Pricing snapshot is stale. Native enforcement will block paid
-              generation until it is re-verified.
+              Pricing is stale; paid generation remains blocked until
+              re-verified.
             </span>
           )}
         </div>
+      ) : settings.provider === "ollama" ? (
+        <div className="cloud-connection">
+          <strong>Local provider selected</strong>
+          <span>
+            Ollama runs on loopback and does not use the paid-provider budget.
+          </span>
+        </div>
       ) : (
         <div className="safety-callout">
-          <strong>No verified pricing for selected model</strong>
+          <strong>
+            No verified pricing for the current OpenAI routine model
+          </strong>
           <span>
-            MUNSHI will not make a paid generation request with an unpriced
-            model.
+            Paid generation will not run without a known current pricing
+            snapshot. Local fallback can remain available.
           </span>
         </div>
       )}
 
-      <button
-        className="primary"
-        type="button"
-        disabled={busy}
-        onClick={() => void saveControls()}
-      >
-        Save AI controls
-      </button>
-      <button
-        className="quiet"
-        type="button"
-        disabled={busy}
-        onClick={() => void refresh()}
-      >
-        Refresh usage
-      </button>
+      <div className="record-actions">
+        <button
+          className="primary"
+          type="button"
+          disabled={busy}
+          onClick={() => void saveControls()}
+        >
+          Save AI controls
+        </button>
+        <button
+          className="quiet"
+          type="button"
+          disabled={busy}
+          onClick={() => void refresh()}
+        >
+          Refresh status
+        </button>
+      </div>
       {message && (
         <div className={messageIsError ? "diagnostic-error" : "notice"}>
           {message}
@@ -457,13 +542,14 @@ export function AIControlCenter({
       )}
 
       <div className="safety-callout">
-        <strong>Permanent truth boundary</strong>
+        <strong>Truth boundary, not a usability barrier</strong>
         <span>
-          AI drafting is limited to selected narrative question types and
-          authoritative non-protected evidence. Work authorization, sponsorship,
-          salary, EEO/demographics, disclosures, security checks, and final
-          submission remain outside autonomous AI generation. Every generated
-          answer remains a draft requiring owner review.
+          Generated answers can cover job-specific narrative questions using job
+          context plus verified candidate evidence. Work authorization,
+          sponsorship, EEO/demographics, factual disclosures, security
+          checkpoints, and final submission are not invented by AI. Every
+          generated answer remains reviewable and must be approved before
+          guarded fill.
         </span>
       </div>
     </section>

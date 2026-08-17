@@ -1,4 +1,5 @@
 import { useMemo, useState, type DragEvent } from "react";
+import { ingestResumeEvidence } from "../messaging/native";
 import {
   getCloudConnection,
   uploadEncryptedResume,
@@ -20,6 +21,8 @@ export function ResumeVaultPanel({
   snapshot,
   selectedResumeId,
   currentRole,
+  nativeAvailable,
+  applicationId,
   onSelected,
   onRefresh,
   onNotice,
@@ -27,6 +30,8 @@ export function ResumeVaultPanel({
   snapshot: CloudSnapshot | null;
   selectedResumeId: string;
   currentRole: string | null;
+  nativeAvailable: boolean;
+  applicationId: string | null;
   onSelected: (resumeId: string) => void;
   onRefresh: () => Promise<void>;
   onNotice: (message: string) => void;
@@ -72,8 +77,27 @@ export function ResumeVaultPanel({
       });
       onSelected(resume.resumeId);
       if (source === "TAILORED") setRoleFamily("");
+      let evidenceNotice = "";
+      if (nativeAvailable) {
+        try {
+          const indexed = await ingestResumeEvidence({
+            file,
+            resumeId: resume.resumeId,
+            sha256: resume.sha256 ?? "",
+            applicationId: applicationId || null,
+          });
+          evidenceNotice = ` ${indexed.evidenceCount} résumé evidence chunks indexed for grounded answers.`;
+          if (indexed.warnings.length > 0)
+            evidenceNotice += ` ${indexed.warnings.join(" ")}`;
+        } catch (error) {
+          evidenceNotice = ` The encrypted résumé was saved, but evidence indexing was deferred: ${error instanceof Error ? error.message : "parser unavailable"}.`;
+        }
+      } else {
+        evidenceNotice =
+          " Evidence indexing will run after the native companion is available.";
+      }
       onNotice(
-        `${resume.name} encrypted as ${source === "MASTER" ? "your master résumé" : `a tailored résumé for ${role ?? "this job"}`}.`,
+        `${resume.name} encrypted as ${source === "MASTER" ? "your master résumé" : `a tailored résumé for ${role ?? "this job"}`}.${evidenceNotice}`,
       );
       await onRefresh();
     } catch (error) {

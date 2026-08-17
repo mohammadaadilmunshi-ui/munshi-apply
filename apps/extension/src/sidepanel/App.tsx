@@ -243,9 +243,13 @@ type AnswerDraft = {
 };
 
 const defaultAISettings: AISettings = {
-  provider: "openai",
+  provider: "auto",
   enabled: false,
   model: "",
+  cheapModel: "",
+  strongModel: "",
+  ollamaModel: "",
+  preferLocalFallback: true,
   monthlyBudgetUsd: 0,
   warningBudgetUsd: 0,
   hardStop: true,
@@ -1656,6 +1660,8 @@ export function App() {
               snapshot={cloudSnapshot}
               selectedResumeId={selectedResumeId}
               currentRole={page?.title ?? null}
+              nativeAvailable={native.status === "healthy"}
+              applicationId={activeApplicationId || null}
               onSelected={setSelectedResumeId}
               onRefresh={refresh}
               onNotice={setNotice}

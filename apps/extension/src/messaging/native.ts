@@ -12,10 +12,16 @@ const nativeHostName = "systems.munshi.apply";
 type NativeResponse =
   { ok: true; data?: unknown } | { ok: false; error: string };
 
+export type AIProviderChoice = "openai" | "ollama" | "auto";
+
 export type AISettings = {
-  provider: "openai";
+  provider: AIProviderChoice;
   enabled: boolean;
   model: string;
+  cheapModel: string;
+  strongModel: string;
+  ollamaModel: string;
+  preferLocalFallback: boolean;
   monthlyBudgetUsd: number;
   warningBudgetUsd: number;
   hardStop: boolean;
@@ -78,8 +84,14 @@ export type AIDraftRequest = {
 export type AIDraftPreview = {
   state: "READY_FOR_PROVIDER";
   providerCallMade: false;
+  provider: "openai" | "ollama";
   model: string;
+  modelLane: "CHEAP" | "STRONG";
+  routeReason: string;
+  responseIntent: string;
+  styleSamples: number;
   evidenceIds: string[];
+  evidenceStats?: Record<string, unknown>;
   estimatedInputTokens: number;
   plannedCostUsd: number;
   budget: {
@@ -106,7 +118,7 @@ export type AIDraftRecord = {
   controlId: string;
   questionFingerprint: string;
   semanticType: string;
-  provider: "openai";
+  provider: "openai" | "ollama";
   model: string;
   responseId: string;
   originalText: string;
@@ -132,8 +144,12 @@ export type AIDraftResult = {
   status: "DRAFT_REVIEW_REQUIRED";
   draftId: string;
   draft: AIDraftRecord;
-  provider: "openai";
+  provider: "openai" | "ollama";
   model: string;
+  modelLane: "CHEAP" | "STRONG";
+  routeReason: string;
+  responseIntent: string;
+  styleSamples: number;
   responseId: string;
   text: string;
   claims: { claimId: string; text: string; evidenceIds: string[] }[];
@@ -219,7 +235,8 @@ function integerValue(value: unknown, label: string): number {
 
 export function parseAISettings(value: unknown): AISettings {
   const candidate = objectValue(value, "AI settings");
-  if (candidate.provider !== "openai") {
+  const provider = candidate.provider;
+  if (provider !== "openai" && provider !== "ollama" && provider !== "auto") {
     throw new Error("AI settings provider is invalid");
   }
   const keySource = candidate.keySource;
@@ -255,9 +272,16 @@ export function parseAISettings(value: unknown): AISettings {
     throw new Error("AI warning budget cannot exceed the monthly budget");
   }
   return {
-    provider: "openai",
+    provider,
     enabled: candidate.enabled as boolean,
     model: typeof candidate.model === "string" ? candidate.model : "",
+    cheapModel:
+      typeof candidate.cheapModel === "string" ? candidate.cheapModel : "",
+    strongModel:
+      typeof candidate.strongModel === "string" ? candidate.strongModel : "",
+    ollamaModel:
+      typeof candidate.ollamaModel === "string" ? candidate.ollamaModel : "",
+    preferLocalFallback: candidate.preferLocalFallback !== false,
     monthlyBudgetUsd,
     warningBudgetUsd,
     hardStop: candidate.hardStop as boolean,
@@ -368,7 +392,7 @@ function parseAIDraftRecord(value: unknown): AIDraftRecord {
   if (typeof candidate.status !== "string" || !statuses.has(candidate.status)) {
     throw new Error("AI draft status is invalid");
   }
-  if (candidate.provider !== "openai") {
+  if (candidate.provider !== "openai" && candidate.provider !== "ollama") {
     throw new Error("AI draft provider is invalid");
   }
   const contentSha256 = stringValue(
@@ -425,7 +449,7 @@ function parseAIDraftRecord(value: unknown): AIDraftRecord {
       "AI question fingerprint",
     ),
     semanticType: stringValue(candidate.semanticType, "AI semantic type"),
-    provider: "openai",
+    provider: candidate.provider as "openai" | "ollama",
     model: stringValue(candidate.model, "AI model"),
     responseId: stringValue(candidate.responseId, "AI responseId"),
     originalText: stringValue(candidate.originalText, "AI original text"),
@@ -559,6 +583,10 @@ export async function saveAISettings(
         provider: settings.provider,
         enabled: settings.enabled,
         model: settings.model,
+        cheapModel: settings.cheapModel,
+        strongModel: settings.strongModel,
+        ollamaModel: settings.ollamaModel,
+        preferLocalFallback: settings.preferLocalFallback,
         monthlyBudgetUsd: settings.monthlyBudgetUsd,
         warningBudgetUsd: settings.warningBudgetUsd,
         hardStop: settings.hardStop,
@@ -598,6 +626,143 @@ export async function listOpenAIModels(): Promise<string[]> {
     15_000,
   );
   return result.models;
+}
+
+export async function testOllamaConnection(): Promise<{ modelCount: number }> {
+  return sendNative<{ modelCount: number }>(
+    { type: "TEST_OLLAMA_CONNECTION" },
+    15_000,
+  );
+}
+
+export async function listOllamaModels(): Promise<string[]> {
+  const result = await sendNative<{ models: string[] }>(
+    { type: "LIST_OLLAMA_MODELS" },
+    15_000,
+  );
+  return result.models;
+}
+
+export type WritingStyleStatus = {
+  samples: number;
+  averageWords: number;
+  averageSentenceWords: number;
+  contractionRate: number;
+  firstPersonRate: number;
+  enthusiasmRate: number;
+  concisePreference: number;
+  instructions: string;
+};
+
+export async function getWritingStyle(): Promise<WritingStyleStatus> {
+  const raw = await sendNative<Record<string, unknown>>({
+    type: "GET_WRITING_STYLE",
+  });
+  return {
+    samples: integerValue(raw.samples, "writing style samples"),
+    averageWords: finiteNumber(
+      raw.average_words ?? raw.averageWords,
+      "writing style averageWords",
+    ),
+    averageSentenceWords: finiteNumber(
+      raw.average_sentence_words ?? raw.averageSentenceWords,
+      "writing style averageSentenceWords",
+    ),
+    contractionRate: finiteNumber(
+      raw.contraction_rate ?? raw.contractionRate,
+      "writing style contractionRate",
+    ),
+    firstPersonRate: finiteNumber(
+      raw.first_person_rate ?? raw.firstPersonRate,
+      "writing style firstPersonRate",
+    ),
+    enthusiasmRate: finiteNumber(
+      raw.enthusiasm_rate ?? raw.enthusiasmRate,
+      "writing style enthusiasmRate",
+    ),
+    concisePreference: finiteNumber(
+      raw.concise_preference ?? raw.concisePreference,
+      "writing style concisePreference",
+    ),
+    instructions: stringValue(raw.instructions, "writing style instructions"),
+  };
+}
+
+export type ResumeEvidenceIngestionResult = {
+  sessionId: string;
+  resumeId: string;
+  sha256: string;
+  parser: string;
+  evidenceCount: number;
+  characterCount: number;
+  warnings: string[];
+};
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const block = 0x8000;
+  for (let index = 0; index < bytes.length; index += block) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + block));
+  }
+  return btoa(binary);
+}
+
+export async function ingestResumeEvidence(input: {
+  file: File;
+  resumeId: string;
+  sha256: string;
+  applicationId?: string | null;
+}): Promise<ResumeEvidenceIngestionResult> {
+  const resumeId = input.resumeId.trim();
+  const sha256 = input.sha256.toLowerCase().trim();
+  if (!resumeId) throw new Error("Résumé evidence indexing requires resumeId");
+  if (!/^[a-f0-9]{64}$/.test(sha256))
+    throw new Error("Résumé evidence indexing requires SHA-256");
+  if (input.file.size < 1 || input.file.size > 12 * 1024 * 1024) {
+    throw new Error("Résumé evidence indexing accepts files up to 12 MB");
+  }
+  const sessionId = `resume-${crypto.randomUUID()}`;
+  await sendNative(
+    {
+      type: "BEGIN_DOCUMENT_INGESTION",
+      payload: {
+        sessionId,
+        resumeId,
+        filename: input.file.name,
+        sha256,
+        sizeBytes: input.file.size,
+        applicationId: input.applicationId?.trim() || null,
+      },
+    },
+    15_000,
+  );
+  try {
+    const bytes = new Uint8Array(await input.file.arrayBuffer());
+    const chunkSize = 384 * 1024;
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+      const chunk = bytes.subarray(
+        offset,
+        Math.min(bytes.length, offset + chunkSize),
+      );
+      await sendNative(
+        {
+          type: "APPEND_DOCUMENT_CHUNK",
+          payload: { sessionId, offset, base64: bytesToBase64(chunk) },
+        },
+        20_000,
+      );
+    }
+    return await sendNative<ResumeEvidenceIngestionResult>(
+      { type: "FINISH_DOCUMENT_INGESTION", payload: { sessionId } },
+      60_000,
+    );
+  } catch (error) {
+    await sendNative({
+      type: "CANCEL_DOCUMENT_INGESTION",
+      payload: { sessionId },
+    }).catch(() => undefined);
+    throw error;
+  }
 }
 
 export async function getAIControlStatus(): Promise<AIControlStatus> {

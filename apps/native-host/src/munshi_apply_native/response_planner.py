@@ -85,22 +85,26 @@ def classify_response_intent(question: str, semantic_type: str) -> str:
     semantic = semantic_type.strip().upper()
     text = _normalized(question)
     if semantic == "WHY_COMPANY" or re.search(
-        r"why (?:do you want to (?:work|join)|are you interested in) (?:us|our|this company|the company)",
+        r"why (?:do you want to (?:work|join)|are you interested in) "
+        r"(?:us|our|this company|the company)",
         text,
     ):
         return "WHY_COMPANY"
     if semantic == "WHY_ROLE" or re.search(
-        r"why (?:this|the) (?:role|position)|why are you interested in (?:this|the) (?:role|position)",
+        r"why (?:this|the) (?:role|position)|why are you interested in "
+        r"(?:this|the) (?:role|position)",
         text,
     ):
         return "WHY_ROLE"
     if semantic in {"ROLE_RESPONSIBILITIES", "ROLE_UNDERSTANDING"} or re.search(
-        r"what (?:does|do you understand about).*(?:role|position)|describe (?:the )?(?:role|responsibilities)",
+        r"what (?:does|do you understand about).*(?:role|position)|describe "
+        r"(?:the )?(?:role|responsibilities)",
         text,
     ):
         return "ROLE_UNDERSTANDING"
     if semantic == "RELEVANT_EXPERIENCE" or re.search(
-        r"(?:relevant|related|prior) experience|tell us about your experience|describe your experience",
+        r"(?:relevant|related|prior) experience|tell us about your experience|"
+        r"describe your experience",
         text,
     ):
         return "RELEVANT_EXPERIENCE"
@@ -142,9 +146,7 @@ def plan_job_response(
         "BEHAVIORAL",
     }
     model_lane = (
-        "STRONG"
-        if intent in {"BEHAVIORAL", "CAREER_TRANSITION", "MOTIVATION"}
-        else "CHEAP"
+        "STRONG" if intent in {"BEHAVIORAL", "CAREER_TRANSITION", "MOTIVATION"} else "CHEAP"
     )
     defaults = {
         "WHY_COMPANY": 140,

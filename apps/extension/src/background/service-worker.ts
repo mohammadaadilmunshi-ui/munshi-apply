@@ -391,6 +391,14 @@ async function finishTeach(
           eventTypes: string[];
           startedAt: string;
           finishedAt: string;
+          eventSequence?: { type: string; target: string; atMs: number }[];
+          beforeState?: Record<string, unknown>;
+          afterState?: Record<string, unknown>;
+          quality?: {
+            score: number;
+            reasons: string[];
+            valueCommitted: boolean;
+          };
         };
         error?: string;
       }
@@ -403,7 +411,8 @@ async function finishTeach(
   const capture = response?.result;
   if (!capture)
     throw new Error("Teach MUNSHI returned no demonstration capture");
-  if (!capture.reusable) return { ...capture, recipe: null };
+  if (!capture.reusable || (capture.quality?.score ?? 0) < 0.8)
+    return { ...capture, recipe: null };
 
   const page = await getMergedPageForTab(tab.id!);
   if (!page)

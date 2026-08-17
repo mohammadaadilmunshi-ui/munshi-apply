@@ -30,7 +30,7 @@ def create_runtime(
             "semantic_types": ["WHY_ROLE"],
             "trust_level": "VERIFIED",
             "protected": False,
-            "source": "test",
+            "source": "job-listing",
             "updated_at": now,
         }
     )

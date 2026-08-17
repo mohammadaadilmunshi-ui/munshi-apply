@@ -120,7 +120,12 @@ class AISettingsStore:
         self.config_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         payload = config.public_dict()
         with tempfile.NamedTemporaryFile(
-            "w", encoding="utf-8", dir=self.config_path.parent, prefix="ai-", suffix=".tmp", delete=False
+            "w",
+            encoding="utf-8",
+            dir=self.config_path.parent,
+            prefix="ai-",
+            suffix=".tmp",
+            delete=False,
         ) as handle:
             json.dump(payload, handle, indent=2, sort_keys=True)
             handle.write("\n")

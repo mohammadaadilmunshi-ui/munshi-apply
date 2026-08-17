@@ -145,12 +145,12 @@ def _instructions(request: ProviderGenerationRequest) -> str:
         "only when it supports the statement. For why-company and why-role questions, connect "
         "specific job/company evidence with relevant candidate evidence rather than writing "
         "generic enthusiasm. For experience and behavioral answers, prioritize concrete actions "
-        "and verified results. For career-transition answers, stay constructive and future-focused. "
+        "and verified results. For career-transition answers, stay constructive and "
+        "future-focused. "
         "Do not invent facts, metrics, employers, dates, credentials, immigration facts, motives, "
         "or claims. If evidence does not support a personal claim, omit it. Avoid generic filler, "
         "clichés, robotic headings, and references to the evidence system. Every factual claim "
-        "must cite supplied evidenceId values in the structured claims array."
-        + style
+        "must cite supplied evidenceId values in the structured claims array." + style
     )
 
 

@@ -18,14 +18,7 @@ export type JobResponsePlan = {
 };
 
 const intentTerms: Record<JobResponseIntent, string[]> = {
-  WHY_COMPANY: [
-    "company",
-    "mission",
-    "culture",
-    "values",
-    "industry",
-    "team",
-  ],
+  WHY_COMPANY: ["company", "mission", "culture", "values", "industry", "team"],
   WHY_ROLE: ["role", "position", "responsibilities", "skills", "experience"],
   ROLE_UNDERSTANDING: [
     "responsibilities",
@@ -92,7 +85,9 @@ export function classifyJobResponseIntent(
   }
   if (
     semantic === "RELEVANT_EXPERIENCE" ||
-    /(?:relevant|related|prior).*?experience|describe your experience/.test(text)
+    /(?:relevant|related|prior).*?experience|describe your experience/.test(
+      text,
+    )
   ) {
     return "RELEVANT_EXPERIENCE";
   }
