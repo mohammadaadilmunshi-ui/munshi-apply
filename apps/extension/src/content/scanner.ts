@@ -28,6 +28,23 @@ import {
 } from "./adaptive";
 import { createBoundedHintStore } from "./bounded-hint-store";
 
+let sectionHeadingCache = new WeakMap<Document | ShadowRoot, Element[]>();
+let computedStyleCache = new WeakMap<HTMLElement, CSSStyleDeclaration>();
+let hiddenStateCache = new WeakMap<HTMLElement, boolean>();
+
+function resetScanCaches(): void {
+  sectionHeadingCache = new WeakMap<Document | ShadowRoot, Element[]>();
+  computedStyleCache = new WeakMap<HTMLElement, CSSStyleDeclaration>();
+  hiddenStateCache = new WeakMap<HTMLElement, boolean>();
+}
+
+function computedStyleFor(element: HTMLElement): CSSStyleDeclaration {
+  const cached = computedStyleCache.get(element);
+  if (cached) return cached;
+  const style = window.getComputedStyle(element);
+  computedStyleCache.set(element, style);
+  return style;
+}
 const selector = [
   "input",
   "select",
@@ -75,29 +92,30 @@ function normalized(value: string | null | undefined): string {
 }
 
 function hiddenBySelfOrAncestor(element: HTMLElement): boolean {
-  let current: HTMLElement | null = element;
-  while (current) {
-    const style = window.getComputedStyle(current);
-    const opacity = Number.parseFloat(style.opacity || "1");
-    if (
-      current.hidden ||
-      current.getAttribute("aria-hidden") === "true" ||
-      style.display === "none" ||
-      style.visibility === "hidden" ||
-      style.visibility === "collapse" ||
-      (Number.isFinite(opacity) && opacity <= 0.01)
-    ) {
-      return true;
-    }
-    current = current.parentElement;
-  }
-  return false;
+  const cached = hiddenStateCache.get(element);
+  if (cached !== undefined) return cached;
+  const style = computedStyleFor(element);
+  const opacity = Number.parseFloat(style.opacity || "1");
+  const hiddenBySelf =
+    element.hidden ||
+    element.getAttribute("aria-hidden") === "true" ||
+    style.display === "none" ||
+    style.visibility === "hidden" ||
+    style.visibility === "collapse" ||
+    (Number.isFinite(opacity) && opacity <= 0.01);
+  const hidden =
+    hiddenBySelf ||
+    (element.parentElement
+      ? hiddenBySelfOrAncestor(element.parentElement)
+      : false);
+  hiddenStateCache.set(element, hidden);
+  return hidden;
 }
 
 function isVisible(element: Element): boolean {
   if (!(element instanceof HTMLElement)) return false;
   if (hiddenBySelfOrAncestor(element)) return false;
-  const style = window.getComputedStyle(element);
+  const style = computedStyleFor(element);
   const rect = element.getBoundingClientRect();
   if (rect.width <= 0 || rect.height <= 0) return false;
   const explicitlyPositioned =
@@ -332,13 +350,17 @@ function sectionContextFor(element: Element): string {
 
   const root = element.getRootNode();
   if (!(root instanceof Document || root instanceof ShadowRoot)) return "";
-  const preceding = Array.from(
-    root.querySelectorAll("h1, h2, h3, h4, h5, h6, [role='heading'], legend"),
-  )
+  let headings = sectionHeadingCache.get(root);
+  if (!headings) {
+    headings = Array.from(
+      root.querySelectorAll("h1, h2, h3, h4, h5, h6, [role='heading'], legend"),
+    ).filter(isVisible);
+    sectionHeadingCache.set(root, headings);
+  }
+  const preceding = headings
     .filter(
       (candidate) =>
         candidate !== element &&
-        isVisible(candidate) &&
         Boolean(
           candidate.compareDocumentPosition(element) &
           Node.DOCUMENT_POSITION_FOLLOWING,
@@ -484,7 +506,7 @@ function validationState(element: Element): {
   };
 }
 
-function stableControlSignature(element: Element): string {
+function stableControlSignature(element: Element, label: string): string {
   const url = new URL(window.location.href);
   const type = element instanceof HTMLInputElement ? element.type : "";
   const optionValue =
@@ -501,7 +523,7 @@ function stableControlSignature(element: Element): string {
     element.id,
     compactText(element.getAttribute("name")),
     type,
-    labelFor(element),
+    label,
     compactText(element.getAttribute("placeholder")),
     compactText(element.getAttribute("aria-label")),
     compactText(element.getAttribute("autocomplete")),
@@ -568,13 +590,14 @@ function createControl(element: Element): Control | null {
       : null;
   const kind = kindFor(element);
   const options = optionsFor(element);
+  const label = labelFor(element);
   return {
-    controlId: `ctl-${hash(stableControlSignature(element))}`,
+    controlId: `ctl-${hash(stableControlSignature(element, label))}`,
     frameId: 0,
     kind,
     tagName: element.tagName.toLowerCase(),
     name: compactText(element.getAttribute("name")),
-    label: labelFor(element),
+    label,
     placeholder: compactText(element.getAttribute("placeholder")),
     ariaLabel: compactText(element.getAttribute("aria-label")),
     required:
@@ -644,6 +667,7 @@ type ControlEntry = { element: Element; control: Control };
 const controlHints = createBoundedHintStore<Control>();
 
 function scanControlEntries(): ControlEntry[] {
+  resetScanCaches();
   const duplicateCounts = new Map<string, number>();
   const entries: ControlEntry[] = [];
   for (const element of collectInteractiveElements(document)) {
