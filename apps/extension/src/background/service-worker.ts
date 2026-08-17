@@ -30,6 +30,7 @@ import {
   clearJobContext,
   rememberJobContext,
 } from "./job-context";
+import { mergeApplicationPages } from "./page-merge";
 import {
   clearPagesForTab,
   deletePage,
@@ -158,24 +159,7 @@ function sameProfileSaveContent(
 async function getMergedPageForTab(
   tabId: number,
 ): Promise<ApplicationPage | null> {
-  const pages = await getPagesForTab(tabId);
-  if (pages.length === 0) return null;
-  const topLevel = pages.find((page) => page.frameId === 0);
-  const base = topLevel ?? pages.at(0);
-  if (!base) return null;
-  const controls = pages.flatMap((page) => page.controls);
-  const controlIds = new Set(controls.map((control) => control.controlId));
-  return {
-    ...base,
-    controls,
-    questions: pages
-      .flatMap((page) => page.questions)
-      .filter((question) => controlIds.has(question.controlId)),
-    observedAt:
-      pages
-        .map((page) => page.observedAt)
-        .sort((left, right) => right.localeCompare(left))[0] ?? base.observedAt,
-  };
+  return mergeApplicationPages(await getPagesForTab(tabId));
 }
 
 const learnableStrategies = new Set<InteractionRecipeStrategy>([
