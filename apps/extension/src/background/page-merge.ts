@@ -37,10 +37,14 @@ function strongestSecurityCheckpoint(
   return strongest;
 }
 
-function mergedPageContext(pages: readonly ApplicationPage[]): string | undefined {
+function mergedPageContext(
+  pages: readonly ApplicationPage[],
+): string | undefined {
   const chunks: string[] = [];
   const seen = new Set<string>();
-  for (const page of [...pages].sort((left, right) => left.frameId - right.frameId)) {
+  for (const page of [...pages].sort(
+    (left, right) => left.frameId - right.frameId,
+  )) {
     const value = (page.pageContext ?? "").replace(/\s+/g, " ").trim();
     if (!value || seen.has(value)) continue;
     seen.add(value);
@@ -78,13 +82,14 @@ export function mergeApplicationPages(
       localControlIds.has(question.controlId),
     );
   });
-  const navigationCandidates = pages.flatMap((page) => page.navigationCandidates);
+  const navigationCandidates = pages.flatMap(
+    (page) => page.navigationCandidates,
+  );
   const atsFamily =
     base.atsFamily && base.atsFamily !== "GENERIC"
       ? base.atsFamily
-      : pages.find(
-          (page) => page.atsFamily && page.atsFamily !== "GENERIC",
-        )?.atsFamily ?? base.atsFamily;
+      : (pages.find((page) => page.atsFamily && page.atsFamily !== "GENERIC")
+          ?.atsFamily ?? base.atsFamily);
 
   return {
     ...base,
@@ -102,9 +107,7 @@ export function mergeApplicationPages(
       0,
     ),
     navigationCandidates,
-    finalSubmissionBoundary: pages.some(
-      (page) => page.finalSubmissionBoundary,
-    ),
+    finalSubmissionBoundary: pages.some((page) => page.finalSubmissionBoundary),
     atsFamily,
   };
 }
