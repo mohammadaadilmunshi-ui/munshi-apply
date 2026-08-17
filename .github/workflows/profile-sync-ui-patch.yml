@@ -26,85 +26,93 @@ jobs:
           path = Path("apps/extension/src/sidepanel/App.tsx")
           text = path.read_text()
 
-          old_autosave = '''        void saveProfile(profile)
-            .then(async () => {
-              const status = await getProfileSyncStatus();
-              setProfileSyncStatus(status);
-              if (profileRevision.current !== revision) return;
-              setProfileDirty(false);
-              setSaveState(
-                status.conflict
-                  ? "conflict"
-                  : cloud.status === "connected" && cloud.data.encryptionReady
-                    ? "synced"
-                    : "local",
-              );
-            })'''
-          new_autosave = '''        void saveProfile(profile)
-            .then((acknowledgement) => {
-              const status: ProfileSyncStatus = {
-                conflict: acknowledgement.conflict,
-              };
-              setProfileSyncStatus(status);
-              if (profileRevision.current !== revision) return;
-              setProfileDirty(false);
-              setSaveState(
-                status.conflict
-                  ? "conflict"
-                  : acknowledgement.cloudSynced
-                    ? "synced"
-                    : "local",
-              );
-            })'''
+          old_autosave = (
+              "        void saveProfile(profile)\n"
+              "          .then(async () => {\n"
+              "            const status = await getProfileSyncStatus();\n"
+              "            setProfileSyncStatus(status);\n"
+              "            if (profileRevision.current !== revision) return;\n"
+              "            setProfileDirty(false);\n"
+              "            setSaveState(\n"
+              "              status.conflict\n"
+              "                ? \"conflict\"\n"
+              "                : cloud.status === \"connected\" && cloud.data.encryptionReady\n"
+              "                  ? \"synced\"\n"
+              "                  : \"local\",\n"
+              "            );\n"
+              "          })"
+          )
+          new_autosave = (
+              "        void saveProfile(profile)\n"
+              "          .then((acknowledgement) => {\n"
+              "            const status: ProfileSyncStatus = {\n"
+              "              conflict: acknowledgement.conflict,\n"
+              "            };\n"
+              "            setProfileSyncStatus(status);\n"
+              "            if (profileRevision.current !== revision) return;\n"
+              "            setProfileDirty(false);\n"
+              "            setSaveState(\n"
+              "              status.conflict\n"
+              "                ? \"conflict\"\n"
+              "                : acknowledgement.cloudSynced\n"
+              "                  ? \"synced\"\n"
+              "                  : \"local\",\n"
+              "            );\n"
+              "          })"
+          )
           if text.count(old_autosave) != 1:
               raise SystemExit("autosave source block drifted; refusing blind patch")
           text = text.replace(old_autosave, new_autosave, 1)
 
-          old_dependency = '''  }, [cloud, profile, profileDirty, profileLoaded, retryTick]);'''
-          new_dependency = '''  }, [profile, profileDirty, profileLoaded, retryTick]);'''
+          old_dependency = "  }, [cloud, profile, profileDirty, profileLoaded, retryTick]);"
+          new_dependency = "  }, [profile, profileDirty, profileLoaded, retryTick]);"
           if text.count(old_dependency) != 1:
               raise SystemExit("autosave dependency block drifted; refusing blind patch")
           text = text.replace(old_dependency, new_dependency, 1)
 
-          old_sync_now = '''    try {
-      await saveProfile(profile);
-      const syncStatus = await getProfileSyncStatus();
-      setProfileSyncStatus(syncStatus);
-      if (profileRevision.current === revision) {
-        setProfileDirty(false);
-        setSaveState(
-          syncStatus.conflict
-            ? "conflict"
-            : cloud.status === "connected" && cloud.data.encryptionReady
-              ? "synced"
-              : "local",
-        );
-      }
-    } catch (error) {'''
-          new_sync_now = '''    try {
-      const acknowledgement = await saveProfile(profile);
-      const syncStatus: ProfileSyncStatus = {
-        conflict: acknowledgement.conflict,
-      };
-      setProfileSyncStatus(syncStatus);
-      if (profileRevision.current === revision) {
-        setProfileDirty(false);
-        setSaveState(
-          syncStatus.conflict
-            ? "conflict"
-            : acknowledgement.cloudSynced
-              ? "synced"
-              : "local",
-        );
-        if (!syncStatus.conflict) {
-          setNotice(
-            acknowledgement.cloudSynced
-              ? "Profile saved locally and acknowledged by the encrypted workspace."
-              : "Profile saved locally. The encrypted workspace has not acknowledged this save yet.",
-          );
-        }
-      }
-    } catch (error) {'''
+          old_sync_now = (
+              "    try {\n"
+              "      await saveProfile(profile);\n"
+              "      const syncStatus = await getProfileSyncStatus();\n"
+              "      setProfileSyncStatus(syncStatus);\n"
+              "      if (profileRevision.current === revision) {\n"
+              "        setProfileDirty(false);\n"
+              "        setSaveState(\n"
+              "          syncStatus.conflict\n"
+              "            ? \"conflict\"\n"
+              "            : cloud.status === \"connected\" && cloud.data.encryptionReady\n"
+              "              ? \"synced\"\n"
+              "              : \"local\",\n"
+              "        );\n"
+              "      }\n"
+              "    } catch (error) {"
+          )
+          new_sync_now = (
+              "    try {\n"
+              "      const acknowledgement = await saveProfile(profile);\n"
+              "      const syncStatus: ProfileSyncStatus = {\n"
+              "        conflict: acknowledgement.conflict,\n"
+              "      };\n"
+              "      setProfileSyncStatus(syncStatus);\n"
+              "      if (profileRevision.current === revision) {\n"
+              "        setProfileDirty(false);\n"
+              "        setSaveState(\n"
+              "          syncStatus.conflict\n"
+              "            ? \"conflict\"\n"
+              "            : acknowledgement.cloudSynced\n"
+              "              ? \"synced\"\n"
+              "              : \"local\",\n"
+              "        );\n"
+              "        if (!syncStatus.conflict) {\n"
+              "          setNotice(\n"
+              "            acknowledgement.cloudSynced\n"
+              "              ? \"Profile saved locally and acknowledged by the encrypted workspace.\"\n"
+              "              : \"Profile saved locally. The encrypted workspace has not acknowledged this save yet.\",\n"
+              "          );\n"
+              "        }\n"
+              "      }\n"
+              "    } catch (error) {"
+          )
           if text.count(old_sync_now) != 1:
               raise SystemExit("manual sync source block drifted; refusing blind patch")
           text = text.replace(old_sync_now, new_sync_now, 1)
