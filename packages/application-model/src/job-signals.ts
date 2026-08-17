@@ -16,10 +16,7 @@ export const jobSignalDimensions = [
 export type JobSignalDimension = (typeof jobSignalDimensions)[number];
 export type JobSignalSeverity = "LOW" | "MODERATE" | "HIGH";
 export type OverallJobSignal =
-  | "LOW"
-  | "MODERATE"
-  | "HIGH"
-  | "INSUFFICIENT_DATA";
+  "LOW" | "MODERATE" | "HIGH" | "INSUFFICIENT_DATA";
 
 export type JobSignalInput = {
   company?: string | null;
@@ -123,13 +120,25 @@ function allText(input: JobSignalInput): string {
     .join("\n");
 }
 
+function accumulator(): DimensionAccumulator {
+  return { score: null, confidence: 0, evidenceIds: [] };
+}
+
 function emptyDimensions(): Record<JobSignalDimension, DimensionAccumulator> {
-  return Object.fromEntries(
-    jobSignalDimensions.map((dimension) => [
-      dimension,
-      { score: null, confidence: 0, evidenceIds: [] },
-    ]),
-  ) as Record<JobSignalDimension, DimensionAccumulator>;
+  return {
+    ROLE_AMBIGUITY: accumulator(),
+    RESPONSIBILITY_BREADTH: accumulator(),
+    QUALIFICATION_INFLATION: accumulator(),
+    WORKLOAD_PRESSURE: accumulator(),
+    SCHEDULE_INTENSITY: accumulator(),
+    TRAVEL_BURDEN: accumulator(),
+    COMPENSATION_CLARITY: accumulator(),
+    SENIORITY_ALIGNMENT: accumulator(),
+    ROLE_STABILITY: accumulator(),
+    LOCATION_CONSTRAINTS: accumulator(),
+    WORK_AUTHORIZATION_RISK: accumulator(),
+    APPLICATION_FRICTION: accumulator(),
+  };
 }
 
 function setDimension(
@@ -226,7 +235,9 @@ function analyzeResponsibilityBreadth(
   signals: JobSignalEvidence[],
   dimensions: Record<JobSignalDimension, DimensionAccumulator>,
 ): void {
-  const domains = functionalPatterns.filter((pattern) => pattern.test(text)).length;
+  const domains = functionalPatterns.filter((pattern) =>
+    pattern.test(text),
+  ).length;
   if (domains < 4) return;
   const score = Math.min(88, 35 + (domains - 3) * 9);
   addSignal(
@@ -247,9 +258,8 @@ function analyzeQualificationInflation(
   dimensions: Record<JobSignalDimension, DimensionAccumulator>,
 ): void {
   const role = compact(input.role).toLocaleLowerCase("en-US");
-  const juniorRole = /\b(intern|entry|assistant|coordinator|associate|junior)\b/.test(
-    role,
-  );
+  const juniorRole =
+    /\b(intern|entry|assistant|coordinator|associate|junior)\b/.test(role);
   if (!juniorRole) return;
   const years = numericYears(text);
   const maximum = years.length ? Math.max(...years) : 0;
@@ -320,15 +330,11 @@ function analyzeScheduleIntensity(
       "The posting explicitly requires evening/night and weekend availability.",
     ],
     [
-      /\bweekends? (?:required|as needed|as necessary)\b/i,
+      /\bweekend(?:s| work)?(?: (?:is|are))? (?:required|as needed|as necessary)\b/i,
       62,
       "The posting explicitly requires or may require weekend work.",
     ],
-    [
-      /\bon[- ]call\b/i,
-      74,
-      "The posting includes an on-call expectation.",
-    ],
+    [/\bon[- ]call\b/i, 74, "The posting includes an on-call expectation."],
     [
       /\bmandatory overtime\b/i,
       88,
@@ -363,7 +369,8 @@ function analyzeTravel(
   const percentage = text.match(/\b(?:up to )?(\d{1,3})%\s+travel\b/i);
   if (percentage) {
     const amount = Math.min(100, Number(percentage[1]));
-    const score = amount <= 10 ? 20 : amount <= 25 ? 45 : amount <= 50 ? 70 : 90;
+    const score =
+      amount <= 10 ? 20 : amount <= 25 ? 45 : amount <= 50 ? 70 : 90;
     addSignal(
       signals,
       dimensions,
@@ -439,12 +446,10 @@ function analyzeSeniorityAlignment(
   const years = numericYears(text);
   if (!years.length) return;
   const maximum = Math.max(...years);
-  const junior = /\b(intern|entry|assistant|coordinator|associate|junior)\b/.test(
-    role,
-  );
-  const senior = /\b(senior|lead|principal|director|head|vice president|vp)\b/.test(
-    role,
-  );
+  const junior =
+    /\b(intern|entry|assistant|coordinator|associate|junior)\b/.test(role);
+  const senior =
+    /\b(senior|lead|principal|director|head|vice president|vp)\b/.test(role);
   if (junior && maximum >= 4) {
     setDimension(dimensions, "SENIORITY_ALIGNMENT", 30, 0.82);
     addSignal(
@@ -577,7 +582,9 @@ function analyzeApplicationFriction(
   }
   const score = Math.min(
     100,
-    (account ? 18 : 0) + Math.min(50, manual * 10) + Math.min(40, validation * 8),
+    (account ? 18 : 0) +
+      Math.min(50, manual * 10) +
+      Math.min(40, validation * 8),
   );
   addSignal(
     signals,
@@ -602,6 +609,49 @@ function concernScore(result: JobSignalDimensionResult): number | null {
   return result.score;
 }
 
+function finalizeDimension(
+  dimension: JobSignalDimension,
+  dimensions: Record<JobSignalDimension, DimensionAccumulator>,
+): JobSignalDimensionResult {
+  return {
+    dimension,
+    score: dimensions[dimension].score,
+    confidence: dimensions[dimension].confidence,
+    evidenceIds: [...dimensions[dimension].evidenceIds],
+  };
+}
+
+function finalizeDimensions(
+  dimensions: Record<JobSignalDimension, DimensionAccumulator>,
+): Record<JobSignalDimension, JobSignalDimensionResult> {
+  return {
+    ROLE_AMBIGUITY: finalizeDimension("ROLE_AMBIGUITY", dimensions),
+    RESPONSIBILITY_BREADTH: finalizeDimension(
+      "RESPONSIBILITY_BREADTH",
+      dimensions,
+    ),
+    QUALIFICATION_INFLATION: finalizeDimension(
+      "QUALIFICATION_INFLATION",
+      dimensions,
+    ),
+    WORKLOAD_PRESSURE: finalizeDimension("WORKLOAD_PRESSURE", dimensions),
+    SCHEDULE_INTENSITY: finalizeDimension("SCHEDULE_INTENSITY", dimensions),
+    TRAVEL_BURDEN: finalizeDimension("TRAVEL_BURDEN", dimensions),
+    COMPENSATION_CLARITY: finalizeDimension(
+      "COMPENSATION_CLARITY",
+      dimensions,
+    ),
+    SENIORITY_ALIGNMENT: finalizeDimension("SENIORITY_ALIGNMENT", dimensions),
+    ROLE_STABILITY: finalizeDimension("ROLE_STABILITY", dimensions),
+    LOCATION_CONSTRAINTS: finalizeDimension("LOCATION_CONSTRAINTS", dimensions),
+    WORK_AUTHORIZATION_RISK: finalizeDimension(
+      "WORK_AUTHORIZATION_RISK",
+      dimensions,
+    ),
+    APPLICATION_FRICTION: finalizeDimension("APPLICATION_FRICTION", dimensions),
+  };
+}
+
 export function analyzeJobSignals(input: JobSignalInput): JobSignalReport {
   const text = allText(input);
   const dimensions = emptyDimensions();
@@ -622,17 +672,7 @@ export function analyzeJobSignals(input: JobSignalInput): JobSignalReport {
   }
   analyzeApplicationFriction(input, signals, dimensions);
 
-  const finalized = Object.fromEntries(
-    jobSignalDimensions.map((dimension) => [
-      dimension,
-      {
-        dimension,
-        score: dimensions[dimension].score,
-        confidence: dimensions[dimension].confidence,
-        evidenceIds: [...dimensions[dimension].evidenceIds],
-      },
-    ]),
-  ) as Record<JobSignalDimension, JobSignalDimensionResult>;
+  const finalized = finalizeDimensions(dimensions);
   const concerns = jobSignalDimensions
     .map((dimension) => concernScore(finalized[dimension]))
     .filter((score): score is number => score !== null);
