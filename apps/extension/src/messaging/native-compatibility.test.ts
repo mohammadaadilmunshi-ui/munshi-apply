@@ -30,6 +30,7 @@ const currentCapabilities: NonNullable<NativeRuntimeHealth["capabilities"]> = {
   teach_munshi_state_capture: true,
   account_orchestration: true,
   job_signal_intelligence: true,
+  application_analytics: true,
 };
 
 describe("native runtime compatibility", () => {
@@ -56,6 +57,16 @@ describe("native runtime compatibility", () => {
     expect(result.compatible).toBe(false);
     if (!result.compatible) {
       expect(result.reason).toContain("job_signal_intelligence");
+    }
+  });
+
+  it("rejects an older protocol-v3 companion without application analytics", () => {
+    const result = nativeRuntimeCompatibility(
+      health({ ...currentCapabilities, application_analytics: undefined }),
+    );
+    expect(result.compatible).toBe(false);
+    if (!result.compatible) {
+      expect(result.reason).toContain("application_analytics");
     }
   });
 
