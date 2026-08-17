@@ -14,6 +14,12 @@ import {
   parseProfileSnapshot,
   type ProfileSnapshot,
 } from "@munshi-apply/contracts/profile-vault";
+import {
+  parseProfileSaveAck,
+  type ProfileSaveAck,
+  type ProfileSaveConflict,
+  type ProfileSaveConflictDetail,
+} from "./profile-save-ack";
 
 export type ExtensionRuntimeHealth = {
   status: string;
@@ -118,18 +124,10 @@ export type AutoPilotResumePayload = {
   fillInstructions: readonly FillInstruction[];
 };
 
-export type ProfileConflictDetail = {
-  key: string;
-  localValue: unknown;
-  remoteValue: unknown;
-};
+export type ProfileConflictDetail = ProfileSaveConflictDetail;
 
 export type ProfileSyncStatus = {
-  conflict: {
-    keys: string[];
-    details: ProfileConflictDetail[];
-    detectedAt: string;
-  } | null;
+  conflict: ProfileSaveConflict | null;
 };
 
 type AutoPilotRuntimeRequest =
@@ -156,7 +154,7 @@ type AutoPilotRuntimeRequest =
     };
 
 type ProfileSaveWaiter = {
-  resolve: () => void;
+  resolve: (acknowledgement: ProfileSaveAck) => void;
   reject: (error: unknown) => void;
 };
 
@@ -176,11 +174,14 @@ async function send(
 
 async function drainProfileSaveQueue(): Promise<void> {
   let failure: unknown = null;
+  let acknowledgement: ProfileSaveAck | null = null;
   try {
     while (queuedProfile) {
       const profile = queuedProfile;
       queuedProfile = null;
-      await send({ type: "SAVE_PROFILE", payload: profile });
+      acknowledgement = parseProfileSaveAck(
+        await send({ type: "SAVE_PROFILE", payload: profile }),
+      );
     }
   } catch (error) {
     failure = error;
@@ -190,8 +191,13 @@ async function drainProfileSaveQueue(): Promise<void> {
     const waiters = profileSaveWaiters;
     profileSaveWaiters = [];
     for (const waiter of waiters) {
-      if (failure) waiter.reject(failure);
-      else waiter.resolve();
+      if (failure) {
+        waiter.reject(failure);
+      } else if (acknowledgement) {
+        waiter.resolve(acknowledgement);
+      } else {
+        waiter.reject(new Error("Profile save completed without acknowledgement"));
+      }
     }
     if (queuedProfile && !profileSaveRunning) {
       profileSaveRunning = true;
@@ -224,7 +230,7 @@ export async function resolveProfileSyncConflict(
   );
 }
 
-export function saveProfile(profile: ProfileSnapshot): Promise<void> {
+export function saveProfile(profile: ProfileSnapshot): Promise<ProfileSaveAck> {
   queuedProfile = parseProfileSnapshot(profile);
   return new Promise((resolve, reject) => {
     profileSaveWaiters.push({ resolve, reject });
