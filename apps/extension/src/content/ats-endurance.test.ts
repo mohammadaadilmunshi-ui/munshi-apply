@@ -306,6 +306,8 @@ describe("ATS-shaped browser endurance matrix", () => {
   });
 
   it("scans a very large application form while preserving unique stable identifiers", () => {
+    // The default 5-second Vitest timeout is the regression budget for two full
+    // scans of 300 application fields. Keep this large-form case intact.
     const fields = Array.from(
       { length: 300 },
       (_, index) =>
