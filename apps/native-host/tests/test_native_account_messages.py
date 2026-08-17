@@ -5,7 +5,6 @@ from pathlib import Path
 from munshi_apply_native.database import Database
 from munshi_apply_native.native_messaging import handle
 
-
 NOW = "2026-08-17T19:00:00+00:00"
 
 
