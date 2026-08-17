@@ -20,6 +20,7 @@ import {
   disposePreviousContentRuntime,
   registerContentRuntime,
 } from "./runtime-lifecycle";
+import { createSnapshotCoalescer } from "./snapshot-coalescer";
 import { createSnapshotRetryController } from "./snapshot-retry";
 
 disposePreviousContentRuntime();
@@ -29,16 +30,9 @@ const MAX_SCAN_DEBOUNCE_MS = 600;
 let previousFingerprint = "";
 let pending: number | undefined;
 let debounceStartedAt = 0;
-let scanQueue: Promise<void> = Promise.resolve();
 let disposed = false;
 const listenerAbortController = new AbortController();
 const snapshotRetry = createSnapshotRetryController();
-
-function runSnapshot(force: boolean): void {
-  void enqueueSnapshot(force).catch(() => {
-    snapshotRetry.failed(() => runSnapshot(true));
-  });
-}
 
 async function publishSnapshot(force = false): Promise<void> {
   if (disposed) return;
@@ -55,12 +49,16 @@ async function publishSnapshot(force = false): Promise<void> {
   snapshotRetry.succeeded();
 }
 
+const snapshotCoalescer = createSnapshotCoalescer(publishSnapshot);
+
 function enqueueSnapshot(force: boolean): Promise<void> {
-  if (disposed) return Promise.resolve();
-  scanQueue = scanQueue
-    .catch(() => undefined)
-    .then(() => publishSnapshot(force));
-  return scanQueue;
+  return snapshotCoalescer.request(force);
+}
+
+function runSnapshot(force: boolean): void {
+  void enqueueSnapshot(force).catch(() => {
+    snapshotRetry.failed(() => runSnapshot(true));
+  });
 }
 
 function clearPendingScan(): void {
@@ -315,6 +313,7 @@ chrome.runtime.onMessage.addListener(runtimeMessageListener);
 
 registerContentRuntime(() => {
   disposed = true;
+  snapshotCoalescer.dispose();
   snapshotRetry.dispose();
   clearPendingScan();
   debounceStartedAt = 0;
