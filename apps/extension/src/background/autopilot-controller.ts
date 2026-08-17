@@ -20,6 +20,7 @@ import type {
   FillResult,
   NavigationCandidate,
 } from "@munshi-apply/contracts";
+import { evaluateForwardNavigationSafety } from "./forward-navigation-safety";
 
 export const AUTO_PILOT_RUNTIME_SCHEMA_VERSION = 1 as const;
 
@@ -784,6 +785,16 @@ export class AutoPilotController {
       }
 
       case "NAVIGATE_NEXT": {
+        const navigationSafety = evaluateForwardNavigationSafety({
+          page,
+          selectedResumeSha256: runtime.session.selectedResumeSha256,
+        });
+        if (!navigationSafety.safe) {
+          return this.persistPause(runtime, observation, {
+            type: "REVIEW",
+            reason: navigationSafety.reason,
+          });
+        }
         const candidate = safeForwardCandidate(page);
         if (!candidate) {
           return this.fail(
