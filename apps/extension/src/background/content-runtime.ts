@@ -76,6 +76,16 @@ export async function ensureTabContentRuntime(
     if (!isMissingContentReceiverError(error)) throw error;
   }
 
+  if (topFrameHealthy) {
+    const response = await api.sendMessage<ContentScanResponse>(
+      tabId,
+      { type: "CONTENT_SCAN_NOW" },
+      { frameId: 0 },
+    );
+    assertSuccessfulScan(response, 0);
+    return;
+  }
+
   let framesToScan = [0];
   try {
     const injected = await api.executeScript({
@@ -84,12 +94,10 @@ export async function ensureTabContentRuntime(
     });
     framesToScan = [...new Set([0, ...injectedFrameIds(injected)])];
   } catch {
-    if (!topFrameHealthy) {
-      await api.executeScript({
-        target: { tabId, frameIds: [0] },
-        files: [CONTENT_SCRIPT_FILE],
-      });
-    }
+    await api.executeScript({
+      target: { tabId, frameIds: [0] },
+      files: [CONTENT_SCRIPT_FILE],
+    });
     framesToScan = [0];
   }
 
