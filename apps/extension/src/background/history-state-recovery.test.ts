@@ -98,14 +98,20 @@ describe("SPA history-state recovery", () => {
 
   it("ignores an inaccessible secondary frame but never hides failure of the changed frame", async () => {
     const runtime = dependencies([page(0), page(2)]);
-    runtime.scanFrame.mockImplementation(async (_tabId: number, frameId: number) => {
-      if (frameId === 2) throw new Error("frame disappeared");
-    });
+    runtime.scanFrame.mockImplementation(
+      async (_tabId: number, frameId: number) => {
+        if (frameId === 2) throw new Error("frame disappeared");
+      },
+    );
 
-    await expect(recoverHistoryStateChange(9, 0, runtime)).resolves.toBeUndefined();
+    await expect(
+      recoverHistoryStateChange(9, 0, runtime),
+    ).resolves.toBeUndefined();
 
     const childRuntime = dependencies([page(0), page(2)]);
-    childRuntime.scanFrame.mockRejectedValue(new Error("changed frame disappeared"));
+    childRuntime.scanFrame.mockRejectedValue(
+      new Error("changed frame disappeared"),
+    );
     await expect(recoverHistoryStateChange(9, 2, childRuntime)).rejects.toThrow(
       "changed frame disappeared",
     );
