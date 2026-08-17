@@ -1,5 +1,6 @@
 export * from "./account-orchestration";
 export * from "./analytics";
+export * from "./application-analytics";
 export * from "./application-detection";
 export * from "./application-url";
 export * from "./autopilot";
