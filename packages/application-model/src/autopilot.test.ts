@@ -131,7 +131,9 @@ describe("planAutoPilotStep", () => {
       completedControlIds: ["control-1"],
     });
     expect(afterFill.action.type).toBe("PAUSE_REVIEW");
-    expect(afterFill.reason).toMatch(/credentials and navigation remain owner/i);
+    expect(afterFill.reason).toMatch(
+      /credentials and navigation remain owner/i,
+    );
     expect(afterFill.checkpointRequired).toBe(true);
   });
 
