@@ -1,0 +1,126 @@
+name: Guarded profile sync UI patch
+on:
+  push:
+    branches: [feat/v3-foundation-alignment]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
+          fetch-depth: 1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Apply exact acknowledgement-driven UI patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("apps/extension/src/sidepanel/App.tsx")
+          text = path.read_text()
+
+          old_autosave = '''        void saveProfile(profile)
+            .then(async () => {
+              const status = await getProfileSyncStatus();
+              setProfileSyncStatus(status);
+              if (profileRevision.current !== revision) return;
+              setProfileDirty(false);
+              setSaveState(
+                status.conflict
+                  ? "conflict"
+                  : cloud.status === "connected" && cloud.data.encryptionReady
+                    ? "synced"
+                    : "local",
+              );
+            })'''
+          new_autosave = '''        void saveProfile(profile)
+            .then((acknowledgement) => {
+              const status: ProfileSyncStatus = {
+                conflict: acknowledgement.conflict,
+              };
+              setProfileSyncStatus(status);
+              if (profileRevision.current !== revision) return;
+              setProfileDirty(false);
+              setSaveState(
+                status.conflict
+                  ? "conflict"
+                  : acknowledgement.cloudSynced
+                    ? "synced"
+                    : "local",
+              );
+            })'''
+          if text.count(old_autosave) != 1:
+              raise SystemExit("autosave source block drifted; refusing blind patch")
+          text = text.replace(old_autosave, new_autosave, 1)
+
+          old_dependency = '''  }, [cloud, profile, profileDirty, profileLoaded, retryTick]);'''
+          new_dependency = '''  }, [profile, profileDirty, profileLoaded, retryTick]);'''
+          if text.count(old_dependency) != 1:
+              raise SystemExit("autosave dependency block drifted; refusing blind patch")
+          text = text.replace(old_dependency, new_dependency, 1)
+
+          old_sync_now = '''    try {
+      await saveProfile(profile);
+      const syncStatus = await getProfileSyncStatus();
+      setProfileSyncStatus(syncStatus);
+      if (profileRevision.current === revision) {
+        setProfileDirty(false);
+        setSaveState(
+          syncStatus.conflict
+            ? "conflict"
+            : cloud.status === "connected" && cloud.data.encryptionReady
+              ? "synced"
+              : "local",
+        );
+      }
+    } catch (error) {'''
+          new_sync_now = '''    try {
+      const acknowledgement = await saveProfile(profile);
+      const syncStatus: ProfileSyncStatus = {
+        conflict: acknowledgement.conflict,
+      };
+      setProfileSyncStatus(syncStatus);
+      if (profileRevision.current === revision) {
+        setProfileDirty(false);
+        setSaveState(
+          syncStatus.conflict
+            ? "conflict"
+            : acknowledgement.cloudSynced
+              ? "synced"
+              : "local",
+        );
+        if (!syncStatus.conflict) {
+          setNotice(
+            acknowledgement.cloudSynced
+              ? "Profile saved locally and acknowledged by the encrypted workspace."
+              : "Profile saved locally. The encrypted workspace has not acknowledged this save yet.",
+          );
+        }
+      }
+    } catch (error) {'''
+          if text.count(old_sync_now) != 1:
+              raise SystemExit("manual sync source block drifted; refusing blind patch")
+          text = text.replace(old_sync_now, new_sync_now, 1)
+
+          path.write_text(text)
+          PY
+          npx prettier apps/extension/src/sidepanel/App.tsx --write
+          git diff --check
+          git diff -- apps/extension/src/sidepanel/App.tsx
+      - name: Commit patch and remove one-shot workflow
+        shell: bash
+        run: |
+          rm .github/workflows/profile-sync-ui-patch.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/extension/src/sidepanel/App.tsx .github/workflows/profile-sync-ui-patch.yml
+          git diff --cached --check
+          git commit -m "fix: make profile sync status acknowledgement-driven"
+          git push origin HEAD:feat/v3-foundation-alignment
