@@ -99,7 +99,8 @@ describe("AutoPilot interrupted navigation recovery", () => {
     expect(started.session.pauseReason).toContain("could not confirm");
     expect(navigateCount).toBe(1);
 
-    const persisted = (await dependencies.loadRuntime()) as AutoPilotRuntimeState;
+    const persisted =
+      (await dependencies.loadRuntime()) as AutoPilotRuntimeState;
     expect(persisted.navigationDispatchAttempted).toBe(false);
     expect(persisted.beforeNavigation).toBeNull();
 
