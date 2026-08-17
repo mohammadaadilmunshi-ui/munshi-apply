@@ -1,0 +1,19 @@
+name: Resume verifier format probe
+on:
+  push:
+    branches: [feat/v3-foundation-alignment]
+    paths:
+      - .github/workflows/resume-verifier-format-probe.yml
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: |
+          npx prettier apps/extension/src/background/resume-file-verification.ts --write
+          git diff -- apps/extension/src/background/resume-file-verification.ts
