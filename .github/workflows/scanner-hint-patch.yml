@@ -1,0 +1,50 @@
+name: Scanner hint patch
+on:
+  push:
+    branches: [feat/v3-foundation-alignment]
+    paths:
+      - .github/workflows/scanner-hint-patch.yml
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Apply bounded scanner hint store
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("apps/extension/src/content/scanner.ts")
+          source = path.read_text()
+          import_anchor = '} from "./adaptive";\n'
+          replacement_import = import_anchor + 'import { createBoundedHintStore } from "./bounded-hint-store";\n'
+          if source.count(import_anchor) != 1:
+              raise SystemExit("Expected exactly one scanner adaptive import anchor")
+          source = source.replace(import_anchor, replacement_import, 1)
+
+          old_store = 'const controlHints = new Map<string, Control>();'
+          new_store = 'const controlHints = createBoundedHintStore<Control>();'
+          if source.count(old_store) != 1:
+              raise SystemExit("Expected exactly one unbounded scanner hint store")
+          path.write_text(source.replace(old_store, new_store, 1))
+          PY
+          npx prettier apps/extension/src/content/scanner.ts --write
+      - name: Verify bounded hint tests
+        run: npx vitest run apps/extension/src/content/bounded-hint-store.test.ts
+      - name: Commit scanner integration
+        run: |
+          git config user.name "MUNSHI Apply CI"
+          git config user.email "actions@users.noreply.github.com"
+          git add apps/extension/src/content/scanner.ts
+          git diff --cached --check
+          git commit -m "fix: bound scanner rebound hint cache"
+          git push origin HEAD:feat/v3-foundation-alignment
