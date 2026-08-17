@@ -22,7 +22,7 @@ replace_once(
 old_section = '''  const root = element.getRootNode();
   if (!(root instanceof Document || root instanceof ShadowRoot)) return "";
   const preceding = Array.from(
-    root.querySelectorAll("h1, h2, h3, h4, h5, h6, [role=heading], legend"),
+    root.querySelectorAll("h1, h2, h3, h4, h5, h6, [role='heading'], legend"),
   )
     .filter(
       (candidate) =>
@@ -41,7 +41,7 @@ new_section = '''  const root = element.getRootNode();
   let headings = sectionHeadingCache.get(root);
   if (!headings) {
     headings = Array.from(
-      root.querySelectorAll("h1, h2, h3, h4, h5, h6, [role=heading], legend"),
+      root.querySelectorAll("h1, h2, h3, h4, h5, h6, [role='heading'], legend"),
     ).filter(isVisible);
     sectionHeadingCache.set(root, headings);
   }
@@ -60,41 +60,81 @@ new_section = '''  const root = element.getRootNode();
 replace_once(old_section, new_section, "section heading query block")
 
 old_signature = '''function stableControlSignature(element: Element): string {
-  const ancestry = stableAncestry(element);
+  const url = new URL(window.location.href);
+  const type = element instanceof HTMLInputElement ? element.type : "";
+  const optionValue =
+    element instanceof HTMLInputElement &&
+    (element.type === "radio" ||
+      element.type === "checkbox" ||
+      ["button", "submit", "reset"].includes(element.type))
+      ? element.value
+      : "";
   return [
-    element.tagName.toLowerCase(),
-    element.getAttribute("type") ?? "",
-    element.getAttribute("name") ?? "",
+    url.origin,
+    url.pathname,
+    element.tagName,
+    element.id,
+    compactText(element.getAttribute("name")),
+    type,
     labelFor(element),
 '''
 new_signature = '''function stableControlSignature(element: Element, label: string): string {
-  const ancestry = stableAncestry(element);
+  const url = new URL(window.location.href);
+  const type = element instanceof HTMLInputElement ? element.type : "";
+  const optionValue =
+    element instanceof HTMLInputElement &&
+    (element.type === "radio" ||
+      element.type === "checkbox" ||
+      ["button", "submit", "reset"].includes(element.type))
+      ? element.value
+      : "";
   return [
-    element.tagName.toLowerCase(),
-    element.getAttribute("type") ?? "",
-    element.getAttribute("name") ?? "",
+    url.origin,
+    url.pathname,
+    element.tagName,
+    element.id,
+    compactText(element.getAttribute("name")),
+    type,
     label,
 '''
 replace_once(old_signature, new_signature, "stable control signature")
 
-old_create = '''  const validation = validationFor(element);
-  const controlId = hash(`ctl:${stableControlSignature(element)}`);
+old_create = '''  const validation = validationState(element);
+  const validationMessage =
+    validationMessageFor(element) || validation.validationMessage;
+  const repeat = repeatMetadataFor(element);
+  const fileFingerprint =
+    element instanceof HTMLInputElement && element.type === "file"
+      ? fileFingerprintFor(element)
+      : null;
   const kind = kindFor(element);
+  const options = optionsFor(element);
+  return {
+    controlId: `ctl-${hash(stableControlSignature(element))}`,
 '''
-new_create = '''  const validation = validationFor(element);
-  const label = labelFor(element);
-  const controlId = hash(`ctl:${stableControlSignature(element, label)}`);
+new_create = '''  const validation = validationState(element);
+  const validationMessage =
+    validationMessageFor(element) || validation.validationMessage;
+  const repeat = repeatMetadataFor(element);
+  const fileFingerprint =
+    element instanceof HTMLInputElement && element.type === "file"
+      ? fileFingerprintFor(element)
+      : null;
   const kind = kindFor(element);
+  const options = optionsFor(element);
+  const label = labelFor(element);
+  return {
+    controlId: `ctl-${hash(stableControlSignature(element, label))}`,
 '''
 replace_once(old_create, new_create, "createControl identity block")
 replace_once('    label: labelFor(element),\n', '    label,\n', "createControl label assignment")
 
 old_scan = '''export function scanDocument(): ApplicationPage {
-  const context = scanControlEntries();
+  const entries = scanControlEntries();
 '''
 new_scan = '''export function scanDocument(): ApplicationPage {
   sectionHeadingCache = new WeakMap<Document | ShadowRoot, Element[]>();
-  const context = scanControlEntries();
+  const entries = scanControlEntries();
 '''
 replace_once(old_scan, new_scan, "scanDocument entry point")
 
