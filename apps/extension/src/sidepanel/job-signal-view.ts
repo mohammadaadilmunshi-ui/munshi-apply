@@ -7,11 +7,7 @@ import {
 } from "@munshi-apply/application-model";
 import { assessJobOpportunity } from "@munshi-apply/application-model";
 
-export type JobSignalDisposition =
-  | "POSITIVE"
-  | "MIXED"
-  | "CONCERN"
-  | "UNKNOWN";
+export type JobSignalDisposition = "POSITIVE" | "MIXED" | "CONCERN" | "UNKNOWN";
 
 export type JobSignalViewRow = {
   dimension: JobSignalDimension;
@@ -75,7 +71,9 @@ export function buildJobSignalView(input: {
   const rows = jobSignalDimensions.map((dimension) => {
     const result = input.report.dimensions[dimension];
     const evidence = result.evidenceIds
-      .map((id) => input.report.signals.find((signal) => signal.signalId === id))
+      .map((id) =>
+        input.report.signals.find((signal) => signal.signalId === id),
+      )
       .filter((signal) => signal !== undefined);
     return {
       dimension,

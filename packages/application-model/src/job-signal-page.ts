@@ -50,9 +50,11 @@ export function buildPageJobSignalSource(
   const hasObservedFriction =
     accountRequired || manualRequiredControls > 0 || validationErrors > 0;
   const frictionIdentity = hasObservedFriction
-    ? [accountRequired ? "account" : "no-account", manualRequiredControls, validationErrors].join(
-        ":",
-      )
+    ? [
+        accountRequired ? "account" : "no-account",
+        manualRequiredControls,
+        validationErrors,
+      ].join(":")
     : "no-observed-friction";
   const fingerprintMaterial = [
     "job-signal-page-v2",

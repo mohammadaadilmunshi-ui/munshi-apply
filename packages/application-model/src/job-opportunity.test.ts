@@ -126,9 +126,9 @@ describe("job opportunity prioritization", () => {
       },
     });
     expect(assessment.priorityScore).not.toBeNull();
-    expect(assessment.riskFactors.some((item) => /Job Signal concern/i.test(item))).toBe(
-      true,
-    );
+    expect(
+      assessment.riskFactors.some((item) => /Job Signal concern/i.test(item)),
+    ).toBe(true);
     expect(assessment.explanation).not.toMatch(/toxic/i);
   });
 
@@ -145,9 +145,9 @@ describe("job opportunity prioritization", () => {
       },
     });
     expect(["HIGH", "MEDIUM", "LOW"]).toContain(assessment.priority);
-    expect(assessment.riskFactors.some((item) => /owner review/i.test(item))).toBe(
-      true,
-    );
+    expect(
+      assessment.riskFactors.some((item) => /owner review/i.test(item)),
+    ).toBe(true);
   });
 
   it("validates score ranges instead of silently clamping invalid fit inputs", () => {

@@ -195,7 +195,9 @@ async function drainProfileSaveQueue(): Promise<void> {
     } else if (acknowledgement !== null) {
       for (const waiter of waiters) waiter.resolve(acknowledgement);
     } else {
-      const error = new Error("Profile save completed without an acknowledgement");
+      const error = new Error(
+        "Profile save completed without an acknowledgement",
+      );
       for (const waiter of waiters) waiter.reject(error);
     }
   }
@@ -242,27 +244,45 @@ export async function fillPage(plan: FillPlan): Promise<FillResult[]> {
 }
 
 export async function getAutoPilotStatus(): Promise<AutoPilotControllerStatus | null> {
-  return (await send({ type: "AUTOPILOT_STATUS" })) as AutoPilotControllerStatus | null;
+  return (await send({
+    type: "AUTOPILOT_STATUS",
+  })) as AutoPilotControllerStatus | null;
 }
 
 export async function startAutoPilot(
   payload: AutoPilotStartPayload,
 ): Promise<AutoPilotControllerStatus> {
-  return (await send({ type: "AUTOPILOT_START", payload })) as AutoPilotControllerStatus;
+  return (await send({
+    type: "AUTOPILOT_START",
+    payload,
+  })) as AutoPilotControllerStatus;
 }
 
-export async function pauseAutoPilot(reason = "Owner paused AutoPilot"): Promise<AutoPilotControllerStatus> {
-  return (await send({ type: "AUTOPILOT_PAUSE", payload: { reason } })) as AutoPilotControllerStatus;
+export async function pauseAutoPilot(
+  reason = "Owner paused AutoPilot",
+): Promise<AutoPilotControllerStatus> {
+  return (await send({
+    type: "AUTOPILOT_PAUSE",
+    payload: { reason },
+  })) as AutoPilotControllerStatus;
 }
 
 export async function resumeAutoPilot(
   payload: AutoPilotResumePayload,
 ): Promise<AutoPilotControllerStatus> {
-  return (await send({ type: "AUTOPILOT_RESUME", payload })) as AutoPilotControllerStatus;
+  return (await send({
+    type: "AUTOPILOT_RESUME",
+    payload,
+  })) as AutoPilotControllerStatus;
 }
 
-export async function stopAutoPilot(reason = "Owner stopped AutoPilot"): Promise<AutoPilotControllerStatus | null> {
-  return (await send({ type: "AUTOPILOT_STOP", payload: { reason } })) as AutoPilotControllerStatus | null;
+export async function stopAutoPilot(
+  reason = "Owner stopped AutoPilot",
+): Promise<AutoPilotControllerStatus | null> {
+  return (await send({
+    type: "AUTOPILOT_STOP",
+    payload: { reason },
+  })) as AutoPilotControllerStatus | null;
 }
 
 export async function requestFilePickerAssist(input: {

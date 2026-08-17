@@ -142,9 +142,7 @@ export function JobSignalPanel({
           <h3 id="job-signal-heading">Job Signals</h3>
         </div>
         <span
-          className={
-            report.overallSignal === "HIGH" ? "badge review" : "badge"
-          }
+          className={report.overallSignal === "HIGH" ? "badge review" : "badge"}
         >
           {view.overallLabel}
           {view.overallScore === null ? "" : ` · ${view.overallScore}/100`}

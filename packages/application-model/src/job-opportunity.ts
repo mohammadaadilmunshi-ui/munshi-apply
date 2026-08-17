@@ -1,23 +1,13 @@
 import type { JobSignalReport } from "./job-signals";
 
 export type OpportunityPreflightState =
-  | "READY"
-  | "REVIEW"
-  | "UNRESOLVED"
-  | "BLOCKED";
+  "READY" | "REVIEW" | "UNRESOLVED" | "BLOCKED";
 
 export type OpportunityCompatibility =
-  | "MATCH"
-  | "PARTIAL"
-  | "MISMATCH"
-  | "UNKNOWN";
+  "MATCH" | "PARTIAL" | "MISMATCH" | "UNKNOWN";
 
 export type OpportunityPriority =
-  | "HIGH"
-  | "MEDIUM"
-  | "LOW"
-  | "HOLD"
-  | "INSUFFICIENT_DATA";
+  "HIGH" | "MEDIUM" | "LOW" | "HOLD" | "INSUFFICIENT_DATA";
 
 export type OpportunityFitFacts = {
   roleMatchScore?: number | null;
@@ -47,7 +37,9 @@ type ScoredFactor = {
 function boundedScore(value: number | null | undefined): number | null {
   if (value === null || value === undefined) return null;
   if (!Number.isFinite(value) || value < 0 || value > 100) {
-    throw new Error("Opportunity fit scores must be finite numbers from 0 to 100");
+    throw new Error(
+      "Opportunity fit scores must be finite numbers from 0 to 100",
+    );
   }
   return Math.round(value);
 }
@@ -70,7 +62,10 @@ function compatibilityScore(
 function signalCoverage(report: JobSignalReport): number {
   const values = Object.values(report.dimensions);
   if (values.length === 0) return 0;
-  return values.filter((dimension) => dimension.score !== null).length / values.length;
+  return (
+    values.filter((dimension) => dimension.score !== null).length /
+    values.length
+  );
 }
 
 function weightedAverage(factors: readonly ScoredFactor[]): number | null {
@@ -122,11 +117,15 @@ export function assessJobOpportunity(input: {
 
   const roleMatch = boundedScore(fit.roleMatchScore);
   if (roleMatch === null) {
-    unknowns.push("Role-family fit has not been evaluated from verified evidence.");
+    unknowns.push(
+      "Role-family fit has not been evaluated from verified evidence.",
+    );
   } else {
     factors.push({ label: "Role fit", score: roleMatch, weight: 1.25 });
-    if (roleMatch >= 75) positiveFactors.push("Verified role-family fit is strong.");
-    else if (roleMatch < 50) riskFactors.push("Verified role-family fit is limited.");
+    if (roleMatch >= 75)
+      positiveFactors.push("Verified role-family fit is strong.");
+    else if (roleMatch < 50)
+      riskFactors.push("Verified role-family fit is limited.");
   }
 
   const evidenceMatch = boundedScore(fit.evidenceMatchScore);
@@ -174,11 +173,17 @@ export function assessJobOpportunity(input: {
 
   const signalConcern = input.jobSignals.overallScore;
   if (signalConcern === null) {
-    unknowns.push("The posting does not contain enough evidence for an overall Job Signal concern score.");
+    unknowns.push(
+      "The posting does not contain enough evidence for an overall Job Signal concern score.",
+    );
   } else if (signalConcern >= 65) {
-    riskFactors.push(`Evidence-backed Job Signal concern is high (${signalConcern}/100).`);
+    riskFactors.push(
+      `Evidence-backed Job Signal concern is high (${signalConcern}/100).`,
+    );
   } else if (signalConcern <= 30) {
-    positiveFactors.push(`Evidence-backed Job Signal concern is low (${signalConcern}/100).`);
+    positiveFactors.push(
+      `Evidence-backed Job Signal concern is low (${signalConcern}/100).`,
+    );
   }
 
   const workAuthorizationRisk =
@@ -187,7 +192,9 @@ export function assessJobOpportunity(input: {
     fit.workAuthorizationCompatibility ?? "UNKNOWN";
 
   if (input.preflightState === "BLOCKED") {
-    riskFactors.unshift("Employer pre-flight contains a verified blocking contradiction.");
+    riskFactors.unshift(
+      "Employer pre-flight contains a verified blocking contradiction.",
+    );
     return {
       priority: "HOLD",
       priorityScore: 0,
@@ -201,7 +208,9 @@ export function assessJobOpportunity(input: {
   }
 
   if (input.preflightState === "UNRESOLVED") {
-    riskFactors.unshift("Employer pre-flight still contains consequential unresolved requirements.");
+    riskFactors.unshift(
+      "Employer pre-flight still contains consequential unresolved requirements.",
+    );
     return {
       priority: "HOLD",
       priorityScore: null,
@@ -215,7 +224,9 @@ export function assessJobOpportunity(input: {
   }
 
   if (workAuthorizationCompatibility === "MISMATCH") {
-    riskFactors.unshift("Verified work-authorization compatibility is a mismatch.");
+    riskFactors.unshift(
+      "Verified work-authorization compatibility is a mismatch.",
+    );
     return {
       priority: "HOLD",
       priorityScore: 0,
@@ -272,13 +283,18 @@ export function assessJobOpportunity(input: {
   const knownFitFactors = factors.length;
   const fitCoverage = Math.min(1, knownFitFactors / 5);
   const confidence = Number(
-    Math.min(1, fitCoverage * 0.7 + signalCoverage(input.jobSignals) * 0.3).toFixed(3),
+    Math.min(
+      1,
+      fitCoverage * 0.7 + signalCoverage(input.jobSignals) * 0.3,
+    ).toFixed(3),
   );
   const priority: OpportunityPriority =
     score >= 72 ? "HIGH" : score >= 50 ? "MEDIUM" : "LOW";
 
   if (input.preflightState === "REVIEW") {
-    riskFactors.push("Employer pre-flight still requires owner review before automated navigation.");
+    riskFactors.push(
+      "Employer pre-flight still requires owner review before automated navigation.",
+    );
   }
 
   return {

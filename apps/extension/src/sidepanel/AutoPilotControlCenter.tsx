@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ApplicationPage } from "@munshi-apply/contracts";
 import type { AccountRecord } from "@munshi-apply/application-model";
+import { ApplicationAnalyticsPanel } from "./ApplicationAnalyticsPanel";
 import { JobSignalPanel } from "./JobSignalPanel";
 import { TeachMunshiPanel } from "./TeachMunshiPanel";
 import {
@@ -376,6 +377,16 @@ export function AutoPilotControlCenter({
               preflightState={plan.preflight.state}
               accountRequired={plan.accountPlan.flow !== "NONE"}
               manualRequiredControls={plan.manualControls.length}
+            />
+          )}
+
+          {plan && (
+            <ApplicationAnalyticsPanel
+              page={page}
+              applicationId={applicationId}
+              selectedResumeId={selectedResumeId}
+              nativeAvailable={nativeAvailable}
+              autoPilotStatus={status}
             />
           )}
 

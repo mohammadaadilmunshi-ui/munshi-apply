@@ -38,7 +38,9 @@ describe("Job Signal presentation model", () => {
     expect(compensation?.disposition).toBe("POSITIVE");
     expect(compensation?.evidence[0]).toContain("$75,000 - $88,000");
     expect(authorization?.disposition).toBe("CONCERN");
-    expect(authorization?.explanations[0]).toMatch(/eligibility is evaluated separately/i);
+    expect(authorization?.explanations[0]).toMatch(
+      /eligibility is evaluated separately/i,
+    );
     expect(travel?.score).toBe(70);
     expect(travel?.evidence[0]).toMatch(/40% travel/i);
   });

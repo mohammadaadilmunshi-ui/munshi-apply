@@ -30,8 +30,7 @@ const outcomeStages = new Set<ApplicationOutcomeStage>([
 ]);
 
 type NativeResponse =
-  | { ok: true; data?: unknown }
-  | { ok: false; error: string };
+  { ok: true; data?: unknown } | { ok: false; error: string };
 
 export type NativeApplicationAnalyticsSnapshot = {
   contexts: ApplicationAttributionContext[];
@@ -55,7 +54,8 @@ function requiredString(value: unknown, label: string): string {
 
 function optionalString(value: unknown, label: string): string | null {
   if (value === null || value === undefined || value === "") return null;
-  if (typeof value !== "string") throw new Error(`${label} must be a string or null`);
+  if (typeof value !== "string")
+    throw new Error(`${label} must be a string or null`);
   return value.trim() || null;
 }
 
@@ -73,7 +73,10 @@ function timestamp(value: unknown, label: string): string {
 function parseContext(value: unknown): ApplicationAttributionContext {
   const item = objectValue(value, "Attribution context");
   return {
-    applicationId: requiredString(item.applicationId, "Attribution applicationId"),
+    applicationId: requiredString(
+      item.applicationId,
+      "Attribution applicationId",
+    ),
     capturedAt: timestamp(item.capturedAt, "Attribution capturedAt"),
     jobSource: optionalString(item.jobSource, "Attribution jobSource"),
     atsFamily: optionalString(item.atsFamily, "Attribution atsFamily"),
@@ -112,11 +115,18 @@ function parseLifecycleEvent(value: unknown): ApplicationLifecycleEvent {
 
 function parseOutcome(value: unknown): ApplicationOutcomeEvent {
   const item = objectValue(value, "Application outcome");
-  const stage = requiredString(item.stage, "Application outcome stage") as ApplicationOutcomeStage;
-  if (!outcomeStages.has(stage)) throw new Error("Application outcome stage is invalid");
+  const stage = requiredString(
+    item.stage,
+    "Application outcome stage",
+  ) as ApplicationOutcomeStage;
+  if (!outcomeStages.has(stage))
+    throw new Error("Application outcome stage is invalid");
   return {
     eventId: requiredString(item.eventId, "Application outcome eventId"),
-    applicationId: requiredString(item.applicationId, "Application outcome applicationId"),
+    applicationId: requiredString(
+      item.applicationId,
+      "Application outcome applicationId",
+    ),
     stage,
     occurredAt: timestamp(item.occurredAt, "Application outcome occurredAt"),
     source: requiredString(item.source, "Application outcome source"),
@@ -127,11 +137,13 @@ export function parseNativeApplicationAnalyticsSnapshot(
   value: unknown,
 ): NativeApplicationAnalyticsSnapshot {
   const snapshot = objectValue(value, "Application analytics snapshot");
-  if (!Array.isArray(snapshot.contexts)) throw new Error("Analytics contexts must be an array");
+  if (!Array.isArray(snapshot.contexts))
+    throw new Error("Analytics contexts must be an array");
   if (!Array.isArray(snapshot.lifecycleEvents)) {
     throw new Error("Analytics lifecycleEvents must be an array");
   }
-  if (!Array.isArray(snapshot.outcomes)) throw new Error("Analytics outcomes must be an array");
+  if (!Array.isArray(snapshot.outcomes))
+    throw new Error("Analytics outcomes must be an array");
   return {
     contexts: snapshot.contexts.map(parseContext),
     lifecycleEvents: snapshot.lifecycleEvents.map(parseLifecycleEvent),
@@ -186,7 +198,10 @@ export function recordNativeApplicationAnalyticsEvent(
 ): Promise<boolean> {
   return recordCreated("RECORD_APPLICATION_ANALYTICS_EVENT", {
     eventId: requiredString(event.eventId, "Analytics eventId"),
-    applicationId: requiredString(event.applicationId, "Analytics applicationId"),
+    applicationId: requiredString(
+      event.applicationId,
+      "Analytics applicationId",
+    ),
     eventType: event.eventType,
     occurredAt: timestamp(event.occurredAt, "Analytics occurredAt"),
     source: requiredString(event.source, "Analytics source"),
@@ -200,7 +215,10 @@ export function recordNativeApplicationAttributionContext(input: {
 }): Promise<boolean> {
   return recordCreated("RECORD_APPLICATION_ATTRIBUTION_CONTEXT", {
     eventId: requiredString(input.eventId, "Attribution eventId"),
-    applicationId: requiredString(input.context.applicationId, "Attribution applicationId"),
+    applicationId: requiredString(
+      input.context.applicationId,
+      "Attribution applicationId",
+    ),
     capturedAt: timestamp(input.context.capturedAt, "Attribution capturedAt"),
     jobSource: input.context.jobSource ?? null,
     atsFamily: input.context.atsFamily ?? null,
@@ -213,7 +231,10 @@ export function recordNativeApplicationOutcome(
 ): Promise<boolean> {
   return recordCreated("RECORD_APPLICATION_OUTCOME", {
     eventId: requiredString(outcome.eventId, "Outcome eventId"),
-    applicationId: requiredString(outcome.applicationId, "Outcome applicationId"),
+    applicationId: requiredString(
+      outcome.applicationId,
+      "Outcome applicationId",
+    ),
     stage: outcome.stage,
     occurredAt: timestamp(outcome.occurredAt, "Outcome occurredAt"),
     source: requiredString(outcome.source, "Outcome source"),
@@ -222,7 +243,9 @@ export function recordNativeApplicationOutcome(
 
 export async function getNativeApplicationAnalyticsSnapshot(): Promise<NativeApplicationAnalyticsSnapshot> {
   return parseNativeApplicationAnalyticsSnapshot(
-    await sendNativeAnalytics<unknown>({ type: "GET_APPLICATION_ANALYTICS_SNAPSHOT" }),
+    await sendNativeAnalytics<unknown>({
+      type: "GET_APPLICATION_ANALYTICS_SNAPSHOT",
+    }),
   );
 }
 

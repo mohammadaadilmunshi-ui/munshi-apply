@@ -86,7 +86,11 @@ function normalizedBucket(value: string | null | undefined): string {
   return normalized || "UNKNOWN";
 }
 
-function rate(count: number, sample: number, minimumSample: number): number | null {
+function rate(
+  count: number,
+  sample: number,
+  minimumSample: number,
+): number | null {
   if (sample < minimumSample || sample === 0) return null;
   return Number((count / sample).toFixed(6));
 }
@@ -104,7 +108,9 @@ function summarizeBuckets(
   return [...groups.entries()]
     .map(([bucket, items]) => {
       const sampleCount = items.length;
-      const appliedCount = items.filter((item) => item.outcomes.has("APPLIED")).length;
+      const appliedCount = items.filter((item) =>
+        item.outcomes.has("APPLIED"),
+      ).length;
       const responseCount = items.filter(
         (item) =>
           item.lifecycle.has("RECRUITER_RESPONSE") ||
@@ -112,8 +118,12 @@ function summarizeBuckets(
           item.outcomes.has("INTERVIEW") ||
           item.outcomes.has("OFFER"),
       ).length;
-      const interviewCount = items.filter((item) => item.outcomes.has("INTERVIEW")).length;
-      const offerCount = items.filter((item) => item.outcomes.has("OFFER")).length;
+      const interviewCount = items.filter((item) =>
+        item.outcomes.has("INTERVIEW"),
+      ).length;
+      const offerCount = items.filter((item) =>
+        item.outcomes.has("OFFER"),
+      ).length;
       const ratesVisible = sampleCount >= minimumSample;
       return {
         key: bucket,
@@ -130,7 +140,11 @@ function summarizeBuckets(
           : `Rates withheld until this bucket has at least ${minimumSample} applications.`,
       } satisfies AttributionBucketSummary;
     })
-    .sort((left, right) => right.sampleCount - left.sampleCount || left.key.localeCompare(right.key));
+    .sort(
+      (left, right) =>
+        right.sampleCount - left.sampleCount ||
+        left.key.localeCompare(right.key),
+    );
 }
 
 export function summarizeApplicationAnalytics(input: {
@@ -161,9 +175,12 @@ export function summarizeApplicationAnalytics(input: {
     return created;
   };
 
-  for (const context of contexts.values()) ensure(context.applicationId).context = context;
-  for (const event of input.lifecycleEvents) ensure(event.applicationId).lifecycle.add(event.eventType);
-  for (const outcome of input.outcomes) ensure(outcome.applicationId).outcomes.add(outcome.stage);
+  for (const context of contexts.values())
+    ensure(context.applicationId).context = context;
+  for (const event of input.lifecycleEvents)
+    ensure(event.applicationId).lifecycle.add(event.eventType);
+  for (const outcome of input.outcomes)
+    ensure(outcome.applicationId).outcomes.add(outcome.stage);
 
   const items = [...applications.values()];
   const hasResponse = (item: ApplicationState): boolean =>
@@ -182,15 +199,20 @@ export function summarizeApplicationAnalytics(input: {
     ).length,
     appliedCount: items.filter((item) => item.outcomes.has("APPLIED")).length,
     responseCount: items.filter(hasResponse).length,
-    assessmentCount: items.filter((item) => item.outcomes.has("ASSESSMENT")).length,
-    interviewCount: items.filter((item) => item.outcomes.has("INTERVIEW")).length,
+    assessmentCount: items.filter((item) => item.outcomes.has("ASSESSMENT"))
+      .length,
+    interviewCount: items.filter((item) => item.outcomes.has("INTERVIEW"))
+      .length,
     offerCount: items.filter((item) => item.outcomes.has("OFFER")).length,
     rejectedCount: items.filter((item) => item.outcomes.has("REJECTED")).length,
-    withdrawnCount: items.filter((item) => item.outcomes.has("WITHDRAWN")).length,
+    withdrawnCount: items.filter((item) => item.outcomes.has("WITHDRAWN"))
+      .length,
     autopilotCompletedCount: items.filter((item) =>
       item.lifecycle.has("AUTOPILOT_COMPLETED"),
     ).length,
-    autopilotFailedCount: items.filter((item) => item.lifecycle.has("AUTOPILOT_FAILED")).length,
+    autopilotFailedCount: items.filter((item) =>
+      item.lifecycle.has("AUTOPILOT_FAILED"),
+    ).length,
     byJobSource: summarizeBuckets(
       items,
       (item) => normalizedBucket(item.context?.jobSource),

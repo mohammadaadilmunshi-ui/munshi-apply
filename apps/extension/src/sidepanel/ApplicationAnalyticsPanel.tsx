@@ -91,9 +91,8 @@ export function ApplicationAnalyticsPanel({
 }) {
   const [summary, setSummary] = useState<ApplicationFunnelSummary | null>(null);
   const [message, setMessage] = useState("");
-  const [busyOutcome, setBusyOutcome] = useState<ApplicationOutcomeStage | null>(
-    null,
-  );
+  const [busyOutcome, setBusyOutcome] =
+    useState<ApplicationOutcomeStage | null>(null);
   const source = useMemo(() => detectedJobSource(page.url), [page.url]);
 
   const refresh = useCallback(async () => {
@@ -108,9 +107,12 @@ export function ApplicationAnalyticsPanel({
     if (!nativeAvailable || !applicationId.trim()) return;
     let cancelled = false;
     const observedAt = timezoneAware(page.observedAt);
-    const pageKey = [applicationId, page.pageId, page.pageFingerprint, observedAt].join(
-      "|",
-    );
+    const pageKey = [
+      applicationId,
+      page.pageId,
+      page.pageFingerprint,
+      observedAt,
+    ].join("|");
 
     void (async () => {
       await recordNativeApplicationAttributionContext({
@@ -275,8 +277,8 @@ export function ApplicationAnalyticsPanel({
           <div className="cloud-connection">
             <strong>
               Funnel · {summary.preparedCount} prepared · {summary.appliedCount}{" "}
-              applied · {summary.responseCount} responses · {summary.interviewCount}{" "}
-              interviews · {summary.offerCount} offers
+              applied · {summary.responseCount} responses ·{" "}
+              {summary.interviewCount} interviews · {summary.offerCount} offers
             </strong>
             <span>
               AutoPilot: {summary.autopilotCompletedCount} completed ·{" "}
@@ -289,12 +291,14 @@ export function ApplicationAnalyticsPanel({
             bucket ? (
               <article className="answer-card" key={`${bucket.key}-${index}`}>
                 <strong>
-                  {index === 0 ? "Job source" : index === 1 ? "ATS" : "Résumé"}: {" "}
+                  {index === 0 ? "Job source" : index === 1 ? "ATS" : "Résumé"}:{" "}
                   {bucket.key}
                 </strong>
                 <span>
-                  {bucket.sampleCount} applications · response {formatRate(bucket.responseRate)} ·{" "}
-                  interview {formatRate(bucket.interviewRate)} · offer {formatRate(bucket.offerRate)}
+                  {bucket.sampleCount} applications · response{" "}
+                  {formatRate(bucket.responseRate)} · interview{" "}
+                  {formatRate(bucket.interviewRate)} · offer{" "}
+                  {formatRate(bucket.offerRate)}
                 </span>
                 <span>{bucket.rateReason}</span>
               </article>

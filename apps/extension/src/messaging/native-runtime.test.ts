@@ -56,12 +56,16 @@ describe("native runtime compatibility", () => {
       nativeRuntimeCompatibility(
         health({
           protocol_version: REQUIRED_NATIVE_PROTOCOL_VERSION,
-          capabilities: { ...currentCapabilities, application_analytics: false },
+          capabilities: {
+            ...currentCapabilities,
+            application_analytics: false,
+          },
         }),
       ),
     ).toEqual({
       compatible: false,
-      reason: "Native companion is missing required capabilities: application_analytics.",
+      reason:
+        "Native companion is missing required capabilities: application_analytics.",
     });
   });
 });
