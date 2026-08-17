@@ -9,6 +9,55 @@ const careerContextPattern =
   /\b(career|careers|job|jobs|recruit|recruiting|position|vacancy|opportunit)/i;
 const descriptionSignalPattern =
   /\b(responsibilit|qualification|requirements?|what you(?:'|’)ll do|what we(?:'|’)re looking for|about the role|job description|role overview|preferred qualifications?)\b/i;
+const genericAffinityTokens = new Set([
+  "about",
+  "application",
+  "apply",
+  "candidate",
+  "career",
+  "careers",
+  "company",
+  "experience",
+  "greenhouse",
+  "icims",
+  "jobs",
+  "lever",
+  "myworkdayjobs",
+  "opportunity",
+  "position",
+  "qualification",
+  "qualifications",
+  "recruit",
+  "recruiting",
+  "requirements",
+  "responsibilities",
+  "role",
+  "skills",
+  "smartrecruiters",
+  "taleo",
+  "team",
+  "work",
+  "working",
+  "your",
+]);
+const genericHostTokens = new Set([
+  "apply",
+  "career",
+  "careers",
+  "candidate",
+  "com",
+  "co",
+  "greenhouse",
+  "icims",
+  "jobs",
+  "lever",
+  "myworkdayjobs",
+  "net",
+  "org",
+  "smartrecruiters",
+  "taleo",
+  "www",
+]);
 
 export type StoredJobContext = {
   url: string;
@@ -23,6 +72,72 @@ function compact(value: string | null | undefined): string {
 
 function storageKey(tabId: number): string {
   return `${storagePrefix}${tabId}`;
+}
+
+function affinityTokens(value: string): Set<string> {
+  return new Set(
+    value
+      .toLocaleLowerCase("en-US")
+      .match(/[a-z0-9]+/g)
+      ?.filter(
+        (token) => token.length >= 4 && !genericAffinityTokens.has(token),
+      ) ?? [],
+  );
+}
+
+function organizationTokens(url: URL): Set<string> {
+  return new Set(
+    url.hostname
+      .toLocaleLowerCase("en-US")
+      .split(/[.\-_]+/)
+      .filter(
+        (token) => token.length >= 3 && !genericHostTokens.has(token),
+      ),
+  );
+}
+
+function hasIntersection(left: Set<string>, right: Set<string>): boolean {
+  for (const value of left) {
+    if (right.has(value)) return true;
+  }
+  return false;
+}
+
+export function hasJobContextAffinity(
+  page: ApplicationPage,
+  stored: StoredJobContext,
+): boolean {
+  let source: URL;
+  let destination: URL;
+  try {
+    source = new URL(stored.url);
+    destination = new URL(page.url);
+  } catch {
+    return false;
+  }
+
+  if (source.origin === destination.origin) return true;
+
+  const sourceOrganizations = organizationTokens(source);
+  const destinationLocator = new Set([
+    ...organizationTokens(destination),
+    ...affinityTokens(`${destination.pathname} ${destination.search}`),
+  ]);
+  if (hasIntersection(sourceOrganizations, destinationLocator)) return true;
+
+  const listingTokens = affinityTokens(
+    `${source.pathname} ${source.search} ${stored.title} ${stored.pageContext.slice(0, 4_000)}`,
+  );
+  const applicationTokens = affinityTokens(
+    `${destination.pathname} ${destination.search} ${page.title} ${(page.pageContext ?? "").slice(0, 4_000)}`,
+  );
+  let shared = 0;
+  for (const token of listingTokens) {
+    if (!applicationTokens.has(token)) continue;
+    shared += 1;
+    if (shared >= 2) return true;
+  }
+  return false;
 }
 
 export function shouldRememberJobContext(page: ApplicationPage): boolean {
@@ -54,6 +169,7 @@ export function mergeJobContext(
     return page;
   }
   if (stored.url === page.url) return page;
+  if (!hasJobContextAffinity(page, stored)) return page;
   const listing = compact(stored.pageContext).slice(0, maxListingCharacters);
   if (!listing) return page;
   const current = compact(page.pageContext).slice(0, maxApplicationCharacters);
