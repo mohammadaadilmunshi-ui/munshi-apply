@@ -48,7 +48,9 @@ describe("job signal intelligence", () => {
       description:
         "This is a high-volume environment with multiple competing priorities. Weekend work is required and the role includes up to 40% travel.",
     });
-    expect(report.dimensions.WORKLOAD_PRESSURE.score).toBeGreaterThanOrEqual(50);
+    expect(report.dimensions.WORKLOAD_PRESSURE.score).toBeGreaterThanOrEqual(
+      50,
+    );
     expect(report.dimensions.SCHEDULE_INTENSITY.score).toBeGreaterThanOrEqual(
       60,
     );
@@ -89,9 +91,9 @@ describe("job signal intelligence", () => {
       description:
         "Own recruiting, people analytics, HRIS, payroll, employee relations, benefits, compliance, and project management activities.",
     });
-    expect(report.dimensions.RESPONSIBILITY_BREADTH.score).toBeGreaterThanOrEqual(
-      70,
-    );
+    expect(
+      report.dimensions.RESPONSIBILITY_BREADTH.score,
+    ).toBeGreaterThanOrEqual(70);
     expect(
       report.signals.every((signal) => !/toxic/i.test(signal.explanation)),
     ).toBe(true);
