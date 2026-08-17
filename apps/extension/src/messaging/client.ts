@@ -196,7 +196,9 @@ async function drainProfileSaveQueue(): Promise<void> {
       } else if (acknowledgement) {
         waiter.resolve(acknowledgement);
       } else {
-        waiter.reject(new Error("Profile save completed without acknowledgement"));
+        waiter.reject(
+          new Error("Profile save completed without acknowledgement"),
+        );
       }
     }
     if (queuedProfile && !profileSaveRunning) {
