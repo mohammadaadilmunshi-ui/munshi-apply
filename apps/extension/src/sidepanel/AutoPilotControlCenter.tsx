@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ApplicationPage } from "@munshi-apply/contracts";
+import type { AccountRecord } from "@munshi-apply/application-model";
 import { TeachMunshiPanel } from "./TeachMunshiPanel";
 import {
   getAutoPilotStatus,
@@ -11,11 +12,29 @@ import {
   type AutoPilotControllerStatus,
 } from "../messaging/client";
 import {
+  lookupNativeAccounts,
+  upsertNativeAccount,
+} from "../messaging/native-account";
+import {
   buildAutoPilotLaunchPlan,
   canAutoPilotMakeProgress,
   remainingApprovedFillCount,
   type AutoPilotAnswer,
 } from "./autopilot-plan";
+
+function inferredAccountEmail(
+  page: ApplicationPage,
+  answers: Record<string, AutoPilotAnswer>,
+): string | null {
+  for (const question of page.questions) {
+    if (!/\b(?:e-?mail|email address|username)\b/i.test(question.rawText)) {
+      continue;
+    }
+    const value = answers[question.questionId]?.value.trim() ?? "";
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return value;
+  }
+  return null;
+}
 
 export function AutoPilotControlCenter({
   page,
@@ -37,14 +56,44 @@ export function AutoPilotControlCenter({
   const [status, setStatus] = useState<AutoPilotControllerStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [knownAccounts, setKnownAccounts] = useState<AccountRecord[]>([]);
+  const [accountBusy, setAccountBusy] = useState(false);
+  const [accountMessage, setAccountMessage] = useState("");
+  const accountEmail = useMemo(
+    () => (page ? inferredAccountEmail(page, answers) : null),
+    [answers, page],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!nativeAvailable || !page) {
+      setKnownAccounts([]);
+      return () => {
+        cancelled = true;
+      };
+    }
+    void lookupNativeAccounts({ portalUrl: page.url })
+      .then((accounts) => {
+        if (!cancelled) setKnownAccounts(accounts);
+      })
+      .catch(() => {
+        if (!cancelled) setKnownAccounts([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [nativeAvailable, page]);
+
   const plan = useMemo(
     () =>
       page
         ? buildAutoPilotLaunchPlan(page, answers, {
             expectedResumeSha256: selectedResumeSha256,
+            knownAccounts,
+            preferredEmail: accountEmail,
           })
         : null,
-    [answers, page, selectedResumeSha256],
+    [accountEmail, answers, knownAccounts, page, selectedResumeSha256],
   );
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -77,6 +126,33 @@ export function AutoPilotControlCenter({
       );
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function rememberCompletedAccountStep(): Promise<void> {
+    if (!page || !accountEmail) return;
+    setAccountBusy(true);
+    setAccountMessage("");
+    try {
+      const saved = await upsertNativeAccount({
+        portalUrl: page.url,
+        email: accountEmail,
+        applicationId: applicationId || null,
+        observedAt: page.observedAt,
+      });
+      const accounts = await lookupNativeAccounts({ portalUrl: page.url });
+      setKnownAccounts(accounts);
+      setAccountMessage(
+        `Account metadata recorded for ${saved.email}. No password, OTP, token, or credential was stored.`,
+      );
+    } catch (error) {
+      setAccountMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to record account metadata",
+      );
+    } finally {
+      setAccountBusy(false);
     }
   }
 
@@ -214,6 +290,52 @@ export function AutoPilotControlCenter({
                   Final submission control detected · owner action required
                 </span>
               )}
+              {plan.accountPlan.flow !== "NONE" && (
+                <>
+                  <span className="diagnostic-error">
+                    Account step: {plan.accountPlan.flow.replaceAll("_", " ")}
+                  </span>
+                  <span>
+                    Portal scope: {plan.accountPlan.scopeKey}
+                    {plan.accountPlan.knownAccount
+                      ? ` · known account ${plan.accountPlan.knownAccount.email}`
+                      : " · no matching account recorded"}
+                  </span>
+                  {plan.accountPlan.reasons.map((reason) => (
+                    <span key={reason}>{reason}</span>
+                  ))}
+                  {nativeAvailable && accountEmail && (
+                    <button
+                      className="quiet"
+                      type="button"
+                      disabled={accountBusy}
+                      onClick={() => void rememberCompletedAccountStep()}
+                    >
+                      {accountBusy
+                        ? "Recording account metadata…"
+                        : "I completed this account step"}
+                    </button>
+                  )}
+                  {!accountEmail && (
+                    <span>
+                      Enter the account email on the employer page before MUNSHI
+                      can remember this account metadata.
+                    </span>
+                  )}
+                  {accountMessage && <span>{accountMessage}</span>}
+                </>
+              )}
+              {plan.employerKnockoutFindings.map((finding) => (
+                <span
+                  className={
+                    finding.state === "BLOCKED" ? "diagnostic-error" : undefined
+                  }
+                  key={finding.requirement.requirementId}
+                >
+                  Employer rule · {finding.requirement.kind.replaceAll("_", " ")}
+                  : {finding.reason}
+                </span>
+              ))}
               <span>{plan.preflight.readyCount} approved fill actions</span>
               <span>
                 {plan.preflight.reviewCount} require review/manual interaction
@@ -374,8 +496,8 @@ export function AutoPilotControlCenter({
         <strong>Permanent owner boundaries</strong>
         <span>
           AutoPilot never performs final submission, CAPTCHA, MFA, OTP, identity
-          verification, authentication, or OS file selection. Those actions
-          pause or hand control to you.
+          verification, authentication, password entry, credential storage, or
+          OS file selection. Those actions pause or hand control to you.
         </span>
       </div>
     </section>
