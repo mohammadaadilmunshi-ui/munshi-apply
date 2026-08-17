@@ -11,9 +11,12 @@ from typing import Any
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
+from .providers import list_ollama_models
+
 _KEYCHAIN_SERVICE = "systems.munshi.apply.openai"
 _KEYCHAIN_ACCOUNT = "OPENAI_API_KEY"
 _OPENAI_MODELS_URL = "https://api.openai.com/v1/models"
+_ALLOWED_PROVIDERS = {"openai", "ollama", "auto"}
 
 
 @dataclass
@@ -21,6 +24,10 @@ class AIConfiguration:
     provider: str = "openai"
     enabled: bool = False
     model: str = ""
+    cheap_model: str = ""
+    strong_model: str = ""
+    ollama_model: str = ""
+    prefer_local_fallback: bool = True
     monthly_budget_usd: float = 0.0
     warning_budget_usd: float = 0.0
     hard_stop: bool = True
@@ -32,19 +39,24 @@ class AIConfiguration:
     def from_payload(cls, payload: object) -> AIConfiguration:
         if not isinstance(payload, dict):
             raise ValueError("AI settings payload must be an object")
-        provider = str(payload.get("provider", "openai"))
-        if provider != "openai":
-            raise ValueError("Only the OpenAI provider is available in this release")
+        provider = str(payload.get("provider", "openai")).lower().strip()
+        if provider not in _ALLOWED_PROVIDERS:
+            raise ValueError("AI provider must be openai, ollama, or auto")
         monthly = float(payload.get("monthlyBudgetUsd", 0))
         warning = float(payload.get("warningBudgetUsd", 0))
         if monthly < 0 or warning < 0:
             raise ValueError("AI budget values cannot be negative")
         if monthly > 0 and warning > monthly:
             raise ValueError("Warning threshold cannot exceed the monthly budget")
+        model = str(payload.get("model", ""))
         return cls(
             provider=provider,
             enabled=bool(payload.get("enabled", False)),
-            model=str(payload.get("model", "")),
+            model=model,
+            cheap_model=str(payload.get("cheapModel", model)),
+            strong_model=str(payload.get("strongModel", model)),
+            ollama_model=str(payload.get("ollamaModel", "")),
+            prefer_local_fallback=bool(payload.get("preferLocalFallback", True)),
             monthly_budget_usd=monthly,
             warning_budget_usd=warning,
             hard_stop=bool(payload.get("hardStop", True)),
@@ -58,6 +70,10 @@ class AIConfiguration:
             "provider": self.provider,
             "enabled": self.enabled,
             "model": self.model,
+            "cheapModel": self.cheap_model,
+            "strongModel": self.strong_model,
+            "ollamaModel": self.ollama_model,
+            "preferLocalFallback": self.prefer_local_fallback,
             "monthlyBudgetUsd": self.monthly_budget_usd,
             "warningBudgetUsd": self.warning_budget_usd,
             "hardStop": self.hard_stop,
@@ -66,9 +82,15 @@ class AIConfiguration:
             "allowResumeEvidence": self.allow_resume_evidence,
         }
 
+    def openai_model_for_lane(self, lane: str) -> str:
+        if lane == "STRONG":
+            return (self.strong_model or self.model).strip()
+        return (self.cheap_model or self.model).strip()
+
 
 class AISettingsStore:
     def __init__(self, runtime_root: Path) -> None:
+        self.runtime_root = runtime_root
         self.config_path = runtime_root / "settings" / "ai.json"
         self.legacy_config_path = runtime_root / "config" / "ai.json"
 
@@ -85,7 +107,6 @@ class AISettingsStore:
             return self._read_configuration(self.config_path)
         if not self.legacy_config_path.exists():
             return AIConfiguration()
-
         config = self._read_configuration(self.legacy_config_path)
         self.save(config)
         try:
@@ -99,12 +120,7 @@ class AISettingsStore:
         self.config_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         payload = config.public_dict()
         with tempfile.NamedTemporaryFile(
-            "w",
-            encoding="utf-8",
-            dir=self.config_path.parent,
-            prefix="ai-",
-            suffix=".tmp",
-            delete=False,
+            "w", encoding="utf-8", dir=self.config_path.parent, prefix="ai-", suffix=".tmp", delete=False
         ) as handle:
             json.dump(payload, handle, indent=2, sort_keys=True)
             handle.write("\n")
@@ -204,7 +220,7 @@ class AISettingsStore:
             headers={
                 "Authorization": f"Bearer {self.get_api_key()}",
                 "Accept": "application/json",
-                "User-Agent": "MUNSHI-Apply/0.2",
+                "User-Agent": "MUNSHI-Apply/0.2.5",
             },
         )
         try:
@@ -239,3 +255,6 @@ class AISettingsStore:
             and "image" not in model_id
         ]
         return sorted(set(preferred))
+
+    def list_ollama_models(self) -> list[str]:
+        return list_ollama_models()
