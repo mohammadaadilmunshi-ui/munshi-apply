@@ -51,6 +51,10 @@ import {
   saveNativeApplicationCheckpoint,
 } from "../messaging/native";
 import {
+  localProfileSaveAck,
+  syncedProfileSaveAck,
+} from "../messaging/profile-save-ack";
+import {
   getCloudConnection,
   getCloudSnapshot,
   isCloudEncryptionReady,
@@ -680,35 +684,38 @@ async function routeMessage(
         const parsed = parseProfileSnapshot(request.payload);
         await persistAuthoritativeProfileSnapshot(parsed);
         const connection = await getCloudConnection();
-        if (connection && (await isCloudEncryptionReady())) {
-          try {
-            const synchronized = await synchronizeProtectedProfile(
-              connection,
-              parsed,
-            );
-            await persistAuthoritativeProfileSnapshot(synchronized);
-            if (!sameProfileSaveContent(synchronized, parsed)) {
-              throw new Error(
-                "Profile content changed on another device. Refresh before saving again.",
-              );
-            }
-            profileSyncConflict = null;
-          } catch (error) {
-            if (error instanceof ProtectedProfileConflictError) {
-              rememberProfileConflict(error);
-              return {
-                ok: true,
-                data: {
-                  localSaved: true,
-                  cloudSynced: false,
-                  conflict: profileSyncConflict,
-                },
-              };
-            }
-            throw error;
-          }
+        const encryptionReady = connection
+          ? await isCloudEncryptionReady()
+          : false;
+        if (!connection || !encryptionReady) {
+          return {
+            ok: true,
+            data: localProfileSaveAck(profileSyncConflict),
+          };
         }
-        return { ok: true, data: { localSaved: true, cloudSynced: true } };
+        try {
+          const synchronized = await synchronizeProtectedProfile(
+            connection,
+            parsed,
+          );
+          await persistAuthoritativeProfileSnapshot(synchronized);
+          if (!sameProfileSaveContent(synchronized, parsed)) {
+            throw new Error(
+              "Profile content changed on another device. Refresh before saving again.",
+            );
+          }
+          profileSyncConflict = null;
+        } catch (error) {
+          if (error instanceof ProtectedProfileConflictError) {
+            rememberProfileConflict(error);
+            return {
+              ok: true,
+              data: localProfileSaveAck(profileSyncConflict),
+            };
+          }
+          throw error;
+        }
+        return { ok: true, data: syncedProfileSaveAck() };
       }
       case "APPLY_FILL_PLAN":
         return { ok: true, data: await applyFillPlan(request.payload) };
