@@ -58,6 +58,11 @@ replace_once(
     "  cancelTeachInteraction();",
     '  cancelTeachInteraction("cleanup-session");',
 )
+replace_once(
+    "apps/extension/src/content/teach-strengthened.test.ts",
+    "    expect(capture.beforeState.value).not.toBe(capture.afterState.value);",
+    "    expect(capture.beforeState.valueLength).not.toBe(capture.afterState.valueLength);\n    expect(JSON.stringify(capture)).not.toContain(\"Automotive\");",
+)
 
 replace_once(
     "apps/extension/src/content/teach.test.ts",
@@ -67,6 +72,126 @@ replace_once(
     input.value = "United States";
     input.dispatchEvent(new Event("input", { bubbles: true }));''',
 )
+
+path = "apps/extension/src/content/teach.ts"
+content = read(path)
+content = content.replace(
+    '''function stateFor(element: HTMLElement): Record<string, unknown> {
+  const input = element instanceof HTMLInputElement ? element : null;
+  const select = element instanceof HTMLSelectElement ? element : null;
+  const textarea = element instanceof HTMLTextAreaElement ? element : null;
+  return {
+    value:
+      input?.value ??
+      select?.value ??
+      textarea?.value ??
+      element.textContent ??
+      "",
+    checked: input?.checked ?? element.getAttribute("aria-checked"),
+    selected: element.getAttribute("aria-selected"),
+    expanded: element.getAttribute("aria-expanded"),
+    invalid: element.getAttribute("aria-invalid"),
+    disabled:
+      input?.disabled ??
+      select?.disabled ??
+      textarea?.disabled ??
+      element.getAttribute("aria-disabled"),
+    role: element.getAttribute("role"),
+  };
+}
+
+function marker(element: HTMLElement): string {
+  const input = element instanceof HTMLInputElement ? element : null;
+  const select = element instanceof HTMLSelectElement ? element : null;
+  const textarea = element instanceof HTMLTextAreaElement ? element : null;
+  void input;
+  void select;
+  void textarea;
+  return JSON.stringify(stateFor(element));
+}''',
+    '''function controlValue(element: HTMLElement): string {
+  if (element instanceof HTMLInputElement) return element.value;
+  if (element instanceof HTMLSelectElement) return element.value;
+  if (element instanceof HTMLTextAreaElement) return element.value;
+  return element.textContent ?? "";
+}
+
+function stateFor(element: HTMLElement): Record<string, unknown> {
+  const input = element instanceof HTMLInputElement ? element : null;
+  const select = element instanceof HTMLSelectElement ? element : null;
+  const textarea = element instanceof HTMLTextAreaElement ? element : null;
+  const value = controlValue(element);
+  return {
+    valuePresent: value.length > 0,
+    valueLength: value.length,
+    checked: input?.checked ?? element.getAttribute("aria-checked"),
+    selected: element.getAttribute("aria-selected"),
+    expanded: element.getAttribute("aria-expanded"),
+    invalid: element.getAttribute("aria-invalid"),
+    disabled:
+      input?.disabled ??
+      select?.disabled ??
+      textarea?.disabled ??
+      element.getAttribute("aria-disabled"),
+    role: element.getAttribute("role"),
+  };
+}
+
+function marker(element: HTMLElement): string {
+  return JSON.stringify({
+    ...stateFor(element),
+    __privateValue: controlValue(element),
+  });
+}
+
+function redactedMarkerState(value: string): Record<string, unknown> {
+  const parsed = JSON.parse(value) as Record<string, unknown>;
+  delete parsed.__privateValue;
+  return parsed;
+}
+
+function eventTargetsTeachControl(
+  element: HTMLElement,
+  target: Element | null,
+): boolean {
+  if (!target) return false;
+  if (target === element || element.contains(target)) return true;
+  const popupIds = (element.getAttribute("aria-controls") ?? "")
+    .split(/\\s+/)
+    .filter(Boolean);
+  let cursor: Element | null = target;
+  while (cursor) {
+    if (cursor.id && popupIds.includes(cursor.id)) return true;
+    cursor = cursor.parentElement;
+  }
+  return false;
+}''',
+    1,
+)
+content = content.replace(
+    '''        const target = event.target instanceof Element ? event.target : null;
+        const related =
+          target === element ||
+          Boolean(
+            target &&
+              (element.contains(target) || element.id
+                ? target.closest(`[aria-controls="${CSS.escape(element.id)}"]`)
+                : null),
+          );''',
+    '''        const target = event.target instanceof Element ? event.target : null;
+        const related = eventTargetsTeachControl(element, target);''',
+    1,
+)
+content = content.replace(
+    '''  const beforeState = JSON.parse(
+    current.beforeMarker,
+  ) as Record<string, unknown>;
+  const afterState = JSON.parse(afterMarker) as Record<string, unknown>;''',
+    '''  const beforeState = redactedMarkerState(current.beforeMarker);
+  const afterState = redactedMarkerState(afterMarker);''',
+    1,
+)
+write(path, content)
 
 replace_once(
     "apps/extension/src/messaging/native-runtime.test.ts",
