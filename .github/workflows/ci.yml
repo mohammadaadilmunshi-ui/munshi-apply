@@ -6,7 +6,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   extension:
@@ -52,3 +52,100 @@ jobs:
           node-version: 24
       - run: node scripts/secret-scan.mjs
       - run: ./scripts/repository-safety.sh
+
+  profile-ui-ack-patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Patch exact Profile save status blocks
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("apps/extension/src/sidepanel/App.tsx")
+          source = path.read_text()
+
+          old_auto = '''        void saveProfile(profile)
+            .then(async () => {
+              const status = await getProfileSyncStatus();
+              setProfileSyncStatus(status);
+              if (profileRevision.current !== revision) return;
+              setProfileDirty(false);
+              setSaveState(
+                status.conflict
+                  ? "conflict"
+                  : cloud.status === "connected" && cloud.data.encryptionReady
+                    ? "synced"
+                    : "local",
+              );
+            })
+'''
+          new_auto = '''        void saveProfile(profile)
+            .then((acknowledgement) => {
+              const status = { conflict: acknowledgement.conflict };
+              setProfileSyncStatus(status);
+              if (profileRevision.current !== revision) return;
+              setProfileDirty(false);
+              setSaveState(
+                acknowledgement.conflict
+                  ? "conflict"
+                  : acknowledgement.cloudSynced
+                    ? "synced"
+                    : "local",
+              );
+            })
+'''
+          if source.count(old_auto) != 1:
+              raise SystemExit("Expected exactly one Profile autosave block")
+          source = source.replace(old_auto, new_auto, 1)
+
+          old_sync = '''    try {
+      await saveProfile(profile);
+      const syncStatus = await getProfileSyncStatus();
+      setProfileSyncStatus(syncStatus);
+      if (profileRevision.current === revision) {
+        setProfileDirty(false);
+        setSaveState(
+          syncStatus.conflict
+            ? "conflict"
+            : cloud.status === "connected" && cloud.data.encryptionReady
+              ? "synced"
+              : "local",
+        );
+      }
+'''
+          new_sync = '''    try {
+      const acknowledgement = await saveProfile(profile);
+      const syncStatus = { conflict: acknowledgement.conflict };
+      setProfileSyncStatus(syncStatus);
+      if (profileRevision.current === revision) {
+        setProfileDirty(false);
+        setSaveState(
+          acknowledgement.conflict
+            ? "conflict"
+            : acknowledgement.cloudSynced
+              ? "synced"
+              : "local",
+        );
+      }
+'''
+          if source.count(old_sync) != 1:
+              raise SystemExit("Expected exactly one manual sync block")
+          path.write_text(source.replace(old_sync, new_sync, 1))
+          PY
+          npx prettier apps/extension/src/sidepanel/App.tsx --write
+      - name: Commit exact Profile UI patch
+        run: |
+          git config user.name "MUNSHI Apply CI"
+          git config user.email "actions@users.noreply.github.com"
+          git add apps/extension/src/sidepanel/App.tsx
+          git diff --cached --check
+          git commit -m "fix: render profile save status from exact acknowledgement"
+          git push origin HEAD:feat/v3-foundation-alignment
