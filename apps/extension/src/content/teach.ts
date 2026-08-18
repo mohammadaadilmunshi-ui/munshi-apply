@@ -28,13 +28,17 @@ export type TeachInteractionCapture = {
   finishedAt: string;
 };
 
+type TeachEventTarget = "control" | "control-group" | "owned-popup";
+
 type ActiveTeachSession = TeachInteractionStart & {
   element: HTMLElement;
   resolvedControlId: string;
+  controlKind: string;
   beforeMarker: string;
   eventTypes: Set<string>;
-  eventSequence: { type: string; target: string; atMs: number }[];
+  eventSequence: { type: string; target: TeachEventTarget; atMs: number }[];
   startedAtMs: number;
+  controlEngaged: boolean;
   abortController: AbortController;
 };
 
@@ -54,11 +58,54 @@ function controlLabel(control: {
   return compact(control.label || control.ariaLabel || control.name);
 }
 
+function radioGroup(element: HTMLInputElement): HTMLInputElement[] {
+  if (element.type !== "radio" || !element.name) return [element];
+  const root = element.getRootNode();
+  if (!(root instanceof Document || root instanceof ShadowRoot)) return [element];
+  return Array.from(root.querySelectorAll<HTMLInputElement>("input[type='radio']")).filter(
+    (candidate) => candidate.name === element.name,
+  );
+}
+
+function customControlShellText(element: HTMLElement): string {
+  if (!isPopupChoiceControl(element)) return "";
+  const pieces: string[] = [];
+  let current: HTMLElement | null = element;
+  for (let depth = 0; current && depth < 3; depth += 1) {
+    const text = compact(current.textContent);
+    if (text) pieces.push(text);
+    current = current.parentElement;
+  }
+  return pieces.join(" | ").slice(0, 4_000);
+}
+
 function controlValue(element: HTMLElement): string {
-  if (element instanceof HTMLInputElement) return element.value;
-  if (element instanceof HTMLSelectElement) return element.value;
-  if (element instanceof HTMLTextAreaElement) return element.value;
-  return element.textContent ?? "";
+  const values: string[] = [];
+  if (element instanceof HTMLInputElement) {
+    values.push(element.value);
+    if (element.type === "radio") {
+      const selected = radioGroup(element).find((candidate) => candidate.checked);
+      values.push(selected?.value ?? "");
+    }
+  } else if (element instanceof HTMLSelectElement) {
+    values.push(element.value);
+    values.push(
+      Array.from(element.selectedOptions)
+        .map((option) => compact(option.textContent))
+        .join(" | "),
+    );
+  } else if (element instanceof HTMLTextAreaElement) {
+    values.push(element.value);
+  } else {
+    values.push(element.textContent ?? "");
+  }
+  values.push(
+    element.getAttribute("aria-valuetext") ?? "",
+    element.getAttribute("data-value") ?? "",
+    element.getAttribute("aria-activedescendant") ?? "",
+    customControlShellText(element),
+  );
+  return compact(values.filter(Boolean).join(" | ")).slice(0, 8_000);
 }
 
 function safeStateFor(element: HTMLElement): Record<string, unknown> {
@@ -66,12 +113,19 @@ function safeStateFor(element: HTMLElement): Record<string, unknown> {
   const select = element instanceof HTMLSelectElement ? element : null;
   const textarea = element instanceof HTMLTextAreaElement ? element : null;
   const value = controlValue(element);
+  const selectedRadio =
+    input?.type === "radio"
+      ? radioGroup(input).some((candidate) => candidate.checked)
+      : undefined;
   return {
     valuePresent: value.length > 0,
     valueLength: value.length,
     checked: input?.checked ?? element.getAttribute("aria-checked"),
+    groupChecked: selectedRadio,
     selected: element.getAttribute("aria-selected"),
     expanded: element.getAttribute("aria-expanded"),
+    activeDescendantPresent: Boolean(element.getAttribute("aria-activedescendant")),
+    dataValuePresent: Boolean(element.getAttribute("data-value")),
     invalid: element.getAttribute("aria-invalid"),
     disabled:
       input?.disabled ??
@@ -108,10 +162,19 @@ function popupIds(element: HTMLElement): string[] {
     .filter(Boolean);
 }
 
+function optionLike(target: Element): boolean {
+  return Boolean(
+    target.closest(
+      '[role="option"],[role="menuitem"],[role="treeitem"],[role="gridcell"],[data-value]',
+    ),
+  );
+}
+
 function eventTargetKind(
   element: HTMLElement,
   target: Element | null,
-): "control" | "control-group" | "owned-popup" | null {
+  allowPortalOption: boolean,
+): TeachEventTarget | null {
   if (!target) return null;
   if (target === element || element.contains(target)) return "control";
 
@@ -137,15 +200,15 @@ function eventTargetKind(
     if (group?.contains(target)) return "control-group";
   }
 
-  if (
-    isPopupChoiceControl(element) &&
-    (element.getAttribute("aria-expanded") === "true" ||
-      document.activeElement === element)
-  ) {
-    const option = target.closest(
-      '[role="option"],[role="menuitem"],[role="treeitem"],[data-value]',
-    );
-    if (option) return "owned-popup";
+  if (isPopupChoiceControl(element)) {
+    if (
+      (element.getAttribute("aria-expanded") === "true" ||
+        document.activeElement === element) &&
+      optionLike(target)
+    ) {
+      return "owned-popup";
+    }
+    if (allowPortalOption && optionLike(target)) return "owned-popup";
   }
 
   return null;
@@ -166,27 +229,48 @@ function teachable(element: HTMLElement): boolean {
   return true;
 }
 
-function resolveLiveElement(session: ActiveTeachSession): HTMLElement {
-  if (session.element.isConnected) return session.element;
+function compatibleControlKind(original: string, candidate: string): boolean {
+  if (original === candidate) return true;
+  const choiceKinds = new Set(["COMBOBOX", "SELECT"]);
+  return choiceKinds.has(original) && choiceKinds.has(candidate);
+}
 
-  const exact = resolveControlElement(session.controlId);
-  if (exact?.element instanceof HTMLElement && teachable(exact.element)) {
-    session.element = exact.element;
-    session.resolvedControlId = exact.control.controlId;
-    return exact.element;
+function tryRebind(session: ActiveTeachSession, controlId: string): HTMLElement | null {
+  const rebound = resolveControlElement(controlId);
+  if (!(rebound?.element instanceof HTMLElement) || !teachable(rebound.element)) {
+    return null;
   }
+  if (!compatibleControlKind(session.controlKind, rebound.control.kind)) return null;
+  session.element = rebound.element;
+  session.resolvedControlId = rebound.control.controlId;
+  return rebound.element;
+}
 
-  const candidates = scanDocument().controls.filter(
+function resolveLiveElement(session: ActiveTeachSession): HTMLElement {
+  const exact = tryRebind(session, session.controlId);
+  if (exact) return exact;
+
+  const controls = scanDocument().controls;
+  const fingerprintCandidates = controls.filter(
     (control) =>
       control.componentFingerprint === session.componentFingerprint &&
+      compatibleControlKind(session.controlKind, control.kind) &&
       (!session.label || controlLabel(control) === session.label),
   );
-  if (candidates.length === 1) {
-    const rebound = resolveControlElement(candidates[0]!.controlId);
-    if (rebound?.element instanceof HTMLElement && teachable(rebound.element)) {
-      session.element = rebound.element;
-      session.resolvedControlId = rebound.control.controlId;
-      return rebound.element;
+  if (fingerprintCandidates.length === 1) {
+    const rebound = tryRebind(session, fingerprintCandidates[0]!.controlId);
+    if (rebound) return rebound;
+  }
+
+  if (session.label) {
+    const labelCandidates = controls.filter(
+      (control) =>
+        controlLabel(control) === session.label &&
+        compatibleControlKind(session.controlKind, control.kind),
+    );
+    if (labelCandidates.length === 1) {
+      const rebound = tryRebind(session, labelCandidates[0]!.controlId);
+      if (rebound) return rebound;
     }
   }
 
@@ -259,6 +343,43 @@ function inferredActions(
   return [];
 }
 
+function controlClickIsCommit(element: HTMLElement): boolean {
+  if (element instanceof HTMLInputElement) {
+    return ["radio", "checkbox"].includes(element.type);
+  }
+  return ["radio", "checkbox", "switch"].includes(
+    element.getAttribute("role") ?? "",
+  );
+}
+
+function explicitCommitObserved(
+  element: HTMLElement,
+  events: readonly { type: string; target: TeachEventTarget }[],
+): boolean {
+  return events.some((event) => {
+    if (
+      ["input", "change"].includes(event.type) &&
+      (event.target === "control" || event.target === "control-group")
+    ) {
+      return true;
+    }
+    if (
+      event.type === "click" &&
+      ["owned-popup", "control-group"].includes(event.target)
+    ) {
+      return true;
+    }
+    if (
+      event.type === "click" &&
+      event.target === "control" &&
+      controlClickIsCommit(element)
+    ) {
+      return true;
+    }
+    return event.type === "key:Enter";
+  });
+}
+
 function dispose(): void {
   active?.abortController.abort();
   active = null;
@@ -284,7 +405,11 @@ export function beginTeachInteraction(
   }
   const abortController = new AbortController();
   const eventTypes = new Set<string>();
-  const eventSequence: { type: string; target: string; atMs: number }[] = [];
+  const eventSequence: {
+    type: string;
+    target: TeachEventTarget;
+    atMs: number;
+  }[] = [];
   const startedAtMs = performance.now();
   const options = { capture: true, signal: abortController.signal } as const;
   const label = controlLabel(resolved.control);
@@ -295,12 +420,14 @@ export function beginTeachInteraction(
     resolvedControlId: controlId,
     label,
     componentFingerprint,
+    controlKind: resolved.control.kind,
     startedAt: new Date().toISOString(),
     element,
     beforeMarker: marker(element),
     eventTypes,
     eventSequence,
     startedAtMs,
+    controlEngaged: false,
     abortController,
   };
   active = session;
@@ -319,8 +446,15 @@ export function beginTeachInteraction(
         if (!active || active.sessionId !== sessionId) return;
         const live = resolveLiveElement(active);
         const target = event.target instanceof Element ? event.target : null;
-        const targetKind = eventTargetKind(live, target);
+        const targetKind = eventTargetKind(
+          live,
+          target,
+          active.controlEngaged,
+        );
         if (!targetKind) return;
+        if (targetKind === "control" && ["focus", "click", "keydown"].includes(eventName)) {
+          active.controlEngaged = true;
+        }
         if (eventName === "keydown" && event instanceof KeyboardEvent) {
           if (
             !["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"].includes(
@@ -379,27 +513,30 @@ export function finishTeachInteraction(
   const answerStateChanged =
     beforeInternal.__privateValue !== afterInternal.__privateValue ||
     beforeInternal.checked !== afterInternal.checked ||
+    beforeInternal.groupChecked !== afterInternal.groupChecked ||
     beforeInternal.selected !== afterInternal.selected;
-  const commitEventObserved =
-    current.eventTypes.has("change") ||
-    current.eventTypes.has("input") ||
-    current.eventTypes.has("click") ||
-    current.eventTypes.has("key:Enter");
-  const valueCommitted = changed && answerStateChanged && commitEventObserved;
+  const explicitCommit = explicitCommitObserved(live, current.eventSequence);
+  const mechanicsObserved = actions.length > 0 && current.eventSequence.length > 0;
+  const valueCommitted = explicitCommit || (changed && answerStateChanged);
   const reasons: string[] = [];
   if (changed) reasons.push("control-state-changed");
   if (answerStateChanged) reasons.push("answer-state-changed");
+  if (explicitCommit) reasons.push("explicit-commit-observed");
+  if (mechanicsObserved) reasons.push("mechanics-pattern-observed");
   if (valueCommitted) reasons.push("value-commit-observed");
+  if (!changed && explicitCommit) reasons.push("same-value-demonstration");
   if (current.eventSequence.length > 0)
     reasons.push("targeted-events-observed");
   if (current.resolvedControlId !== current.controlId)
     reasons.push("dynamic-control-rebound");
   const score = Math.min(
     1,
-    (changed ? 0.3 : 0) +
-      (answerStateChanged ? 0.3 : 0) +
-      (valueCommitted ? 0.25 : 0) +
-      (current.eventSequence.length > 0 ? 0.15 : 0),
+    (changed ? 0.2 : 0) +
+      (answerStateChanged ? 0.2 : 0) +
+      (explicitCommit ? 0.55 : 0) +
+      (mechanicsObserved ? 0.25 : 0) +
+      (current.eventSequence.length > 0 ? 0.2 : 0) +
+      (current.resolvedControlId !== current.controlId ? 0.05 : 0),
   );
   const result: TeachInteractionCapture = {
     sessionId: current.sessionId,
@@ -407,7 +544,7 @@ export function finishTeachInteraction(
     resolvedControlId: current.resolvedControlId,
     componentFingerprint: current.componentFingerprint,
     changed,
-    reusable: score >= 0.8 && actions.length > 0,
+    reusable: score >= 0.8 && valueCommitted && actions.length > 0,
     actions,
     eventTypes: [...current.eventTypes],
     eventSequence: current.eventSequence.slice(0, 60),
