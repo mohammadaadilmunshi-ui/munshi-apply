@@ -1,7 +1,7 @@
 import type { RecipeAction } from "@munshi-apply/application-model";
 import { isAriaMultiSelectControl } from "./advanced-controls";
 import { isPopupChoiceControl } from "./adaptive";
-import { resolveControlElement } from "./scanner";
+import { resolveControlElement, scanDocument } from "./scanner";
 
 export type TeachInteractionStart = {
   sessionId: string;
@@ -14,6 +14,7 @@ export type TeachInteractionStart = {
 export type TeachInteractionCapture = {
   sessionId: string;
   controlId: string;
+  resolvedControlId: string;
   componentFingerprint: string;
   changed: boolean;
   reusable: boolean;
@@ -29,6 +30,7 @@ export type TeachInteractionCapture = {
 
 type ActiveTeachSession = TeachInteractionStart & {
   element: HTMLElement;
+  resolvedControlId: string;
   beforeMarker: string;
   eventTypes: Set<string>;
   eventSequence: { type: string; target: string; atMs: number }[];
@@ -42,6 +44,14 @@ let active: ActiveTeachSession | null = null;
 
 function compact(value: string | null | undefined): string {
   return (value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function controlLabel(control: {
+  label?: string | null;
+  ariaLabel?: string | null;
+  name?: string | null;
+}): string {
+  return compact(control.label || control.ariaLabel || control.name);
 }
 
 function controlValue(element: HTMLElement): string {
@@ -89,21 +99,44 @@ function redactedMarkerState(value: string): Record<string, unknown> {
   return parsed;
 }
 
+function popupIds(element: HTMLElement): string[] {
+  return [element.getAttribute("aria-controls"), element.getAttribute("aria-owns")]
+    .flatMap((value) => (value ?? "").split(/\s+/))
+    .filter(Boolean);
+}
+
 function eventTargetKind(
   element: HTMLElement,
   target: Element | null,
-): "control" | "owned-popup" | null {
+): "control" | "control-group" | "owned-popup" | null {
   if (!target) return null;
   if (target === element || element.contains(target)) return "control";
-  const popupIds = (element.getAttribute("aria-controls") ?? "")
-    .split(/\s+/)
-    .filter(Boolean);
-  if (popupIds.length === 0) return null;
+
+  const explicitPopupIds = popupIds(element);
   let cursor: Element | null = target;
   while (cursor) {
-    if (cursor.id && popupIds.includes(cursor.id)) return "owned-popup";
+    if (cursor.id && explicitPopupIds.includes(cursor.id)) return "owned-popup";
     cursor = cursor.parentElement;
   }
+
+  const inputType =
+    element instanceof HTMLInputElement ? element.type.toLocaleLowerCase("en-US") : "";
+  const role = element.getAttribute("role") ?? "";
+  if (["radio", "checkbox"].includes(inputType) || ["radio", "checkbox", "switch"].includes(role)) {
+    const group = element.closest('fieldset,[role="radiogroup"],[role="group"]');
+    if (group?.contains(target)) return "control-group";
+  }
+
+  if (
+    isPopupChoiceControl(element) &&
+    (element.getAttribute("aria-expanded") === "true" || document.activeElement === element)
+  ) {
+    const option = target.closest(
+      '[role="option"],[role="menuitem"],[role="treeitem"],[data-value]',
+    );
+    if (option) return "owned-popup";
+  }
+
   return null;
 }
 
@@ -120,6 +153,33 @@ function teachable(element: HTMLElement): boolean {
   }
   if (element instanceof HTMLButtonElement) return false;
   return true;
+}
+
+function resolveLiveElement(session: ActiveTeachSession): HTMLElement {
+  if (session.element.isConnected) return session.element;
+
+  const exact = resolveControlElement(session.controlId);
+  if (exact?.element instanceof HTMLElement && teachable(exact.element)) {
+    session.element = exact.element;
+    session.resolvedControlId = exact.control.controlId;
+    return exact.element;
+  }
+
+  const candidates = scanDocument().controls.filter(
+    (control) =>
+      control.componentFingerprint === session.componentFingerprint &&
+      (!session.label || controlLabel(control) === session.label),
+  );
+  if (candidates.length === 1) {
+    const rebound = resolveControlElement(candidates[0]!.controlId);
+    if (rebound?.element instanceof HTMLElement && teachable(rebound.element)) {
+      session.element = rebound.element;
+      session.resolvedControlId = rebound.control.controlId;
+      return rebound.element;
+    }
+  }
+
+  return session.element;
 }
 
 function inferredActions(
@@ -216,6 +276,24 @@ export function beginTeachInteraction(
   const eventSequence: { type: string; target: string; atMs: number }[] = [];
   const startedAtMs = performance.now();
   const options = { capture: true, signal: abortController.signal } as const;
+  const label = controlLabel(resolved.control);
+
+  const session: ActiveTeachSession = {
+    sessionId,
+    controlId,
+    resolvedControlId: controlId,
+    label,
+    componentFingerprint,
+    startedAt: new Date().toISOString(),
+    element,
+    beforeMarker: marker(element),
+    eventTypes,
+    eventSequence,
+    startedAtMs,
+    abortController,
+  };
+  active = session;
+
   for (const eventName of [
     "focus",
     "click",
@@ -227,8 +305,10 @@ export function beginTeachInteraction(
     document.addEventListener(
       eventName,
       (event) => {
+        if (!active || active.sessionId !== sessionId) return;
+        const live = resolveLiveElement(active);
         const target = event.target instanceof Element ? event.target : null;
-        const targetKind = eventTargetKind(element, target);
+        const targetKind = eventTargetKind(live, target);
         if (!targetKind) return;
         if (eventName === "keydown" && event instanceof KeyboardEvent) {
           if (
@@ -261,31 +341,14 @@ export function beginTeachInteraction(
       options,
     );
   }
-  const startedAt = new Date().toISOString();
-  active = {
-    sessionId,
-    controlId,
-    label: compact(
-      resolved?.control.label ||
-        resolved?.control.ariaLabel ||
-        resolved?.control.name,
-    ),
-    componentFingerprint,
-    startedAt,
-    element,
-    beforeMarker: marker(element),
-    eventTypes,
-    eventSequence,
-    startedAtMs,
-    abortController,
-  };
+
   element.scrollIntoView?.({ block: "center", inline: "nearest" });
   return {
     sessionId,
     controlId,
-    label: active.label,
+    label,
     componentFingerprint,
-    startedAt,
+    startedAt: session.startedAt,
   };
 }
 
@@ -296,8 +359,9 @@ export function finishTeachInteraction(
     throw new Error("Teach MUNSHI session is no longer active in this frame");
   }
   const current = active;
-  const actions = inferredActions(current.element, current.eventTypes);
-  const afterMarker = marker(current.element);
+  const live = resolveLiveElement(current);
+  const actions = inferredActions(live, current.eventTypes);
+  const afterMarker = marker(live);
   const beforeInternal = parseInternalMarker(current.beforeMarker);
   const afterInternal = parseInternalMarker(afterMarker);
   const changed = current.beforeMarker !== afterMarker;
@@ -317,6 +381,8 @@ export function finishTeachInteraction(
   if (valueCommitted) reasons.push("value-commit-observed");
   if (current.eventSequence.length > 0)
     reasons.push("targeted-events-observed");
+  if (current.resolvedControlId !== current.controlId)
+    reasons.push("dynamic-control-rebound");
   const score = Math.min(
     1,
     (changed ? 0.3 : 0) +
@@ -327,6 +393,7 @@ export function finishTeachInteraction(
   const result: TeachInteractionCapture = {
     sessionId: current.sessionId,
     controlId: current.controlId,
+    resolvedControlId: current.resolvedControlId,
     componentFingerprint: current.componentFingerprint,
     changed,
     reusable: score >= 0.8 && actions.length > 0,
