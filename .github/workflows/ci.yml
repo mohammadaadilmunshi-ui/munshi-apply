@@ -6,95 +6,9 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  guarded-prettier-repair:
-    if: github.event_name == 'pull_request' && github.actor != 'github-actions[bot]' && github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: feat/v3-foundation-alignment
-          fetch-depth: 0
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
-      - name: Apply pinned Prettier
-        run: npx prettier --write apps/extension/src/content/teach.ts apps/extension/src/content/teach.test.ts
-      - name: Verify formatted source
-        run: npx prettier --check apps/extension/src/content/teach.ts apps/extension/src/content/teach.test.ts
-      - name: Restore verification-only CI and commit formatting
-        run: |
-          cat > .github/workflows/ci.yml <<'EOF'
-          name: CI
-
-          on:
-            pull_request:
-            push:
-              branches: [main]
-
-          permissions:
-            contents: read
-
-          jobs:
-            extension:
-              runs-on: ubuntu-latest
-              steps:
-                - uses: actions/checkout@v7
-                - uses: actions/setup-node@v7
-                  with:
-                    node-version: 24
-                    cache: npm
-                - run: npm ci
-                - run: npm run check
-                - uses: actions/upload-artifact@v7
-                  with:
-                    name: munshi-apply-edge-unpacked
-                    path: apps/extension/dist
-                    if-no-files-found: error
-
-            native-host:
-              runs-on: ubuntu-latest
-              steps:
-                - uses: actions/checkout@v7
-                - uses: actions/setup-python@v7
-                  with:
-                    python-version: "3.12"
-                    cache: pip
-                - name: Verify operational Python selector
-                  run: |
-                    source scripts/lib/common.sh
-                    "${PYTHON_BIN}" -c 'import sys; assert sys.version_info >= (3, 12); print(sys.executable)'
-                - run: python -m pip install -e './apps/native-host[dev]'
-                - run: python -m ruff check apps/native-host
-                - run: python -m pytest apps/native-host
-
-            repository-safety:
-              runs-on: ubuntu-latest
-              steps:
-                - uses: actions/checkout@v7
-                  with:
-                    fetch-depth: 0
-                - uses: actions/setup-node@v7
-                  with:
-                    node-version: 24
-                - run: node scripts/secret-scan.mjs
-                - run: ./scripts/repository-safety.sh
-          EOF
-          git diff --check
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add apps/extension/src/content/teach.ts apps/extension/src/content/teach.test.ts .github/workflows/ci.yml
-          if git diff --cached --quiet; then
-            echo "No formatting changes required"
-            exit 0
-          fi
-          git commit -m "style: apply Prettier to Teach repair"
-          git push origin HEAD:feat/v3-foundation-alignment
-
   extension:
     runs-on: ubuntu-latest
     steps:

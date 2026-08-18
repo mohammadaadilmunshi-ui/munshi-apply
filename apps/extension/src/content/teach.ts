@@ -61,7 +61,8 @@ function controlLabel(control: {
 function radioGroup(element: HTMLInputElement): HTMLInputElement[] {
   if (element.type !== "radio" || !element.name) return [element];
   const root = element.getRootNode();
-  if (!(root instanceof Document || root instanceof ShadowRoot)) return [element];
+  if (!(root instanceof Document || root instanceof ShadowRoot))
+    return [element];
   return Array.from(
     root.querySelectorAll<HTMLInputElement>("input[type='radio']"),
   ).filter((candidate) => candidate.name === element.name);
@@ -244,7 +245,10 @@ function tryRebind(
   controlId: string,
 ): HTMLElement | null {
   const rebound = resolveControlElement(controlId);
-  if (!(rebound?.element instanceof HTMLElement) || !teachable(rebound.element)) {
+  if (
+    !(rebound?.element instanceof HTMLElement) ||
+    !teachable(rebound.element)
+  ) {
     return null;
   }
   if (!compatibleControlKind(session.controlKind, rebound.control.kind)) {
@@ -330,9 +334,7 @@ function inferredActions(
   if (
     (element instanceof HTMLInputElement &&
       ["radio", "checkbox"].includes(element.type)) ||
-    ["radio", "checkbox", "switch"].includes(
-      element.getAttribute("role") ?? "",
-    )
+    ["radio", "checkbox", "switch"].includes(element.getAttribute("role") ?? "")
   ) {
     return [
       { type: "FOCUS" },

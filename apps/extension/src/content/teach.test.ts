@@ -80,76 +80,66 @@ describe("Teach MUNSHI capture", () => {
     expect(JSON.stringify(learned)).not.toContain('"no"');
   });
 
-  it(
-    "rebinds by stable label when a dynamic ATS changes the control fingerprint",
-    () => {
-      document.body.innerHTML = `
+  it("rebinds by stable label when a dynamic ATS changes the control fingerprint", () => {
+    document.body.innerHTML = `
         <label for="race">Please identify your race</label>
         <input id="race" role="combobox" aria-expanded="false" aria-haspopup="listbox" />
       `;
-      const initialPage = scanDocument();
-      const control = initialPage.controls.find(
-        (item) => item.label === "Please identify your race",
-      )!;
-      const started = beginTeachInteraction(
-        "teach-label-rebind",
-        control.controlId,
-      );
+    const initialPage = scanDocument();
+    const control = initialPage.controls.find(
+      (item) => item.label === "Please identify your race",
+    )!;
+    const started = beginTeachInteraction(
+      "teach-label-rebind",
+      control.controlId,
+    );
 
-      const original = document.getElementById("race") as HTMLInputElement;
-      const replacement = document.createElement("select");
-      replacement.id = "race";
-      replacement.innerHTML = `
+    const original = document.getElementById("race") as HTMLInputElement;
+    const replacement = document.createElement("select");
+    replacement.id = "race";
+    replacement.innerHTML = `
         <option value="">Select</option>
         <option value="asian">Asian</option>
       `;
-      replacement.value = "asian";
-      original.replaceWith(replacement);
-      replacement.dispatchEvent(new Event("change", { bubbles: true }));
+    replacement.value = "asian";
+    original.replaceWith(replacement);
+    replacement.dispatchEvent(new Event("change", { bubbles: true }));
 
-      const learned = finishTeachInteraction(started.sessionId);
-      expect(learned.reusable).toBe(true);
-      expect(learned.quality.reasons).toContain("dynamic-control-rebound");
-      expect(JSON.stringify(learned)).not.toContain("Asian");
-    },
-  );
+    const learned = finishTeachInteraction(started.sessionId);
+    expect(learned.reusable).toBe(true);
+    expect(learned.quality.reasons).toContain("dynamic-control-rebound");
+    expect(JSON.stringify(learned)).not.toContain("Asian");
+  });
 
-  it(
-    "accepts a same-value demonstration when an explicit commit event proves the mechanics",
-    () => {
-      document.body.innerHTML = `
+  it("accepts a same-value demonstration when an explicit commit event proves the mechanics", () => {
+    document.body.innerHTML = `
         <label for="ethnicity">Are you Hispanic/Latino?</label>
         <select id="ethnicity">
           <option value="">Select</option>
           <option value="no" selected>No</option>
         </select>
       `;
-      const page = scanDocument();
-      const control = page.controls.find(
-        (item) => item.label === "Are you Hispanic/Latino?",
-      )!;
-      const select = document.getElementById(
-        "ethnicity",
-      ) as HTMLSelectElement;
-      const started = beginTeachInteraction(
-        "teach-same-value",
-        control.controlId,
-      );
+    const page = scanDocument();
+    const control = page.controls.find(
+      (item) => item.label === "Are you Hispanic/Latino?",
+    )!;
+    const select = document.getElementById("ethnicity") as HTMLSelectElement;
+    const started = beginTeachInteraction(
+      "teach-same-value",
+      control.controlId,
+    );
 
-      select.dispatchEvent(new Event("change", { bubbles: true }));
+    select.dispatchEvent(new Event("change", { bubbles: true }));
 
-      const learned = finishTeachInteraction(started.sessionId);
-      expect(learned.changed).toBe(false);
-      expect(learned.reusable).toBe(true);
-      expect(learned.quality.reasons).toContain("same-value-demonstration");
-      expect(learned.quality.reasons).toContain("explicit-commit-observed");
-    },
-  );
+    const learned = finishTeachInteraction(started.sessionId);
+    expect(learned.changed).toBe(false);
+    expect(learned.reusable).toBe(true);
+    expect(learned.quality.reasons).toContain("same-value-demonstration");
+    expect(learned.quality.reasons).toContain("explicit-commit-observed");
+  });
 
-  it(
-    "accepts a portaled custom-select option click without retaining the answer",
-    () => {
-      document.body.innerHTML = `
+  it("accepts a portaled custom-select option click without retaining the answer", () => {
+    document.body.innerHTML = `
         <div id="race-shell">
           <label for="race">Please identify your race</label>
           <input id="race" role="combobox" aria-expanded="false" aria-haspopup="listbox" />
@@ -159,30 +149,29 @@ describe("Teach MUNSHI capture", () => {
           <div id="asian-option" role="option">Asian</div>
         </div>
       `;
-      const page = scanDocument();
-      const control = page.controls.find(
-        (item) => item.label === "Please identify your race",
-      )!;
-      const input = document.getElementById("race") as HTMLInputElement;
-      const option = document.getElementById("asian-option") as HTMLElement;
-      const visibleChoice = document.getElementById("visible-choice")!;
-      const started = beginTeachInteraction("teach-portal", control.controlId);
+    const page = scanDocument();
+    const control = page.controls.find(
+      (item) => item.label === "Please identify your race",
+    )!;
+    const input = document.getElementById("race") as HTMLInputElement;
+    const option = document.getElementById("asian-option") as HTMLElement;
+    const visibleChoice = document.getElementById("visible-choice")!;
+    const started = beginTeachInteraction("teach-portal", control.controlId);
 
-      input.setAttribute("aria-expanded", "true");
-      input.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      visibleChoice.textContent = "Asian";
-      input.setAttribute("aria-expanded", "false");
-      option.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    input.setAttribute("aria-expanded", "true");
+    input.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    visibleChoice.textContent = "Asian";
+    input.setAttribute("aria-expanded", "false");
+    option.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
-      const learned = finishTeachInteraction(started.sessionId);
-      expect(learned.reusable).toBe(true);
-      expect(
-        learned.eventSequence.some((event) => event.target === "owned-popup"),
-      ).toBe(true);
-      expect(learned.quality.reasons).toContain("explicit-commit-observed");
-      expect(JSON.stringify(learned)).not.toContain("Asian");
-    },
-  );
+    const learned = finishTeachInteraction(started.sessionId);
+    expect(learned.reusable).toBe(true);
+    expect(
+      learned.eventSequence.some((event) => event.target === "owned-popup"),
+    ).toBe(true);
+    expect(learned.quality.reasons).toContain("explicit-commit-observed");
+    expect(JSON.stringify(learned)).not.toContain("Asian");
+  });
 
   it("captures radio-group label clicks inside the taught field group", () => {
     document.body.innerHTML = `
