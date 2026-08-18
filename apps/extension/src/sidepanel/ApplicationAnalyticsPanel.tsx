@@ -236,7 +236,8 @@ export function ApplicationAnalyticsPanel({
           occurredAt,
           source: "owner",
         });
-        const label = outcomeLabels.find(([value]) => value === stage)?.[1] ?? stage;
+        const label =
+          outcomeLabels.find(([value]) => value === stage)?.[1] ?? stage;
         setMessage(`${label} saved to this application's history.`);
         await refresh();
       } catch (error) {
@@ -254,7 +255,10 @@ export function ApplicationAnalyticsPanel({
 
   if (!nativeAvailable) {
     return (
-      <section className="subpanel analytics-panel" aria-labelledby="analytics-heading">
+      <section
+        className="subpanel analytics-panel"
+        aria-labelledby="analytics-heading"
+      >
         <div className="section-heading">
           <div>
             <p className="eyebrow">Application history</p>
@@ -283,7 +287,10 @@ export function ApplicationAnalyticsPanel({
   ].filter((item): item is NonNullable<typeof item> => item !== null);
 
   return (
-    <section className="subpanel analytics-panel" aria-labelledby="analytics-heading">
+    <section
+      className="subpanel analytics-panel"
+      aria-labelledby="analytics-heading"
+    >
       <div className="section-heading">
         <div>
           <p className="eyebrow">Application history</p>
@@ -302,7 +309,10 @@ export function ApplicationAnalyticsPanel({
           <div className="panel-title-row">
             <div>
               <span className="panel-subtitle">Your application funnel</span>
-              <h3>{summary.applicationCount} application{summary.applicationCount === 1 ? "" : "s"}</h3>
+              <h3>
+                {summary.applicationCount} application
+                {summary.applicationCount === 1 ? "" : "s"}
+              </h3>
             </div>
           </div>
 
@@ -355,7 +365,8 @@ export function ApplicationAnalyticsPanel({
                       {label}: {friendlyBucketKey(kind, bucket.key)}
                     </strong>
                     <span>
-                      {bucket.sampleCount} application{bucket.sampleCount === 1 ? "" : "s"}
+                      {bucket.sampleCount} application
+                      {bucket.sampleCount === 1 ? "" : "s"}
                     </span>
                   </div>
                   <div>
@@ -395,7 +406,13 @@ export function ApplicationAnalyticsPanel({
           ))}
         </div>
         {message && (
-          <div className={message.startsWith("Could not") ? "inline-note danger" : "inline-note success"}>
+          <div
+            className={
+              message.startsWith("Could not")
+                ? "inline-note danger"
+                : "inline-note success"
+            }
+          >
             {message}
           </div>
         )}

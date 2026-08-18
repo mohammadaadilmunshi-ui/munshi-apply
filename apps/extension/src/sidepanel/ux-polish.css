@@ -22,7 +22,9 @@ section > .section-heading + p {
 
 .answer-card:focus-within {
   border-color: #d2a18d;
-  box-shadow: 0 0 0 3px rgb(184 92 56 / 0.08), var(--munshi-shadow);
+  box-shadow:
+    0 0 0 3px rgb(184 92 56 / 0.08),
+    var(--munshi-shadow);
 }
 
 .resume-select {

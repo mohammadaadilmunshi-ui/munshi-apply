@@ -87,7 +87,9 @@ export function TeachMunshiPanel({
     } catch (error) {
       setResultTone("error");
       setMessage(
-        error instanceof Error ? error.message : "MUNSHI could not start watching this field.",
+        error instanceof Error
+          ? error.message
+          : "MUNSHI could not start watching this field.",
       );
     } finally {
       setBusy(false);
@@ -161,7 +163,9 @@ export function TeachMunshiPanel({
     } finally {
       setActive(null);
       setResultTone("warning");
-      setMessage("Teaching cancelled. Nothing from this demonstration was saved.");
+      setMessage(
+        "Teaching cancelled. Nothing from this demonstration was saved.",
+      );
       setBusy(false);
     }
   }
@@ -179,9 +183,9 @@ export function TeachMunshiPanel({
       </div>
 
       <p className="teach-copy">
-        Use this only when MUNSHI struggles with a field. You demonstrate how the
-        control works once; MUNSHI learns the interaction mechanics, never the
-        answer you selected.
+        Use this only when MUNSHI struggles with a field. You demonstrate how
+        the control works once; MUNSHI learns the interaction mechanics, never
+        the answer you selected.
       </p>
 
       {eligible.length > 0 ? (
@@ -190,7 +194,9 @@ export function TeachMunshiPanel({
             <ol className="teach-steps">
               <li>Choose the field MUNSHI had trouble with.</li>
               <li>Start watching before you touch the employer field.</li>
-              <li>Complete that one field, return here, then finish teaching.</li>
+              <li>
+                Complete that one field, return here, then finish teaching.
+              </li>
             </ol>
           )}
 
@@ -269,7 +275,10 @@ export function TeachMunshiPanel({
       )}
 
       {message && (
-        <div className={`teach-result ${resultTone ?? "warning"}`} role="status">
+        <div
+          className={`teach-result ${resultTone ?? "warning"}`}
+          role="status"
+        >
           {message}
         </div>
       )}

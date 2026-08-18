@@ -125,7 +125,9 @@ export function JobSignalPanel({
       if (shouldPersistJobContext) {
         setMessage("Posting signals saved with this application.");
       } else if (latest) {
-        setMessage("Using the latest saved posting signals for this application.");
+        setMessage(
+          "Using the latest saved posting signals for this application.",
+        );
       }
     })().catch((error: unknown) => {
       if (cancelled) return;
@@ -170,7 +172,10 @@ export function JobSignalPanel({
       : view.opportunity.explanation;
 
   return (
-    <section className="subpanel job-signal-panel" aria-labelledby="job-signal-heading">
+    <section
+      className="subpanel job-signal-panel"
+      aria-labelledby="job-signal-heading"
+    >
       <div className="section-heading">
         <div>
           <p className="eyebrow">Opportunity snapshot</p>
@@ -244,15 +249,22 @@ export function JobSignalPanel({
               <div className="signal-row" key={row.dimension}>
                 <div className="signal-row-heading">
                   <strong>{row.label}</strong>
-                  <span className={row.disposition === "CONCERN" ? "badge review" : "badge"}>
+                  <span
+                    className={
+                      row.disposition === "CONCERN" ? "badge review" : "badge"
+                    }
+                  >
                     {row.score}/100
                   </span>
                 </div>
                 <p>
-                  {row.disposition.toLowerCase()} · confidence {Math.round(row.confidence * 100)}%
+                  {row.disposition.toLowerCase()} · confidence{" "}
+                  {Math.round(row.confidence * 100)}%
                 </p>
                 {row.explanations.slice(0, 2).map((explanation, index) => (
-                  <p key={`${row.dimension}-explanation-${index}`}>{explanation}</p>
+                  <p key={`${row.dimension}-explanation-${index}`}>
+                    {explanation}
+                  </p>
                 ))}
                 {row.evidence.length > 0 && (
                   <div className="inline-note">
