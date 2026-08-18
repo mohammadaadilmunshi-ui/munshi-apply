@@ -64,7 +64,22 @@ function lifecycleType(
 }
 
 function formatRate(value: number | null): string {
-  return value === null ? "withheld" : `${Math.round(value * 100)}%`;
+  return value === null ? "—" : `${Math.round(value * 100)}%`;
+}
+
+function friendlyBucketKey(
+  kind: "source" | "ats" | "resume",
+  value: string,
+): string {
+  if (!value || value === "UNKNOWN") {
+    return kind === "source" ? "Not captured yet" : "Unknown";
+  }
+  if (kind === "ats") return value.replaceAll("_", " ");
+  if (kind === "resume" && value.startsWith("resume-")) {
+    const short = value.slice(-8);
+    return `Selected résumé · …${short}`;
+  }
+  return value;
 }
 
 const outcomeLabels: readonly [ApplicationOutcomeStage, string][] = [
@@ -221,7 +236,8 @@ export function ApplicationAnalyticsPanel({
           occurredAt,
           source: "owner",
         });
-        setMessage(`${stage.toLocaleLowerCase("en-US")} outcome recorded.`);
+        const label = outcomeLabels.find(([value]) => value === stage)?.[1] ?? stage;
+        setMessage(`${label} saved to this application's history.`);
         await refresh();
       } catch (error) {
         setMessage(
@@ -238,19 +254,16 @@ export function ApplicationAnalyticsPanel({
 
   if (!nativeAvailable) {
     return (
-      <section className="answer-list" aria-labelledby="analytics-heading">
+      <section className="subpanel analytics-panel" aria-labelledby="analytics-heading">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">Observed application history</p>
-            <h3 id="analytics-heading">Analytics & attribution</h3>
+            <p className="eyebrow">Application history</p>
+            <h3 id="analytics-heading">Analytics</h3>
           </div>
         </div>
-        <div className="safety-callout">
-          <strong>Durable analytics unavailable</strong>
-          <span>
-            The current native companion must be available before MUNSHI stores
-            attribution or application outcomes.
-          </span>
+        <div className="inline-note warning">
+          Connect the MUNSHI native companion to save application history and
+          outcomes on this Mac.
         </div>
       </section>
     );
@@ -259,61 +272,116 @@ export function ApplicationAnalyticsPanel({
   const topSource = summary?.byJobSource[0] ?? null;
   const topAts = summary?.byAtsFamily[0] ?? null;
   const topResume = summary?.byResume[0] ?? null;
+  const attribution = [
+    topSource
+      ? { kind: "source" as const, label: "Job source", bucket: topSource }
+      : null,
+    topAts ? { kind: "ats" as const, label: "ATS", bucket: topAts } : null,
+    topResume
+      ? { kind: "resume" as const, label: "Résumé", bucket: topResume }
+      : null,
+  ].filter((item): item is NonNullable<typeof item> => item !== null);
 
   return (
-    <section className="answer-list" aria-labelledby="analytics-heading">
+    <section className="subpanel analytics-panel" aria-labelledby="analytics-heading">
       <div className="section-heading">
         <div>
-          <p className="eyebrow">Observed application history</p>
-          <h3 id="analytics-heading">Analytics & attribution</h3>
+          <p className="eyebrow">Application history</p>
+          <h3 id="analytics-heading">Analytics</h3>
+          <p className="panel-subtitle">
+            What you have actually prepared, submitted, and heard back from.
+          </p>
         </div>
         <span className="badge">
-          {summary ? `${summary.applicationCount} applications` : "Loading"}
+          {summary ? `${summary.applicationCount} tracked` : "Loading"}
         </span>
       </div>
 
       {summary && (
-        <>
-          <div className="cloud-connection">
-            <strong>
-              Funnel · {summary.preparedCount} prepared · {summary.appliedCount}{" "}
-              applied · {summary.responseCount} responses ·{" "}
-              {summary.interviewCount} interviews · {summary.offerCount} offers
-            </strong>
-            <span>
-              AutoPilot: {summary.autopilotCompletedCount} completed ·{" "}
-              {summary.autopilotFailedCount} failed
-            </span>
-            <span>{summary.statisticalNote}</span>
+        <div className="panel-card analytics-funnel">
+          <div className="panel-title-row">
+            <div>
+              <span className="panel-subtitle">Your application funnel</span>
+              <h3>{summary.applicationCount} application{summary.applicationCount === 1 ? "" : "s"}</h3>
+            </div>
           </div>
 
-          {[topSource, topAts, topResume].map((bucket, index) =>
-            bucket ? (
-              <article className="answer-card" key={`${bucket.key}-${index}`}>
-                <strong>
-                  {index === 0 ? "Job source" : index === 1 ? "ATS" : "Résumé"}:{" "}
-                  {bucket.key}
-                </strong>
-                <span>
-                  {bucket.sampleCount} applications · response{" "}
-                  {formatRate(bucket.responseRate)} · interview{" "}
-                  {formatRate(bucket.interviewRate)} · offer{" "}
-                  {formatRate(bucket.offerRate)}
-                </span>
-                <span>{bucket.rateReason}</span>
-              </article>
-            ) : null,
+          <div className="stat-grid">
+            <div className="stat-tile">
+              <strong>{summary.preparedCount}</strong>
+              <span>Prepared</span>
+            </div>
+            <div className="stat-tile">
+              <strong>{summary.appliedCount}</strong>
+              <span>Applied</span>
+            </div>
+            <div className="stat-tile">
+              <strong>{summary.responseCount}</strong>
+              <span>Responses</span>
+            </div>
+            <div className="stat-tile">
+              <strong>{summary.interviewCount}</strong>
+              <span>Interviews</span>
+            </div>
+            <div className="stat-tile">
+              <strong>{summary.offerCount}</strong>
+              <span>Offers</span>
+            </div>
+            <div className="stat-tile">
+              <strong>{summary.autopilotCompletedCount}</strong>
+              <span>AutoPilot done</span>
+            </div>
+          </div>
+
+          {summary.autopilotFailedCount > 0 && (
+            <div className="inline-note warning">
+              AutoPilot has {summary.autopilotFailedCount} recorded failed run
+              {summary.autopilotFailedCount === 1 ? "" : "s"}. These remain in
+              history so recovery patterns can be improved.
+            </div>
           )}
-        </>
+        </div>
       )}
 
-      <div className="cloud-connection">
-        <strong>Record an actual outcome</strong>
-        <span>
-          These are owner-confirmed events. MUNSHI does not infer an application
-          was submitted, rejected, interviewed, or offered from page appearance.
-        </span>
-        <div className="button-row">
+      {attribution.length > 0 && (
+        <details className="compact-details">
+          <summary>Where applications are coming from</summary>
+          <div className="compact-details-body">
+            <div className="attribution-list">
+              {attribution.map(({ kind, label, bucket }) => (
+                <div className="attribution-row" key={`${kind}-${bucket.key}`}>
+                  <div>
+                    <strong>
+                      {label}: {friendlyBucketKey(kind, bucket.key)}
+                    </strong>
+                    <span>
+                      {bucket.sampleCount} application{bucket.sampleCount === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                  <div>
+                    <strong>{formatRate(bucket.responseRate)}</strong>
+                    <span>response rate</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {summary && <span>{summary.statisticalNote}</span>}
+          </div>
+        </details>
+      )}
+
+      <div className="panel-card soft">
+        <div className="panel-title-row">
+          <div>
+            <span className="panel-subtitle">Keep history accurate</span>
+            <h3>Update application outcome</h3>
+          </div>
+        </div>
+        <p>
+          Choose an outcome only when it actually happens. MUNSHI never guesses
+          that you applied, interviewed, were rejected, or received an offer.
+        </p>
+        <div className="outcome-buttons">
           {outcomeLabels.map(([stage, label]) => (
             <button
               key={stage}
@@ -326,8 +394,27 @@ export function ApplicationAnalyticsPanel({
             </button>
           ))}
         </div>
+        {message && (
+          <div className={message.startsWith("Could not") ? "inline-note danger" : "inline-note success"}>
+            {message}
+          </div>
+        )}
       </div>
-      {message && <span className="url">{message}</span>}
+
+      <details className="compact-details">
+        <summary>About these analytics</summary>
+        <div className="compact-details-body">
+          <span>
+            MUNSHI shows counts immediately but waits for enough applications
+            before showing rates, so one or two applications do not create
+            misleading conclusions.
+          </span>
+          <span>
+            Attribution is descriptive. It does not prove that a job source,
+            ATS, résumé, or strategy caused an outcome.
+          </span>
+        </div>
+      </details>
     </section>
   );
 }
