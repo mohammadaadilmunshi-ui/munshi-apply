@@ -15,12 +15,22 @@ describe("owner answer memory", () => {
     );
   });
 
-  it("auto-approves exact short operational answers", () => {
+  it("auto-approves exact short operational answers after owner approval", () => {
     expect(
       canAutoApproveRememberedAnswer({
         semanticType: "UNKNOWN",
         controlKind: "SELECT",
         value: "No",
+      }),
+    ).toBe(true);
+  });
+
+  it("allows exact short demographic recall only through the approved answer-memory path", () => {
+    expect(
+      canAutoApproveRememberedAnswer({
+        semanticType: "VOLUNTARY_DEMOGRAPHIC",
+        controlKind: "SELECT",
+        value: "Decline to self-identify",
       }),
     ).toBe(true);
   });
@@ -31,6 +41,16 @@ describe("owner answer memory", () => {
         semanticType: "WHY_COMPANY",
         controlKind: "TEXTAREA",
         value: "A previously approved answer",
+      }),
+    ).toBe(false);
+  });
+
+  it("never auto-approves long remembered prose", () => {
+    expect(
+      canAutoApproveRememberedAnswer({
+        semanticType: "UNKNOWN",
+        controlKind: "TEXTAREA",
+        value: "x".repeat(501),
       }),
     ).toBe(false);
   });
