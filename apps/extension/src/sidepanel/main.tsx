@@ -5,6 +5,7 @@ import "./styles.css";
 import "./form-controls.css";
 import "./resume-vault.css";
 import "./ux-overhaul.css";
+import "./ux-polish.css";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Side panel root not found");
