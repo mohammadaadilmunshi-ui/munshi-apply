@@ -35,6 +35,32 @@ function restoredReport(report: PersistedJobSignalReport): JobSignalReport {
   };
 }
 
+function friendlyEvidence(value: string): string {
+  return value
+    .replaceAll("_", " ")
+    .replaceAll("=true", ": yes")
+    .replaceAll("=false", ": no")
+    .replaceAll("=", ": ")
+    .replaceAll(";", " · ");
+}
+
+function priorityLabel(value: string): string {
+  switch (value) {
+    case "PRIORITIZE":
+      return "Strong priority";
+    case "CONSIDER":
+      return "Worth considering";
+    case "REVIEW":
+      return "Review before applying";
+    case "HOLD":
+      return "Hold for review";
+    case "INSUFFICIENT_DATA":
+      return "Need more evidence";
+    default:
+      return value.replaceAll("_", " ");
+  }
+}
+
 export function JobSignalPanel({
   page,
   applicationId,
@@ -70,8 +96,8 @@ export function JobSignalPanel({
       setPersisted(null);
       setMessage(
         nativeAvailable
-          ? "Job Signal persistence will begin when this application has a durable id."
-          : "Job Signals are available locally; durable history requires the native companion.",
+          ? "MUNSHI will save job signals once this application has a durable record."
+          : "Job signals are available for this page, but history requires the native companion.",
       );
       return () => {
         cancelled = true;
@@ -97,16 +123,16 @@ export function JobSignalPanel({
       if (cancelled) return;
       setPersisted(latest);
       if (shouldPersistJobContext) {
-        setMessage("Job-posting signals saved to this application record.");
+        setMessage("Posting signals saved with this application.");
       } else if (latest) {
-        setMessage("Showing the latest durable job-posting signal report.");
+        setMessage("Using the latest saved posting signals for this application.");
       }
     })().catch((error: unknown) => {
       if (cancelled) return;
       setMessage(
         error instanceof Error
-          ? `Job Signal history unavailable: ${error.message}`
-          : "Job Signal history is temporarily unavailable.",
+          ? `Saved job-signal history is unavailable: ${error.message}`
+          : "Saved job-signal history is temporarily unavailable.",
       );
     });
 
@@ -133,13 +159,25 @@ export function JobSignalPanel({
   );
   const knownRows = view.rows.filter((row) => row.score !== null);
   const liveFriction = liveReport.dimensions.APPLICATION_FRICTION;
+  const atFinalOwnerBoundary = Boolean(page.finalSubmissionBoundary);
+  const displayedPriority =
+    atFinalOwnerBoundary && view.opportunity.priority === "HOLD"
+      ? "Final owner review"
+      : priorityLabel(view.opportunity.priority);
+  const displayedExplanation =
+    atFinalOwnerBoundary && view.opportunity.priority === "HOLD"
+      ? "MUNSHI detected the final submit step. Submission is always left to you; reaching this boundary is not itself a negative signal about the job. Review any separate eligibility findings above before submitting."
+      : view.opportunity.explanation;
 
   return (
-    <section className="answer-list" aria-labelledby="job-signal-heading">
+    <section className="subpanel job-signal-panel" aria-labelledby="job-signal-heading">
       <div className="section-heading">
         <div>
-          <p className="eyebrow">Evidence-backed opportunity intelligence</p>
+          <p className="eyebrow">Opportunity snapshot</p>
           <h3 id="job-signal-heading">Job Signals</h3>
+          <p className="panel-subtitle">
+            Evidence MUNSHI found in the posting and application flow.
+          </p>
         </div>
         <span
           className={report.overallSignal === "HIGH" ? "badge review" : "badge"}
@@ -149,75 +187,112 @@ export function JobSignalPanel({
         </span>
       </div>
 
-      <div className="cloud-connection">
-        <strong>
-          Opportunity priority: {view.opportunity.priority.replaceAll("_", " ")}
-          {view.opportunity.priorityScore === null
-            ? ""
-            : ` · ${view.opportunity.priorityScore}/100`}
-        </strong>
-        <span>{view.opportunity.explanation}</span>
-        <span>
-          {view.knownDimensionCount} dimensions have evidence ·{" "}
-          {view.unknownDimensionCount} remain unknown
-        </span>
-        {persisted && page.applicationState !== "JOB_CONTEXT" && (
-          <span>
-            Posting report restored from {persisted.evaluatedAt}. Current form
-            churn does not replace the posting evidence.
-          </span>
-        )}
-        {persisted &&
-          page.applicationState !== "JOB_CONTEXT" &&
-          liveFriction.score !== null && (
-            <span>
-              Live application friction: {liveFriction.score}/100 · observed on
-              the current form only
-            </span>
+      <div className="panel-card signal-overview">
+        <div className="panel-title-row">
+          <div>
+            <span className="panel-subtitle">Opportunity status</span>
+            <h3>{displayedPriority}</h3>
+          </div>
+          {view.opportunity.priorityScore !== null && !atFinalOwnerBoundary && (
+            <span className="badge">{view.opportunity.priorityScore}/100</span>
           )}
-        {message && <span>{message}</span>}
+        </div>
+        <p>{displayedExplanation}</p>
+
+        <div className="stat-grid">
+          <div className="stat-tile">
+            <strong>{view.knownDimensionCount}</strong>
+            <span>Known signals</span>
+          </div>
+          <div className="stat-tile">
+            <strong>{view.unknownDimensionCount}</strong>
+            <span>Still unknown</span>
+          </div>
+          <div className="stat-tile">
+            <strong>
+              {liveFriction.score === null ? "—" : `${liveFriction.score}`}
+            </strong>
+            <span>Form friction</span>
+          </div>
+        </div>
+
+        {atFinalOwnerBoundary && (
+          <div className="inline-note success">
+            Final submission is an owner-control boundary. It does not count as
+            evidence that the employer or opportunity is poor.
+          </div>
+        )}
+
+        {persisted && page.applicationState !== "JOB_CONTEXT" && (
+          <div className="inline-note">
+            Showing the saved job-posting report while keeping current form
+            friction separate, so application-page changes do not overwrite the
+            original posting evidence.
+          </div>
+        )}
+        {message && <div className="inline-note">{message}</div>}
       </div>
 
       {knownRows.length ? (
-        knownRows.map((row) => (
-          <article className="answer-card" key={row.dimension}>
-            <strong>
-              {row.label} · {row.score}/100 · {row.disposition.toLowerCase()}
-            </strong>
-            <span>Confidence: {Math.round(row.confidence * 100)}%</span>
-            {row.evidence.map((evidence, index) => (
-              <span key={`${row.dimension}-evidence-${index}`}>
-                Evidence: {evidence}
-              </span>
+        <details className="compact-details">
+          <summary>
+            View {knownRows.length} evidence-backed signal
+            {knownRows.length === 1 ? "" : "s"}
+          </summary>
+          <div className="compact-details-body">
+            {knownRows.map((row) => (
+              <div className="signal-row" key={row.dimension}>
+                <div className="signal-row-heading">
+                  <strong>{row.label}</strong>
+                  <span className={row.disposition === "CONCERN" ? "badge review" : "badge"}>
+                    {row.score}/100
+                  </span>
+                </div>
+                <p>
+                  {row.disposition.toLowerCase()} · confidence {Math.round(row.confidence * 100)}%
+                </p>
+                {row.explanations.slice(0, 2).map((explanation, index) => (
+                  <p key={`${row.dimension}-explanation-${index}`}>{explanation}</p>
+                ))}
+                {row.evidence.length > 0 && (
+                  <div className="inline-note">
+                    {row.evidence.map(friendlyEvidence).join(" · ")}
+                  </div>
+                )}
+              </div>
             ))}
-            {row.explanations.map((explanation, index) => (
-              <span key={`${row.dimension}-explanation-${index}`}>
-                {explanation}
-              </span>
-            ))}
-          </article>
-        ))
+          </div>
+        </details>
       ) : (
-        <div className="safety-callout">
-          <strong>Not enough job evidence yet</strong>
-          <span>
-            MUNSHI will keep these dimensions unknown rather than infer employer
-            conditions or candidate fit from missing information.
-          </span>
+        <div className="inline-note warning">
+          Not enough posting evidence yet. MUNSHI will leave missing dimensions
+          unknown rather than inventing employer conditions or candidate fit.
         </div>
       )}
 
-      {view.opportunity.riskFactors.length > 0 && (
-        <div className="cloud-connection">
-          <strong>Review factors</strong>
-          {view.opportunity.riskFactors.map((factor) => (
-            <span className="diagnostic-error" key={factor}>
-              {factor}
-            </span>
-          ))}
-        </div>
+      {view.opportunity.riskFactors.length > 0 && !atFinalOwnerBoundary && (
+        <details className="compact-details">
+          <summary>Review factors</summary>
+          <div className="compact-details-body">
+            {view.opportunity.riskFactors.map((factor) => (
+              <div className="inline-note danger" key={factor}>
+                {factor}
+              </div>
+            ))}
+          </div>
+        </details>
       )}
-      <span className="url">{report.disclaimer}</span>
+
+      <details className="compact-details signal-methodology">
+        <summary>How to read Job Signals</summary>
+        <div className="compact-details-body">
+          <span>{report.disclaimer}</span>
+          <span>
+            Scores summarize available evidence only. Unknown information stays
+            unknown, and Job Signals never override confirmed eligibility facts.
+          </span>
+        </div>
+      </details>
     </section>
   );
 }
