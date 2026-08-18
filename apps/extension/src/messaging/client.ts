@@ -313,6 +313,7 @@ export async function requestFilePickerAssist(
 
 export type TeachMunshiStart = {
   sessionId: string;
+  frameId: number;
   controlId: string;
   label: string;
   componentFingerprint: string;
@@ -322,6 +323,7 @@ export type TeachMunshiStart = {
 export type TeachMunshiResult = {
   sessionId: string;
   controlId: string;
+  resolvedControlId?: string;
   changed: boolean;
   reusable: boolean;
   eventTypes: string[];
@@ -343,10 +345,11 @@ export async function beginTeachMunshi(
   controlId: string,
   applicationId: string,
 ): Promise<TeachMunshiStart> {
-  return (await send({
+  const started = (await send({
     type: "TEACH_BEGIN",
     payload: { frameId, controlId, applicationId },
-  })) as TeachMunshiStart;
+  })) as Omit<TeachMunshiStart, "frameId">;
+  return { ...started, frameId };
 }
 
 export async function finishTeachMunshi(

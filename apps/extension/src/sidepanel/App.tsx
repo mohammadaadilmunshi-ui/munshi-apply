@@ -60,6 +60,11 @@ import { AIControlCenter } from "./AIControlCenter";
 import { AIDraftReview } from "./AIDraftReview";
 import { AutoPilotControlCenter } from "./AutoPilotControlCenter";
 import { ResumeVaultPanel } from "./ResumeVaultPanel";
+import {
+  canAutoApproveRememberedAnswer,
+  getRememberedAnswer,
+  saveRememberedAnswer,
+} from "../storage/answer-memory";
 
 type View = "application" | "profile" | "autopilot" | "ai" | "diagnostics";
 type SaveState =
@@ -240,6 +245,7 @@ type AnswerDraft = {
   sensitive: boolean;
   sourceDraftId?: string | null;
   ownerEdited?: boolean;
+  remembered?: boolean;
 };
 
 const defaultAISettings: AISettings = {
@@ -578,6 +584,73 @@ export function App() {
       return cloudSnapshot?.resumes[0]?.resumeId ?? "";
     });
   }, [cloudSnapshot, page, profile]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!page) return () => undefined;
+
+    void Promise.all(
+      page.questions.map(
+        async (question) =>
+          [
+            question.questionId,
+            await getRememberedAnswer(question.rawText).catch(() => null),
+          ] as const,
+      ),
+    ).then((entries) => {
+      if (cancelled) return;
+      const memories = new Map(entries);
+      setAnswers((current) => {
+        const next = { ...current };
+        for (const question of page.questions) {
+          const existing = next[question.questionId];
+          if (existing?.ownerEdited || existing?.value.trim()) continue;
+          const remembered = memories.get(question.questionId);
+          if (!remembered?.value.trim()) continue;
+          const control = page.controls.find(
+            (candidate) => candidate.controlId === question.controlId,
+          );
+          next[question.questionId] = {
+            value: remembered.value,
+            approved: canAutoApproveRememberedAnswer({
+              semanticType: question.semanticType,
+              controlKind: control?.kind,
+              value: remembered.value,
+            }),
+            sensitive: Boolean(question.sensitive || remembered.sensitive),
+            remembered: true,
+          };
+        }
+        return next;
+      });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [page]);
+
+  useEffect(() => {
+    if (!page) return;
+    for (const question of page.questions) {
+      const answer = answers[question.questionId];
+      if (!answer?.ownerEdited || !answer.approved || !answer.value.trim()) {
+        continue;
+      }
+      void saveRememberedAnswer({
+        question: question.rawText,
+        semanticType: question.semanticType,
+        value: answer.value,
+        sensitive: Boolean(question.sensitive || answer.sensitive),
+      }).catch((error: unknown) => {
+        setNotice(
+          error instanceof Error
+            ? `Answer memory unavailable: ${error.message}`
+            : "Answer memory is temporarily unavailable.",
+        );
+      });
+    }
+  }, [answers, page]);
 
   const selectedResume = useMemo(
     () =>
@@ -976,31 +1049,15 @@ export function App() {
 
   async function fillApprovedFields(): Promise<void> {
     if (!page) return;
-    const controls = new Map(
-      page.controls.map((control) => [control.controlId, control]),
-    );
-    const instructions: FillInstruction[] = page.questions
-      .map((question) => {
-        const answer = answers[question.questionId];
-        const control = controls.get(question.controlId);
-        if (!answer || !control || !answer.value.trim()) return null;
-        return {
-          controlId: question.controlId,
-          frameId: control.frameId,
-          value: answer.value,
-          sensitive: question.sensitive,
-          approved: answer.approved,
-        };
-      })
-      .filter(
-        (instruction): instruction is FillInstruction => instruction !== null,
-      );
-    if (instructions.length === 0) {
-      setNotice("No approved answers are ready to fill.");
-      return;
-    }
     setFilling(true);
     try {
+      const workingAnswers: Record<string, AnswerDraft> = { ...answers };
+      const attemptedControlIds = new Set<string>();
+      const allResults: Awaited<ReturnType<typeof applyFillPlan>> = [];
+      const usedDraftIds = new Set<string>();
+      let currentPage: ApplicationPage = page;
+      let dynamicRounds = 0;
+
       const connection = await getCloudConnection();
       if (
         connection &&
@@ -1017,7 +1074,7 @@ export function App() {
           resumeSha256: selectedResume?.sha256 ?? null,
           approvedAt: now(),
           answers: page.questions.map((question) => {
-            const answer = answers[question.questionId] ?? {
+            const answer = workingAnswers[question.questionId] ?? {
               value: "",
               approved: false,
               sensitive: question.sensitive,
@@ -1033,30 +1090,124 @@ export function App() {
         };
         await publishApplicationReview(connection, review);
       }
-      const results = await applyFillPlan({
-        pageId: page.pageId,
-        instructions,
-      });
-      const usedDraftIds = results
-        .filter((result) => result.status === "FILLED")
-        .flatMap((result) => {
-          const question = page.questions.find(
+
+      for (let round = 0; round < 4; round += 1) {
+        const controls = new Map(
+          currentPage.controls.map((control) => [control.controlId, control]),
+        );
+        const memories = await Promise.all(
+          currentPage.questions.map(
+            async (question) =>
+              [
+                question.questionId,
+                await getRememberedAnswer(question.rawText).catch(() => null),
+              ] as const,
+          ),
+        );
+        const memoryByQuestion = new Map(memories);
+
+        for (const question of currentPage.questions) {
+          const existing = workingAnswers[question.questionId];
+          if (existing?.value.trim()) continue;
+          const resolution = resolveProfileAnswer(question, profile);
+          if (resolution.value != null && String(resolution.value).trim()) {
+            workingAnswers[question.questionId] = {
+              value: String(resolution.value),
+              approved: resolution.state === "READY",
+              sensitive: resolution.sensitive,
+            };
+            continue;
+          }
+          const remembered = memoryByQuestion.get(question.questionId);
+          if (!remembered?.value.trim()) continue;
+          const control = controls.get(question.controlId);
+          workingAnswers[question.questionId] = {
+            value: remembered.value,
+            approved: canAutoApproveRememberedAnswer({
+              semanticType: question.semanticType,
+              controlKind: control?.kind,
+              value: remembered.value,
+            }),
+            sensitive: Boolean(question.sensitive || remembered.sensitive),
+            remembered: true,
+          };
+        }
+
+        setAnswers((current) => ({ ...current, ...workingAnswers }));
+
+        const instructions: FillInstruction[] = currentPage.questions
+          .map((question) => {
+            const answer = workingAnswers[question.questionId];
+            const control = controls.get(question.controlId);
+            if (
+              !answer ||
+              !control ||
+              !answer.value.trim() ||
+              !answer.approved ||
+              attemptedControlIds.has(question.controlId)
+            ) {
+              return null;
+            }
+            return {
+              controlId: question.controlId,
+              frameId: control.frameId,
+              value: answer.value,
+              sensitive: question.sensitive,
+              approved: true,
+            };
+          })
+          .filter(
+            (instruction): instruction is FillInstruction =>
+              instruction !== null,
+          );
+
+        if (instructions.length === 0) break;
+        instructions.forEach((instruction) =>
+          attemptedControlIds.add(instruction.controlId),
+        );
+
+        const results = await applyFillPlan({
+          pageId: currentPage.pageId,
+          instructions,
+        });
+        allResults.push(...results);
+        for (const result of results) {
+          if (result.status !== "FILLED") continue;
+          const question = currentPage.questions.find(
             (candidate) => candidate.controlId === result.controlId,
           );
           const draftId = question
-            ? answers[question.questionId]?.sourceDraftId
+            ? workingAnswers[question.questionId]?.sourceDraftId
             : null;
-          return draftId ? [draftId] : [];
-        });
+          if (draftId) usedDraftIds.add(draftId);
+        }
+
+        await new Promise((resolve) => window.setTimeout(resolve, 450));
+        const latest = await getActivePage();
+        if (!latest || !sameOrigin(latest.url, currentPage.url)) break;
+        const previousQuestionIds = new Set(
+          currentPage.questions.map((question) => question.questionId),
+        );
+        const revealed = latest.questions.filter(
+          (question) => !previousQuestionIds.has(question.questionId),
+        ).length;
+        if (revealed > 0) dynamicRounds += 1;
+        currentPage = latest;
+      }
+
       await Promise.allSettled(
-        usedDraftIds.map((draftId) => markAIDraftUsed(draftId)),
+        [...usedDraftIds].map((draftId) => markAIDraftUsed(draftId)),
       );
-      const filled = results.filter(
+      const filled = allResults.filter(
         (result) => result.status === "FILLED",
       ).length;
-      const skipped = results.length - filled;
+      const skipped = allResults.length - filled;
+      if (allResults.length === 0) {
+        setNotice("No approved answers are ready to fill.");
+        return;
+      }
       setNotice(
-        `${filled} field${filled === 1 ? "" : "s"} filled and verified${skipped ? `; ${skipped} require manual interaction` : ""}. Final submission remains manual.`,
+        `${filled} field${filled === 1 ? "" : "s"} filled and verified${dynamicRounds ? ` across ${dynamicRounds + 1} dynamic form passes` : ""}${skipped ? `; ${skipped} require manual interaction` : ""}. Newly revealed unresolved questions stay visible for your review. Final submission remains manual.`,
       );
     } catch (error) {
       setNotice(
@@ -1279,8 +1430,13 @@ export function App() {
                             }))
                           }
                         />
-                        Approved for this application
+                        Approved · remember for matching questions
                       </label>
+                      {answer.remembered && (
+                        <span className="answer-memory-note">
+                          Remembered from a previous approved answer.
+                        </span>
+                      )}
                       <AIDraftReview
                         applicationId={activeApplicationId || page.pageId}
                         pageId={page.pageId}

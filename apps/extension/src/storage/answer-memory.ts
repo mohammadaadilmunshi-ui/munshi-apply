@@ -100,8 +100,12 @@ export async function saveRememberedAnswer(input: {
   const question = cleanQuestion(input.question);
   const memoryKey = answerMemoryKey(question);
   const value = input.value.trim().slice(0, maxAnswerLength);
-  if (!memoryKey) throw new Error("A question is required before an answer can be remembered");
-  if (!value) throw new Error("An answer is required before it can be remembered");
+  if (!memoryKey)
+    throw new Error(
+      "A question is required before an answer can be remembered",
+    );
+  if (!value)
+    throw new Error("An answer is required before it can be remembered");
 
   const existing = await getRememberedAnswer(question);
   const timestamp = new Date().toISOString();

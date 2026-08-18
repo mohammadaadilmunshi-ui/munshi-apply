@@ -372,6 +372,7 @@ async function finishTeach(
         result?: {
           sessionId: string;
           controlId: string;
+          resolvedControlId?: string;
           componentFingerprint: string;
           changed: boolean;
           reusable: boolean;
@@ -407,13 +408,16 @@ async function finishTeach(
     throw new Error(
       "Application page changed before the demonstration was saved",
     );
+  const resolvedControlId = capture.resolvedControlId ?? capture.controlId;
   const control = page.controls.find(
-    (item) => item.controlId === capture.controlId,
+    (item) => item.controlId === resolvedControlId,
   );
   const question = page.questions.find(
-    (item) => item.controlId === capture.controlId,
+    (item) => item.controlId === (control?.controlId ?? resolvedControlId),
   );
-  if (!control || !control.componentFingerprint) {
+  const componentFingerprint =
+    control?.componentFingerprint || capture.componentFingerprint;
+  if (!componentFingerprint) {
     throw new Error(
       "The demonstrated control changed before its recipe could be saved",
     );
@@ -423,7 +427,7 @@ async function finishTeach(
     attemptId: `demo-${crypto.randomUUID()}`,
     applicationId,
     siteOrigin: new URL(page.url).origin,
-    componentFingerprint: control.componentFingerprint,
+    componentFingerprint,
     semanticType: question?.semanticType ?? "UNKNOWN",
     actions: capture.actions,
   });

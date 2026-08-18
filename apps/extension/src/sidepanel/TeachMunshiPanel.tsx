@@ -66,7 +66,7 @@ export function TeachMunshiPanel({
   };
 
   const selectedLabel = active
-    ? labelFor(active.controlId)
+    ? active.label || labelFor(active.controlId)
     : selected
       ? labelFor(selected)
       : "";
@@ -98,16 +98,12 @@ export function TeachMunshiPanel({
 
   async function finish(): Promise<void> {
     if (!active) return;
-    const control = eligible.find(
-      (item) => item.controlId === active.controlId,
-    );
-    if (!control) return;
     setBusy(true);
     setMessage("");
     setResultTone(null);
     try {
       const learned = await finishTeachMunshi(
-        control.frameId,
+        active.frameId,
         active.sessionId,
         applicationId,
       );
@@ -154,12 +150,9 @@ export function TeachMunshiPanel({
 
   async function cancel(): Promise<void> {
     if (!active) return;
-    const control = eligible.find(
-      (item) => item.controlId === active.controlId,
-    );
     setBusy(true);
     try {
-      if (control) await cancelTeachMunshi(control.frameId, active.sessionId);
+      await cancelTeachMunshi(active.frameId, active.sessionId);
     } finally {
       setActive(null);
       setResultTone("warning");

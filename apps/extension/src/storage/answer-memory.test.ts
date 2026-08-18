@@ -7,9 +7,9 @@ import {
 
 describe("owner answer memory", () => {
   it("normalizes repeated employer questions without depending on punctuation or required markers", () => {
-    expect(
-      normalizeQuestionForMemory("  Are you Hispanic/Latino?*  "),
-    ).toBe("are you hispanic latino");
+    expect(normalizeQuestionForMemory("  Are you Hispanic/Latino?*  ")).toBe(
+      "are you hispanic latino",
+    );
     expect(answerMemoryKey("ARE YOU HISPANIC / LATINO ?")).toBe(
       "are you hispanic latino",
     );

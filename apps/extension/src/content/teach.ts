@@ -100,7 +100,10 @@ function redactedMarkerState(value: string): Record<string, unknown> {
 }
 
 function popupIds(element: HTMLElement): string[] {
-  return [element.getAttribute("aria-controls"), element.getAttribute("aria-owns")]
+  return [
+    element.getAttribute("aria-controls"),
+    element.getAttribute("aria-owns"),
+  ]
     .flatMap((value) => (value ?? "").split(/\s+/))
     .filter(Boolean);
 }
@@ -120,16 +123,24 @@ function eventTargetKind(
   }
 
   const inputType =
-    element instanceof HTMLInputElement ? element.type.toLocaleLowerCase("en-US") : "";
+    element instanceof HTMLInputElement
+      ? element.type.toLocaleLowerCase("en-US")
+      : "";
   const role = element.getAttribute("role") ?? "";
-  if (["radio", "checkbox"].includes(inputType) || ["radio", "checkbox", "switch"].includes(role)) {
-    const group = element.closest('fieldset,[role="radiogroup"],[role="group"]');
+  if (
+    ["radio", "checkbox"].includes(inputType) ||
+    ["radio", "checkbox", "switch"].includes(role)
+  ) {
+    const group = element.closest(
+      'fieldset,[role="radiogroup"],[role="group"]',
+    );
     if (group?.contains(target)) return "control-group";
   }
 
   if (
     isPopupChoiceControl(element) &&
-    (element.getAttribute("aria-expanded") === "true" || document.activeElement === element)
+    (element.getAttribute("aria-expanded") === "true" ||
+      document.activeElement === element)
   ) {
     const option = target.closest(
       '[role="option"],[role="menuitem"],[role="treeitem"],[data-value]',
