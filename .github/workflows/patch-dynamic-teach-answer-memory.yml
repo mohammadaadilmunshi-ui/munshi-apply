@@ -1,0 +1,528 @@
+name: Guarded dynamic Teach and answer-memory patch
+
+on:
+  push:
+    branches:
+      - feat/v3-foundation-alignment
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Apply guarded runtime patch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace(path: str, old: str, new: str) -> None:
+              target = Path(path)
+              text = target.read_text()
+              if old not in text:
+                  raise SystemExit(f"Guard failed for {path}: expected source block not found")
+              target.write_text(text.replace(old, new, 1))
+
+          replace(
+              "apps/extension/src/messaging/client.ts",
+              '''export type TeachMunshiStart = {
+            sessionId: string;
+            controlId: string;
+            label: string;
+            componentFingerprint: string;
+            startedAt: string;
+          };''',
+              '''export type TeachMunshiStart = {
+            sessionId: string;
+            frameId: number;
+            controlId: string;
+            label: string;
+            componentFingerprint: string;
+            startedAt: string;
+          };''',
+          )
+          replace(
+              "apps/extension/src/messaging/client.ts",
+              '''export type TeachMunshiResult = {
+            sessionId: string;
+            controlId: string;
+            changed: boolean;''',
+              '''export type TeachMunshiResult = {
+            sessionId: string;
+            controlId: string;
+            resolvedControlId?: string;
+            changed: boolean;''',
+          )
+          replace(
+              "apps/extension/src/messaging/client.ts",
+              '''export async function beginTeachMunshi(
+            frameId: number,
+            controlId: string,
+            applicationId: string,
+          ): Promise<TeachMunshiStart> {
+            return (await send({
+              type: "TEACH_BEGIN",
+              payload: { frameId, controlId, applicationId },
+            })) as TeachMunshiStart;
+          }''',
+              '''export async function beginTeachMunshi(
+            frameId: number,
+            controlId: string,
+            applicationId: string,
+          ): Promise<TeachMunshiStart> {
+            const started = (await send({
+              type: "TEACH_BEGIN",
+              payload: { frameId, controlId, applicationId },
+            })) as Omit<TeachMunshiStart, "frameId">;
+            return { ...started, frameId };
+          }''',
+          )
+
+          replace(
+              "apps/extension/src/sidepanel/TeachMunshiPanel.tsx",
+              '''  const selectedLabel = active
+            ? labelFor(active.controlId)
+            : selected
+              ? labelFor(selected)
+              : "";''',
+              '''  const selectedLabel = active
+            ? active.label || labelFor(active.controlId)
+            : selected
+              ? labelFor(selected)
+              : "";''',
+          )
+          replace(
+              "apps/extension/src/sidepanel/TeachMunshiPanel.tsx",
+              '''  async function finish(): Promise<void> {
+            if (!active) return;
+            const control = eligible.find(
+              (item) => item.controlId === active.controlId,
+            );
+            if (!control) return;
+            setBusy(true);
+            setMessage("");
+            setResultTone(null);
+            try {
+              const learned = await finishTeachMunshi(
+                control.frameId,
+                active.sessionId,
+                applicationId,
+              );''',
+              '''  async function finish(): Promise<void> {
+            if (!active) return;
+            setBusy(true);
+            setMessage("");
+            setResultTone(null);
+            try {
+              const learned = await finishTeachMunshi(
+                active.frameId,
+                active.sessionId,
+                applicationId,
+              );''',
+          )
+          replace(
+              "apps/extension/src/sidepanel/TeachMunshiPanel.tsx",
+              '''  async function cancel(): Promise<void> {
+            if (!active) return;
+            const control = eligible.find(
+              (item) => item.controlId === active.controlId,
+            );
+            setBusy(true);
+            try {
+              if (control) await cancelTeachMunshi(control.frameId, active.sessionId);
+            } finally {''',
+              '''  async function cancel(): Promise<void> {
+            if (!active) return;
+            setBusy(true);
+            try {
+              await cancelTeachMunshi(active.frameId, active.sessionId);
+            } finally {''',
+          )
+
+          replace(
+              "apps/extension/src/background/service-worker.ts",
+              '''          sessionId: string;
+                  controlId: string;
+                  componentFingerprint: string;
+                  changed: boolean;''',
+              '''          sessionId: string;
+                  controlId: string;
+                  resolvedControlId?: string;
+                  componentFingerprint: string;
+                  changed: boolean;''',
+          )
+          replace(
+              "apps/extension/src/background/service-worker.ts",
+              '''  const control = page.controls.find(
+            (item) => item.controlId === capture.controlId,
+          );
+          const question = page.questions.find(
+            (item) => item.controlId === capture.controlId,
+          );
+          if (!control || !control.componentFingerprint) {
+            throw new Error(
+              "The demonstrated control changed before its recipe could be saved",
+            );
+          }
+          await ensureNativeApplication(applicationId, page.observedAt);
+          const recipe = await teachInteractionRecipe({
+            attemptId: `demo-${crypto.randomUUID()}`,
+            applicationId,
+            siteOrigin: new URL(page.url).origin,
+            componentFingerprint: control.componentFingerprint,
+            semanticType: question?.semanticType ?? "UNKNOWN",
+            actions: capture.actions,
+          });''',
+              '''  const resolvedControlId = capture.resolvedControlId ?? capture.controlId;
+          const control = page.controls.find(
+            (item) => item.controlId === resolvedControlId,
+          );
+          const question = page.questions.find(
+            (item) => item.controlId === (control?.controlId ?? resolvedControlId),
+          );
+          const componentFingerprint =
+            control?.componentFingerprint || capture.componentFingerprint;
+          if (!componentFingerprint) {
+            throw new Error(
+              "The demonstrated control changed before its recipe could be saved",
+            );
+          }
+          await ensureNativeApplication(applicationId, page.observedAt);
+          const recipe = await teachInteractionRecipe({
+            attemptId: `demo-${crypto.randomUUID()}`,
+            applicationId,
+            siteOrigin: new URL(page.url).origin,
+            componentFingerprint,
+            semanticType: question?.semanticType ?? "UNKNOWN",
+            actions: capture.actions,
+          });''',
+          )
+
+          replace(
+              "apps/extension/src/sidepanel/App.tsx",
+              '''import { ResumeVaultPanel } from "./ResumeVaultPanel";''',
+              '''import { ResumeVaultPanel } from "./ResumeVaultPanel";
+          import {
+            canAutoApproveRememberedAnswer,
+            getRememberedAnswer,
+            saveRememberedAnswer,
+          } from "../storage/answer-memory";''',
+          )
+          replace(
+              "apps/extension/src/sidepanel/App.tsx",
+              '''type AnswerDraft = {
+            value: string;
+            approved: boolean;
+            sensitive: boolean;
+            sourceDraftId?: string | null;
+            ownerEdited?: boolean;
+          };''',
+              '''type AnswerDraft = {
+            value: string;
+            approved: boolean;
+            sensitive: boolean;
+            sourceDraftId?: string | null;
+            ownerEdited?: boolean;
+            remembered?: boolean;
+          };''',
+          )
+          replace(
+              "apps/extension/src/sidepanel/App.tsx",
+              '''  const refreshAI = useCallback(async () => {
+            try {
+              setAiSettings(await getAISettings());
+            } catch {
+              // The updated native companion may not be installed yet.
+            }
+          }, []);''',
+              '''  const refreshAI = useCallback(async () => {
+            try {
+              setAiSettings(await getAISettings());
+            } catch {
+              // The updated native companion may not be installed yet.
+            }
+          }, []);
+
+          const rememberApprovedAnswer = useCallback(
+            async (
+              question: ApplicationPage["questions"][number],
+              draft: AnswerDraft,
+            ): Promise<void> => {
+              if (!draft.approved || !draft.value.trim()) return;
+              try {
+                await saveRememberedAnswer({
+                  question: question.rawText,
+                  semanticType: question.semanticType,
+                  value: draft.value,
+                  sensitive: question.sensitive || draft.sensitive,
+                });
+                setAnswers((current) => ({
+                  ...current,
+                  [question.questionId]: {
+                    ...(current[question.questionId] ?? draft),
+                    remembered: true,
+                  },
+                }));
+              } catch (error) {
+                setNotice(
+                  error instanceof Error
+                    ? `Answer could not be remembered: ${error.message}`
+                    : "Answer could not be remembered.",
+                );
+              }
+            },
+            [],
+          );''',
+          )
+
+          old_effect = '''  useEffect(() => {
+            if (!page) {
+              setAnswers({});
+              return;
+            }
+            const review = cloudSnapshot?.reviews.find(
+              (candidate: ApplicationReview) => candidate.pageId === page.pageId,
+            );
+            const next = Object.fromEntries(
+              page.questions.map((question) => {
+                const approved = review?.answers.find(
+                  (answer) => answer.questionId === question.questionId,
+                );
+                const resolution = resolveProfileAnswer(question, profile);
+                const suggested = resolution.value ?? "";
+                return [
+                  question.questionId,
+                  approved ?? {
+                    value: suggested,
+                    approved: resolution.state === "READY",
+                    sensitive: resolution.sensitive,
+                  },
+                ];
+              }),
+            );
+            setAnswers((current) =>
+              Object.fromEntries(
+                page.questions.map((question) => [
+                  question.questionId,
+                  current[question.questionId]?.ownerEdited
+                    ? current[question.questionId]!
+                    : next[question.questionId]!,
+                ]),
+              ),
+            );
+            setSelectedResumeId((current) => {
+              const reviewedResume = review?.resumeId;
+              if (
+                reviewedResume &&
+                cloudSnapshot?.resumes.some(
+                  (resume) => resume.resumeId === reviewedResume,
+                )
+              )
+                return reviewedResume;
+              if (
+                current &&
+                cloudSnapshot?.resumes.some((resume) => resume.resumeId === current)
+              )
+                return current;
+              return cloudSnapshot?.resumes[0]?.resumeId ?? "";
+            });
+          }, [cloudSnapshot, page, profile]);'''
+          new_effect = '''  useEffect(() => {
+            let cancelled = false;
+            if (!page) {
+              setAnswers({});
+              return () => {
+                cancelled = true;
+              };
+            }
+            const review = cloudSnapshot?.reviews.find(
+              (candidate: ApplicationReview) => candidate.pageId === page.pageId,
+            );
+
+            void (async () => {
+              const memories = await Promise.all(
+                page.questions.map(async (question) => [
+                  question.questionId,
+                  await getRememberedAnswer(question.rawText).catch(() => null),
+                ] as const),
+              );
+              if (cancelled) return;
+              const memoryByQuestion = Object.fromEntries(memories);
+              const next = Object.fromEntries(
+                page.questions.map((question) => {
+                  const approved = review?.answers.find(
+                    (answer) => answer.questionId === question.questionId,
+                  );
+                  const resolution = resolveProfileAnswer(question, profile);
+                  const suggested = resolution.value ?? "";
+                  const remembered = memoryByQuestion[question.questionId] ?? null;
+                  const control = page.controls.find(
+                    (candidate) => candidate.controlId === question.controlId,
+                  );
+                  const useRemembered =
+                    !approved && !String(suggested).trim() && remembered
+                      ? remembered
+                      : null;
+                  const rememberedApproved = Boolean(
+                    useRemembered &&
+                      canAutoApproveRememberedAnswer({
+                        semanticType: question.semanticType,
+                        controlKind: control?.kind,
+                        value: useRemembered.value,
+                      }),
+                  );
+                  return [
+                    question.questionId,
+                    approved ?? {
+                      value: useRemembered?.value ?? suggested,
+                      approved:
+                        resolution.state === "READY" || rememberedApproved,
+                      sensitive: Boolean(
+                        resolution.sensitive || useRemembered?.sensitive,
+                      ),
+                      remembered: Boolean(useRemembered),
+                    },
+                  ];
+                }),
+              );
+              setAnswers((current) =>
+                Object.fromEntries(
+                  page.questions.map((question) => [
+                    question.questionId,
+                    current[question.questionId]?.ownerEdited
+                      ? current[question.questionId]!
+                      : next[question.questionId]!,
+                  ]),
+                ),
+              );
+            })();
+
+            setSelectedResumeId((current) => {
+              const reviewedResume = review?.resumeId;
+              if (
+                reviewedResume &&
+                cloudSnapshot?.resumes.some(
+                  (resume) => resume.resumeId === reviewedResume,
+                )
+              )
+                return reviewedResume;
+              if (
+                current &&
+                cloudSnapshot?.resumes.some((resume) => resume.resumeId === current)
+              )
+                return current;
+              return cloudSnapshot?.resumes[0]?.resumeId ?? "";
+            });
+
+            return () => {
+              cancelled = true;
+            };
+          }, [cloudSnapshot, page, profile]);'''
+          replace("apps/extension/src/sidepanel/App.tsx", old_effect, new_effect)
+
+          replace(
+              "apps/extension/src/sidepanel/App.tsx",
+              '''                        onChange={(event) =>
+                          setAnswers((current) => ({
+                            ...current,
+                            [question.questionId]: {
+                              ...answer,
+                              approved: event.target.checked,
+                              ownerEdited: true,
+                            },
+                          }))
+                        }
+                      />
+                      Approved for this application''',
+              '''                        onChange={(event) => {
+                          const nextAnswer: AnswerDraft = {
+                            ...answer,
+                            approved: event.target.checked,
+                            ownerEdited: true,
+                          };
+                          setAnswers((current) => ({
+                            ...current,
+                            [question.questionId]: nextAnswer,
+                          }));
+                          if (nextAnswer.approved) {
+                            void rememberApprovedAnswer(question, nextAnswer);
+                          }
+                        }}
+                      />
+                      Approved · remember for matching questions''',
+          )
+          replace(
+              "apps/extension/src/sidepanel/App.tsx",
+              '''                      <AIDraftReview
+                        applicationId={activeApplicationId || page.pageId}
+                        pageId={page.pageId}
+                        question={question}
+                        nativeAvailable={native.status === "healthy"}
+                        pageContext={page.pageContext ?? ""}
+                        onApproved={(value, draftId) =>
+                          setAnswers((current) => ({
+                            ...current,
+                            [question.questionId]: {
+                              value,
+                              approved: true,
+                              sensitive: question.sensitive,
+                              sourceDraftId: draftId,
+                              ownerEdited: true,
+                            },
+                          }))
+                        }
+                      />''',
+              '''                      {answer.remembered && (
+                        <span className="answer-memory-note">
+                          Remembered from a previous approved answer.
+                        </span>
+                      )}
+                      <AIDraftReview
+                        applicationId={activeApplicationId || page.pageId}
+                        pageId={page.pageId}
+                        question={question}
+                        nativeAvailable={native.status === "healthy"}
+                        pageContext={page.pageContext ?? ""}
+                        onApproved={(value, draftId) => {
+                          const nextAnswer: AnswerDraft = {
+                            value,
+                            approved: true,
+                            sensitive: question.sensitive,
+                            sourceDraftId: draftId,
+                            ownerEdited: true,
+                          };
+                          setAnswers((current) => ({
+                            ...current,
+                            [question.questionId]: nextAnswer,
+                          }));
+                          void rememberApprovedAnswer(question, nextAnswer);
+                        }}
+                      />''',
+          )
+          PY
+      - name: Format changed files
+        run: npx prettier --write apps/extension/src/messaging/client.ts apps/extension/src/sidepanel/TeachMunshiPanel.tsx apps/extension/src/background/service-worker.ts apps/extension/src/sidepanel/App.tsx apps/extension/src/content/teach.ts apps/extension/src/content/teach.test.ts apps/extension/src/storage/answer-memory.ts apps/extension/src/storage/answer-memory.test.ts
+      - name: Run targeted regression tests
+        run: npx vitest run apps/extension/src/content/teach.test.ts apps/extension/src/storage/answer-memory.test.ts apps/extension/src/messaging/client.test.ts
+      - name: Build extension
+        run: npm run build
+      - name: Remove temporary patch workflow
+        run: rm .github/workflows/patch-dynamic-teach-answer-memory.yml
+      - name: Commit guarded patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/extension/src/messaging/client.ts apps/extension/src/sidepanel/TeachMunshiPanel.tsx apps/extension/src/background/service-worker.ts apps/extension/src/sidepanel/App.tsx apps/extension/src/content/teach.ts apps/extension/src/content/teach.test.ts apps/extension/src/storage/answer-memory.ts apps/extension/src/storage/answer-memory.test.ts .github/workflows/patch-dynamic-teach-answer-memory.yml
+          git commit -m "fix: harden dynamic teaching and recall owner answers"
+          git push origin HEAD:feat/v3-foundation-alignment
