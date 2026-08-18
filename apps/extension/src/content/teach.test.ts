@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// Regression coverage for dynamic, same-value, and portaled custom controls.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { scanDocument } from "./scanner";
