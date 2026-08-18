@@ -62,9 +62,9 @@ function radioGroup(element: HTMLInputElement): HTMLInputElement[] {
   if (element.type !== "radio" || !element.name) return [element];
   const root = element.getRootNode();
   if (!(root instanceof Document || root instanceof ShadowRoot)) return [element];
-  return Array.from(root.querySelectorAll<HTMLInputElement>("input[type='radio']")).filter(
-    (candidate) => candidate.name === element.name,
-  );
+  return Array.from(
+    root.querySelectorAll<HTMLInputElement>("input[type='radio']"),
+  ).filter((candidate) => candidate.name === element.name);
 }
 
 function customControlShellText(element: HTMLElement): string {
@@ -84,7 +84,9 @@ function controlValue(element: HTMLElement): string {
   if (element instanceof HTMLInputElement) {
     values.push(element.value);
     if (element.type === "radio") {
-      const selected = radioGroup(element).find((candidate) => candidate.checked);
+      const selected = radioGroup(element).find(
+        (candidate) => candidate.checked,
+      );
       values.push(selected?.value ?? "");
     }
   } else if (element instanceof HTMLSelectElement) {
@@ -124,7 +126,9 @@ function safeStateFor(element: HTMLElement): Record<string, unknown> {
     groupChecked: selectedRadio,
     selected: element.getAttribute("aria-selected"),
     expanded: element.getAttribute("aria-expanded"),
-    activeDescendantPresent: Boolean(element.getAttribute("aria-activedescendant")),
+    activeDescendantPresent: Boolean(
+      element.getAttribute("aria-activedescendant"),
+    ),
     dataValuePresent: Boolean(element.getAttribute("data-value")),
     invalid: element.getAttribute("aria-invalid"),
     disabled:
@@ -235,12 +239,17 @@ function compatibleControlKind(original: string, candidate: string): boolean {
   return choiceKinds.has(original) && choiceKinds.has(candidate);
 }
 
-function tryRebind(session: ActiveTeachSession, controlId: string): HTMLElement | null {
+function tryRebind(
+  session: ActiveTeachSession,
+  controlId: string,
+): HTMLElement | null {
   const rebound = resolveControlElement(controlId);
   if (!(rebound?.element instanceof HTMLElement) || !teachable(rebound.element)) {
     return null;
   }
-  if (!compatibleControlKind(session.controlKind, rebound.control.kind)) return null;
+  if (!compatibleControlKind(session.controlKind, rebound.control.kind)) {
+    return null;
+  }
   session.element = rebound.element;
   session.resolvedControlId = rebound.control.controlId;
   return rebound.element;
@@ -321,7 +330,9 @@ function inferredActions(
   if (
     (element instanceof HTMLInputElement &&
       ["radio", "checkbox"].includes(element.type)) ||
-    ["radio", "checkbox", "switch"].includes(element.getAttribute("role") ?? "")
+    ["radio", "checkbox", "switch"].includes(
+      element.getAttribute("role") ?? "",
+    )
   ) {
     return [
       { type: "FOCUS" },
@@ -446,13 +457,12 @@ export function beginTeachInteraction(
         if (!active || active.sessionId !== sessionId) return;
         const live = resolveLiveElement(active);
         const target = event.target instanceof Element ? event.target : null;
-        const targetKind = eventTargetKind(
-          live,
-          target,
-          active.controlEngaged,
-        );
+        const targetKind = eventTargetKind(live, target, active.controlEngaged);
         if (!targetKind) return;
-        if (targetKind === "control" && ["focus", "click", "keydown"].includes(eventName)) {
+        if (
+          targetKind === "control" &&
+          ["focus", "click", "keydown"].includes(eventName)
+        ) {
           active.controlEngaged = true;
         }
         if (eventName === "keydown" && event instanceof KeyboardEvent) {
@@ -516,7 +526,8 @@ export function finishTeachInteraction(
     beforeInternal.groupChecked !== afterInternal.groupChecked ||
     beforeInternal.selected !== afterInternal.selected;
   const explicitCommit = explicitCommitObserved(live, current.eventSequence);
-  const mechanicsObserved = actions.length > 0 && current.eventSequence.length > 0;
+  const mechanicsObserved =
+    actions.length > 0 && current.eventSequence.length > 0;
   const valueCommitted = explicitCommit || (changed && answerStateChanged);
   const reasons: string[] = [];
   if (changed) reasons.push("control-state-changed");
