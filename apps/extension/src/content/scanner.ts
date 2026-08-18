@@ -60,6 +60,12 @@ const selector = [
   "[aria-haspopup='tree']",
   "[aria-haspopup='grid']",
   "[aria-haspopup='dialog']",
+  "[tabindex]:not([tabindex='-1'])",
+  "[class*='select' i]",
+  "[class*='dropdown' i]",
+  "[data-testid*='select' i]",
+  "[data-automation-id*='select' i]",
+  "[data-qa*='select' i]",
   "[contenteditable='true']",
 ].join(",");
 
@@ -589,6 +595,17 @@ function createControl(element: Element): Control | null {
       ? fileFingerprintFor(element)
       : null;
   const kind = kindFor(element);
+  const genericDiscoveryCandidate = element.matches(
+    "[tabindex]:not([tabindex='-1']), [class*='select' i], [class*='dropdown' i], [data-testid*='select' i], [data-automation-id*='select' i], [data-qa*='select' i]",
+  );
+  if (
+    genericDiscoveryCandidate &&
+    kind === "UNKNOWN" &&
+    !(element instanceof HTMLInputElement) &&
+    !(element instanceof HTMLElement && element.isContentEditable)
+  ) {
+    return null;
+  }
   const options = optionsFor(element);
   const label = labelFor(element);
   return {

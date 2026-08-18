@@ -188,6 +188,31 @@ describe("AutoPilot page-state scanner", () => {
     });
   });
 
+  it("discovers a focusable select shell without native or ARIA select semantics", () => {
+    document.body.innerHTML = `
+    <div class="application-field">
+      <label>Years of Experience *</label>
+      <div id="years" class="experience-select" tabindex="0">Select an option</div>
+    </div>
+  `;
+    const result = scanDocument();
+    expect(result.controls).toContainEqual(
+      expect.objectContaining({
+        kind: "COMBOBOX",
+        label: "Years of Experience *",
+      }),
+    );
+    expect(result.questions).toContainEqual(
+      expect.objectContaining({ rawText: "Years of Experience *" }),
+    );
+  });
+
+  it("does not promote unrelated focusable containers into application questions", () => {
+    document.body.innerHTML = `<div tabindex="0">Help and support</div>`;
+    const result = scanDocument();
+    expect(result.questions).toHaveLength(0);
+  });
+
   it("uses the radio-group prompt instead of Yes or No option labels", () => {
     document.body.innerHTML = `
       <div class="question-field">

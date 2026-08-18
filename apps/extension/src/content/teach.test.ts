@@ -174,6 +174,35 @@ describe("Teach MUNSHI capture", () => {
     expect(JSON.stringify(learned)).not.toContain("Asian");
   });
 
+  it("learns a generic Years of Experience select shell with a portaled option", () => {
+    document.body.innerHTML = `
+    <div class="application-field">
+      <label>Years of Experience *</label>
+      <div id="years" class="experience-select" tabindex="0">Select an option</div>
+    </div>
+    <div id="years-portal" role="listbox">
+      <div id="years-option" role="option">1-2 years</div>
+    </div>
+  `;
+    const page = scanDocument();
+    const control = page.controls.find(
+      (item) => item.label === "Years of Experience *",
+    )!;
+    const shell = document.getElementById("years") as HTMLElement;
+    const option = document.getElementById("years-option") as HTMLElement;
+    const started = beginTeachInteraction("teach-years", control.controlId);
+
+    shell.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    option.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    const learned = finishTeachInteraction(started.sessionId);
+    expect(learned.reusable).toBe(true);
+    expect(
+      learned.eventSequence.some((event) => event.target === "owned-popup"),
+    ).toBe(true);
+    expect(JSON.stringify(learned)).not.toContain("1-2 years");
+  });
+
   it("captures radio-group label clicks inside the taught field group", () => {
     document.body.innerHTML = `
       <fieldset>

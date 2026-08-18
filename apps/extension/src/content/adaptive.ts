@@ -733,6 +733,46 @@ export function validationFailureReason(
   return "Control did not preserve the requested value after browser validation";
 }
 
+function genericPopupChoiceEvidence(element: Element): boolean {
+  if (!(element instanceof HTMLElement)) return false;
+  if (
+    element instanceof HTMLInputElement ||
+    element instanceof HTMLSelectElement ||
+    element instanceof HTMLTextAreaElement
+  ) {
+    return false;
+  }
+
+  const tabindex = element.getAttribute("tabindex");
+  const numericTabindex = tabindex === null ? Number.NaN : Number(tabindex);
+  const focusable =
+    element instanceof HTMLButtonElement ||
+    (Number.isFinite(numericTabindex) && numericTabindex >= 0);
+  const visibleText = normalizedText(element.textContent);
+  const placeholderLike =
+    visibleText.length <= 80 &&
+    /^(select|choose)( an?)?( option| one)?[.…]*$/.test(visibleText);
+  const descriptor = normalizedText(
+    [
+      element.id,
+      element.getAttribute("class"),
+      element.getAttribute("name"),
+      element.getAttribute("data-testid"),
+      element.getAttribute("data-automation-id"),
+      element.getAttribute("data-qa"),
+    ]
+      .filter(Boolean)
+      .join(" "),
+  );
+  const structuralHint = /\b(select|dropdown|combobox|picker)\b/.test(
+    descriptor,
+  );
+  return (
+    (placeholderLike && (focusable || structuralHint)) ||
+    (focusable && structuralHint)
+  );
+}
+
 export function isPopupChoiceControl(element: Element): boolean {
   const role = normalizedText(element.getAttribute("role"));
   const hasPopup = normalizedText(element.getAttribute("aria-haspopup"));
@@ -740,7 +780,8 @@ export function isPopupChoiceControl(element: Element): boolean {
     role === "combobox" ||
     hasPopup === "listbox" ||
     hasPopup === "tree" ||
-    hasPopup === "grid"
+    hasPopup === "grid" ||
+    genericPopupChoiceEvidence(element)
   );
 }
 
