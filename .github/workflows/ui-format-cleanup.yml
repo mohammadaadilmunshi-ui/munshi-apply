@@ -1,0 +1,40 @@
+name: One-shot UI formatter
+
+on:
+  push:
+    branches:
+      - feat/v3-foundation-alignment
+    paths:
+      - .github/workflows/ui-format-cleanup.yml
+
+permissions:
+  contents: write
+
+jobs:
+  format-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Format UI files and remove formatter
+        run: |
+          npx prettier --write \
+            apps/extension/src/sidepanel/ApplicationAnalyticsPanel.tsx \
+            apps/extension/src/sidepanel/JobSignalPanel.tsx \
+            apps/extension/src/sidepanel/TeachMunshiPanel.tsx \
+            apps/extension/src/sidepanel/ux-overhaul.css \
+            apps/extension/src/sidepanel/ux-polish.css
+          rm .github/workflows/ui-format-cleanup.yml
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/extension/src/sidepanel .github/workflows/ui-format-cleanup.yml
+          git commit -m "chore: format extension UX overhaul"
+          git push origin HEAD:feat/v3-foundation-alignment
