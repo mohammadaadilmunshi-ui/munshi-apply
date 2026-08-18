@@ -1,0 +1,228 @@
+name: Guarded generic choice-shell repair
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-generic-choice-shell:
+    if: github.event.pull_request.number == 11 && github.event.pull_request.head.ref == 'feat/v3-foundation-alignment'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Patch scanner and popup-choice classifier
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          adaptive = Path('apps/extension/src/content/adaptive.ts')
+          text = adaptive.read_text()
+          old = '''export function isPopupChoiceControl(element: Element): boolean {
+            const role = normalizedText(element.getAttribute("role"));
+            const hasPopup = normalizedText(element.getAttribute("aria-haspopup"));
+            return (
+              role === "combobox" ||
+              hasPopup === "listbox" ||
+              hasPopup === "tree" ||
+              hasPopup === "grid"
+            );
+          }
+          '''
+          new = '''function genericPopupChoiceEvidence(element: Element): boolean {
+            if (!(element instanceof HTMLElement)) return false;
+            if (
+              element instanceof HTMLInputElement ||
+              element instanceof HTMLSelectElement ||
+              element instanceof HTMLTextAreaElement
+            ) {
+              return false;
+            }
+
+            const tabindex = element.getAttribute("tabindex");
+            const numericTabindex = tabindex === null ? Number.NaN : Number(tabindex);
+            const focusable =
+              element instanceof HTMLButtonElement ||
+              (Number.isFinite(numericTabindex) && numericTabindex >= 0);
+            const visibleText = normalizedText(element.textContent);
+            const placeholderLike =
+              visibleText.length <= 80 &&
+              /^(select|choose)( an?)?( option| one)?[.…]*$/.test(visibleText);
+            const descriptor = normalizedText(
+              [
+                element.id,
+                element.getAttribute("class"),
+                element.getAttribute("name"),
+                element.getAttribute("data-testid"),
+                element.getAttribute("data-automation-id"),
+                element.getAttribute("data-qa"),
+              ]
+                .filter(Boolean)
+                .join(" "),
+            );
+            const structuralHint = /\\b(select|dropdown|combobox|picker)\\b/.test(
+              descriptor,
+            );
+            return (placeholderLike && (focusable || structuralHint)) || (focusable && structuralHint);
+          }
+
+          export function isPopupChoiceControl(element: Element): boolean {
+            const role = normalizedText(element.getAttribute("role"));
+            const hasPopup = normalizedText(element.getAttribute("aria-haspopup"));
+            return (
+              role === "combobox" ||
+              hasPopup === "listbox" ||
+              hasPopup === "tree" ||
+              hasPopup === "grid" ||
+              genericPopupChoiceEvidence(element)
+            );
+          }
+          '''
+          if old not in text:
+              raise SystemExit('adaptive.ts expected block not found')
+          adaptive.write_text(text.replace(old, new, 1))
+
+          scanner = Path('apps/extension/src/content/scanner.ts')
+          text = scanner.read_text()
+          old = '''  "[aria-haspopup='dialog']",
+            "[contenteditable='true']",
+          ].join(",");
+          '''
+          new = '''  "[aria-haspopup='dialog']",
+            "[tabindex]:not([tabindex='-1'])",
+            "[class*='select' i]",
+            "[class*='dropdown' i]",
+            "[data-testid*='select' i]",
+            "[data-automation-id*='select' i]",
+            "[data-qa*='select' i]",
+            "[contenteditable='true']",
+          ].join(",");
+          '''
+          if old not in text:
+              raise SystemExit('scanner selector block not found')
+          text = text.replace(old, new, 1)
+
+          old = '''  const kind = kindFor(element);
+            const options = optionsFor(element);
+          '''
+          new = '''  const kind = kindFor(element);
+            const genericDiscoveryCandidate = element.matches(
+              "[tabindex]:not([tabindex='-1']), [class*='select' i], [class*='dropdown' i], [data-testid*='select' i], [data-automation-id*='select' i], [data-qa*='select' i]",
+            );
+            if (
+              genericDiscoveryCandidate &&
+              kind === "UNKNOWN" &&
+              !(element instanceof HTMLInputElement) &&
+              !(element instanceof HTMLElement && element.isContentEditable)
+            ) {
+              return null;
+            }
+            const options = optionsFor(element);
+          '''
+          if old not in text:
+              raise SystemExit('scanner kind block not found')
+          scanner.write_text(text.replace(old, new, 1))
+          PY
+      - name: Add exact regressions
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          scanner_test = Path('apps/extension/src/content/scanner.test.ts')
+          text = scanner_test.read_text()
+          anchor = '''  it("uses the radio-group prompt instead of Yes or No option labels", () => {
+          '''
+          insert = '''  it("discovers a focusable select shell without native or ARIA select semantics", () => {
+            document.body.innerHTML = `
+              <div class="application-field">
+                <label>Years of Experience *</label>
+                <div id="years" class="experience-select" tabindex="0">Select an option</div>
+              </div>
+            `;
+            const result = scanDocument();
+            expect(result.controls).toContainEqual(
+              expect.objectContaining({
+                kind: "COMBOBOX",
+                label: "Years of Experience *",
+              }),
+            );
+            expect(result.questions).toContainEqual(
+              expect.objectContaining({ rawText: "Years of Experience *" }),
+            );
+          });
+
+          it("does not promote unrelated focusable containers into application questions", () => {
+            document.body.innerHTML = `<div tabindex="0">Help and support</div>`;
+            const result = scanDocument();
+            expect(result.questions).toHaveLength(0);
+          });
+
+          '''
+          if anchor not in text:
+              raise SystemExit('scanner test anchor not found')
+          scanner_test.write_text(text.replace(anchor, insert + anchor, 1))
+
+          teach_test = Path('apps/extension/src/content/teach.test.ts')
+          text = teach_test.read_text()
+          anchor = '''  it("captures radio-group label clicks inside the taught field group", () => {
+          '''
+          insert = '''  it("learns a generic Years of Experience select shell with a portaled option", () => {
+            document.body.innerHTML = `
+              <div class="application-field">
+                <label>Years of Experience *</label>
+                <div id="years" class="experience-select" tabindex="0">Select an option</div>
+              </div>
+              <div id="years-portal" role="listbox">
+                <div id="years-option" role="option">1-2 years</div>
+              </div>
+            `;
+            const page = scanDocument();
+            const control = page.controls.find(
+              (item) => item.label === "Years of Experience *",
+            )!;
+            const shell = document.getElementById("years") as HTMLElement;
+            const option = document.getElementById("years-option") as HTMLElement;
+            const started = beginTeachInteraction("teach-years", control.controlId);
+
+            shell.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+            option.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+            const learned = finishTeachInteraction(started.sessionId);
+            expect(learned.reusable).toBe(true);
+            expect(
+              learned.eventSequence.some((event) => event.target === "owned-popup"),
+            ).toBe(true);
+            expect(JSON.stringify(learned)).not.toContain("1-2 years");
+          });
+
+          '''
+          if anchor not in text:
+              raise SystemExit('teach test anchor not found')
+          teach_test.write_text(text.replace(anchor, insert + anchor, 1))
+          PY
+      - name: Format and verify targeted repair
+        run: |
+          npx prettier --write apps/extension/src/content/adaptive.ts apps/extension/src/content/scanner.ts apps/extension/src/content/scanner.test.ts apps/extension/src/content/teach.test.ts
+          npx prettier --check apps/extension/src/content/adaptive.ts apps/extension/src/content/scanner.ts apps/extension/src/content/scanner.test.ts apps/extension/src/content/teach.test.ts
+          npx vitest run apps/extension/src/content/scanner.test.ts apps/extension/src/content/teach.test.ts
+          npm run typecheck
+          npm run build
+          node scripts/verify-artifacts.mjs
+      - name: Commit repaired source and remove helper
+        run: |
+          rm .github/workflows/patch-generic-choice-shell.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/extension/src/content/adaptive.ts apps/extension/src/content/scanner.ts apps/extension/src/content/scanner.test.ts apps/extension/src/content/teach.test.ts .github/workflows/patch-generic-choice-shell.yml
+          git diff --cached --check
+          git commit -m "fix: discover teachable generic choice shells"
+          git push origin HEAD:feat/v3-foundation-alignment
