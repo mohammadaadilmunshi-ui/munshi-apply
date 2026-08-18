@@ -27,6 +27,27 @@ section > .section-heading + p {
     var(--munshi-shadow);
 }
 
+.answer-memory-note {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  color: var(--munshi-green);
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1.4;
+}
+
+.answer-memory-note::before {
+  content: "✓";
+  align-items: center;
+  background: var(--munshi-green-soft);
+  border-radius: 999px;
+  display: inline-flex;
+  height: 18px;
+  justify-content: center;
+  width: 18px;
+}
+
 .resume-select {
   padding: 14px;
   border: 1px solid var(--munshi-line);
