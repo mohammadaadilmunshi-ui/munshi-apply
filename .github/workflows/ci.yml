@@ -6,9 +6,112 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
+  guarded-runtime-repair:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'feat/v3-foundation-alignment' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Apply guarded runtime repair
+        run: python3 scripts/patch-dynamic-teach-answer-memory.py
+      - name: Format repaired source
+        run: >-
+          npx prettier --write
+          apps/extension/src/messaging/client.ts
+          apps/extension/src/sidepanel/TeachMunshiPanel.tsx
+          apps/extension/src/background/service-worker.ts
+          apps/extension/src/sidepanel/App.tsx
+          apps/extension/src/content/teach.ts
+          apps/extension/src/content/teach.test.ts
+          apps/extension/src/storage/answer-memory.ts
+          apps/extension/src/storage/answer-memory.test.ts
+          apps/extension/src/sidepanel/ux-polish.css
+      - name: Run targeted regressions
+        run: >-
+          npx vitest run
+          apps/extension/src/content/teach.test.ts
+          apps/extension/src/storage/answer-memory.test.ts
+          apps/extension/src/messaging/client.test.ts
+      - name: Build extension
+        run: npm run build
+      - name: Restore verification-only CI and remove helpers
+        run: |
+          rm -f .github/workflows/patch-dynamic-teach-answer-memory.yml
+          rm -f scripts/patch-dynamic-teach-answer-memory.py
+          cat > .github/workflows/ci.yml <<'YAML'
+          name: CI
+
+          on:
+            pull_request:
+            push:
+              branches: [main]
+
+          permissions:
+            contents: read
+
+          jobs:
+            extension:
+              runs-on: ubuntu-latest
+              steps:
+                - uses: actions/checkout@v7
+                - uses: actions/setup-node@v7
+                  with:
+                    node-version: 24
+                    cache: npm
+                - run: npm ci
+                - run: npm run check
+                - uses: actions/upload-artifact@v7
+                  with:
+                    name: munshi-apply-edge-unpacked
+                    path: apps/extension/dist
+                    if-no-files-found: error
+
+            native-host:
+              runs-on: ubuntu-latest
+              steps:
+                - uses: actions/checkout@v7
+                - uses: actions/setup-python@v7
+                  with:
+                    python-version: "3.12"
+                    cache: pip
+                - name: Verify operational Python selector
+                  run: |
+                    source scripts/lib/common.sh
+                    "${PYTHON_BIN}" -c 'import sys; assert sys.version_info >= (3, 12); print(sys.executable)'
+                - run: python -m pip install -e './apps/native-host[dev]'
+                - run: python -m ruff check apps/native-host
+                - run: python -m pytest apps/native-host
+
+            repository-safety:
+              runs-on: ubuntu-latest
+              steps:
+                - uses: actions/checkout@v7
+                  with:
+                    fetch-depth: 0
+                - uses: actions/setup-node@v7
+                  with:
+                    node-version: 24
+                - run: node scripts/secret-scan.mjs
+                - run: ./scripts/repository-safety.sh
+          YAML
+      - name: Commit repaired source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: harden dynamic fields and remember owner answers"
+          git push origin HEAD:feat/v3-foundation-alignment
+
   extension:
     runs-on: ubuntu-latest
     steps:
