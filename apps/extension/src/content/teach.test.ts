@@ -53,6 +53,56 @@ describe("Teach MUNSHI capture", () => {
     expect(JSON.stringify(learned)).not.toContain("United States");
   });
 
+  it("rebinds when an ATS replaces the taught control after selection", () => {
+    document.body.innerHTML = `
+      <label for="ethnicity">Are you Hispanic/Latino?</label>
+      <select id="ethnicity">
+        <option value="">Select</option>
+        <option value="no">No</option>
+      </select>
+    `;
+    const initialPage = scanDocument();
+    const control = initialPage.controls.find(
+      (item) => item.label === "Are you Hispanic/Latino?",
+    )!;
+    const started = beginTeachInteraction("teach-dynamic", control.controlId);
+
+    const original = document.getElementById("ethnicity") as HTMLSelectElement;
+    const replacement = original.cloneNode(true) as HTMLSelectElement;
+    replacement.value = "no";
+    original.replaceWith(replacement);
+    replacement.dispatchEvent(new Event("change", { bubbles: true }));
+
+    const learned = finishTeachInteraction(started.sessionId);
+    expect(learned.reusable).toBe(true);
+    expect(learned.quality.reasons).toContain("value-commit-observed");
+    expect(learned.resolvedControlId).toBeTruthy();
+    expect(JSON.stringify(learned)).not.toContain('"no"');
+  });
+
+  it("captures radio-group label clicks inside the taught field group", () => {
+    document.body.innerHTML = `
+      <fieldset>
+        <legend>Race</legend>
+        <label><input type="radio" name="race" value="a" /> Asian</label>
+        <label><input type="radio" name="race" value="b" /> Other</label>
+      </fieldset>
+    `;
+    const page = scanDocument();
+    const control = page.controls.find(
+      (item) => item.kind === "RADIO" && item.name === "race",
+    )!;
+    const started = beginTeachInteraction("teach-radio", control.controlId);
+    const radios = Array.from(
+      document.querySelectorAll<HTMLInputElement>('input[name="race"]'),
+    );
+    radios[1]!.checked = true;
+    radios[1]!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    radios[1]!.dispatchEvent(new Event("change", { bubbles: true }));
+    const learned = finishTeachInteraction(started.sessionId);
+    expect(learned.eventSequence.length).toBeGreaterThan(0);
+  });
+
   it("cancels without retaining a demonstration", () => {
     document.body.innerHTML = `<label for="name">Name</label><input id="name" />`;
     const control = scanDocument().controls[0]!;
