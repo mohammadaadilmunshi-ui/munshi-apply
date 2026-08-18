@@ -271,12 +271,12 @@ export function beginTeachInteraction(
   dispose();
   const resolved = resolveControlElement(controlId);
   const element = resolved?.element;
-  if (!(element instanceof HTMLElement) || !teachable(element)) {
+  if (!resolved || !(element instanceof HTMLElement) || !teachable(element)) {
     throw new Error(
       "This employer control is not eligible for Teach MUNSHI. File/security/final actions stay owner-operated.",
     );
   }
-  const componentFingerprint = resolved?.control.componentFingerprint ?? "";
+  const componentFingerprint = resolved.control.componentFingerprint ?? "";
   if (!componentFingerprint) {
     throw new Error(
       "This control does not have a reusable component fingerprint yet",
