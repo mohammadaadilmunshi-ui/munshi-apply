@@ -7,6 +7,9 @@ const candidateRegistrationIntent =
 const careerOrJobContext =
   /(?:^|[\s/_.-])(career|careers|job|jobs|recruiting|recruitment)(?:$|[\s/_.-])/i;
 const strongJobRegistrationRoute = /\/(?:jobs?|careers?)\/register(?:\/|$)/i;
+const strongApplicationFormRoute =
+  /\/(?:application(?:form|wizard|questions?|steps?)|apply(?:form|wizard)?|jobapplication|candidateapplication)(?:\/|$)/i;
+const knownApplicationPlatformHost = /(?:^|\.)avature\.net$/i;
 const resumeLabel = /\b(resume|résumé|cv)\b/i;
 const applicationNavigation = /\b(apply|application)\b/i;
 
@@ -128,6 +131,26 @@ function hasStrongJobRegistrationRoute(page: ApplicationPage): boolean {
   }
 }
 
+function hasStrongApplicationFormRoute(page: ApplicationPage): boolean {
+  try {
+    const url = new URL(page.url);
+    return (
+      strongApplicationFormRoute.test(url.pathname) &&
+      careerOrJobContext.test(`${url.hostname} ${url.pathname} ${page.title}`)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function hasKnownApplicationPlatformHost(page: ApplicationPage): boolean {
+  try {
+    return knownApplicationPlatformHost.test(new URL(page.url).hostname);
+  } catch {
+    return false;
+  }
+}
+
 function meaningfulQuestionCount(page: ApplicationPage): number {
   const questions = Array.isArray(page.questions) ? page.questions : [];
   return questions.filter((question) => question.semanticType !== "UNKNOWN")
@@ -192,18 +215,21 @@ function hasApplicationProgression(page: ApplicationPage): boolean {
 /**
  * Decide whether an observed browser page has enough deterministic evidence to
  * enter the application ledger. The scanner observes broadly, while this gate
- * rejects ordinary browsing. Multi-step careers registration flows are allowed
- * to remain tracked between steps even when the current step has no visible
- * Next button or résumé control.
+ * rejects ordinary browsing. Multi-step careers registration flows and strong
+ * careers application-form routes are allowed to remain tracked between steps
+ * even when the current step has no visible Next button or résumé control.
  */
 export function applicationPageEligibility(
   page: ApplicationPage,
 ): ApplicationEligibility {
   const reasons: string[] = [];
-  const knownAts = Boolean(page.atsFamily && page.atsFamily !== "GENERIC");
+  const knownAts =
+    Boolean(page.atsFamily && page.atsFamily !== "GENERIC") ||
+    hasKnownApplicationPlatformHost(page);
   const explicitIntent = hasExplicitIntent(page);
   const candidateRegistration = hasCandidateRegistrationIntent(page);
   const strongJobRegistration = hasStrongJobRegistrationRoute(page);
+  const strongApplicationForm = hasStrongApplicationFormRoute(page);
   const meaningfulQuestions = meaningfulQuestionCount(page);
   const specificQuestions = applicationSpecificQuestionCount(page);
   const candidateIdentityQuestions = candidateIdentityQuestionCount(page);
@@ -246,6 +272,13 @@ export function applicationPageEligibility(
     reasons.push(
       "explicit application context with multiple classified questions",
     );
+  }
+  if (
+    page.applicationState !== "AUTH" &&
+    strongApplicationForm &&
+    interactiveFields >= 1
+  ) {
+    reasons.push("explicit careers application-form route with interactive fields");
   }
   if (strongJobRegistration && interactiveFields >= 2) {
     reasons.push(
