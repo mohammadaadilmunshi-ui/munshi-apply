@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "MUNSHI Apply",
   "description": "Evidence-grounded application understanding and preparation for Microsoft Edge.",
-  "version": "0.1.0",
+  "version": "0.2.5",
   "minimum_chrome_version": "120",
   "action": {
     "default_title": "Open MUNSHI Apply"
@@ -21,7 +21,14 @@
     }
   ],
   "host_permissions": ["http://*/*", "https://*/*"],
-  "permissions": ["sidePanel", "storage", "tabs"],
+  "permissions": [
+    "nativeMessaging",
+    "sidePanel",
+    "scripting",
+    "storage",
+    "tabs",
+    "webNavigation"
+  ],
   "side_panel": {
     "default_path": "sidepanel/index.html"
   }

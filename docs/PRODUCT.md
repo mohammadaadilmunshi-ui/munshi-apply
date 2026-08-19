@@ -14,8 +14,10 @@ The system should reduce repetitive effort without reducing factual accuracy or 
 
 This project is not a bulk-application spam engine, a bot-detection evasion tool, a CAPTCHA solver, an identity-verification bypass, or an AI that fabricates qualifications. Platform-specific adapters are optimizations, never the compatibility foundation.
 
-## Release boundary
+## Current release boundary
 
-The `0.1.x` line is an observe-and-model foundation. It can discover visible controls, normalize question meaning, flag review requirements, preserve confirmed profile facts, and persist structured events. It cannot write to employer pages.
+The `0.2.0` line includes universal visible-control discovery across injectable frames and open Shadow DOM, deterministic question classification, a structured encrypted profile, encrypted résumé synchronization, pre-flight answer review, and guarded filling for explicitly approved supported controls.
 
-Autofill begins only after interaction verification, preview, protected-answer policies, checkpointing, and recovery are implemented and tested against the synthetic application lab.
+Guarded filling is not autonomous submission. MUNSHI verifies supported interactions after browser events and reports unsupported controls instead of claiming success. File selection, CAPTCHA, MFA, OTP, identity verification, authentication/security checkpoints, and final submission remain deliberate owner actions.
+
+OpenAI provider configuration is available through the native companion, but generated application answers remain disabled until evidence retrieval, contradiction checking, usage metering, budget enforcement, and generated-response validation satisfy the intelligence milestone gates.

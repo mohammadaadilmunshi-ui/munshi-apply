@@ -1,0 +1,110 @@
+import { describe, expect, it } from "vitest";
+import type { ApplicationPage } from "@munshi-apply/contracts";
+import { buildPageJobSignalSource } from "./job-signal-page";
+
+function page(overrides: Partial<ApplicationPage> = {}): ApplicationPage {
+  return {
+    pageId: "page-1",
+    tabId: 1,
+    frameId: 0,
+    documentId: "document-1",
+    url: "https://jobs.example.com/job/people-analyst?source=board#apply",
+    title: "People Analyst | Example",
+    pageContext: "High-volume role with up to 25% travel.",
+    observedAt: "2026-08-17T20:40:00.000Z",
+    controls: [],
+    questions: [],
+    applicationState: "JOB_CONTEXT",
+    pageFingerprint: "page-fingerprint-1",
+    securityCheckpoint: null,
+    validationErrorCount: 0,
+    navigationCandidates: [],
+    finalSubmissionBoundary: false,
+    ...overrides,
+  };
+}
+
+describe("Job Signal page adapter", () => {
+  it("uses captured text only on an explicit job-context page", () => {
+    const source = buildPageJobSignalSource(page());
+    expect(source.input.description).toBe(
+      "High-volume role with up to 25% travel.",
+    );
+    expect(source.input.role).toBeUndefined();
+    expect(source.input.company).toBeUndefined();
+    expect(source.input.compensation).toBeUndefined();
+  });
+
+  it("does not reinterpret application questions as job-posting evidence", () => {
+    const source = buildPageJobSignalSource(
+      page({
+        applicationState: "QUESTIONS",
+        title: "Application Questions",
+        pageContext:
+          "Will you require sponsorship? Are you willing to work weekends?",
+      }),
+    );
+    expect(source.input.description).toBeNull();
+    expect(source.input.role).toBeUndefined();
+    expect(source.input.company).toBeUndefined();
+  });
+
+  it("includes observed workflow friction without treating it as job text", () => {
+    const source = buildPageJobSignalSource(
+      page({ applicationState: "QUESTIONS", validationErrorCount: 2 }),
+      { accountRequired: true, manualRequiredControls: 3 },
+    );
+    expect(source.input.description).toBeNull();
+    expect(source.input.applicationFriction).toEqual({
+      accountRequired: true,
+      manualRequiredControls: 3,
+      validationErrors: 2,
+    });
+  });
+
+  it("keeps friction unknown when no friction evidence has been observed", () => {
+    const source = buildPageJobSignalSource(page(), {
+      manualRequiredControls: -4,
+    });
+    expect(source.input.applicationFriction).toBeNull();
+  });
+
+  it("keeps a stable fingerprint across timestamps, tracking, and DOM-only changes", () => {
+    const first = buildPageJobSignalSource(page()).sourceFingerprint;
+    const second = buildPageJobSignalSource(
+      page({
+        observedAt: "2026-08-17T20:41:00.000Z",
+        url: "https://jobs.example.com/job/people-analyst?source=other#details",
+        pageFingerprint: "page-fingerprint-2",
+      }),
+    ).sourceFingerprint;
+    expect(second).toBe(first);
+  });
+
+  it("changes the fingerprint when analyzed job evidence or friction changes", () => {
+    const first = buildPageJobSignalSource(page()).sourceFingerprint;
+    const changedContext = buildPageJobSignalSource(
+      page({ pageContext: "Role requires up to 60% travel." }),
+    ).sourceFingerprint;
+    const changedFriction = buildPageJobSignalSource(page(), {
+      accountRequired: true,
+      manualRequiredControls: 2,
+    }).sourceFingerprint;
+    expect(changedContext).not.toBe(first);
+    expect(changedFriction).not.toBe(first);
+  });
+
+  it("distinguishes recognized job identifiers that exist only in the query string", () => {
+    const first = buildPageJobSignalSource(
+      page({ url: "https://jobs.example.com/apply?jobId=123&utm_source=a" }),
+    ).sourceFingerprint;
+    const sameJob = buildPageJobSignalSource(
+      page({ url: "https://jobs.example.com/apply?utm_source=b&jobId=123" }),
+    ).sourceFingerprint;
+    const differentJob = buildPageJobSignalSource(
+      page({ url: "https://jobs.example.com/apply?jobId=456" }),
+    ).sourceFingerprint;
+    expect(sameJob).toBe(first);
+    expect(differentJob).not.toBe(first);
+  });
+});

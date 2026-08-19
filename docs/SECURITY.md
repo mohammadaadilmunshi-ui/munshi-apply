@@ -11,16 +11,17 @@
 
 ## Permission budget
 
-The `0.1.0` extension requests only:
+The `0.2.0` extension requests only:
 
-| Permission             | Reason                                                |
-| ---------------------- | ----------------------------------------------------- |
-| `sidePanel`            | Persistent application command center                 |
-| `storage`              | Extension-owned state and future settings             |
-| `tabs`                 | Resolve the active tab to its persisted page snapshot |
-| HTTP/HTTPS host access | Inject the universal read-only page sensor            |
+| Permission             | Reason                                                  |
+| ---------------------- | ------------------------------------------------------- |
+| `sidePanel`            | Persistent application command center                   |
+| `storage`              | Extension-owned cache and UI state                      |
+| `tabs`                 | Resolve the active tab to its persisted page snapshot   |
+| `nativeMessaging`      | Health-checked connection to the local SQLite companion |
+| HTTP/HTTPS host access | Inject the universal read-only page sensor              |
 
-`nativeMessaging`, `scripting`, `downloads`, and `debugger` are not requested until a shipped feature needs them and receives a separate review.
+`scripting`, `downloads`, and `debugger` are not requested. Native Messaging is limited to the fixed `systems.munshi.apply` host installed for the exact local Edge extension ID.
 
 ## Explicitly prohibited behavior
 
@@ -29,6 +30,8 @@ MUNSHI Apply must not defeat CAPTCHA, MFA, OTP, identity verification, authentic
 ## Secrets
 
 Use `apps/native-host/.env.example` only as a variable-name template. Put real values in an ignored `.env` file or the operating system's credential store. Never paste secrets into GitHub issues, pull requests, screenshots, logs, or test fixtures.
+
+Private runtime data belongs under `~/Library/Application Support/MUNSHI Apply/` on macOS, never inside the repository. CI rejects committed databases, credentials, private keys, real résumé files, generated diagnostics, and common secret patterns.
 
 ## Reporting
 

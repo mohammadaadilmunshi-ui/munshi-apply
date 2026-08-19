@@ -5,3 +5,4 @@ backups
 reports/generated
 package-lock.json
 docs/MASTER_ARCHITECTURE.md
+apps/owner-workspace
