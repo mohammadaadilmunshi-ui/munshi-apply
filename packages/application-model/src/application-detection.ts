@@ -278,7 +278,9 @@ export function applicationPageEligibility(
     strongApplicationForm &&
     interactiveFields >= 1
   ) {
-    reasons.push("explicit careers application-form route with interactive fields");
+    reasons.push(
+      "explicit careers application-form route with interactive fields",
+    );
   }
   if (strongJobRegistration && interactiveFields >= 2) {
     reasons.push(
