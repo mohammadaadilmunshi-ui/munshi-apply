@@ -18,7 +18,8 @@ function avaturePage(url: string): ApplicationPage {
         kind: "RADIO",
         tagName: "input",
         name: "workAuthorization",
-        label: "Are you legally authorized to work for ANY employers, full time, in the country in which this position is located?",
+        label:
+          "Are you legally authorized to work for ANY employers, full time, in the country in which this position is located?",
         placeholder: "",
         ariaLabel: "",
         required: true,
@@ -35,7 +36,8 @@ function avaturePage(url: string): ApplicationPage {
       {
         questionId: "q-work-auth",
         controlId: "ctl-work-auth",
-        rawText: "Are you legally authorized to work for ANY employers, full time, in the country in which this position is located?",
+        rawText:
+          "Are you legally authorized to work for ANY employers, full time, in the country in which this position is located?",
         semanticType: "WORK_AUTHORIZATION_CURRENT",
         confidence: 0.98,
         sensitive: true,
@@ -64,14 +66,21 @@ describe("Avature and strong application-form detection", () => {
     expect(result.reasons).toContain(
       "explicit careers application-form route with interactive fields",
     );
-    expect(result.reasons).toContain("known ATS with application-specific questions");
+    expect(result.reasons).toContain(
+      "known ATS with application-specific questions",
+    );
   });
 
   it("does not treat unrelated paths beginning with ApplicationForm as an application route", () => {
-    const page = avaturePage("https://docs.example.test/careers/ApplicationFormat");
+    const page = avaturePage(
+      "https://docs.example.test/careers/ApplicationFormat",
+    );
     page.questions = [];
     page.controls = [];
 
-    expect(applicationPageEligibility(page)).toEqual({ eligible: false, reasons: [] });
+    expect(applicationPageEligibility(page)).toEqual({
+      eligible: false,
+      reasons: [],
+    });
   });
 });
