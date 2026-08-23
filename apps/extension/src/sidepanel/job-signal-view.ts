@@ -15,7 +15,9 @@ export type JobSignalViewRow = {
   score: number | null;
   confidence: number;
   disposition: JobSignalDisposition;
+  directionLabel: string;
   evidence: readonly string[];
+  evidenceSources: readonly string[];
   explanations: readonly string[];
 };
 
@@ -64,6 +66,19 @@ export function jobSignalDisposition(
   return "MIXED";
 }
 
+function directionLabel(disposition: JobSignalDisposition): string {
+  switch (disposition) {
+    case "POSITIVE":
+      return "Helpful evidence";
+    case "CONCERN":
+      return "Review evidence";
+    case "MIXED":
+      return "Context to weigh";
+    case "UNKNOWN":
+      return "Not stated";
+  }
+}
+
 export function buildJobSignalView(input: {
   report: JobSignalReport;
   preflightState: OpportunityPreflightState;
@@ -75,13 +90,16 @@ export function buildJobSignalView(input: {
         input.report.signals.find((signal) => signal.signalId === id),
       )
       .filter((signal) => signal !== undefined);
+    const disposition = jobSignalDisposition(dimension, result.score);
     return {
       dimension,
       label: labels[dimension],
       score: result.score,
       confidence: result.confidence,
-      disposition: jobSignalDisposition(dimension, result.score),
+      disposition,
+      directionLabel: directionLabel(disposition),
       evidence: evidence.map((signal) => signal.evidence),
+      evidenceSources: evidence.map((signal) => signal.source),
       explanations: evidence.map((signal) => signal.explanation),
     } satisfies JobSignalViewRow;
   });

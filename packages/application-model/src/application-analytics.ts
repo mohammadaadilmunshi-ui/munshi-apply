@@ -9,7 +9,8 @@ export type ApplicationLifecycleEventType =
   | "AUTOPILOT_FAILED"
   | "DRAFT_USED"
   | "RESUME_USED"
-  | "RECRUITER_RESPONSE";
+  | "RECRUITER_RESPONSE"
+  | "JOB_SIGNALS_ANALYZED";
 
 export type ApplicationLifecycleEvent = {
   eventId: string;

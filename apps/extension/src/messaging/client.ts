@@ -54,6 +54,7 @@ export type NativeRuntimeHealth = {
     teach_munshi_state_capture?: boolean;
     account_orchestration?: boolean;
     job_signal_intelligence?: boolean;
+    job_signal_identity_binding?: boolean;
     application_analytics?: boolean;
   };
 };
@@ -88,6 +89,7 @@ export function nativeRuntimeCompatibility(
     "writing_style_learning",
     "account_orchestration",
     "job_signal_intelligence",
+    "job_signal_identity_binding",
     "application_analytics",
   ] as const;
   const missing = requiredCapabilities.filter(

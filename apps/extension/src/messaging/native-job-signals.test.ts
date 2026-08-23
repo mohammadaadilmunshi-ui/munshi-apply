@@ -18,6 +18,8 @@ function validReport() {
   return {
     reportId: "report-1",
     applicationId: "application-1",
+    jobId: "job-1",
+    sourceIdentity: "https://jobs.example.com/job/1",
     sourceFingerprint: "source-1",
     evaluatedAt: "2026-08-17T20:30:00.000Z",
     overallSignal: "MODERATE",
@@ -41,6 +43,8 @@ function validReport() {
         signalId: "signal-travel",
         dimension: "TRAVEL_BURDEN",
         severity: "HIGH",
+        direction: "CONCERN",
+        source: "JOB_POSTING",
         evidence: "Up to 40% travel",
         explanation: "The posting explicitly states a 40% travel expectation.",
       },
@@ -73,8 +77,10 @@ describe("native Job Signal parsing", () => {
         ...candidate,
         dimensions: {
           ...candidate.dimensions,
-          TRAVEL_BURDEN: dimension("TRAVEL_BURDEN", 70, 0.98),
-          WORKLOAD_PRESSURE: dimension("WORKLOAD_PRESSURE", null, 0, [
+          TRAVEL_BURDEN: dimension("TRAVEL_BURDEN", 70, 0.98, [
+            "signal-travel",
+          ]),
+          WORKLOAD_PRESSURE: dimension("WORKLOAD_PRESSURE", 58, 0.9, [
             "signal-travel",
           ]),
         },
@@ -111,5 +117,19 @@ describe("native Job Signal parsing", () => {
         },
       }),
     ).toThrow(/integer from 0 to 100/);
+  });
+
+  it("rejects scored dimensions that have no exact evidence", () => {
+    const candidate = validReport();
+    expect(() =>
+      parsePersistedJobSignalReport({
+        ...candidate,
+        dimensions: {
+          ...candidate.dimensions,
+          TRAVEL_BURDEN: dimension("TRAVEL_BURDEN", 70, 0.98),
+        },
+        signals: [],
+      }),
+    ).toThrow(/requires evidence and confidence/);
   });
 });

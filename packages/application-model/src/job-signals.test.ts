@@ -27,6 +27,8 @@ describe("job signal intelligence", () => {
         signal.evidence.includes("$82,000 - $96,000"),
       ),
     ).toBe(true);
+    expect(report.overallSignal).toBe("INSUFFICIENT_DATA");
+    expect(report.overallScore).toBeNull();
   });
 
   it("flags a junior title paired with a high explicit experience threshold", () => {
@@ -107,5 +109,47 @@ describe("job signal intelligence", () => {
     });
     expect(report.dimensions.COMPENSATION_CLARITY.score).toBeNull();
     expect(report.dimensions.ROLE_STABILITY.score).toBeNull();
+  });
+
+  it("requires exact evidence and a direction for every scored dimension", () => {
+    const report = analyzeJobSignals({
+      role: "Senior HRIS Analyst",
+      employmentType: "Regular full-time",
+      compensation: "$90,000 to $110,000",
+      requirements: "At least 5 years of HRIS experience.",
+      description: "The position requires up to 10% travel.",
+    });
+    const scored = Object.values(report.dimensions).filter(
+      (dimension) => dimension.score !== null,
+    );
+    expect(scored.length).toBeGreaterThanOrEqual(3);
+    expect(
+      scored.every(
+        (dimension) =>
+          dimension.confidence > 0 && dimension.evidenceIds.length > 0,
+      ),
+    ).toBe(true);
+    expect(
+      report.signals.every(
+        (signal) =>
+          signal.evidence.trim().length > 0 &&
+          ["POSITIVE", "CONCERN", "NEUTRAL"].includes(signal.direction) &&
+          ["JOB_POSTING", "APPLICATION_OBSERVATION"].includes(signal.source),
+      ),
+    ).toBe(true);
+    expect(report.overallSignal).not.toBe("INSUFFICIENT_DATA");
+  });
+
+  it("does not reinterpret a generic sponsorship question as employer policy", () => {
+    const report = analyzeJobSignals({
+      description:
+        "Application question: Will you now or in the future require sponsorship?",
+    });
+    expect(report.dimensions.WORK_AUTHORIZATION_RISK.score).toBeNull();
+    expect(
+      report.signals.some(
+        (signal) => signal.dimension === "WORK_AUTHORIZATION_RISK",
+      ),
+    ).toBe(false);
   });
 });

@@ -36,7 +36,9 @@ describe("Job Signal presentation model", () => {
     const travel = view.rows.find((row) => row.dimension === "TRAVEL_BURDEN");
 
     expect(compensation?.disposition).toBe("POSITIVE");
+    expect(compensation?.directionLabel).toBe("Helpful evidence");
     expect(compensation?.evidence[0]).toContain("$75,000 - $88,000");
+    expect(compensation?.evidenceSources).toEqual(["JOB_POSTING"]);
     expect(authorization?.disposition).toBe("CONCERN");
     expect(authorization?.explanations[0]).toMatch(
       /eligibility is evaluated separately/i,

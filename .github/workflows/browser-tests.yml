@@ -43,7 +43,9 @@ jobs:
             apps/extension/src/background/autopilot-navigation-safety.integration.test.ts \
             apps/extension/src/messaging/native-application-analytics.test.ts \
             apps/extension/src/sidepanel/job-signal-view.test.ts \
+            apps/extension/src/sidepanel/JobSignalPanel.test.tsx \
             packages/application-model/src/job-opportunity.test.ts \
+            packages/application-model/src/job-signals-fixtures.test.ts \
             packages/application-model/src/application-analytics.test.ts \
             packages/application-model/src/job-signal-page.test.ts
       - run: npm run build

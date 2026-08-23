@@ -7,8 +7,8 @@ function health(
   return {
     status: "healthy",
     database: "healthy",
-    migration_count: 10,
-    schema_version: "010_job_signal_intelligence.sql",
+    migration_count: 11,
+    schema_version: "011_job_signal_identity_and_analytics.sql",
     outbox: {},
     protocol_version: 3,
     capabilities,
@@ -30,6 +30,7 @@ const currentCapabilities: NonNullable<NativeRuntimeHealth["capabilities"]> = {
   teach_munshi_state_capture: true,
   account_orchestration: true,
   job_signal_intelligence: true,
+  job_signal_identity_binding: true,
   application_analytics: true,
 };
 
@@ -57,6 +58,16 @@ describe("native runtime compatibility", () => {
     expect(result.compatible).toBe(false);
     if (!result.compatible) {
       expect(result.reason).toContain("job_signal_intelligence");
+    }
+  });
+
+  it("rejects a companion that cannot enforce Job Signal identity binding", () => {
+    const result = nativeRuntimeCompatibility(
+      health({ ...currentCapabilities, job_signal_identity_binding: false }),
+    );
+    expect(result.compatible).toBe(false);
+    if (!result.compatible) {
+      expect(result.reason).toContain("job_signal_identity_binding");
     }
   });
 

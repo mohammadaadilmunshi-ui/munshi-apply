@@ -22,6 +22,18 @@ function validSnapshot() {
         source: "extension",
         metadata: {},
       },
+      {
+        eventId: "job-signals-1",
+        applicationId: "application-1",
+        eventType: "JOB_SIGNALS_ANALYZED",
+        occurredAt: "2026-08-17T22:36:00.000Z",
+        source: "extension",
+        metadata: {
+          reportId: "report-1",
+          statisticalNote:
+            "Observed association only; this does not establish causation.",
+        },
+      },
     ],
     outcomes: [
       {
@@ -40,6 +52,7 @@ describe("native application analytics parsing", () => {
     const snapshot = parseNativeApplicationAnalyticsSnapshot(validSnapshot());
     expect(snapshot.contexts[0]?.jobSource).toBe("Handshake");
     expect(snapshot.lifecycleEvents[0]?.eventType).toBe("AUTOPILOT_COMPLETED");
+    expect(snapshot.lifecycleEvents[1]?.eventType).toBe("JOB_SIGNALS_ANALYZED");
     expect(snapshot.outcomes[0]?.stage).toBe("INTERVIEW");
 
     const summary = summarizeApplicationAnalytics({

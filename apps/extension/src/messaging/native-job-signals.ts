@@ -2,7 +2,9 @@ import {
   jobSignalDimensions,
   type JobSignalDimension,
   type JobSignalDimensionResult,
+  type JobSignalDirection,
   type JobSignalEvidence,
+  type JobSignalEvidenceSource,
   type JobSignalReport,
   type OverallJobSignal,
 } from "@munshi-apply/application-model";
@@ -20,6 +22,15 @@ const severities = new Set<JobSignalEvidence["severity"]>([
   "MODERATE",
   "HIGH",
 ]);
+const directions = new Set<JobSignalDirection>([
+  "POSITIVE",
+  "CONCERN",
+  "NEUTRAL",
+]);
+const evidenceSources = new Set<JobSignalEvidenceSource>([
+  "JOB_POSTING",
+  "APPLICATION_OBSERVATION",
+]);
 
 type NativeResponse =
   { ok: true; data?: unknown } | { ok: false; error: string };
@@ -27,6 +38,8 @@ type NativeResponse =
 export type PersistedJobSignalReport = Omit<JobSignalReport, "disclaimer"> & {
   reportId: string;
   applicationId: string;
+  jobId: string;
+  sourceIdentity: string;
   sourceFingerprint: string;
   evaluatedAt: string;
 };
@@ -115,20 +128,33 @@ function parseDimensionResult(
       `Job Signal dimension ${expectedDimension} does not match its key`,
     );
   }
+  const score = boundedScore(
+    candidate.score,
+    `Job Signal dimension ${expectedDimension}.score`,
+  );
+  const parsedConfidence = confidence(
+    candidate.confidence,
+    `Job Signal dimension ${expectedDimension}.confidence`,
+  );
+  const evidenceIds = stringArray(
+    candidate.evidenceIds,
+    `Job Signal dimension ${expectedDimension}.evidenceIds`,
+  );
+  if (score === null && (parsedConfidence !== 0 || evidenceIds.length > 0)) {
+    throw new Error(
+      `Unknown Job Signal dimension ${expectedDimension} cannot claim confidence or evidence`,
+    );
+  }
+  if (score !== null && (parsedConfidence <= 0 || evidenceIds.length === 0)) {
+    throw new Error(
+      `Scored Job Signal dimension ${expectedDimension} requires evidence and confidence`,
+    );
+  }
   return {
     dimension,
-    score: boundedScore(
-      candidate.score,
-      `Job Signal dimension ${expectedDimension}.score`,
-    ),
-    confidence: confidence(
-      candidate.confidence,
-      `Job Signal dimension ${expectedDimension}.confidence`,
-    ),
-    evidenceIds: stringArray(
-      candidate.evidenceIds,
-      `Job Signal dimension ${expectedDimension}.evidenceIds`,
-    ),
+    score,
+    confidence: parsedConfidence,
+    evidenceIds,
   };
 }
 
@@ -219,6 +245,20 @@ function parseSignals(value: unknown): JobSignalEvidence[] {
     if (!severities.has(severity as JobSignalEvidence["severity"])) {
       throw new Error(`Job Signal signal ${index}.severity is invalid`);
     }
+    const direction = requiredString(
+      candidate.direction,
+      `Job Signal signal ${index}.direction`,
+    ) as JobSignalDirection;
+    if (!directions.has(direction)) {
+      throw new Error(`Job Signal signal ${index}.direction is invalid`);
+    }
+    const source = requiredString(
+      candidate.source,
+      `Job Signal signal ${index}.source`,
+    ) as JobSignalEvidenceSource;
+    if (!evidenceSources.has(source)) {
+      throw new Error(`Job Signal signal ${index}.source is invalid`);
+    }
     return {
       signalId,
       dimension: dimensionValue(
@@ -226,6 +266,8 @@ function parseSignals(value: unknown): JobSignalEvidence[] {
         `Job Signal signal ${index}.dimension`,
       ),
       severity: severity as JobSignalEvidence["severity"],
+      direction,
+      source,
       evidence: requiredString(
         candidate.evidence,
         `Job Signal signal ${index}.evidence`,
@@ -296,6 +338,11 @@ export function parsePersistedJobSignalReport(
       candidate.applicationId,
       "Job Signal applicationId",
     ),
+    jobId: requiredString(candidate.jobId, "Job Signal jobId"),
+    sourceIdentity: requiredString(
+      candidate.sourceIdentity,
+      "Job Signal sourceIdentity",
+    ),
     sourceFingerprint: requiredString(
       candidate.sourceFingerprint,
       "Job Signal sourceFingerprint",
@@ -342,6 +389,8 @@ async function sendNativeJobSignal<T>(
 export async function saveNativeJobSignalReport(input: {
   reportId: string;
   applicationId: string;
+  jobId: string;
+  sourceIdentity: string;
   sourceFingerprint: string;
   evaluatedAt: string;
   report: JobSignalReport;
@@ -351,6 +400,8 @@ export async function saveNativeJobSignalReport(input: {
     payload: {
       reportId: input.reportId.trim(),
       applicationId: input.applicationId.trim(),
+      jobId: input.jobId.trim(),
+      sourceIdentity: input.sourceIdentity.trim(),
       sourceFingerprint: input.sourceFingerprint.trim(),
       evaluatedAt: timestamp(input.evaluatedAt, "Job Signal evaluatedAt"),
       overallSignal: input.report.overallSignal,
@@ -362,16 +413,29 @@ export async function saveNativeJobSignalReport(input: {
   return parsePersistedJobSignalReport(response);
 }
 
-export async function getLatestNativeJobSignalReport(
-  applicationId: string,
-): Promise<PersistedJobSignalReport | null> {
-  const normalizedApplicationId = applicationId.trim();
+export async function getLatestNativeJobSignalReport(input: {
+  applicationId: string;
+  jobId: string;
+  sourceIdentity?: string;
+}): Promise<PersistedJobSignalReport | null> {
+  const normalizedApplicationId = input.applicationId.trim();
   if (!normalizedApplicationId) {
     throw new Error("applicationId must be a non-empty string");
   }
   const response = await sendNativeJobSignal<unknown>({
     type: "GET_LATEST_JOB_SIGNAL_REPORT",
-    payload: { applicationId: normalizedApplicationId },
+    payload: {
+      applicationId: normalizedApplicationId,
+      jobId: requiredString(input.jobId, "Job Signal jobId"),
+      ...(input.sourceIdentity
+        ? {
+            sourceIdentity: requiredString(
+              input.sourceIdentity,
+              "Job Signal sourceIdentity",
+            ),
+          }
+        : {}),
+    },
   });
   return response === null ? null : parsePersistedJobSignalReport(response);
 }

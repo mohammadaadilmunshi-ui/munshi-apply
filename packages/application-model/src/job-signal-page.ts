@@ -3,12 +3,15 @@ import { applicationUrlIdentityKey } from "./application-url";
 import type { JobSignalInput } from "./job-signals";
 
 export type PageJobSignalOptions = {
+  applicationId?: string;
   accountRequired?: boolean;
   manualRequiredControls?: number;
 };
 
 export type PageJobSignalSource = {
   input: JobSignalInput;
+  jobId: string;
+  sourceIdentity: string;
   sourceFingerprint: string;
 };
 
@@ -56,9 +59,13 @@ export function buildPageJobSignalSource(
         validationErrors,
       ].join(":")
     : "no-observed-friction";
+  const sourceIdentity = applicationUrlIdentityKey(page.url);
+  const stableApplicationIdentity = compact(options.applicationId);
+  const jobIdentityMaterial = stableApplicationIdentity || sourceIdentity;
+  const jobId = `job-${stableHash(`job-identity-v1\n${jobIdentityMaterial}`)}`;
   const fingerprintMaterial = [
     "job-signal-page-v2",
-    applicationUrlIdentityKey(page.url),
+    sourceIdentity,
     page.applicationState,
     jobContext,
     frictionIdentity,
@@ -75,6 +82,8 @@ export function buildPageJobSignalSource(
           }
         : null,
     },
+    jobId,
+    sourceIdentity,
     sourceFingerprint: `job-source-${stableHash(fingerprintMaterial)}`,
   };
 }

@@ -9,8 +9,8 @@ function health(input: Partial<NativeRuntimeHealth> = {}): NativeRuntimeHealth {
   return {
     status: "healthy",
     database: "healthy",
-    migration_count: 10,
-    schema_version: "010_job_signal_intelligence.sql",
+    migration_count: 11,
+    schema_version: "011_job_signal_identity_and_analytics.sql",
     outbox: {},
     ...input,
   };
@@ -29,6 +29,7 @@ const currentCapabilities: NonNullable<NativeRuntimeHealth["capabilities"]> = {
   writing_style_learning: true,
   account_orchestration: true,
   job_signal_intelligence: true,
+  job_signal_identity_binding: true,
   application_analytics: true,
 };
 

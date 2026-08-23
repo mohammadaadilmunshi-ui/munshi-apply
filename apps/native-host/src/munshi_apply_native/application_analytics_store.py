@@ -16,6 +16,7 @@ _LIFECYCLE_TYPES = {
     "DRAFT_USED",
     "RESUME_USED",
     "RECRUITER_RESPONSE",
+    "JOB_SIGNALS_ANALYZED",
 }
 _OUTCOME_STAGES = {
     "APPLIED",
@@ -211,7 +212,8 @@ class ApplicationAnalyticsStore:
                    OR event_type IN (
                      'DETECTED', 'PREPARED', 'AUTOPILOT_STARTED',
                      'AUTOPILOT_COMPLETED', 'AUTOPILOT_PAUSED', 'AUTOPILOT_FAILED',
-                     'DRAFT_USED', 'RESUME_USED', 'RECRUITER_RESPONSE'
+                     'DRAFT_USED', 'RESUME_USED', 'RECRUITER_RESPONSE',
+                     'JOB_SIGNALS_ANALYZED'
                    )
                 ORDER BY occurred_at, event_id
                 """

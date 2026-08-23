@@ -15,8 +15,12 @@ export const jobSignalDimensions = [
 
 export type JobSignalDimension = (typeof jobSignalDimensions)[number];
 export type JobSignalSeverity = "LOW" | "MODERATE" | "HIGH";
+export type JobSignalDirection = "POSITIVE" | "CONCERN" | "NEUTRAL";
+export type JobSignalEvidenceSource = "JOB_POSTING" | "APPLICATION_OBSERVATION";
 export type OverallJobSignal =
   "LOW" | "MODERATE" | "HIGH" | "INSUFFICIENT_DATA";
+
+export const minimumJobSignalDimensionsForOverall = 3;
 
 export type JobSignalInput = {
   company?: string | null;
@@ -39,6 +43,8 @@ export type JobSignalEvidence = {
   signalId: string;
   dimension: JobSignalDimension;
   severity: JobSignalSeverity;
+  direction: JobSignalDirection;
+  source: JobSignalEvidenceSource;
   evidence: string;
   explanation: string;
 };
@@ -104,6 +110,24 @@ function severity(score: number): JobSignalSeverity {
   return "LOW";
 }
 
+function direction(
+  dimension: JobSignalDimension,
+  score: number,
+): JobSignalDirection {
+  if (
+    dimension === "COMPENSATION_CLARITY" ||
+    dimension === "SENIORITY_ALIGNMENT" ||
+    dimension === "ROLE_STABILITY"
+  ) {
+    if (score >= 68) return "POSITIVE";
+    if (score <= 35) return "CONCERN";
+    return "NEUTRAL";
+  }
+  if (score >= 65) return "CONCERN";
+  if (score <= 30) return "POSITIVE";
+  return "NEUTRAL";
+}
+
 function allText(input: JobSignalInput): string {
   return [
     input.role,
@@ -162,12 +186,15 @@ function addSignal(
   evidence: string,
   explanation: string,
   confidence = 0.9,
+  source: JobSignalEvidenceSource = "JOB_POSTING",
 ): void {
   const signalId = `job-signal-${dimension.toLocaleLowerCase("en-US")}-${signals.length + 1}`;
   signals.push({
     signalId,
     dimension,
     severity: severity(score),
+    direction: direction(dimension, score),
+    source,
     evidence: excerpt(evidence),
     explanation,
   });
@@ -181,11 +208,14 @@ function addSignal(
   );
 }
 
-function numericYears(text: string): number[] {
+function numericYears(text: string): Array<{
+  value: number;
+  evidence: string;
+}> {
   return Array.from(
     text.matchAll(/\b(\d+(?:\.\d+)?)\+?\s+years?\b/gi),
-    (match) => Number(match[1]),
-  ).filter(Number.isFinite);
+    (match) => ({ value: Number(match[1]), evidence: match[0] }),
+  ).filter((item) => Number.isFinite(item.value));
 }
 
 function analyzeRoleAmbiguity(
@@ -235,9 +265,10 @@ function analyzeResponsibilityBreadth(
   signals: JobSignalEvidence[],
   dimensions: Record<JobSignalDimension, DimensionAccumulator>,
 ): void {
-  const domains = functionalPatterns.filter((pattern) =>
-    pattern.test(text),
-  ).length;
+  const domainEvidence = functionalPatterns
+    .map((pattern) => text.match(pattern)?.[0])
+    .filter((match): match is string => Boolean(match));
+  const domains = domainEvidence.length;
   if (domains < 4) return;
   const score = Math.min(88, 35 + (domains - 3) * 9);
   addSignal(
@@ -245,7 +276,7 @@ function analyzeResponsibilityBreadth(
     dimensions,
     "RESPONSIBILITY_BREADTH",
     score,
-    `${domains} distinct functional domains detected in the supplied job text`,
+    domainEvidence.join("; "),
     "The posting spans several distinct functional areas. Breadth is reported as scope, not as a claim about employer quality.",
     0.78,
   );
@@ -262,15 +293,19 @@ function analyzeQualificationInflation(
     /\b(intern|entry|assistant|coordinator|associate|junior)\b/.test(role);
   if (!juniorRole) return;
   const years = numericYears(text);
-  const maximum = years.length ? Math.max(...years) : 0;
-  if (maximum < 3) return;
-  const score = maximum >= 5 ? 88 : 68;
+  const maximum = years.reduce(
+    (current, candidate) =>
+      candidate.value > current.value ? candidate : current,
+    { value: 0, evidence: "" },
+  );
+  if (maximum.value < 3) return;
+  const score = maximum.value >= 5 ? 88 : 68;
   addSignal(
     signals,
     dimensions,
     "QUALIFICATION_INFLATION",
     score,
-    `${compact(input.role)} paired with an explicit ${maximum}-year experience threshold`,
+    `Role title: ${compact(input.role)}; posting threshold: ${maximum.evidence}`,
     "A junior-position title is paired with a comparatively high explicit experience threshold.",
     0.86,
   );
@@ -445,24 +480,33 @@ function analyzeSeniorityAlignment(
   if (!role) return;
   const years = numericYears(text);
   if (!years.length) return;
-  const maximum = Math.max(...years);
+  const maximum = years.reduce((current, candidate) =>
+    candidate.value > current.value ? candidate : current,
+  );
   const junior =
     /\b(intern|entry|assistant|coordinator|associate|junior)\b/.test(role);
   const senior =
     /\b(senior|lead|principal|director|head|vice president|vp)\b/.test(role);
-  if (junior && maximum >= 4) {
-    setDimension(dimensions, "SENIORITY_ALIGNMENT", 30, 0.82);
+  if (junior && maximum.value >= 4) {
     addSignal(
       signals,
       dimensions,
       "SENIORITY_ALIGNMENT",
       30,
-      `${compact(input.role)} with a ${maximum}-year experience threshold`,
+      `Role title: ${compact(input.role)}; posting threshold: ${maximum.evidence}`,
       "The title signals a junior level while the explicit experience threshold signals greater seniority.",
       0.82,
     );
-  } else if (senior && maximum >= 5) {
-    setDimension(dimensions, "SENIORITY_ALIGNMENT", 85, 0.76);
+  } else if (senior && maximum.value >= 5) {
+    addSignal(
+      signals,
+      dimensions,
+      "SENIORITY_ALIGNMENT",
+      85,
+      `Role title: ${compact(input.role)}; posting threshold: ${maximum.evidence}`,
+      "The senior title and explicit experience threshold point in the same direction. This describes title/requirement consistency, not candidate fit.",
+      0.76,
+    );
   }
 }
 
@@ -491,7 +535,15 @@ function analyzeRoleStability(
   }
   const permanent = source.match(/\b(?:permanent|regular full[- ]time)\b/i);
   if (permanent) {
-    setDimension(dimensions, "ROLE_STABILITY", 88, 0.88);
+    addSignal(
+      signals,
+      dimensions,
+      "ROLE_STABILITY",
+      88,
+      permanent[0],
+      "The supplied job context explicitly describes a permanent or regular full-time arrangement.",
+      0.88,
+    );
   }
 }
 
@@ -577,7 +629,16 @@ function analyzeApplicationFriction(
   const validation = Math.max(0, friction.validationErrors ?? 0);
   const account = friction.accountRequired === true;
   if (!account && manual === 0 && validation === 0) {
-    setDimension(dimensions, "APPLICATION_FRICTION", 0, 0.95);
+    addSignal(
+      signals,
+      dimensions,
+      "APPLICATION_FRICTION",
+      0,
+      "account_required=false; manual_required_controls=0; validation_errors=0",
+      "The observed application state contains no account requirement, manual required control, or validation error. This describes the observed form only.",
+      0.95,
+      "APPLICATION_OBSERVATION",
+    );
     return;
   }
   const score = Math.min(
@@ -594,6 +655,7 @@ function analyzeApplicationFriction(
     `account_required=${account}; manual_required_controls=${manual}; validation_errors=${validation}`,
     "Application friction is calculated from observed workflow requirements, not inferred from employer quality.",
     0.96,
+    "APPLICATION_OBSERVATION",
   );
 }
 
@@ -670,12 +732,18 @@ export function analyzeJobSignals(input: JobSignalInput): JobSignalReport {
   analyzeApplicationFriction(input, signals, dimensions);
 
   const finalized = finalizeDimensions(dimensions);
+  const knownDimensionCount = jobSignalDimensions.filter(
+    (dimension) => finalized[dimension].score !== null,
+  ).length;
   const concerns = jobSignalDimensions
     .map((dimension) => concernScore(finalized[dimension]))
     .filter((score): score is number => score !== null);
-  const overallScore = concerns.length
-    ? bounded(concerns.reduce((sum, score) => sum + score, 0) / concerns.length)
-    : null;
+  const overallScore =
+    knownDimensionCount >= minimumJobSignalDimensionsForOverall
+      ? bounded(
+          concerns.reduce((sum, score) => sum + score, 0) / concerns.length,
+        )
+      : null;
   const overallSignal: OverallJobSignal =
     overallScore === null
       ? "INSUFFICIENT_DATA"
@@ -690,7 +758,6 @@ export function analyzeJobSignals(input: JobSignalInput): JobSignalReport {
     overallScore,
     dimensions: finalized,
     signals,
-    disclaimer:
-      "Job signals describe evidence found in the supplied job/application context. They do not diagnose employer culture, toxicity, intent, or future workplace conditions.",
+    disclaimer: `Job signals describe evidence found in the supplied job/application context. An overall score requires at least ${minimumJobSignalDimensionsForOverall} evidenced dimensions. They do not diagnose employer culture, toxicity, intent, or future workplace conditions, and they do not prove that any signal caused an application outcome.`,
   };
 }

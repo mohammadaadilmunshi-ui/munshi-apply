@@ -83,10 +83,11 @@ export function JobSignalPanel({
   const source = useMemo(
     () =>
       buildPageJobSignalSource(page, {
+        applicationId,
         accountRequired,
         manualRequiredControls,
       }),
-    [accountRequired, manualRequiredControls, page],
+    [accountRequired, applicationId, manualRequiredControls, page],
   );
   const liveReport = useMemo(() => analyzeJobSignals(source.input), [source]);
 
@@ -106,7 +107,14 @@ export function JobSignalPanel({
 
     void (async () => {
       setMessage("");
-      let latest = await getLatestNativeJobSignalReport(applicationId);
+      let latest = await getLatestNativeJobSignalReport({
+        applicationId,
+        jobId: source.jobId,
+        sourceIdentity:
+          page.applicationState === "JOB_CONTEXT"
+            ? source.sourceIdentity
+            : undefined,
+      });
       const shouldPersistJobContext =
         page.applicationState === "JOB_CONTEXT" &&
         source.input.description !== null &&
@@ -115,6 +123,8 @@ export function JobSignalPanel({
         latest = await saveNativeJobSignalReport({
           reportId: `job-signal-${stableId(`${applicationId}|${source.sourceFingerprint}`)}`,
           applicationId,
+          jobId: source.jobId,
+          sourceIdentity: source.sourceIdentity,
           sourceFingerprint: source.sourceFingerprint,
           evaluatedAt: page.observedAt,
           report: liveReport,
@@ -148,6 +158,8 @@ export function JobSignalPanel({
     page.applicationState,
     page.observedAt,
     source.input.description,
+    source.jobId,
+    source.sourceIdentity,
     source.sourceFingerprint,
   ]);
 
@@ -258,8 +270,18 @@ export function JobSignalPanel({
                   </span>
                 </div>
                 <p>
-                  {row.disposition.toLowerCase()} · confidence{" "}
+                  {row.directionLabel} · confidence{" "}
                   {Math.round(row.confidence * 100)}%
+                </p>
+                <p>
+                  Source:{" "}
+                  {[...new Set(row.evidenceSources)]
+                    .map((source) =>
+                      source === "APPLICATION_OBSERVATION"
+                        ? "observed application flow"
+                        : "job posting",
+                    )
+                    .join(", ")}
                 </p>
                 {row.explanations.slice(0, 2).map((explanation, index) => (
                   <p key={`${row.dimension}-explanation-${index}`}>
@@ -268,6 +290,7 @@ export function JobSignalPanel({
                 ))}
                 {row.evidence.length > 0 && (
                   <div className="inline-note">
+                    Exact evidence:{" "}
                     {row.evidence.map(friendlyEvidence).join(" · ")}
                   </div>
                 )}

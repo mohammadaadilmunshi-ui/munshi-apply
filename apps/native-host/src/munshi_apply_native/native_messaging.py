@@ -38,6 +38,7 @@ NATIVE_CAPABILITIES: dict[str, bool] = {
     "writing_style_learning": True,
     "account_orchestration": True,
     "job_signal_intelligence": True,
+    "job_signal_identity_binding": True,
     "application_analytics": True,
 }
 
@@ -117,14 +118,28 @@ def job_signal_application_payload(message: dict[str, object]) -> tuple[str, str
     return application_id.strip(), normalized_evaluated_at
 
 
-def job_signal_lookup_application_id(message: dict[str, object]) -> str:
+def job_signal_lookup_identity(
+    message: dict[str, object],
+) -> tuple[str, str, str | None]:
     payload = message.get("payload")
     if not isinstance(payload, dict):
         raise ValueError("Job signal lookup payload must be an object")
     application_id = payload.get("applicationId")
     if not isinstance(application_id, str) or not application_id.strip():
         raise ValueError("Job signal lookup requires applicationId")
-    return application_id.strip()
+    job_id = payload.get("jobId")
+    if not isinstance(job_id, str) or not job_id.strip():
+        raise ValueError("Job signal lookup requires jobId")
+    source_identity = payload.get("sourceIdentity")
+    if source_identity is not None and (
+        not isinstance(source_identity, str) or not source_identity.strip()
+    ):
+        raise ValueError("Job signal lookup sourceIdentity must be a non-empty string")
+    return (
+        application_id.strip(),
+        job_id.strip(),
+        source_identity.strip() if isinstance(source_identity, str) else None,
+    )
 
 
 def handle(
@@ -179,10 +194,10 @@ def handle(
             "data": JobSignalStore(database).save(message.get("payload")),
         }
     if message_type == "GET_LATEST_JOB_SIGNAL_REPORT":
-        application_id = job_signal_lookup_application_id(message)
+        application_id, job_id, source_identity = job_signal_lookup_identity(message)
         return {
             "ok": True,
-            "data": JobSignalStore(database).latest(application_id),
+            "data": JobSignalStore(database).latest(application_id, job_id, source_identity),
         }
     if message_type == "RECORD_APPLICATION_ANALYTICS_EVENT":
         created = ApplicationAnalyticsStore(database).record_event(message.get("payload"))

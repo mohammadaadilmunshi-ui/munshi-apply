@@ -21,6 +21,7 @@ MUNSHI Apply is currently in **build-only mode**. Source changes are committed a
 - **Hybrid evidence retrieval — Implemented in 0.2.5.** Retrieval combines semantic intent, query overlap, trust, evidence kind, job/candidate evidence needs, source diversity, duplicate suppression, and contradiction avoidance. Job-response planning expands retrieval beyond literal question words.
 - **Deterministic pre-flight — Advanced.** Central `READY` / `REVIEW` / `UNRESOLVED` / `BLOCKED` resolution, contradiction checks, explicit employer-rule extraction, current-page knockout checks, salary review, and current-page review scoping are implemented.
 - **Account orchestration — Implemented foundation.** Generic login/create/recovery/verification classification, portal-scoped account metadata, duplicate-account detection, Workday tenant separation, application linkage, native lookup/upsert, and AutoPilot owner handoff are implemented. Authentication secrets remain outside the account registry.
+- **Phase 13 Job Signal Intelligence — Source complete.** All twelve Architecture 2.0 dimensions are deterministic and preserve missing information as unknown. Every scored dimension carries exact evidence, a posting/observed-flow source, direction, and a nontechnical explanation. Reports are bound to durable application, stable job, canonical source, and source-fingerprint identities; mismatched job/application identities fail closed, while same-job reports survive navigation and native restart. An overall concern score is withheld until at least three dimensions are evidenced. Work-authorization risk requires explicit employer policy wording; a generic sponsorship question is not treated as a no-sponsorship rule. Final submission remains a separate owner boundary, not an opportunity concern. Saved reports emit private `JOB_SIGNALS_ANALYZED` ledger context with an explicit association-not-causation warning.
 - **Universal Autofill — Advanced.** Text, textarea, contenteditable, native/custom select, radio, checkbox, switch, date/month/time/date-like controls, native/ARIA multi-selects, popup components, all-frame scanning, stale-control rebinding, verification, rollback, and learned-recipe fallback exist.
 - **Employer file controls — Owner-controlled verified handoff.** The browser/OS file-selection boundary is not bypassed.
 - **Multi-Page AutoPilot — Advanced.** Persistent Observe → Plan → Act → Verify → Rescan runtime, checkpoint-first navigation, durable pause/resume, optional-review progress, recoverable fill/navigation failures, timeout recovery, final-review boundary, account/security boundaries, explicit current-page knockout blocking, and interruption-safe state are implemented. Broad real-site crash/recovery validation remains a release activity.
@@ -105,12 +106,11 @@ Verified results at that code head:
 
 The largest remaining program areas are:
 
-1. Job Signal Intelligence.
-2. Analytics, attribution, experiment presentation/exports, portfolio-event ingestion, and production n8n workflows.
-3. Real OpenAI/Ollama provider and Mac Keychain smoke testing, including routing/fallback/latency/budget/output validation.
-4. Broad real-ATS endurance, crash/interruption, reload, dynamic-page, and recovery validation.
-5. Final security, recovery, accessibility, performance, privacy, and backup/restore hardening.
-6. Consolidated deployment and physical acceptance, including final owner-workspace/profile continuity validation.
+1. Analytics, attribution, experiment presentation/exports, portfolio-event ingestion, and production n8n workflows.
+2. OpenAI-only source-path completion and the deferred real OpenAI/Mac Keychain smoke test.
+3. Broad real-ATS endurance, crash/interruption, reload, dynamic-page, and recovery validation.
+4. Final security, recovery, accessibility, performance, privacy, and backup/restore hardening.
+5. Consolidated deployment and physical acceptance, including final owner-workspace/profile continuity validation.
 
 ## Release boundary
 

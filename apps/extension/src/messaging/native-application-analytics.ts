@@ -19,6 +19,7 @@ const lifecycleTypes = new Set<ApplicationLifecycleEventType>([
   "DRAFT_USED",
   "RESUME_USED",
   "RECRUITER_RESPONSE",
+  "JOB_SIGNALS_ANALYZED",
 ]);
 const outcomeStages = new Set<ApplicationOutcomeStage>([
   "APPLIED",

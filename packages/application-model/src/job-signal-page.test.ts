@@ -26,13 +26,19 @@ function page(overrides: Partial<ApplicationPage> = {}): ApplicationPage {
 
 describe("Job Signal page adapter", () => {
   it("uses captured text only on an explicit job-context page", () => {
-    const source = buildPageJobSignalSource(page());
+    const source = buildPageJobSignalSource(page(), {
+      applicationId: "app-stable-1",
+    });
     expect(source.input.description).toBe(
       "High-volume role with up to 25% travel.",
     );
     expect(source.input.role).toBeUndefined();
     expect(source.input.company).toBeUndefined();
     expect(source.input.compensation).toBeUndefined();
+    expect(source.jobId).toMatch(/^job-/);
+    expect(source.sourceIdentity).toBe(
+      "https://jobs.example.com/job/people-analyst",
+    );
   });
 
   it("does not reinterpret application questions as job-posting evidence", () => {
@@ -106,5 +112,25 @@ describe("Job Signal page adapter", () => {
     ).sourceFingerprint;
     expect(sameJob).toBe(first);
     expect(differentJob).not.toBe(first);
+  });
+
+  it("keeps the stable job identity across posting-to-application navigation", () => {
+    const posting = buildPageJobSignalSource(page(), {
+      applicationId: "app-stable-1",
+    });
+    const application = buildPageJobSignalSource(
+      page({
+        applicationState: "QUESTIONS",
+        url: "https://apply.example.com/candidate/questions?jobId=123",
+      }),
+      { applicationId: "app-stable-1" },
+    );
+    const otherApplication = buildPageJobSignalSource(page(), {
+      applicationId: "app-stable-2",
+    });
+
+    expect(application.jobId).toBe(posting.jobId);
+    expect(application.sourceIdentity).not.toBe(posting.sourceIdentity);
+    expect(otherApplication.jobId).not.toBe(posting.jobId);
   });
 });

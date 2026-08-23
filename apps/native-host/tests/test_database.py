@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from shutil import copy2
 
 from munshi_apply_native.database import Database
 
@@ -20,12 +21,13 @@ def test_migrations_are_idempotent(tmp_path: Path) -> None:
         "008_progressive_memory.sql",
         "009_account_orchestration.sql",
         "010_job_signal_intelligence.sql",
+        "011_job_signal_identity_and_analytics.sql",
     ]
     assert database.migrate() == []
     health = database.health()
     assert health["status"] == "healthy"
-    assert health["migration_count"] == 10
-    assert health["schema_version"] == "010_job_signal_intelligence.sql"
+    assert health["migration_count"] == 11
+    assert health["schema_version"] == "011_job_signal_identity_and_analytics.sql"
 
 
 def test_architecture_tables_are_created_with_integrity_constraints(tmp_path: Path) -> None:
@@ -97,6 +99,79 @@ def test_architecture_tables_are_created_with_integrity_constraints(tmp_path: Pa
             (now, now),
         )
         assert connection.execute("SELECT COUNT(*) FROM profile_record_facts").fetchone()[0] == 1
+
+
+def test_job_signal_identity_migration_preserves_existing_reports(tmp_path: Path) -> None:
+    migrations = Path(__file__).resolve().parents[3] / "migrations"
+    legacy_migrations = tmp_path / "legacy-migrations"
+    legacy_migrations.mkdir()
+    for migration in sorted(migrations.glob("0[0-1][0-9]_*.sql")):
+        if migration.name >= "011_job_signal_identity_and_analytics.sql":
+            continue
+        copy2(migration, legacy_migrations / migration.name)
+
+    database_path = tmp_path / "upgrade.sqlite"
+    legacy = Database(database_path, legacy_migrations)
+    legacy.migrate()
+    now = datetime.now(UTC).isoformat()
+    with legacy.connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO applications (
+                application_id, job_id, status, resume_id, job_signal_score,
+                submitted_at, created_at, updated_at
+            ) VALUES ('application-legacy', NULL, 'DETECTED', NULL, 42, NULL, ?, ?)
+            """,
+            (now, now),
+        )
+        connection.execute(
+            """
+            INSERT INTO job_signal_reports (
+                report_id, application_id, overall_signal, overall_score,
+                source_fingerprint, evaluated_at, created_at, updated_at
+            ) VALUES (
+                'report-legacy', 'application-legacy', 'MODERATE', 42,
+                'source-legacy', ?, ?, ?
+            )
+            """,
+            (now, now, now),
+        )
+        connection.execute(
+            """
+            INSERT INTO job_signal_dimensions (
+                report_id, dimension, score, confidence
+            ) VALUES ('report-legacy', 'TRAVEL_BURDEN', 70, 0.98)
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO job_signal_evidence (
+                signal_id, report_id, dimension, severity, evidence, explanation
+            ) VALUES (
+                'signal-legacy', 'report-legacy', 'TRAVEL_BURDEN', 'HIGH',
+                '40% travel', 'The posting explicitly states 40% travel.'
+            )
+            """
+        )
+
+    upgraded = Database(database_path, migrations)
+    assert upgraded.migrate() == ["011_job_signal_identity_and_analytics.sql"]
+    with upgraded.connect() as connection:
+        report = connection.execute(
+            "SELECT * FROM job_signal_reports WHERE report_id = 'report-legacy'"
+        ).fetchone()
+        assert report["job_id"] == "job-legacy-application-legacy"
+        assert report["source_identity"] == "legacy:source-legacy"
+        assert (
+            connection.execute(
+                "SELECT job_id FROM applications WHERE application_id = 'application-legacy'"
+            ).fetchone()[0]
+            == "job-legacy-application-legacy"
+        )
+        evidence = connection.execute(
+            "SELECT direction, source FROM job_signal_evidence WHERE signal_id = 'signal-legacy'"
+        ).fetchone()
+        assert tuple(evidence) == ("CONCERN", "JOB_POSTING")
 
 
 def event_record() -> dict[str, object]:

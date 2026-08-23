@@ -46,6 +46,26 @@ def test_event_creates_application_and_is_idempotent(tmp_path: Path) -> None:
         assert count == 1
 
 
+def test_job_signal_analytics_remain_descriptive_context(tmp_path: Path) -> None:
+    store = ApplicationAnalyticsStore(database(tmp_path))
+    payload = {
+        "eventId": "job-signals-1",
+        "applicationId": "application-1",
+        "eventType": "JOB_SIGNALS_ANALYZED",
+        "occurredAt": NOW,
+        "source": "extension",
+        "metadata": {
+            "reportId": "report-1",
+            "overallScore": 42,
+            "statisticalNote": "Observed association only; this does not establish causation.",
+        },
+    }
+    assert store.record_event(payload) is True
+    event = store.snapshot()["lifecycleEvents"][0]
+    assert event["eventType"] == "JOB_SIGNALS_ANALYZED"
+    assert "does not establish causation" in event["metadata"]["statisticalNote"]
+
+
 def test_same_event_id_cannot_be_rebound(tmp_path: Path) -> None:
     store = ApplicationAnalyticsStore(database(tmp_path))
     original = {
@@ -62,26 +82,32 @@ def test_same_event_id_cannot_be_rebound(tmp_path: Path) -> None:
 
 def test_latest_attribution_context_wins_without_storing_extra_payload(tmp_path: Path) -> None:
     store = ApplicationAnalyticsStore(database(tmp_path))
-    assert store.record_context(
-        {
-            "eventId": "context-old",
-            "applicationId": "application-1",
-            "capturedAt": NOW,
-            "jobSource": "Unknown",
-            "atsFamily": "GENERIC",
-            "resumeId": "resume-old",
-        }
-    ) is True
-    assert store.record_context(
-        {
-            "eventId": "context-new",
-            "applicationId": "application-1",
-            "capturedAt": LATER,
-            "jobSource": "Handshake",
-            "atsFamily": "WORKDAY",
-            "resumeId": "resume-new",
-        }
-    ) is True
+    assert (
+        store.record_context(
+            {
+                "eventId": "context-old",
+                "applicationId": "application-1",
+                "capturedAt": NOW,
+                "jobSource": "Unknown",
+                "atsFamily": "GENERIC",
+                "resumeId": "resume-old",
+            }
+        )
+        is True
+    )
+    assert (
+        store.record_context(
+            {
+                "eventId": "context-new",
+                "applicationId": "application-1",
+                "capturedAt": LATER,
+                "jobSource": "Handshake",
+                "atsFamily": "WORKDAY",
+                "resumeId": "resume-new",
+            }
+        )
+        is True
+    )
 
     snapshot = store.snapshot()
     assert snapshot["contexts"] == [

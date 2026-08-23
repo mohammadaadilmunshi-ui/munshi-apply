@@ -22,7 +22,7 @@ The Architecture 2.0 baseline defines Phases 0 through 17. Delivery uses smaller
 
 **M7 Learning — Advanced foundation.** Interaction recipes, Teach-MUNSHI, verified promotion, fallback, versioning, and rollback are implemented. Broader site/global/question/user memory composition remains.
 
-**M8 Analytics & orchestration — Foundation.** Ledger, attribution, experiments, and n8n bridge foundations exist. Production UI, exports, and workflows remain.
+**M8 Analytics & orchestration — Phase 13 complete; later phases in progress.** Job Signal Intelligence is source-complete with twelve evidence-backed dimensions, identity-safe persistence, opportunity presentation, AutoPilot wiring, descriptive analytics linkage, and six realistic role-family calibration fixtures. Artifact attribution, experiment completion, exports, portfolio events, and production n8n contracts remain.
 
 **M9 Hardening — Ongoing.** Permissions, security, accessibility, performance, backup/restore, privacy, and the final release audit remain the closing campaign.
 
@@ -44,11 +44,12 @@ The Architecture 2.0 baseline defines Phases 0 through 17. Delivery uses smaller
 - **AI review:** preview, generation, editable draft, evidence/claim display, exact-hash approval, rejection, and mark-used lifecycle remain review-gated before any guarded fill.
 - **Learning:** interaction-recipe learning is active. Broader site memory, question learning, cross-site/global pattern composition, and user-correction memory beyond writing-style learning remain future work.
 - **Analytics/orchestration:** application outcomes, attribution tokens, experiment assignments, and statistical-honesty foundations exist. Production exports, Tableau-ready datasets, portfolio-event ingestion, experiment UI, and full n8n orchestration remain.
+- **Job Signal Intelligence:** all twelve dimensions, exact evidence provenance, direction-aware owner explanations, insufficient-data calibration, application/job/source identity binding, restart/navigation persistence, opportunity analytics linkage, side-panel UI, and AutoPilot integration are implemented. Signals remain observational and never diagnose toxicity, employer intent, future culture, or anonymous recruiter identity.
 - **Hardening:** secret scanning, repository safety, migrations, native/extension tests, protected sync, Keychain-safe credential writes, and hardened résumé XML parsing are present. Final permission/accessibility/performance/privacy/recovery/backup exercises remain for the release campaign.
 
 ## Build sequence after 0.2.5
 
-The next major architecture work should focus on deeper Interaction Escalation + Progressive Learning, then Account Orchestration, Job Signal Intelligence, Attribution/Analytics/n8n, and finally the comprehensive hardening/release campaign.
+Job Signal Intelligence is no longer future work. The remaining sequence is Artifact Attribution/portfolio-event/n8n contracts, Experiments/analytics/exports, OpenAI-only intelligence completion, interaction and recovery endurance, and the comprehensive hardening/release-preparation campaign.
 
 ## Non-negotiable boundaries
 

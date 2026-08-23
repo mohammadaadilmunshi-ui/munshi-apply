@@ -33,6 +33,8 @@ def report_payload() -> dict[str, object]:
     return {
         "reportId": "report-native",
         "applicationId": "application-native",
+        "jobId": "job-application-native",
+        "sourceIdentity": "https://jobs.example.com/application-native",
         "overallSignal": "MODERATE",
         "overallScore": 44,
         "sourceFingerprint": "source-native-1",
@@ -42,9 +44,7 @@ def report_payload() -> dict[str, object]:
                 "dimension": dimension,
                 "score": 58 if dimension == "WORKLOAD_PRESSURE" else None,
                 "confidence": 0.9 if dimension == "WORKLOAD_PRESSURE" else 0.0,
-                "evidenceIds": (
-                    ["signal-native"] if dimension == "WORKLOAD_PRESSURE" else []
-                ),
+                "evidenceIds": (["signal-native"] if dimension == "WORKLOAD_PRESSURE" else []),
             }
             for dimension in DIMENSIONS
         },
@@ -53,6 +53,8 @@ def report_payload() -> dict[str, object]:
                 "signalId": "signal-native",
                 "dimension": "WORKLOAD_PRESSURE",
                 "severity": "MODERATE",
+                "direction": "NEUTRAL",
+                "source": "JOB_POSTING",
                 "evidence": "high-volume environment",
                 "explanation": "The posting explicitly describes high-volume work.",
             }
@@ -74,7 +76,11 @@ def test_native_job_signal_save_ensures_application_and_round_trips(tmp_path: Pa
     latest = handle(
         {
             "type": "GET_LATEST_JOB_SIGNAL_REPORT",
-            "payload": {"applicationId": "application-native"},
+            "payload": {
+                "applicationId": "application-native",
+                "jobId": "job-application-native",
+                "sourceIdentity": "https://jobs.example.com/application-native",
+            },
         },
         db,
     )
@@ -97,7 +103,10 @@ def test_native_job_signal_lookup_returns_none_before_report_exists(tmp_path: Pa
     response = handle(
         {
             "type": "GET_LATEST_JOB_SIGNAL_REPORT",
-            "payload": {"applicationId": "application-missing-report"},
+            "payload": {
+                "applicationId": "application-missing-report",
+                "jobId": "job-application-missing-report",
+            },
         },
         database(tmp_path),
     )
@@ -120,3 +129,4 @@ def test_native_health_advertises_job_signal_intelligence(tmp_path: Path) -> Non
     response = handle({"type": "PING"}, database(tmp_path))
     assert response["ok"] is True
     assert response["data"]["capabilities"]["job_signal_intelligence"] is True
+    assert response["data"]["capabilities"]["job_signal_identity_binding"] is True
