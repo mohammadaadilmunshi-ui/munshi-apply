@@ -32,7 +32,7 @@ let historyStateRecoveryInstalled = false;
 
 export function isMissingContentReceiverError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error ?? "");
-  return /could not establish connection|receiving end does not exist|message port closed|message channel closed|extension context invalidated|context invalidated|content message timed out/i.test(
+  return /could not establish connection|receiving end does not exist|message port closed|message channel closed|extension context invalidated|context invalidated|content message timed out|the user aborted a request/i.test(
     message,
   );
 }
