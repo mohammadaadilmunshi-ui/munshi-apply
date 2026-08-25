@@ -18,10 +18,6 @@ import { shouldRescanFromMutations } from "./mutation-rescan-policy";
 import { applyNavigationAction } from "./navigation";
 import { scanDocument, snapshotFingerprint } from "./scanner";
 import {
-  focusControlForOwner,
-  readControlValueForTeach,
-} from "./field-navigation";
-import {
   disposePreviousContentRuntime,
   registerContentRuntime,
 } from "./runtime-lifecycle";
@@ -235,14 +231,6 @@ const runtimeMessageListener = (
         }
       });
     return true;
-  }
-  if (message.type === "CONTENT_FOCUS_CONTROL" && message.controlId) {
-    sendResponse({ result: focusControlForOwner(message.controlId) });
-    return false;
-  }
-  if (message.type === "CONTENT_READ_CONTROL_VALUE" && message.controlId) {
-    sendResponse({ result: readControlValueForTeach(message.controlId) });
-    return false;
   }
   if (message.type === "APPLY_FILL_INSTRUCTIONS" && message.instructions) {
     void applyFillInstructions(
