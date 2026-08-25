@@ -198,7 +198,11 @@ async function send(
       return response.data;
     } catch (error) {
       const delay = transientRuntimeRetryDelays[attempt];
-      if (!retryable || delay === undefined || !isTransientRuntimeError(error)) {
+      if (
+        !retryable ||
+        delay === undefined ||
+        !isTransientRuntimeError(error)
+      ) {
         throw error;
       }
       await wait(delay);
