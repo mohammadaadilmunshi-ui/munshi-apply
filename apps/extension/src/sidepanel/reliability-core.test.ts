@@ -29,7 +29,7 @@ function page(overrides: Partial<ApplicationPage> = {}): ApplicationPage {
     validationErrorCount: 0,
     navigationCandidates: [],
     finalSubmissionBoundary: false,
-    atsFamily: "UNKNOWN",
+    atsFamily: "GENERIC",
     ...overrides,
   };
 }
