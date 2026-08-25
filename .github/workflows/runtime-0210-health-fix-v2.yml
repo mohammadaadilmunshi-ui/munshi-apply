@@ -1,0 +1,69 @@
+name: Temporary 0.2.10 health hydration fix v2
+
+on:
+  push:
+    branches: [feat/v3-foundation-alignment]
+    paths: [.github/workflows/runtime-0210-health-fix-v2.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Apply verified 0.2.10 patch definition
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          workflow = Path('.github/workflows/runtime-0210-health-fix.yml').read_text()
+          start_marker = "          python3 - <<'PY'\n"
+          end_marker = "\n          PY\n\n      - name: Format patched source"
+          if start_marker not in workflow or end_marker not in workflow:
+              raise SystemExit('Could not locate 0.2.10 patch block')
+          block = workflow.split(start_marker, 1)[1].split(end_marker, 1)[0]
+          Path('/tmp/munshi_0210_patch.py').write_text(textwrap.dedent(block))
+          PY
+          python3 /tmp/munshi_0210_patch.py
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('apps/extension/src/messaging/client.test.ts')
+          text = p.read_text()
+          old = '''    const pending = getNativeHealth();\n    await vi.advanceTimersByTimeAsync(5_000);\n    await expect(pending).rejects.toThrow(\n      "Native companion health check timed out after 5 seconds",\n    );\n'''
+          new = '''    const pending = getNativeHealth();\n    const rejection = expect(pending).rejects.toThrow(\n      "Native companion health check timed out after 5 seconds",\n    );\n    await vi.advanceTimersByTimeAsync(5_000);\n    await rejection;\n'''
+          if old not in text:
+              raise SystemExit('Expected native-health timeout test not found')
+          p.write_text(text.replace(old, new, 1))
+          PY
+
+      - name: Format patched source
+        run: ./node_modules/.bin/prettier --write apps/extension/public/manifest.json apps/extension/src/messaging/client.ts apps/extension/src/messaging/client.test.ts apps/extension/src/sidepanel/App.tsx
+
+      - name: Full repository verification
+        run: npm run check
+
+      - name: Commit verified 0.2.10 source only
+        shell: bash
+        run: |
+          git config user.name "Aadil Munshi"
+          git config user.email "mohammadaadilmunshi@gmail.com"
+          git add apps/extension
+          if git diff --cached --quiet; then
+            echo "No source changes to commit"
+            exit 0
+          fi
+          git commit -m "fix: decouple companion health from cloud hydration"
+          git push origin HEAD:feat/v3-foundation-alignment
