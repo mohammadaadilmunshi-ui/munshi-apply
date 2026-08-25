@@ -177,7 +177,8 @@ export async function getRememberedAnswer(
   return null;
 }
 
-type RuntimeResponse = { ok: true; data?: unknown } | { ok: false; error: string };
+type RuntimeResponse =
+  { ok: true; data?: unknown } | { ok: false; error: string };
 
 async function promoteToPermanentProfile(input: {
   semanticType: string;
