@@ -190,9 +190,8 @@ async function send(
   const retryable = retryableRuntimeRequestTypes.has(request.type);
   for (let attempt = 0; ; attempt += 1) {
     try {
-      const response = (await chrome.runtime.sendMessage(
-        request,
-      )) as ExtensionResponse | undefined;
+      const response = (await chrome.runtime.sendMessage(request)) as
+        ExtensionResponse | undefined;
       if (!response) throw new Error("Extension returned no response");
       if (!response.ok) throw new Error(response.error);
       return response.data;
