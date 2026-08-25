@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   answerMemoryKey,
+  canonicalAnswerMemoryKey,
   canAutoApproveRememberedAnswer,
   normalizeQuestionForMemory,
 } from "./answer-memory";
@@ -13,6 +14,30 @@ describe("owner answer memory", () => {
     expect(answerMemoryKey("ARE YOU HISPANIC / LATINO ?")).toBe(
       "are you hispanic latino",
     );
+  });
+
+  it("uses one semantic memory key for stable permanent questions with different wording", () => {
+    expect(
+      canonicalAnswerMemoryKey(
+        "Will you now or in the future require sponsorship?",
+        "SPONSORSHIP_FUTURE",
+      ),
+    ).toBe("semantic:SPONSORSHIP_FUTURE");
+    expect(
+      canonicalAnswerMemoryKey(
+        "Do you require visa sponsorship in the future?",
+        "SPONSORSHIP_FUTURE",
+      ),
+    ).toBe("semantic:SPONSORSHIP_FUTURE");
+  });
+
+  it("keeps company-specific narrative questions scoped to exact normalized wording", () => {
+    expect(
+      canonicalAnswerMemoryKey(
+        "Why do you want to work for Example Company?",
+        "WHY_COMPANY",
+      ),
+    ).toBe("question:why do you want to work for example company");
   });
 
   it("auto-approves exact short operational answers after owner approval", () => {
