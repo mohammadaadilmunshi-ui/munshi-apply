@@ -1,4 +1,3 @@
-import { isEligibleApplicationPage } from "@munshi-apply/application-model";
 import {
   ApplicationPageSchema,
   type ApplicationPage,
