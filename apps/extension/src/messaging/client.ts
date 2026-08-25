@@ -166,14 +166,44 @@ let queuedProfile: ProfileSnapshot | null = null;
 let profileSaveRunning = false;
 let profileSaveWaiters: ProfileSaveWaiter[] = [];
 
+const transientRuntimeRetryDelays = [120, 320] as const;
+const retryableRuntimeRequestTypes = new Set([
+  "PING",
+  "GET_ACTIVE_PAGE",
+  "NATIVE_HEALTH",
+]);
+
+function isTransientRuntimeError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /the user aborted a request|could not establish connection|receiving end does not exist|message port closed|message channel closed|extension context invalidated|context invalidated/i.test(
+    message,
+  );
+}
+
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
 async function send(
   request: ExtensionRequest | AutoPilotRuntimeRequest,
 ): Promise<unknown> {
-  const response = (await chrome.runtime.sendMessage(
-    request,
-  )) as ExtensionResponse;
-  if (!response.ok) throw new Error(response.error);
-  return response.data;
+  const retryable = retryableRuntimeRequestTypes.has(request.type);
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      const response = (await chrome.runtime.sendMessage(
+        request,
+      )) as ExtensionResponse | undefined;
+      if (!response) throw new Error("Extension returned no response");
+      if (!response.ok) throw new Error(response.error);
+      return response.data;
+    } catch (error) {
+      const delay = transientRuntimeRetryDelays[attempt];
+      if (!retryable || delay === undefined || !isTransientRuntimeError(error)) {
+        throw error;
+      }
+      await wait(delay);
+    }
+  }
 }
 
 async function drainProfileSaveQueue(): Promise<void> {
