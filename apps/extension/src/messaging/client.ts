@@ -39,10 +39,17 @@ export type NativeRuntimeHealth = {
   schema_version: string;
   outbox: Record<string, number>;
   protocol_version?: number;
+  transport?: {
+    lastSuccessAt: string | null;
+    lastFailureAt: string | null;
+    lastError: string | null;
+    consecutiveFailures: number;
+  };
   capabilities?: {
     profile_vault?: boolean;
     application_checkpoints?: boolean;
     interaction_learning?: boolean;
+    interaction_learning_list?: boolean;
     teach_munshi?: boolean;
     ai_settings?: boolean;
     ai_governance?: boolean;
@@ -134,6 +141,19 @@ export type ProfileSyncStatus = {
   conflict: ProfileSaveConflict | null;
 };
 
+export type LearnedInteractionLesson = {
+  recipeId: string;
+  siteOrigin: string;
+  semanticType: string;
+  state: "SHADOW" | "PROMOTED" | "ROLLED_BACK";
+  version: number;
+  verifiedAttempts: number;
+  verifiedSuccesses: number;
+  actionCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
 type AutoPilotRuntimeRequest =
   | { type: "AUTOPILOT_START"; payload: AutoPilotStartPayload }
   | { type: "AUTOPILOT_PAUSE"; payload?: { reason?: string } }
@@ -155,7 +175,10 @@ type AutoPilotRuntimeRequest =
   | {
       type: "TEACH_CANCEL";
       payload: { frameId: number; sessionId: string };
-    };
+    }
+  | { type: "JUMP_TO_QUESTION"; payload: { questionIndex: number } }
+  | { type: "LIST_LEARNED_LESSONS" }
+  | { type: "EXPIRE_RECENT_CONTEXT" };
 
 type ProfileSaveWaiter = {
   resolve: (acknowledgement: ProfileSaveAck) => void;
@@ -261,6 +284,26 @@ export async function applyFillPlan(plan: FillPlan): Promise<FillResult[]> {
   return result.results ?? [];
 }
 
+export async function jumpToQuestion(
+  questionIndex: number,
+): Promise<{ status: string; reason: string }> {
+  return (await send({
+    type: "JUMP_TO_QUESTION",
+    payload: { questionIndex },
+  })) as { status: string; reason: string };
+}
+
+export async function listLearnedInteractionLessons(): Promise<
+  LearnedInteractionLesson[]
+> {
+  const result = await send({ type: "LIST_LEARNED_LESSONS" });
+  return Array.isArray(result) ? (result as LearnedInteractionLesson[]) : [];
+}
+
+export async function expireRecentApplicationContext(): Promise<void> {
+  await send({ type: "EXPIRE_RECENT_CONTEXT" });
+}
+
 export async function getAutoPilotStatus(): Promise<AutoPilotControllerStatus | null> {
   return (await send({
     type: "AUTOPILOT_STATUS",
@@ -333,6 +376,9 @@ export type TeachMunshiResult = {
   beforeState?: Record<string, unknown>;
   afterState?: Record<string, unknown>;
   quality?: { score: number; reasons: string[]; valueCommitted: boolean };
+  answerSaved?: boolean;
+  profilePromoted?: boolean;
+  profileKey?: string | null;
   recipe: null | {
     recipeId: string;
     state: "SHADOW" | "PROMOTED" | "ROLLED_BACK";
