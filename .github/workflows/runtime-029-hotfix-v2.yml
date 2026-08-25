@@ -38,9 +38,6 @@ jobs:
           PY
           python3 /tmp/munshi_029_patch.py
 
-          # Reconcile the exact guard/test failures found by the first two full
-          # verification passes. These keep the evidence-based runtime behavior
-          # while preserving strong metadata and relevant visibility rescans.
           python3 - <<'PY'
           from pathlib import Path
 
@@ -51,40 +48,101 @@ jobs:
                   raise SystemExit(f"Expected reconciliation text not found in {path}: {old[:120]!r}")
               p.write_text(text.replace(old, new, count))
 
-          # Lint-only regex correction.
           p = Path('packages/semantic-engine/src/index.ts')
           text = p.read_text().replace(r'[\*✱＊]+', r'[*✱＊]+')
-          # "Location" is intentionally left generic so strong metadata such as
-          # postalCode can win. The real Lever label is "Current location".
           text = text.replace(
               r'pattern: /^(current location|location)$/i,',
               r'pattern: /^current location$/i,',
           )
           p.write_text(text)
 
-          # Keep relevant ancestor visibility/class changes observable, but stop
-          # unconditional text/status child-list churn from rescanning the page.
-          replace(
-              'apps/extension/src/content/mutation-rescan-policy.ts',
-              '''      if (attribute === "hidden" || attribute === "aria-hidden") {\n        if (\n          elementIsApplicationRelevant(record.target) ||\n          elementContainsApplicationControl(record.target)\n        ) {\n          return true;\n        }\n        continue;\n      }\n\n      // Class/style churn on a large ancestor is common on ATS pages and\n      // should not continuously rescan the entire document. Direct control\n      // changes remain observable.\n      if (attribute === "class" || attribute === "style") {\n        if (elementIsApplicationRelevant(record.target)) return true;\n        continue;\n      }\n\n      if (elementIsApplicationRelevant(record.target)) return true;\n''',
-              '''      if (attribute === "hidden" || attribute === "aria-hidden") {\n        return true;\n      }\n\n      // Class/style churn is relevant when the changed node is itself a\n      // control or contains an application control. Decorative churn elsewhere\n      // remains ignored.\n      if (attribute === "class" || attribute === "style") {\n        if (\n          elementIsApplicationRelevant(record.target) ||\n          elementContainsApplicationControl(record.target)\n        ) {\n          return true;\n        }\n        continue;\n      }\n\n      // The observer's remaining attribute filter is semantic/validation state;\n      // preserve the existing rescan guarantee for those mutations.\n      return true;\n''',
-          )
+          # Deterministic final mutation policy. Text/status-only child mutations
+          # are ignored, while control insertion and visibility/semantic changes
+          # remain observable.
+          Path('apps/extension/src/content/mutation-rescan-policy.ts').write_text(r'''const APPLICATION_RELEVANT_SELECTOR = [
+            "form",
+            "input",
+            "select",
+            "textarea",
+            "button",
+            "iframe",
+            "[contenteditable='true']",
+            "[role='button']",
+            "[role='checkbox']",
+            "[role='combobox']",
+            "[role='listbox']",
+            "[role='option']",
+            "[role='radio']",
+            "[role='switch']",
+            "[aria-invalid='true']",
+            "[aria-required='true']",
+          ].join(",");
 
-          # Existing test now describes the narrowed structural policy.
+          function elementIsApplicationRelevant(element: Element): boolean {
+            return element.matches(APPLICATION_RELEVANT_SELECTOR);
+          }
+
+          function elementContainsApplicationControl(element: Element): boolean {
+            return element.querySelector(APPLICATION_RELEVANT_SELECTOR) !== null;
+          }
+
+          function nodeAddsOrRemovesApplicationControl(node: Node): boolean {
+            return (
+              node instanceof Element &&
+              (elementIsApplicationRelevant(node) ||
+                elementContainsApplicationControl(node))
+            );
+          }
+
+          function childListTouchesApplication(record: MutationRecord): boolean {
+            return [...record.addedNodes, ...record.removedNodes].some(
+              nodeAddsOrRemovesApplicationControl,
+            );
+          }
+
+          export function shouldRescanFromMutations(
+            records: readonly MutationRecord[],
+          ): boolean {
+            for (const record of records) {
+              if (record.type === "childList") {
+                if (childListTouchesApplication(record)) return true;
+                continue;
+              }
+              if (record.type !== "attributes") continue;
+              if (!(record.target instanceof Element)) continue;
+
+              const attribute = record.attributeName ?? "";
+              if (attribute === "hidden" || attribute === "aria-hidden") {
+                return true;
+              }
+
+              if (attribute === "class" || attribute === "style") {
+                if (
+                  elementIsApplicationRelevant(record.target) ||
+                  elementContainsApplicationControl(record.target)
+                ) {
+                  return true;
+                }
+                continue;
+              }
+
+              return true;
+            }
+            return false;
+          }
+          ''')
+
           replace(
               'apps/extension/src/content/mutation-rescan-policy.test.ts',
               '''  it("always rescans structural child-list changes", () => {\n    const root = document.createElement("div");\n    expect(shouldRescanFromMutations([childRecord(root)])).toBe(true);\n  });\n''',
               '''  it("ignores structural child-list records with no application controls", () => {\n    const root = document.createElement("div");\n    expect(shouldRescanFromMutations([childRecord(root)])).toBe(false);\n  });\n''',
           )
 
-          # New browser-shaped mutation test needs jsdom.
           p = Path('apps/extension/src/content/mutation-rescan-policy.runtime.test.ts')
           text = p.read_text()
           if not text.startswith('// @vitest-environment jsdom'):
               p.write_text('// @vitest-environment jsdom\n\n' + text)
 
-          # The cross-context programmatic click is precisely the Edge behavior
-          # being removed; only the on-page owner button may open the chooser.
           replace(
               'apps/extension/src/content/fill.test.ts',
               '    expect(click).toHaveBeenCalledTimes(1);\n',
