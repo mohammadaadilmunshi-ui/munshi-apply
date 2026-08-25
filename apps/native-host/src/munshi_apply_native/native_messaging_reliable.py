@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sys
-from typing import Any
 
 from .ai_settings import AISettingsStore
 from .database import Database
