@@ -86,7 +86,8 @@ const metadataRules: readonly AliasRule[] = [
   },
   {
     id: "metadata-full-name",
-    pattern: /\b(?:full name|fullname|legal name|candidate name|applicant name)\b/,
+    pattern:
+      /\b(?:full name|fullname|legal name|candidate name|applicant name)\b/,
     semanticType: "PERSONAL",
     sensitive: true,
     requiresReview: true,
