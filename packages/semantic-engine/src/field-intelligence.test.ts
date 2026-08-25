@@ -13,7 +13,9 @@ describe("semantic field equivalence", () => {
       semanticType: "EMPLOYER_NAME",
       matchedRule: "prompt-employer-name",
     });
-    expect(classifyQuestion("Please provide your email address")).toMatchObject({
+    expect(
+      classifyQuestion("Please provide your email address"),
+    ).toMatchObject({
       semanticType: "EMAIL",
     });
   });
