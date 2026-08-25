@@ -1,0 +1,669 @@
+name: Temporary 0.2.9 runtime hotfix
+
+on:
+  push:
+    branches: [feat/v3-foundation-alignment]
+    paths: [.github/workflows/runtime-029-hotfix.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Apply evidence-based 0.2.9 runtime repair
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace(path, old, new, count=1):
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise SystemExit(f"Expected text not found in {path}: {old[:120]!r}")
+              p.write_text(text.replace(old, new, count))
+
+          # Version identity.
+          replace(
+              "apps/extension/public/manifest.json",
+              '"version": "0.2.8"',
+              '"version": "0.2.9"',
+          )
+
+          # Only application-relevant DOM mutations should trigger a full rescan.
+          Path("apps/extension/src/content/mutation-rescan-policy.ts").write_text(r'''const APPLICATION_RELEVANT_SELECTOR = [
+            "form",
+            "input",
+            "select",
+            "textarea",
+            "button",
+            "iframe",
+            "[contenteditable='true']",
+            "[role='button']",
+            "[role='checkbox']",
+            "[role='combobox']",
+            "[role='listbox']",
+            "[role='option']",
+            "[role='radio']",
+            "[role='switch']",
+            "[aria-invalid='true']",
+            "[aria-required='true']",
+          ].join(",");
+
+          function elementIsApplicationRelevant(element: Element): boolean {
+            return element.matches(APPLICATION_RELEVANT_SELECTOR);
+          }
+
+          function elementContainsApplicationControl(element: Element): boolean {
+            return element.querySelector(APPLICATION_RELEVANT_SELECTOR) !== null;
+          }
+
+          function nodeAddsOrRemovesApplicationControl(node: Node): boolean {
+            return (
+              node instanceof Element &&
+              (elementIsApplicationRelevant(node) ||
+                elementContainsApplicationControl(node))
+            );
+          }
+
+          function childListTouchesApplication(record: MutationRecord): boolean {
+            return [...record.addedNodes, ...record.removedNodes].some(
+              nodeAddsOrRemovesApplicationControl,
+            );
+          }
+
+          export function shouldRescanFromMutations(
+            records: readonly MutationRecord[],
+          ): boolean {
+            for (const record of records) {
+              if (record.type === "childList") {
+                // Ignore text/status churn such as upload progress and autocomplete
+                // messages. A structural control change still triggers a rescan.
+                if (childListTouchesApplication(record)) return true;
+                continue;
+              }
+              if (record.type !== "attributes") continue;
+              if (!(record.target instanceof Element)) continue;
+
+              const attribute = record.attributeName ?? "";
+              if (attribute === "hidden" || attribute === "aria-hidden") {
+                if (
+                  elementIsApplicationRelevant(record.target) ||
+                  elementContainsApplicationControl(record.target)
+                ) {
+                  return true;
+                }
+                continue;
+              }
+
+              // Class/style churn on a large ancestor is common on ATS pages and
+              // should not continuously rescan the entire document. Direct control
+              // changes remain observable.
+              if (attribute === "class" || attribute === "style") {
+                if (elementIsApplicationRelevant(record.target)) return true;
+                continue;
+              }
+
+              if (elementIsApplicationRelevant(record.target)) return true;
+            }
+            return false;
+          }
+          ''')
+
+          # Always yield between coalesced full scans so ping/navigation messages
+          # cannot be starved by a continuously mutating employer page.
+          replace(
+              "apps/extension/src/content/snapshot-coalescer.ts",
+              """      try {\n        await run(force);\n      } catch (error) {\n        requested = false;\n        forceRequested = false;\n        throw error;\n      }\n""",
+              """      try {\n        await run(force);\n      } catch (error) {\n        requested = false;\n        forceRequested = false;\n        throw error;\n      }\n      if (!disposed && requested) {\n        await new Promise<void>((resolve) => setTimeout(resolve, 0));\n      }\n""",
+          )
+
+          # Clean transient ATS status text out of semantic labels.
+          replace(
+              "apps/extension/src/content/scanner.ts",
+              """function usablePromptText(value: string): string {\n  const text = compactText(value);\n  if (!text || placeholderChoiceText(text)) return \"\";\n  if (/^(yes|no|true|false)$/i.test(text)) return \"\";\n  return text.length <= 500 ? text : \"\";\n}\n""",
+              r'''function sanitizePromptText(value: string): string {
+            let text = compactText(value)
+              .replace(/[✱＊]+/g, " ")
+              .replace(/Couldn't auto-read resume\.?/gi, " ")
+              .replace(/Analyzing resume(?:\.\.\.)?/gi, " ")
+              .replace(/\bSuccess!?\b/gi, " ")
+              .replace(
+                /No location found\.?\s*Try entering a different location/gi,
+                " ",
+              )
+              .replace(/\bLoading\b/gi, " ");
+            text = compactText(text);
+            if (/^resume\s*\/\s*cv\b/i.test(text) && /attach\s+resume\s*\/\s*cv/i.test(text)) {
+              return "Resume/CV";
+            }
+            return text;
+          }
+
+          function usablePromptText(value: string): string {
+            const text = sanitizePromptText(value);
+            if (!text || placeholderChoiceText(text)) return "";
+            if (/^(yes|no|true|false)$/i.test(text)) return "";
+            return text.length <= 500 ? text : "";
+          }
+          ''',
+          )
+
+          # File chooser must be opened from the on-page owner gesture, not from
+          # the cross-context extension message that Edge rejects.
+          replace(
+              "apps/extension/src/content/fill.ts",
+              """  mountFilePickerHandoff(element);\n  try {\n    element.click();\n  } catch {\n    // Cross-context browser activation may refuse a programmatic picker.\n    // The on-page handoff keeps the file choice as a direct owner gesture.\n  }\n  return {\n    status: \"OWNER_ACTION_REQUESTED\",\n    reason:\n      \"Employer file picker requested. If Edge blocks the cross-context request, use the temporary on-page MUNSHI Choose file handoff. File selection remains an explicit owner action.\",\n  };\n""",
+              """  mountFilePickerHandoff(element);\n  return {\n    status: \"OWNER_ACTION_REQUESTED\",\n    reason:\n      \"Use the temporary on-page MUNSHI Choose file button. The chooser opens only from that direct owner gesture, and MUNSHI verifies the selected file afterward.\",\n  };\n""",
+          )
+
+          # Add explicit semantic identities for common profile fields that must
+          # not alias to portfolio/street-address facts.
+          replace(
+              "packages/contracts/src/index.ts",
+              '  "ADDRESS",\n  "STREET_ADDRESS",',
+              '  "ADDRESS",\n  "CURRENT_LOCATION",\n  "STREET_ADDRESS",',
+          )
+          replace(
+              "packages/contracts/src/index.ts",
+              '  "LINKEDIN",\n  "PORTFOLIO",',
+              '  "LINKEDIN",\n  "GITHUB",\n  "PORTFOLIO",',
+          )
+
+          # Real-world semantic aliases and Unicode required marker normalization.
+          replace(
+              "packages/semantic-engine/src/index.ts",
+              '  { id: "linkedin", pattern: /linkedin/i, semanticType: "LINKEDIN" },\n',
+              '  { id: "linkedin", pattern: /linkedin/i, semanticType: "LINKEDIN" },\n  { id: "github", pattern: /\\bgithub(?: url| link)?\\b/i, semanticType: "GITHUB" },\n',
+          )
+          replace(
+              "packages/semantic-engine/src/index.ts",
+              """  { id: \"country\", pattern: /^country$/i, semanticType: \"COUNTRY\" },\n""",
+              """  { id: \"country\", pattern: /^country$/i, semanticType: \"COUNTRY\" },\n  {\n    id: \"current-location\",\n    pattern: /^(current location|location)$/i,\n    semanticType: \"CURRENT_LOCATION\",\n  },\n""",
+          )
+          replace(
+              "packages/semantic-engine/src/index.ts",
+              "/^(employer|employer name|company|company name|current employer|most recent employer)$/i,",
+              "/^(employer|employer name|company|company name|current employer|current company|current organization|most recent employer)$/i,",
+          )
+          replace(
+              "packages/semantic-engine/src/index.ts",
+              '  {\n    id: "portfolio",\n    pattern: /\\b(portfolio|personal website)\\b/i,\n    semanticType: "PORTFOLIO",\n  },\n',
+              '  {\n    id: "portfolio",\n    pattern: /\\b(portfolio|personal website)\\b/i,\n    semanticType: "PORTFOLIO",\n  },\n  {\n    id: "website",\n    pattern: /^(website|other website|personal site|other url)$/i,\n    semanticType: "WEBSITE",\n  },\n',
+          )
+          text = Path("packages/semantic-engine/src/index.ts").read_text()
+          text = text.replace("(?:sponsor|sponsorship)", "(?:sponsors?|sponsorships?)")
+          text = text.replace("(sponsor|sponsorship)", "(sponsors?|sponsorships?)")
+          text = text.replace(
+              '/\\b(sponsor|sponsorship|visa assistance)\\b/i,',
+              '/\\b(sponsors?|sponsorships?|visa assistance)\\b/i,',
+          )
+          text = text.replace(
+              '.replace(/\\s*\\*+\\s*$/, "")',
+              '.replace(/\\s*[\\*✱＊]+\\s*$/, "")',
+          )
+          Path("packages/semantic-engine/src/index.ts").write_text(text)
+
+          # Resolver mappings for new explicit profile facts.
+          replace(
+              "packages/application-model/src/resolver.ts",
+              '  ADDRESS: "street_address",\n',
+              '  ADDRESS: "street_address",\n  CURRENT_LOCATION: "current_location",\n',
+          )
+          replace(
+              "packages/application-model/src/resolver.ts",
+              '  LINKEDIN: "linkedin",\n',
+              '  LINKEDIN: "linkedin",\n  GITHUB: "github",\n',
+          )
+
+          # Deterministically derive a current-location string from confirmed city
+          # and state when no explicit current_location fact has been saved yet.
+          replace(
+              "packages/application-model/src/resolver-smart.ts",
+              """export function resolveProfileAnswer(\n  question: Question,\n  profile: MasterProfile | ProfileSnapshot,\n): AnswerResolution {\n  const base = resolveBaseProfileAnswer(question, profile);\n  return confirmedLegalNameResolution(question, profile, base) ?? base;\n}\n""",
+              r'''function confirmedCurrentLocationResolution(
+            question: Question,
+            profile: MasterProfile | ProfileSnapshot,
+            base: AnswerResolution,
+          ): AnswerResolution | null {
+            if (question.semanticType !== "CURRENT_LOCATION") return null;
+            if (base.state !== "UNRESOLVED") return base;
+
+            const city = profileFact(profile, "city");
+            const state = profileFact(profile, "state");
+            if (!confirmedAndUsable(city)) return null;
+            if (state && factText(state).trim() && !confirmedAndUsable(state)) return null;
+
+            const value = [city, state]
+              .filter((fact): fact is ProfileFact => confirmedAndUsable(fact))
+              .map((fact) => factText(fact).trim())
+              .filter(Boolean)
+              .join(", ");
+            if (!value) return null;
+
+            return {
+              state: "READY",
+              value,
+              sourceFactId: city.factId,
+              sourceKey: state ? "city+state" : "city",
+              trustLevel: "USER_CONFIRMED",
+              sensitive: true,
+              protected: true,
+              confidence: Math.min(question.confidence, 0.96),
+              reasons: [
+                "Current location composed only from explicitly usable confirmed address facts",
+              ],
+            };
+          }
+
+          export function resolveProfileAnswer(
+            question: Question,
+            profile: MasterProfile | ProfileSnapshot,
+          ): AnswerResolution {
+            const base = resolveBaseProfileAnswer(question, profile);
+            return (
+              confirmedLegalNameResolution(question, profile, base) ??
+              confirmedCurrentLocationResolution(question, profile, base) ??
+              base
+            );
+          }
+          ''',
+          )
+
+          # Fill+Remember / Teach promotion targets for the new permanent fields.
+          replace(
+              "apps/extension/src/storage/profile-answer-promotion.ts",
+              '  LINKEDIN: { key: "linkedin", category: "CONTACT", protected: false },\n',
+              '  LINKEDIN: { key: "linkedin", category: "CONTACT", protected: false },\n  GITHUB: { key: "github", category: "CONTACT", protected: false },\n',
+          )
+          replace(
+              "apps/extension/src/storage/profile-answer-promotion.ts",
+              '  STREET_ADDRESS: {\n',
+              '  CURRENT_LOCATION: {\n    key: "current_location",\n    category: "ADDRESS",\n    protected: true,\n  },\n  STREET_ADDRESS: {\n',
+          )
+
+          # Visible Profile fields.
+          replace(
+              "apps/extension/src/sidepanel/App.tsx",
+              '  { section: "Contact", key: "linkedin", label: "LinkedIn URL", category: "CONTACT", protected: false, inputType: "url" },\n',
+              '  { section: "Contact", key: "linkedin", label: "LinkedIn URL", category: "CONTACT", protected: false, inputType: "url" },\n  { section: "Contact", key: "github", label: "GitHub URL", category: "CONTACT", protected: false, inputType: "url" },\n',
+          )
+          replace(
+              "apps/extension/src/sidepanel/App.tsx",
+              '  { section: "Address", key: "street_address", label: "Street address", category: "ADDRESS", protected: true },\n',
+              '  { section: "Address", key: "current_location", label: "Current location", category: "ADDRESS", protected: true },\n  { section: "Address", key: "street_address", label: "Street address", category: "ADDRESS", protected: true },\n',
+          )
+
+          # Browser page cache: prefix-indexed reads, malformed-record tolerance,
+          # and pruning support for the 1,872-record live accumulation we observed.
+          Path("apps/extension/src/storage/vault.ts").write_text(r'''import {
+            ApplicationPageSchema,
+            type ApplicationPage,
+          } from "@munshi-apply/contracts";
+          import {
+            parseProfileSnapshot,
+            type ProfileSnapshot,
+          } from "@munshi-apply/contracts/profile-vault";
+
+          const databaseName = "munshi-apply-vault";
+          const databaseVersion = 1;
+          const profilesStore = "profiles";
+          const pagesStore = "pages";
+          const activeProfileKey = "active";
+
+          function openVault(): Promise<IDBDatabase> {
+            return new Promise((resolve, reject) => {
+              const request = indexedDB.open(databaseName, databaseVersion);
+              request.onerror = () =>
+                reject(request.error ?? new Error("Vault open failed"));
+              request.onupgradeneeded = () => {
+                const database = request.result;
+                if (!database.objectStoreNames.contains(profilesStore)) {
+                  database.createObjectStore(profilesStore);
+                }
+                if (!database.objectStoreNames.contains(pagesStore)) {
+                  database.createObjectStore(pagesStore);
+                }
+              };
+              request.onsuccess = () => resolve(request.result);
+            });
+          }
+
+          async function read(storeName: string, key: IDBValidKey): Promise<unknown> {
+            const database = await openVault();
+            return new Promise((resolve, reject) => {
+              const transaction = database.transaction(storeName, "readonly");
+              const request = transaction.objectStore(storeName).get(key);
+              request.onerror = () =>
+                reject(request.error ?? new Error("Vault read failed"));
+              request.onsuccess = () => resolve(request.result);
+              transaction.oncomplete = () => database.close();
+            });
+          }
+
+          async function readAll(storeName: string): Promise<unknown[]> {
+            const database = await openVault();
+            return new Promise((resolve, reject) => {
+              const transaction = database.transaction(storeName, "readonly");
+              const request = transaction.objectStore(storeName).getAll();
+              request.onerror = () =>
+                reject(request.error ?? new Error("Vault read failed"));
+              request.onsuccess = () => resolve(request.result);
+              transaction.oncomplete = () => database.close();
+            });
+          }
+
+          async function readPagesForTab(tabId: number): Promise<unknown[]> {
+            const database = await openVault();
+            return new Promise((resolve, reject) => {
+              const transaction = database.transaction(pagesStore, "readonly");
+              const range = IDBKeyRange.bound(`${tabId}:`, `${tabId}:\uffff`);
+              const request = transaction.objectStore(pagesStore).getAll(range);
+              request.onerror = () =>
+                reject(request.error ?? new Error("Vault page read failed"));
+              request.onsuccess = () => resolve(request.result);
+              transaction.oncomplete = () => database.close();
+            });
+          }
+
+          async function write(
+            storeName: string,
+            key: IDBValidKey,
+            value: unknown,
+          ): Promise<void> {
+            const database = await openVault();
+            return new Promise((resolve, reject) => {
+              const transaction = database.transaction(storeName, "readwrite");
+              transaction.objectStore(storeName).put(value, key);
+              transaction.onerror = () =>
+                reject(transaction.error ?? new Error("Vault write failed"));
+              transaction.oncomplete = () => {
+                database.close();
+                resolve();
+              };
+            });
+          }
+
+          function parsePage(value: unknown): ApplicationPage | null {
+            const parsed = ApplicationPageSchema.safeParse(value);
+            return parsed.success ? parsed.data : null;
+          }
+
+          export async function getProfile(): Promise<ProfileSnapshot | null> {
+            const candidate = await read(profilesStore, activeProfileKey);
+            if (candidate === undefined) return null;
+            return parseProfileSnapshot(candidate);
+          }
+
+          export async function saveProfile(profile: ProfileSnapshot): Promise<void> {
+            await write(profilesStore, activeProfileKey, parseProfileSnapshot(profile));
+          }
+
+          export async function getPage(
+            tabId: number,
+            frameId = 0,
+          ): Promise<ApplicationPage | null> {
+            const candidate = await read(pagesStore, `${tabId}:${frameId}`);
+            return candidate === undefined ? null : parsePage(candidate);
+          }
+
+          export async function getPagesForTab(tabId: number): Promise<ApplicationPage[]> {
+            return (await readPagesForTab(tabId))
+              .map(parsePage)
+              .filter((page): page is ApplicationPage => page !== null)
+              .sort((left, right) => left.frameId - right.frameId);
+          }
+
+          export async function deletePage(
+            tabId: number,
+            frameId: number,
+          ): Promise<void> {
+            const database = await openVault();
+            await new Promise<void>((resolve, reject) => {
+              const transaction = database.transaction(pagesStore, "readwrite");
+              transaction.objectStore(pagesStore).delete(`${tabId}:${frameId}`);
+              transaction.onerror = () =>
+                reject(transaction.error ?? new Error("Vault page deletion failed"));
+              transaction.oncomplete = () => {
+                database.close();
+                resolve();
+              };
+            });
+          }
+
+          export async function clearPagesForTab(tabId: number): Promise<void> {
+            const database = await openVault();
+            await new Promise<void>((resolve, reject) => {
+              const transaction = database.transaction(pagesStore, "readwrite");
+              const range = IDBKeyRange.bound(`${tabId}:`, `${tabId}:\uffff`);
+              const request = transaction.objectStore(pagesStore).openKeyCursor(range);
+              request.onerror = () =>
+                reject(request.error ?? new Error("Vault page cleanup failed"));
+              request.onsuccess = () => {
+                const cursor = request.result;
+                if (!cursor) return;
+                transaction.objectStore(pagesStore).delete(cursor.primaryKey);
+                cursor.continue();
+              };
+              transaction.onerror = () =>
+                reject(transaction.error ?? new Error("Vault page cleanup failed"));
+              transaction.oncomplete = () => {
+                database.close();
+                resolve();
+              };
+            });
+          }
+
+          export async function prunePagesForExistingTabs(
+            existingTabIds: ReadonlySet<number>,
+          ): Promise<number> {
+            const database = await openVault();
+            return new Promise<number>((resolve, reject) => {
+              let removed = 0;
+              const transaction = database.transaction(pagesStore, "readwrite");
+              const request = transaction.objectStore(pagesStore).openCursor();
+              request.onerror = () =>
+                reject(request.error ?? new Error("Vault page pruning failed"));
+              request.onsuccess = () => {
+                const cursor = request.result;
+                if (!cursor) return;
+                const page = parsePage(cursor.value);
+                if (!page || !existingTabIds.has(page.tabId)) {
+                  cursor.delete();
+                  removed += 1;
+                }
+                cursor.continue();
+              };
+              transaction.onerror = () =>
+                reject(transaction.error ?? new Error("Vault page pruning failed"));
+              transaction.oncomplete = () => {
+                database.close();
+                resolve(removed);
+              };
+            });
+          }
+
+          export async function getLatestPage(): Promise<ApplicationPage | null> {
+            const pages = (await readAll(pagesStore))
+              .map(parsePage)
+              .filter((page): page is ApplicationPage => page !== null);
+            const topLevelPages = pages.filter((page) => page.frameId === 0);
+            const candidates = topLevelPages.length > 0 ? topLevelPages : pages;
+            return (
+              candidates.sort((left, right) =>
+                right.observedAt.localeCompare(left.observedAt),
+              )[0] ?? null
+            );
+          }
+
+          export async function savePage(page: ApplicationPage): Promise<void> {
+            await write(
+              pagesStore,
+              `${page.tabId}:${page.frameId}`,
+              ApplicationPageSchema.parse(page),
+            );
+          }
+          ''')
+
+          # Service-worker cache cleanup and local-first PAGE_SNAPSHOT ack.
+          replace(
+              "apps/extension/src/background/service-worker.ts",
+              """  getPagesForTab,\n  savePage,\n} from \"../storage/vault\";\n""",
+              """  getPagesForTab,\n  prunePagesForExistingTabs,\n  savePage,\n} from \"../storage/vault\";\n""",
+          )
+          replace(
+              "apps/extension/src/background/service-worker.ts",
+              """chrome.tabs.onRemoved.addListener((tabId) => {\n  runSafely(clearJobContext(tabId));\n});\n""",
+              """chrome.tabs.onRemoved.addListener((tabId) => {\n  runSafely(\n    Promise.all([clearJobContext(tabId), clearPagesForTab(tabId)]).then(\n      () => undefined,\n    ),\n  );\n});\n""",
+          )
+          replace(
+              "apps/extension/src/background/service-worker.ts",
+              """async function initialize(): Promise<void> {\n  if (!initialized) {\n    initialized = true;\n    try {\n      await autoPilotController.recover();\n    } catch {\n      // Runtime recovery is fail-closed inside the controller. The side panel can\n      // still open for diagnostics if native messaging is temporarily unavailable.\n    }\n  }\n""",
+              """async function initialize(): Promise<void> {\n  if (!initialized) {\n    initialized = true;\n    try {\n      const tabs = await chrome.tabs.query({});\n      const existingTabIds = new Set(\n        tabs\n          .map((tab) => tab.id)\n          .filter((tabId): tabId is number => tabId !== undefined),\n      );\n      await prunePagesForExistingTabs(existingTabIds);\n    } catch {\n      // Page cache pruning is best-effort and never blocks startup.\n    }\n    try {\n      await autoPilotController.recover();\n    } catch {\n      // Runtime recovery is fail-closed inside the controller. The side panel can\n      // still open for diagnostics if native messaging is temporarily unavailable.\n    }\n  }\n""",
+          )
+
+          old_snapshot = """        const connection = await getCloudConnection();\n        if (eligible && connection && (await isCloudEncryptionReady())) {\n          try {\n            await publishApplicationSnapshot(connection, contextualPage);\n          } catch {\n            // Page discovery remains local-first and retries on the next scan.\n          }\n        }\n        try {\n          await chrome.runtime.sendMessage(\n            eligible\n              ? { type: \"ACTIVE_PAGE_UPDATED\", payload: contextualPage }\n              : { type: \"ACTIVE_PAGE_CLEARED\" },\n          );\n        } catch {\n          // The side panel is optional and may be closed while the sensor is active.\n        }\n        await autoPilotController.onPageSnapshot(tabId, contextualPage);\n        return { ok: true };\n"""
+          new_snapshot = """        // Acknowledge local discovery immediately. Cloud publication and\n        // AutoPilot observation are downstream consumers and must never hold the\n        // browser sensor hostage.\n        runSafely(\n          chrome.runtime\n            .sendMessage(\n              eligible\n                ? { type: \"ACTIVE_PAGE_UPDATED\", payload: contextualPage }\n                : { type: \"ACTIVE_PAGE_CLEARED\" },\n            )\n            .then(() => undefined),\n        );\n        runSafely(\n          (async () => {\n            const connection = await getCloudConnection();\n            if (eligible && connection && (await isCloudEncryptionReady())) {\n              await publishApplicationSnapshot(connection, contextualPage);\n            }\n          })(),\n        );\n        runSafely(\n          autoPilotController\n            .onPageSnapshot(tabId, contextualPage)\n            .then(() => undefined),\n        );\n        return { ok: true };\n"""
+          replace(
+              "apps/extension/src/background/service-worker.ts",
+              old_snapshot,
+              new_snapshot,
+          )
+
+          # Faster stale-runtime recovery now that PAGE_SNAPSHOT is local-first.
+          replace(
+              "apps/extension/src/background/content-runtime.ts",
+              "export const DEFAULT_CONTENT_MESSAGE_TIMEOUT_MS = 10_000;",
+              "export const DEFAULT_CONTENT_MESSAGE_TIMEOUT_MS = 2_500;",
+          )
+
+          # Side-panel health must not be downgraded when only page detection fails.
+          replace(
+              "apps/extension/src/sidepanel/App.tsx",
+              """  const refresh = useCallback(async () => {\n    const [activePage, extensionRuntime] = await Promise.all([\n      getActivePage(),\n      getHealth(),\n    ]);\n    setPage(activePage);\n    setHealth(extensionRuntime.status);\n    setRuntime(extensionRuntime);\n""",
+              """  const refresh = useCallback(async () => {\n    const extensionRuntime = await getHealth();\n    setHealth(extensionRuntime.status);\n    setRuntime(extensionRuntime);\n\n    const activePage = await getActivePage().catch((error: unknown) => {\n      setNotice(\n        error instanceof Error\n          ? `Application detection is recovering: ${error.message}`\n          : \"Application detection is recovering.\",\n      );\n      return null;\n    });\n    setPage(activePage);\n""",
+          )
+
+          # Avoid a MutationObserver feedback loop caused by rebuilding our own
+          # recent-context card on every React mutation.
+          replace(
+              "apps/extension/src/sidepanel/reliability.ts",
+              """  if (recentContext && recentContextIsVisible(recentContext)) {\n    const [active] = Array.from(document.querySelectorAll(\".answer-card\"));\n    if (!active || recentContext.kind === \"LISTING\") {\n      renderRecentContextCard(recentContext);\n    }\n  }\n""",
+              """  if (\n    recentContext &&\n    recentContextIsVisible(recentContext) &&\n    !document.getElementById(\"munshi-recent-context-card\")\n  ) {\n    const [active] = Array.from(document.querySelectorAll(\".answer-card\"));\n    if (!active || recentContext.kind === \"LISTING\") {\n      renderRecentContextCard(recentContext);\n    }\n  }\n""",
+          )
+
+          # Direct application inspection should request canonical recovery too,
+          # eliminating split-brain between reliability state and React page state.
+          replace(
+              "apps/extension/src/sidepanel/reliability.ts",
+              """  const kind = classifyJobContext(page);\n  if (!kind) {\n    await retainCurrentContext();\n    return;\n  }\n  await rememberContext(page, kind);\n}\n""",
+              """  const kind = classifyJobContext(page);\n  if (!kind) {\n    await retainCurrentContext();\n    return;\n  }\n  if (kind === \"APPLICATION\") {\n    try {\n      const response = extensionResponse(\n        await rawRuntimeRequest({ type: \"GET_ACTIVE_PAGE\" }),\n      );\n      const canonical = response?.ok ? parsePage(response.data) : null;\n      await rememberContext(canonical ?? page, kind);\n      return;\n    } catch {\n      // Retain the direct scan as a continuity fallback while canonical recovery\n      // proceeds on the next background/page event.\n    }\n  }\n  await rememberContext(page, kind);\n}\n""",
+          )
+
+          # Add targeted tests for the exact production wording and cache behavior.
+          Path("apps/extension/src/content/mutation-rescan-policy.runtime.test.ts").write_text(r'''import { describe, expect, it } from "vitest";
+          import { shouldRescanFromMutations } from "./mutation-rescan-policy";
+
+          describe("production mutation rescan policy", () => {
+            it("ignores text-only ATS status churn", () => {
+              const host = document.createElement("div");
+              const status = document.createTextNode("Analyzing resume...Success!");
+              const record = {
+                type: "childList",
+                target: host,
+                addedNodes: [status],
+                removedNodes: [],
+              } as unknown as MutationRecord;
+              expect(shouldRescanFromMutations([record])).toBe(false);
+            });
+
+            it("rescans when a new application control is inserted", () => {
+              const host = document.createElement("div");
+              const input = document.createElement("input");
+              const record = {
+                type: "childList",
+                target: host,
+                addedNodes: [input],
+                removedNodes: [],
+              } as unknown as MutationRecord;
+              expect(shouldRescanFromMutations([record])).toBe(true);
+            });
+          });
+          ''')
+
+          Path("packages/semantic-engine/src/lever-runtime-regression.test.ts").write_text(r'''import { describe, expect, it } from "vitest";
+          import { classifyQuestion } from "./index";
+
+          describe("Lever runtime semantic regressions", () => {
+            it("recognizes Unicode-marked full name", () => {
+              expect(classifyQuestion("Full name✱").semanticType).toBe("PERSONAL");
+            });
+
+            it("recognizes plural future sponsorship wording", () => {
+              expect(
+                classifyQuestion(
+                  "Will you now or in the future require any visa sponsorships or transfers for employment in the US?✱",
+                ).semanticType,
+              ).toBe("SPONSORSHIP_FUTURE");
+            });
+
+            it("recognizes common current company and location aliases", () => {
+              expect(classifyQuestion("Current company").semanticType).toBe(
+                "EMPLOYER_NAME",
+              );
+              expect(classifyQuestion("Current location✱").semanticType).toBe(
+                "CURRENT_LOCATION",
+              );
+            });
+
+            it("keeps GitHub distinct from a portfolio URL", () => {
+              expect(classifyQuestion("GitHub URL").semanticType).toBe("GITHUB");
+              expect(classifyQuestion("Other website").semanticType).toBe("WEBSITE");
+            });
+          });
+          ''')
+          PY
+
+      - name: Format changed files
+        run: |
+          ./node_modules/.bin/prettier --write \
+            apps/extension/public/manifest.json \
+            apps/extension/src/content/mutation-rescan-policy.ts \
+            apps/extension/src/content/mutation-rescan-policy.runtime.test.ts \
+            apps/extension/src/content/snapshot-coalescer.ts \
+            apps/extension/src/content/scanner.ts \
+            apps/extension/src/content/fill.ts \
+            apps/extension/src/storage/vault.ts \
+            apps/extension/src/background/service-worker.ts \
+            apps/extension/src/background/content-runtime.ts \
+            apps/extension/src/sidepanel/App.tsx \
+            apps/extension/src/sidepanel/reliability.ts \
+            apps/extension/src/storage/profile-answer-promotion.ts \
+            packages/contracts/src/index.ts \
+            packages/semantic-engine/src/index.ts \
+            packages/semantic-engine/src/lever-runtime-regression.test.ts \
+            packages/application-model/src/resolver.ts \
+            packages/application-model/src/resolver-smart.ts
+      - name: Full repository verification
+        run: npm run check
+      - name: Commit verified 0.2.9 repair and remove temporary workflow
+        shell: bash
+        run: |
+          rm .github/workflows/runtime-029-hotfix.yml
+          git config user.name "Aadil Munshi"
+          git config user.email "mohammadaadilmunshi@gmail.com"
+          git add -A
+          git commit -m "fix: harden Edge runtime detection and scan performance"
+          git push origin HEAD:feat/v3-foundation-alignment
