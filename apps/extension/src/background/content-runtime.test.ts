@@ -24,7 +24,7 @@ function never<T>(): Promise<T> {
 }
 
 describe("content runtime recovery", () => {
-  it("recognizes Chromium's missing, stale, and timed-out receiver errors", () => {
+  it("recognizes Chromium and Edge missing, stale, aborted, and timed-out receiver errors", () => {
     expect(
       isMissingContentReceiverError(
         new Error(
@@ -41,6 +41,9 @@ describe("content runtime recovery", () => {
       isMissingContentReceiverError(
         new Error("Extension context invalidated."),
       ),
+    ).toBe(true);
+    expect(
+      isMissingContentReceiverError(new Error("The user aborted a request.")),
     ).toBe(true);
     expect(
       isMissingContentReceiverError(
@@ -77,6 +80,22 @@ describe("content runtime recovery", () => {
     ).resolves.toEqual({ result: "recovered" });
     expect(runtime.executeScript).toHaveBeenCalledWith({
       target: { tabId: 7, frameIds: [2] },
+      files: ["content/bootstrap.js"],
+    });
+  });
+
+  it("recovers Edge's aborted-request reload error by reinjecting the exact frame", async () => {
+    const runtime = fakeApi();
+    runtime.sendMessage
+      .mockRejectedValueOnce(new Error("The user aborted a request."))
+      .mockResolvedValueOnce({ result: "recovered-after-edge-abort" });
+    runtime.executeScript.mockResolvedValue([{ frameId: 0 }]);
+
+    await expect(
+      sendWithContentRecovery(runtime, 7, 0, { type: "TEST" }),
+    ).resolves.toEqual({ result: "recovered-after-edge-abort" });
+    expect(runtime.executeScript).toHaveBeenCalledWith({
+      target: { tabId: 7, frameIds: [0] },
       files: ["content/bootstrap.js"],
     });
   });
@@ -187,6 +206,25 @@ describe("content runtime recovery", () => {
       11,
       { type: "CONTENT_SCAN_NOW" },
       { frameId: 4 },
+    );
+  });
+
+  it("restores accessible frames after Edge aborts the first reload ping", async () => {
+    const runtime = fakeApi();
+    runtime.sendMessage
+      .mockRejectedValueOnce(new Error("The user aborted a request."))
+      .mockResolvedValue({ ok: true });
+    runtime.executeScript.mockResolvedValue([{ frameId: 0 }]);
+
+    await ensureTabContentRuntime(runtime, 11);
+    expect(runtime.executeScript).toHaveBeenCalledWith({
+      target: { tabId: 11, allFrames: true },
+      files: ["content/bootstrap.js"],
+    });
+    expect(runtime.sendMessage).toHaveBeenCalledWith(
+      11,
+      { type: "CONTENT_SCAN_NOW" },
+      { frameId: 0 },
     );
   });
 
