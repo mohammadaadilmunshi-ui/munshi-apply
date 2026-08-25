@@ -1,4 +1,8 @@
-import type { MasterProfile, ProfileFact, Question } from "@munshi-apply/contracts";
+import type {
+  MasterProfile,
+  ProfileFact,
+  Question,
+} from "@munshi-apply/contracts";
 import { describe, expect, it } from "vitest";
 import { resolveProfileAnswer } from "./resolver-smart";
 
