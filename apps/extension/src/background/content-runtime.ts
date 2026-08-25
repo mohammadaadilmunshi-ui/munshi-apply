@@ -17,7 +17,7 @@ export type ContentRuntimeApi = {
 };
 
 const CONTENT_SCRIPT_FILE = "content/bootstrap.js";
-export const DEFAULT_CONTENT_MESSAGE_TIMEOUT_MS = 10_000;
+export const DEFAULT_CONTENT_MESSAGE_TIMEOUT_MS = 2_500;
 
 type ContentScanResponse = {
   ok?: boolean;

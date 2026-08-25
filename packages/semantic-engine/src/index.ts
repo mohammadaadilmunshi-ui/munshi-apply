@@ -61,9 +61,19 @@ const rules: readonly Rule[] = [
   },
   { id: "linkedin", pattern: /linkedin/i, semanticType: "LINKEDIN" },
   {
+    id: "github",
+    pattern: /\bgithub(?: url| link)?\b/i,
+    semanticType: "GITHUB",
+  },
+  {
     id: "portfolio",
     pattern: /\b(portfolio|personal website)\b/i,
     semanticType: "PORTFOLIO",
+  },
+  {
+    id: "website",
+    pattern: /^(website|other website|personal site|other url)$/i,
+    semanticType: "WEBSITE",
   },
   {
     id: "address-line-2",
@@ -88,6 +98,11 @@ const rules: readonly Rule[] = [
     semanticType: "POSTAL_CODE",
   },
   { id: "country", pattern: /^country$/i, semanticType: "COUNTRY" },
+  {
+    id: "current-location",
+    pattern: /^current location$/i,
+    semanticType: "CURRENT_LOCATION",
+  },
   {
     id: "school-name",
     pattern:
@@ -120,7 +135,7 @@ const rules: readonly Rule[] = [
   {
     id: "employer-name",
     pattern:
-      /^(employer|employer name|company|company name|current employer|most recent employer)$/i,
+      /^(employer|employer name|company|company name|current employer|current company|current organization|most recent employer)$/i,
     semanticType: "EMPLOYER_NAME",
   },
   {
@@ -193,7 +208,7 @@ const rules: readonly Rule[] = [
   {
     id: "future-sponsorship",
     pattern:
-      /(?:\b(?:now or in the future|in the future)\b.{0,90}\b(?:sponsor|sponsorship)\b|\b(?:sponsor|sponsorship)\b.{0,90}\b(?:now or in the future|in the future)\b)/i,
+      /(?:\b(?:now or in the future|in the future)\b.{0,90}\b(?:sponsors?|sponsorships?)\b|\b(?:sponsors?|sponsorships?)\b.{0,90}\b(?:now or in the future|in the future)\b)/i,
     semanticType: "SPONSORSHIP_FUTURE",
     sensitive: true,
     highRisk: true,
@@ -201,7 +216,7 @@ const rules: readonly Rule[] = [
   {
     id: "current-sponsorship",
     pattern:
-      /\b(currently|at this time|right now).{0,40}\b(require|need).{0,30}\b(sponsor|sponsorship)\b|\b(require|need).{0,30}\b(sponsor|sponsorship).{0,40}\b(currently|at this time|right now)\b/i,
+      /\b(currently|at this time|right now).{0,40}\b(require|need).{0,30}\b(sponsors?|sponsorships?)\b|\b(require|need).{0,30}\b(sponsors?|sponsorships?).{0,40}\b(currently|at this time|right now)\b/i,
     semanticType: "SPONSORSHIP_CURRENT",
     sensitive: true,
     highRisk: true,
@@ -215,7 +230,7 @@ const rules: readonly Rule[] = [
   },
   {
     id: "sponsorship",
-    pattern: /\b(sponsor|sponsorship|visa assistance)\b/i,
+    pattern: /\b(sponsors?|sponsorships?|visa assistance)\b/i,
     semanticType: "UNKNOWN",
     sensitive: true,
     highRisk: true,
@@ -481,7 +496,7 @@ function normalize(text: string): string {
   return text
     .replace(/\s+/g, " ")
     .trim()
-    .replace(/\s*\*+\s*$/, "")
+    .replace(/\s*[*✱＊]+\s*$/, "")
     .replace(/\s*\(?required\)?\s*$/i, "")
     .replace(/\s*:\s*$/, "")
     .trim();

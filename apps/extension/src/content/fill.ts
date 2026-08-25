@@ -858,16 +858,10 @@ export function assistFilePicker(controlId: string): FilePickerAssistResult {
   element.scrollIntoView?.({ block: "center", inline: "nearest" });
   element.focus();
   mountFilePickerHandoff(element);
-  try {
-    element.click();
-  } catch {
-    // Cross-context browser activation may refuse a programmatic picker.
-    // The on-page handoff keeps the file choice as a direct owner gesture.
-  }
   return {
     status: "OWNER_ACTION_REQUESTED",
     reason:
-      "Employer file picker requested. If Edge blocks the cross-context request, use the temporary on-page MUNSHI Choose file handoff. File selection remains an explicit owner action.",
+      "Use the temporary on-page MUNSHI Choose file button. The chooser opens only from that direct owner gesture, and MUNSHI verifies the selected file afterward.",
   };
 }
 

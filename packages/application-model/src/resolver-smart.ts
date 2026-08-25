@@ -106,12 +106,52 @@ function confirmedLegalNameResolution(
   };
 }
 
+function confirmedCurrentLocationResolution(
+  question: Question,
+  profile: MasterProfile | ProfileSnapshot,
+  base: AnswerResolution,
+): AnswerResolution | null {
+  if (question.semanticType !== "CURRENT_LOCATION") return null;
+  if (base.state !== "UNRESOLVED") return base;
+
+  const city = profileFact(profile, "city");
+  const state = profileFact(profile, "state");
+  if (!confirmedAndUsable(city)) return null;
+  if (state && factText(state).trim() && !confirmedAndUsable(state))
+    return null;
+
+  const value = [city, state]
+    .filter((fact): fact is ProfileFact => confirmedAndUsable(fact))
+    .map((fact) => factText(fact).trim())
+    .filter(Boolean)
+    .join(", ");
+  if (!value) return null;
+
+  return {
+    state: "READY",
+    value,
+    sourceFactId: city.factId,
+    sourceKey: state ? "city+state" : "city",
+    trustLevel: "USER_CONFIRMED",
+    sensitive: true,
+    protected: true,
+    confidence: Math.min(question.confidence, 0.96),
+    reasons: [
+      "Current location composed only from explicitly usable confirmed address facts",
+    ],
+  };
+}
+
 export function resolveProfileAnswer(
   question: Question,
   profile: MasterProfile | ProfileSnapshot,
 ): AnswerResolution {
   const base = resolveBaseProfileAnswer(question, profile);
-  return confirmedLegalNameResolution(question, profile, base) ?? base;
+  return (
+    confirmedLegalNameResolution(question, profile, base) ??
+    confirmedCurrentLocationResolution(question, profile, base) ??
+    base
+  );
 }
 
 export { factKeyForSemanticType };

@@ -200,8 +200,26 @@ function placeholderChoiceText(value: string): boolean {
   );
 }
 
+function sanitizePromptText(value: string): string {
+  let text = compactText(value)
+    .replace(/[✱＊]+/g, " ")
+    .replace(/Couldn't auto-read resume\.?/gi, " ")
+    .replace(/Analyzing resume(?:\.\.\.)?/gi, " ")
+    .replace(/\bSuccess!?\b/gi, " ")
+    .replace(/No location found\.?\s*Try entering a different location/gi, " ")
+    .replace(/\bLoading\b/gi, " ");
+  text = compactText(text);
+  if (
+    /^resume\s*\/\s*cv\b/i.test(text) &&
+    /attach\s+resume\s*\/\s*cv/i.test(text)
+  ) {
+    return "Resume/CV";
+  }
+  return text;
+}
+
 function usablePromptText(value: string): string {
-  const text = compactText(value);
+  const text = sanitizePromptText(value);
   if (!text || placeholderChoiceText(text)) return "";
   if (/^(yes|no|true|false)$/i.test(text)) return "";
   return text.length <= 500 ? text : "";

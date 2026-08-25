@@ -411,6 +411,19 @@ async function inspectTab(tabId: number): Promise<void> {
     await retainCurrentContext();
     return;
   }
+  if (kind === "APPLICATION") {
+    try {
+      const response = extensionResponse(
+        await rawRuntimeRequest({ type: "GET_ACTIVE_PAGE" }),
+      );
+      const canonical = response?.ok ? parsePage(response.data) : null;
+      await rememberContext(canonical ?? page, kind);
+      return;
+    } catch {
+      // Retain the direct scan as a continuity fallback while canonical recovery
+      // proceeds on the next background/page event.
+    }
+  }
   await rememberContext(page, kind);
 }
 
@@ -762,7 +775,11 @@ function maintainEnhancements(): void {
   patchTeachCopy();
   ensureLearnedPanel();
   processTeachResult();
-  if (recentContext && recentContextIsVisible(recentContext)) {
+  if (
+    recentContext &&
+    recentContextIsVisible(recentContext) &&
+    !document.getElementById("munshi-recent-context-card")
+  ) {
     const [active] = Array.from(document.querySelectorAll(".answer-card"));
     if (!active || recentContext.kind === "LISTING") {
       renderRecentContextCard(recentContext);

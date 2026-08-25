@@ -23,8 +23,14 @@ const permanentProfileTargets: Readonly<
   EMAIL: { key: "email", category: "CONTACT", protected: false },
   PHONE: { key: "phone", category: "CONTACT", protected: false },
   LINKEDIN: { key: "linkedin", category: "CONTACT", protected: false },
+  GITHUB: { key: "github", category: "CONTACT", protected: false },
   PORTFOLIO: { key: "portfolio", category: "CONTACT", protected: false },
   WEBSITE: { key: "portfolio", category: "CONTACT", protected: false },
+  CURRENT_LOCATION: {
+    key: "current_location",
+    category: "ADDRESS",
+    protected: true,
+  },
   STREET_ADDRESS: {
     key: "street_address",
     category: "ADDRESS",

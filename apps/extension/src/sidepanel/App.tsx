@@ -121,7 +121,9 @@ const profileFields: readonly ProfileField[] = [
   { section: "Contact", key: "alternate_email", label: "Alternate email", category: "CONTACT", protected: false, inputType: "email" },
   { section: "Contact", key: "phone", label: "Phone", category: "CONTACT", protected: false, inputType: "tel" },
   { section: "Contact", key: "linkedin", label: "LinkedIn URL", category: "CONTACT", protected: false, inputType: "url" },
+  { section: "Contact", key: "github", label: "GitHub URL", category: "CONTACT", protected: false, inputType: "url" },
   { section: "Contact", key: "portfolio", label: "Portfolio URL", category: "CONTACT", protected: false, inputType: "url" },
+  { section: "Address", key: "current_location", label: "Current location", category: "ADDRESS", protected: true },
   { section: "Address", key: "street_address", label: "Street address", category: "ADDRESS", protected: true },
   { section: "Address", key: "address_line_2", label: "Apartment / unit", category: "ADDRESS", protected: true },
   { section: "Address", key: "city", label: "City", category: "ADDRESS", protected: true },
@@ -335,13 +337,19 @@ export function App() {
   }, []);
 
   const refresh = useCallback(async () => {
-    const [activePage, extensionRuntime] = await Promise.all([
-      getActivePage(),
-      getHealth(),
-    ]);
-    setPage(activePage);
+    const extensionRuntime = await getHealth();
     setHealth(extensionRuntime.status);
     setRuntime(extensionRuntime);
+
+    const activePage = await getActivePage().catch((error: unknown) => {
+      setNotice(
+        error instanceof Error
+          ? `Application detection is recovering: ${error.message}`
+          : "Application detection is recovering.",
+      );
+      return null;
+    });
+    setPage(activePage);
 
     let savedProfile: ProfileSnapshot | null = null;
     try {

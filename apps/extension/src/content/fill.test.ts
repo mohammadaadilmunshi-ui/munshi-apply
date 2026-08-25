@@ -527,7 +527,7 @@ describe("guarded field filling", () => {
     const click = vi.spyOn(input, "click");
     const result = assistFilePicker(control!.controlId);
     expect(result.status).toBe("OWNER_ACTION_REQUESTED");
-    expect(click).toHaveBeenCalledTimes(1);
+    expect(click).not.toHaveBeenCalled();
     expect(
       document.getElementById("munshi-apply-file-picker-handoff"),
     ).not.toBeNull();

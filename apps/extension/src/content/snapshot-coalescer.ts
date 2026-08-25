@@ -25,6 +25,9 @@ export function createSnapshotCoalescer(
         forceRequested = false;
         throw error;
       }
+      if (!disposed && requested) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
     }
   };
 

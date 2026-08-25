@@ -36,6 +36,7 @@ import {
   deletePage,
   getPage,
   getPagesForTab,
+  prunePagesForExistingTabs,
   savePage,
 } from "../storage/vault";
 import {
@@ -496,6 +497,17 @@ async function initialize(): Promise<void> {
   if (!initialized) {
     initialized = true;
     try {
+      const tabs = await chrome.tabs.query({});
+      const existingTabIds = new Set(
+        tabs
+          .map((tab) => tab.id)
+          .filter((tabId): tabId is number => tabId !== undefined),
+      );
+      await prunePagesForExistingTabs(existingTabIds);
+    } catch {
+      // Page cache pruning is best-effort and never blocks startup.
+    }
+    try {
       await autoPilotController.recover();
     } catch {
       // Runtime recovery is fail-closed inside the controller. The side panel can
@@ -523,7 +535,11 @@ if (chrome.webNavigation?.onCommitted) {
 }
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  runSafely(clearJobContext(tabId));
+  runSafely(
+    Promise.all([clearJobContext(tabId), clearPagesForTab(tabId)]).then(
+      () => undefined,
+    ),
+  );
 });
 
 if (!supportsSidePanel) {
@@ -818,24 +834,31 @@ async function routeMessage(
         const contextualPage = eligible
           ? await augmentWithRememberedJobContext(tabId, activePage)
           : activePage;
-        const connection = await getCloudConnection();
-        if (eligible && connection && (await isCloudEncryptionReady())) {
-          try {
-            await publishApplicationSnapshot(connection, contextualPage);
-          } catch {
-            // Page discovery remains local-first and retries on the next scan.
-          }
-        }
-        try {
-          await chrome.runtime.sendMessage(
-            eligible
-              ? { type: "ACTIVE_PAGE_UPDATED", payload: contextualPage }
-              : { type: "ACTIVE_PAGE_CLEARED" },
-          );
-        } catch {
-          // The side panel is optional and may be closed while the sensor is active.
-        }
-        await autoPilotController.onPageSnapshot(tabId, contextualPage);
+        // Acknowledge local discovery immediately. Cloud publication and
+        // AutoPilot observation are downstream consumers and must never hold the
+        // browser sensor hostage.
+        runSafely(
+          chrome.runtime
+            .sendMessage(
+              eligible
+                ? { type: "ACTIVE_PAGE_UPDATED", payload: contextualPage }
+                : { type: "ACTIVE_PAGE_CLEARED" },
+            )
+            .then(() => undefined),
+        );
+        runSafely(
+          (async () => {
+            const connection = await getCloudConnection();
+            if (eligible && connection && (await isCloudEncryptionReady())) {
+              await publishApplicationSnapshot(connection, contextualPage);
+            }
+          })(),
+        );
+        runSafely(
+          autoPilotController
+            .onPageSnapshot(tabId, contextualPage)
+            .then(() => undefined),
+        );
         return { ok: true };
       }
     }

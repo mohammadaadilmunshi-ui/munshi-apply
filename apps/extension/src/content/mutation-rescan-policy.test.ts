@@ -54,9 +54,9 @@ describe("mutation rescan policy", () => {
     );
   });
 
-  it("always rescans structural child-list changes", () => {
+  it("ignores structural child-list records with no application controls", () => {
     const root = document.createElement("div");
-    expect(shouldRescanFromMutations([childRecord(root)])).toBe(true);
+    expect(shouldRescanFromMutations([childRecord(root)])).toBe(false);
   });
 
   it("rescans semantic and validation attributes even on plain elements", () => {
