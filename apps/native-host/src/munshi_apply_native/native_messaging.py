@@ -15,6 +15,7 @@ from .application_store import ApplicationStore
 from .checkpoint_store import ApplicationCheckpointStore
 from .database import Database
 from .document_ingestion import DocumentIngestionService
+from .interaction_recipe_listing import list_interaction_recipes
 from .interaction_recipe_service import InteractionRecipeService
 from .job_signal_store import JobSignalStore
 from .models import ApplicationCheckpointPayload, EventEnvelope
@@ -27,6 +28,7 @@ NATIVE_CAPABILITIES: dict[str, bool] = {
     "profile_vault": True,
     "application_checkpoints": True,
     "interaction_learning": True,
+    "interaction_learning_list": True,
     "teach_munshi": True,
     "teach_munshi_state_capture": True,
     "ai_settings": True,
@@ -229,6 +231,8 @@ def handle(
             "ok": True,
             "data": InteractionRecipeService(database).lookup(message.get("payload")),
         }
+    if message_type == "LIST_INTERACTION_RECIPES":
+        return {"ok": True, "data": list_interaction_recipes(database)}
     if message_type == "RECORD_INTERACTION_RECIPE_ATTEMPT":
         return {
             "ok": True,
