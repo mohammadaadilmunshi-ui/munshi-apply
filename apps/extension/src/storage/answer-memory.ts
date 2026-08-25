@@ -122,14 +122,20 @@ export function canonicalAnswerMemoryKey(
   return `question:${normalizedQuestion}`;
 }
 
-function candidateMemoryKeys(question: string, semanticType?: string): string[] {
+function candidateMemoryKeys(
+  question: string,
+  semanticType?: string,
+): string[] {
   const exact = answerMemoryKey(question);
   if (!exact) return [];
   return [
     canonicalAnswerMemoryKey(question, semanticType),
     `question:${exact}`,
     exact,
-  ].filter((value, index, values) => Boolean(value) && values.indexOf(value) === index);
+  ].filter(
+    (value, index, values) =>
+      Boolean(value) && values.indexOf(value) === index,
+  );
 }
 
 export function canAutoApproveRememberedAnswer(input: {
@@ -144,7 +150,9 @@ export function canAutoApproveRememberedAnswer(input: {
   return true;
 }
 
-async function readRememberedAnswer(memoryKey: string): Promise<RememberedAnswer | null> {
+async function readRememberedAnswer(
+  memoryKey: string,
+): Promise<RememberedAnswer | null> {
   const database = await openDatabase();
   return new Promise((resolve, reject) => {
     const transaction = database.transaction(answersStore, "readonly");
