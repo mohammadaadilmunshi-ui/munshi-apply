@@ -1,0 +1,105 @@
+name: Temporary 0.2.10 health hydration fix
+
+on:
+  push:
+    branches: [feat/v3-foundation-alignment]
+    paths: [.github/workflows/runtime-0210-health-fix.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/v3-foundation-alignment
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Apply bounded independent health hydration
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new, count=1):
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise SystemExit(f"Expected text not found in {path}: {old[:180]!r}")
+              p.write_text(text.replace(old, new, count))
+
+          replace(
+              "apps/extension/public/manifest.json",
+              '"version": "0.2.9"',
+              '"version": "0.2.10"',
+          )
+
+          # Native health must have a deadline so the owner UI cannot remain in
+          # an indeterminate checking state forever.
+          replace(
+              "apps/extension/src/messaging/client.ts",
+              '''function wait(milliseconds: number): Promise<void> {\n  return new Promise((resolve) => setTimeout(resolve, milliseconds));\n}\n''',
+              '''function wait(milliseconds: number): Promise<void> {\n  return new Promise((resolve) => setTimeout(resolve, milliseconds));\n}\n\nfunction withTimeout<T>(\n  promise: Promise<T>,\n  milliseconds: number,\n  message: string,\n): Promise<T> {\n  return new Promise<T>((resolve, reject) => {\n    const timer = setTimeout(() => reject(new Error(message)), milliseconds);\n    promise.then(\n      (value) => {\n        clearTimeout(timer);\n        resolve(value);\n      },\n      (error) => {\n        clearTimeout(timer);\n        reject(error);\n      },\n    );\n  });\n}\n''',
+          )
+          replace(
+              "apps/extension/src/messaging/client.ts",
+              '''export async function getNativeHealth(): Promise<NativeRuntimeHealth> {\n  return (await send({ type: "NATIVE_HEALTH" })) as NativeRuntimeHealth;\n}\n''',
+              '''export async function getNativeHealth(): Promise<NativeRuntimeHealth> {\n  return (await withTimeout(\n    send({ type: "NATIVE_HEALTH" }),\n    5_000,\n    "Native companion health check timed out after 5 seconds",\n  )) as NativeRuntimeHealth;\n}\n''',
+          )
+
+          replace(
+              "apps/extension/src/messaging/client.test.ts",
+              'import { getHealth, saveProfile } from "./client";\n',
+              'import { getHealth, getNativeHealth, saveProfile } from "./client";\n',
+          )
+          replace(
+              "apps/extension/src/messaging/client.test.ts",
+              '''  it("does not retry aborted profile writes and risk duplicate saves", async () => {\n''',
+              '''  it("bounds a native-health request so checking cannot persist forever", async () => {\n    vi.useFakeTimers();\n    const sendMessage = vi.fn(() => new Promise<unknown>(() => undefined));\n    vi.stubGlobal("chrome", { runtime: { sendMessage } });\n\n    const pending = getNativeHealth();\n    await vi.advanceTimersByTimeAsync(5_000);\n    await expect(pending).rejects.toThrow(\n      "Native companion health check timed out after 5 seconds",\n    );\n    expect(sendMessage).toHaveBeenCalledTimes(1);\n  });\n\n  it("does not retry aborted profile writes and risk duplicate saves", async () => {\n''',
+          )
+
+          # The side panel no longer republishes the page snapshot. The service
+          # worker owns local-first publication after PAGE_SNAPSHOT in 0.2.9.
+          replace(
+              "apps/extension/src/sidepanel/App.tsx",
+              '  publishApplicationReview,\n  publishApplicationSnapshot,\n',
+              '  publishApplicationReview,\n',
+          )
+
+          # Start native health immediately after the extension PING, before any
+          # application/profile/cloud hydration. It updates state independently.
+          replace(
+              "apps/extension/src/sidepanel/App.tsx",
+              '''    setHealth(extensionRuntime.status);\n    setRuntime(extensionRuntime);\n\n    const activePage = await getActivePage().catch((error: unknown) => {\n''',
+              '''    setHealth(extensionRuntime.status);\n    setRuntime(extensionRuntime);\n\n    if (!extensionRuntime.capabilities.nativeMessaging) {\n      setNative({ status: "unsupported" });\n    } else {\n      setNative({ status: "checking" });\n      void (async () => {\n        try {\n          const nativeHealth = await getNativeHealth();\n          const compatibility = nativeRuntimeCompatibility(nativeHealth);\n          if (!compatibility.compatible) {\n            setNative({\n              status: "upgrade_required",\n              data: nativeHealth,\n              reason: compatibility.reason,\n            });\n            return;\n          }\n          setNative({ status: "healthy", data: nativeHealth });\n          void refreshAI();\n        } catch (error) {\n          setNative({\n            status: "unavailable",\n            error:\n              error instanceof Error\n                ? error.message\n                : "Native companion is unavailable",\n          });\n        }\n      })();\n    }\n\n    const activePage = await getActivePage().catch((error: unknown) => {\n''',
+          )
+
+          old_cloud = '''    setCloud({ status: "checking" });\n    try {\n      const connection = await getCloudConnection();\n      if (!connection) {\n        setCloud({ status: "disconnected" });\n      } else {\n        setWorkspaceUrl(connection.baseUrl);\n        const cloudHealth = await getCloudHealth(connection);\n        setCloud({ status: "connected", data: cloudHealth });\n        if (cloudHealth.encryptionReady) {\n          if (activePage)\n            await publishApplicationSnapshot(connection, activePage);\n          const snapshot = await getCloudSnapshot(connection);\n          setCloudSnapshot(snapshot);\n          setLastCloudPullAt(now());\n          setSelectedResumeId(\n            (current) => current || snapshot.resumes[0]?.resumeId || "",\n          );\n        } else {\n          setCloudSnapshot(null);\n        }\n      }\n    } catch (error) {\n      setCloud({\n        status: "unavailable",\n        error: error instanceof Error ? error.message : "Cloud unavailable",\n      });\n    }\n\n    if (!extensionRuntime.capabilities.nativeMessaging) {\n      setNative({ status: "unsupported" });\n      return;\n    }\n    setNative({ status: "checking" });\n    try {\n      const nativeHealth = await getNativeHealth();\n      const compatibility = nativeRuntimeCompatibility(nativeHealth);\n      if (!compatibility.compatible) {\n        setNative({\n          status: "upgrade_required",\n          data: nativeHealth,\n          reason: compatibility.reason,\n        });\n        return;\n      }\n      setNative({ status: "healthy", data: nativeHealth });\n      await refreshAI();\n    } catch (error) {\n      setNative({\n        status: "unavailable",\n        error:\n          error instanceof Error\n            ? error.message\n            : "Native companion is unavailable",\n      });\n    }\n'''
+          new_cloud = '''    setCloud({ status: "checking" });\n    void (async () => {\n      try {\n        const connection = await getCloudConnection();\n        if (!connection) {\n          setCloud({ status: "disconnected" });\n          return;\n        }\n        setWorkspaceUrl(connection.baseUrl);\n        const cloudHealth = await getCloudHealth(connection);\n        setCloud({ status: "connected", data: cloudHealth });\n        if (!cloudHealth.encryptionReady) {\n          setCloudSnapshot(null);\n          return;\n        }\n        const snapshot = await getCloudSnapshot(connection);\n        setCloudSnapshot(snapshot);\n        setLastCloudPullAt(now());\n        setSelectedResumeId(\n          (current) => current || snapshot.resumes[0]?.resumeId || "",\n        );\n      } catch (error) {\n        setCloud({\n          status: "unavailable",\n          error: error instanceof Error ? error.message : "Cloud unavailable",\n        });\n      }\n    })();\n'''
+          replace("apps/extension/src/sidepanel/App.tsx", old_cloud, new_cloud)
+          PY
+
+      - name: Format patched source
+        run: ./node_modules/.bin/prettier --write apps/extension/public/manifest.json apps/extension/src/messaging/client.ts apps/extension/src/messaging/client.test.ts apps/extension/src/sidepanel/App.tsx
+
+      - name: Full repository verification
+        run: npm run check
+
+      - name: Commit verified 0.2.10 source only
+        shell: bash
+        run: |
+          git config user.name "Aadil Munshi"
+          git config user.email "mohammadaadilmunshi@gmail.com"
+          git add apps/extension
+          if git diff --cached --quiet; then
+            echo "No source changes to commit"
+            exit 0
+          fi
+          git commit -m "fix: decouple companion health from cloud hydration"
+          git push origin HEAD:feat/v3-foundation-alignment
