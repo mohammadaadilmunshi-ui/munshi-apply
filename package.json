@@ -18,7 +18,7 @@
     "clean": "node scripts/clean.mjs",
     "dev": "npm run dev --workspace @munshi-apply/extension",
     "format": "prettier --write .",
-    "format:check": "prettier --write apps/extension/src/storage/answer-memory.ts packages/application-model/src/resolver-smart.ts packages/application-model/src/resolver-smart.test.ts packages/semantic-engine/src/field-intelligence.ts packages/semantic-engine/src/field-intelligence.test.ts && git diff --exit-code -- apps/extension/src/storage/answer-memory.ts packages/application-model/src/resolver-smart.ts packages/application-model/src/resolver-smart.test.ts packages/semantic-engine/src/field-intelligence.ts packages/semantic-engine/src/field-intelligence.test.ts",
+    "format:check": "prettier --check .",
     "lint": "eslint . --max-warnings 0",
     "secret:scan": "node scripts/secret-scan.mjs",
     "test": "vitest run",
