@@ -51,7 +51,6 @@ import {
   getCloudHealth,
   getCloudSnapshot,
   publishApplicationReview,
-  publishApplicationSnapshot,
   type ApplicationReview,
   type CloudHealth,
   type CloudSnapshot,
@@ -341,6 +340,36 @@ export function App() {
     setHealth(extensionRuntime.status);
     setRuntime(extensionRuntime);
 
+    if (!extensionRuntime.capabilities.nativeMessaging) {
+      setNative({ status: "unsupported" });
+    } else {
+      setNative({ status: "checking" });
+      void (async () => {
+        try {
+          const nativeHealth = await getNativeHealth();
+          const compatibility = nativeRuntimeCompatibility(nativeHealth);
+          if (!compatibility.compatible) {
+            setNative({
+              status: "upgrade_required",
+              data: nativeHealth,
+              reason: compatibility.reason,
+            });
+            return;
+          }
+          setNative({ status: "healthy", data: nativeHealth });
+          void refreshAI();
+        } catch (error) {
+          setNative({
+            status: "unavailable",
+            error:
+              error instanceof Error
+                ? error.message
+                : "Native companion is unavailable",
+          });
+        }
+      })();
+    }
+
     const activePage = await getActivePage().catch((error: unknown) => {
       setNotice(
         error instanceof Error
@@ -371,61 +400,33 @@ export function App() {
     setSaveState(syncStatus.conflict ? "conflict" : "idle");
 
     setCloud({ status: "checking" });
-    try {
-      const connection = await getCloudConnection();
-      if (!connection) {
-        setCloud({ status: "disconnected" });
-      } else {
+    void (async () => {
+      try {
+        const connection = await getCloudConnection();
+        if (!connection) {
+          setCloud({ status: "disconnected" });
+          return;
+        }
         setWorkspaceUrl(connection.baseUrl);
         const cloudHealth = await getCloudHealth(connection);
         setCloud({ status: "connected", data: cloudHealth });
-        if (cloudHealth.encryptionReady) {
-          if (activePage)
-            await publishApplicationSnapshot(connection, activePage);
-          const snapshot = await getCloudSnapshot(connection);
-          setCloudSnapshot(snapshot);
-          setLastCloudPullAt(now());
-          setSelectedResumeId(
-            (current) => current || snapshot.resumes[0]?.resumeId || "",
-          );
-        } else {
+        if (!cloudHealth.encryptionReady) {
           setCloudSnapshot(null);
+          return;
         }
-      }
-    } catch (error) {
-      setCloud({
-        status: "unavailable",
-        error: error instanceof Error ? error.message : "Cloud unavailable",
-      });
-    }
-
-    if (!extensionRuntime.capabilities.nativeMessaging) {
-      setNative({ status: "unsupported" });
-      return;
-    }
-    setNative({ status: "checking" });
-    try {
-      const nativeHealth = await getNativeHealth();
-      const compatibility = nativeRuntimeCompatibility(nativeHealth);
-      if (!compatibility.compatible) {
-        setNative({
-          status: "upgrade_required",
-          data: nativeHealth,
-          reason: compatibility.reason,
+        const snapshot = await getCloudSnapshot(connection);
+        setCloudSnapshot(snapshot);
+        setLastCloudPullAt(now());
+        setSelectedResumeId(
+          (current) => current || snapshot.resumes[0]?.resumeId || "",
+        );
+      } catch (error) {
+        setCloud({
+          status: "unavailable",
+          error: error instanceof Error ? error.message : "Cloud unavailable",
         });
-        return;
       }
-      setNative({ status: "healthy", data: nativeHealth });
-      await refreshAI();
-    } catch (error) {
-      setNative({
-        status: "unavailable",
-        error:
-          error instanceof Error
-            ? error.message
-            : "Native companion is unavailable",
-      });
-    }
+    })();
   }, [refreshAI]);
 
   const pullCloudChanges = useCallback(async () => {

@@ -1,6 +1,6 @@
 import type { ProfileSnapshot } from "@munshi-apply/contracts/profile-vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getHealth, saveProfile } from "./client";
+import { getHealth, getNativeHealth, saveProfile } from "./client";
 
 function profile(displayName: string, updatedAt: string): ProfileSnapshot {
   return {
@@ -114,6 +114,20 @@ describe("profile save queue", () => {
     await vi.advanceTimersByTimeAsync(120);
     await expect(pending).resolves.toEqual(health);
     expect(sendMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it("bounds a native-health request so checking cannot persist forever", async () => {
+    vi.useFakeTimers();
+    const sendMessage = vi.fn(() => new Promise<unknown>(() => undefined));
+    vi.stubGlobal("chrome", { runtime: { sendMessage } });
+
+    const pending = getNativeHealth();
+    const rejection = expect(pending).rejects.toThrow(
+      "Native companion health check timed out after 5 seconds",
+    );
+    await vi.advanceTimersByTimeAsync(5_000);
+    await rejection;
+    expect(sendMessage).toHaveBeenCalledTimes(1);
   });
 
   it("does not retry aborted profile writes and risk duplicate saves", async () => {

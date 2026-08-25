@@ -184,6 +184,26 @@ function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+function withTimeout<T>(
+  promise: Promise<T>,
+  milliseconds: number,
+  message: string,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), milliseconds);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 async function send(
   request: ExtensionRequest | AutoPilotRuntimeRequest,
 ): Promise<unknown> {
@@ -284,7 +304,11 @@ export async function getHealth(): Promise<ExtensionRuntimeHealth> {
 }
 
 export async function getNativeHealth(): Promise<NativeRuntimeHealth> {
-  return (await send({ type: "NATIVE_HEALTH" })) as NativeRuntimeHealth;
+  return (await withTimeout(
+    send({ type: "NATIVE_HEALTH" }),
+    5_000,
+    "Native companion health check timed out after 5 seconds",
+  )) as NativeRuntimeHealth;
 }
 
 export async function applyFillPlan(plan: FillPlan): Promise<FillResult[]> {
