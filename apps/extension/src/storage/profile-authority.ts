@@ -38,27 +38,72 @@ function sameSnapshot(
 export async function loadAuthoritativeProfileSnapshot(
   stores: ProfileSnapshotStores = defaultStores,
 ): Promise<ProfileSnapshot | null> {
-  const browser = await stores.getBrowser();
-  let native: ProfileSnapshot | null;
+  let browser: ProfileSnapshot | null = null;
+  let browserError: unknown = null;
+  try {
+    browser = await stores.getBrowser();
+  } catch (error) {
+    browserError = error;
+  }
+
+  let native: ProfileSnapshot | null = null;
+  let nativeError: unknown = null;
   try {
     native = await stores.getNative();
-  } catch {
+  } catch (error) {
+    nativeError = error;
+  }
+
+  if (browserError) {
+    if (native) return native;
+    const reason =
+      browserError instanceof Error
+        ? browserError.message
+        : String(browserError);
+    throw new Error(
+      `Browser profile vault is unreadable and no native recovery snapshot is available: ${reason}`,
+    );
+  }
+
+  if (nativeError) {
     return browser;
   }
 
   if (!native && !browser) return null;
   if (!native && browser) {
-    await stores.saveNative(browser);
+    try {
+      await stores.saveNative(browser);
+    } catch {
+      // Loading a known-good browser snapshot must not fail because a mirror
+      // write is temporarily unavailable.
+    }
     return browser;
   }
   if (native && !browser) {
-    await stores.saveBrowser(native);
+    try {
+      await stores.saveBrowser(native);
+    } catch {
+      // Preserve the authoritative native value even when the browser mirror
+      // cannot be repaired immediately.
+    }
     return native;
   }
 
   const reconciled = reconcileProtectedProfile(browser!, native!);
-  if (!sameSnapshot(reconciled, native)) await stores.saveNative(reconciled);
-  if (!sameSnapshot(reconciled, browser)) await stores.saveBrowser(reconciled);
+  if (!sameSnapshot(reconciled, native)) {
+    try {
+      await stores.saveNative(reconciled);
+    } catch {
+      // Reconciliation remains readable even if a mirror update must retry later.
+    }
+  }
+  if (!sameSnapshot(reconciled, browser)) {
+    try {
+      await stores.saveBrowser(reconciled);
+    } catch {
+      // Reconciliation remains readable even if a mirror update must retry later.
+    }
+  }
   return reconciled;
 }
 

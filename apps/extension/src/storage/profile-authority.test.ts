@@ -35,13 +35,17 @@ function snapshot(updatedAt: string, value = "Aadil"): ProfileSnapshot {
 function stores(input: {
   browser?: ProfileSnapshot | null;
   native?: ProfileSnapshot | null;
+  browserError?: Error;
   nativeError?: Error;
 }): ProfileSnapshotStores & {
   saveBrowser: ReturnType<typeof vi.fn>;
   saveNative: ReturnType<typeof vi.fn>;
 } {
   return {
-    getBrowser: vi.fn(async () => input.browser ?? null),
+    getBrowser: vi.fn(async () => {
+      if (input.browserError) throw input.browserError;
+      return input.browser ?? null;
+    }),
     saveBrowser: vi.fn(async () => undefined),
     getNative: vi.fn(async () => {
       if (input.nativeError) throw input.nativeError;
@@ -85,6 +89,43 @@ describe("desktop profile authority", () => {
       browser,
     );
     expect(adapters.saveNative).toHaveBeenCalledWith(browser);
+  });
+
+  it("recovers the authoritative native snapshot when the browser mirror is unreadable", async () => {
+    const native = snapshot("2026-08-14T12:01:00.000Z", "Recovered");
+    const adapters = stores({
+      browserError: new Error("IndexedDB profile parse failed"),
+      native,
+    });
+
+    await expect(loadAuthoritativeProfileSnapshot(adapters)).resolves.toEqual(
+      native,
+    );
+    expect(adapters.saveBrowser).not.toHaveBeenCalled();
+    expect(adapters.saveNative).not.toHaveBeenCalled();
+  });
+
+  it("refuses to present an empty profile when the browser mirror is unreadable and native has no snapshot", async () => {
+    const adapters = stores({
+      browserError: new Error("IndexedDB profile parse failed"),
+      native: null,
+    });
+
+    await expect(loadAuthoritativeProfileSnapshot(adapters)).rejects.toThrow(
+      "Browser profile vault is unreadable and no native recovery snapshot is available",
+    );
+  });
+
+  it("still returns a valid snapshot when a mirror repair write fails", async () => {
+    const native = snapshot("2026-08-14T12:01:00.000Z", "Recovered");
+    const adapters = stores({ browser: null, native });
+    adapters.saveBrowser.mockRejectedValueOnce(
+      new Error("IndexedDB write failed"),
+    );
+
+    await expect(loadAuthoritativeProfileSnapshot(adapters)).resolves.toEqual(
+      native,
+    );
   });
 
   it("persists to the browser fallback when the native write fails", async () => {

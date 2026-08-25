@@ -36,6 +36,7 @@ import {
 import {
   deleteOpenAIKey,
   getAISettings,
+  getNativeProfileSnapshot,
   listOpenAIModels,
   markAIDraftUsed,
   saveAISettings,
@@ -289,6 +290,9 @@ export function App() {
   const [page, setPage] = useState<ApplicationPage | null>(null);
   const [profile, setProfile] = useState<ProfileSnapshot>(emptyProfile);
   const [profileLoaded, setProfileLoaded] = useState(false);
+  const [profileRecoveryIssue, setProfileRecoveryIssue] = useState<
+    string | null
+  >(null);
   const [profileDirty, setProfileDirty] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [retryTick, setRetryTick] = useState(0);
@@ -381,12 +385,28 @@ export function App() {
     setPage(activePage);
 
     let savedProfile: ProfileSnapshot | null = null;
+    let profileLoadError: string | null = null;
     try {
       savedProfile = await getProfile();
     } catch (error) {
-      setNotice(
-        error instanceof Error ? error.message : "Unable to load profile",
-      );
+      profileLoadError =
+        error instanceof Error ? error.message : "Unable to load profile";
+      try {
+        const nativeRecovery = await getNativeProfileSnapshot();
+        if (nativeRecovery) {
+          savedProfile = nativeRecovery;
+          profileLoadError = null;
+          setNotice(
+            "Recovered your saved profile from the local encrypted desktop vault.",
+          );
+        }
+      } catch (nativeError) {
+        const nativeMessage =
+          nativeError instanceof Error
+            ? nativeError.message
+            : "Native profile recovery failed";
+        profileLoadError = `${profileLoadError}. ${nativeMessage}`;
+      }
     }
     const syncStatus = await getProfileSyncStatus().catch(() => ({
       conflict: null,
@@ -395,9 +415,16 @@ export function App() {
     if (savedProfile) setProfile(savedProfile);
     setProtectedDrafts({});
     profileRevision.current += 1;
-    setProfileLoaded(true);
     setProfileDirty(false);
-    setSaveState(syncStatus.conflict ? "conflict" : "idle");
+    if (profileLoadError && !savedProfile) {
+      setProfileRecoveryIssue(profileLoadError);
+      setProfileLoaded(false);
+      setSaveState("error");
+    } else {
+      setProfileRecoveryIssue(null);
+      setProfileLoaded(true);
+      setSaveState(syncStatus.conflict ? "conflict" : "idle");
+    }
 
     setCloud({ status: "checking" });
     void (async () => {
@@ -443,6 +470,9 @@ export function App() {
     setProfileSyncStatus(syncStatus);
     if (syncedProfile) {
       setProfile(syncedProfile);
+      setProfileRecoveryIssue(null);
+      setProfileLoaded(true);
+      setProfileDirty(false);
       profileRevision.current += 1;
       setSaveState(syncStatus.conflict ? "conflict" : "synced");
     }
@@ -712,8 +742,11 @@ export function App() {
       : health.toLowerCase() === "healthy"
         ? "partial"
         : "unavailable";
-  const saveLabel =
-    saveState === "editing"
+  const saveLabel = !profileLoaded
+    ? profileRecoveryIssue
+      ? "Recovery mode"
+      : "Loading profile…"
+    : saveState === "editing"
       ? "Editing…"
       : saveState === "saving"
         ? "Saving…"
@@ -730,6 +763,7 @@ export function App() {
                   : "Auto-save ready";
 
   function markProfileDirty(): void {
+    if (!profileLoaded) return;
     profileRevision.current += 1;
     setProfileDirty(true);
     setRetryTick(0);
@@ -1580,6 +1614,24 @@ export function App() {
             facts become confirmed only after you leave the field, and are
             encrypted before cloud synchronization.
           </p>
+          {!profileLoaded && (
+            <div className="profile-conflict-panel">
+              <strong>Profile recovery mode</strong>
+              <p>
+                Autosave is disabled and profile fields are locked until MUNSHI
+                confirms a stored snapshot. No empty profile will be written
+                over your saved data.
+              </p>
+              {profileRecoveryIssue && <p>{profileRecoveryIssue}</p>}
+              <button
+                className="quiet"
+                type="button"
+                onClick={() => void refresh()}
+              >
+                Retry profile recovery
+              </button>
+            </div>
+          )}
           {profileSyncStatus.conflict && (
             <div className="profile-conflict-panel">
               <strong>Choose the authoritative protected value</strong>
@@ -1645,6 +1697,7 @@ export function App() {
                         {field.protected ? " · protected" : ""}
                       </span>
                       <input
+                        disabled={!profileLoaded}
                         type={field.inputType ?? "text"}
                         value={
                           field.protected
@@ -1702,6 +1755,7 @@ export function App() {
                     <button
                       className="quiet"
                       type="button"
+                      disabled={!profileLoaded}
                       onClick={() => addRecord(definition)}
                     >
                       {definition.addLabel}
@@ -1726,7 +1780,7 @@ export function App() {
                               type="button"
                               aria-label={`Move ${record.label} up`}
                               title="Move up"
-                              disabled={recordIndex === 0}
+                              disabled={!profileLoaded || recordIndex === 0}
                               onClick={() => moveRecord(record, -1)}
                             >
                               ↑
@@ -1736,7 +1790,10 @@ export function App() {
                               type="button"
                               aria-label={`Move ${record.label} down`}
                               title="Move down"
-                              disabled={recordIndex === records.length - 1}
+                              disabled={
+                                !profileLoaded ||
+                                recordIndex === records.length - 1
+                              }
                               onClick={() => moveRecord(record, 1)}
                             >
                               ↓
@@ -1746,6 +1803,7 @@ export function App() {
                               type="button"
                               aria-label={`Remove ${record.label}`}
                               title="Remove record"
+                              disabled={!profileLoaded}
                               onClick={() => removeRecord(record)}
                             >
                               ×
@@ -1763,6 +1821,7 @@ export function App() {
                                 recordValue(record, field.key))
                               : recordValue(record, field.key);
                             const shared = {
+                              disabled: !profileLoaded,
                               value,
                               onChange: (
                                 event: ChangeEvent<
@@ -1826,6 +1885,7 @@ export function App() {
             <button
               className="quiet"
               type="button"
+              disabled={!profileLoaded}
               onClick={() => void syncNow()}
             >
               Sync now
@@ -1914,13 +1974,20 @@ export function App() {
             <div>
               <dt>Profile vault</dt>
               <dd>
-                {profile.facts.filter((fact) => fact.trustLevel !== "UNKNOWN")
-                  .length +
-                  profile.records
-                    .flatMap((record) => record.facts)
-                    .filter((fact) => fact.trustLevel !== "UNKNOWN")
-                    .length}{" "}
-                confirmed facts · {profile.records.length} records
+                {profileLoaded ? (
+                  <>
+                    {profile.facts.filter(
+                      (fact) => fact.trustLevel !== "UNKNOWN",
+                    ).length +
+                      profile.records
+                        .flatMap((record) => record.facts)
+                        .filter((fact) => fact.trustLevel !== "UNKNOWN")
+                        .length}{" "}
+                    confirmed facts · {profile.records.length} records
+                  </>
+                ) : (
+                  "recovery mode · autosave disabled"
+                )}
               </dd>
             </div>
             <div>

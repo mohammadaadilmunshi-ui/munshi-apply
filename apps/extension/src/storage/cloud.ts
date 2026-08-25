@@ -378,6 +378,13 @@ export async function getCloudHealth(
       nextCursor: payload.nextCursor ?? 0,
       encryptionReady: rawKey !== null,
     };
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(
+        "Encrypted workspace check timed out. Local profile data remains protected.",
+      );
+    }
+    throw error;
   } finally {
     globalThis.clearTimeout(timeout);
   }

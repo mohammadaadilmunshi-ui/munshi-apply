@@ -677,7 +677,11 @@ async function routeMessage(
             if (error instanceof ProtectedProfileConflictError) {
               rememberProfileConflict(error);
             }
-            // Local-first operation continues when cloud is unavailable or review is required.
+            if (!localProfile) {
+              throw error;
+            }
+            // A known local snapshot remains usable when cloud is unavailable
+            // or protected-value review is required.
           }
         }
         return { ok: true, data: localProfile };
