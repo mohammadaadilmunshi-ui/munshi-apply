@@ -1,0 +1,23 @@
+name: Temporary Prettier Edge diagnostic
+
+on:
+  push:
+    branches: [feat/v3-foundation-alignment]
+
+permissions:
+  contents: read
+
+jobs:
+  diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Print exact Prettier diff
+        run: |
+          npx prettier --write apps/extension/src/messaging/client.ts
+          git --no-pager diff -- apps/extension/src/messaging/client.ts
