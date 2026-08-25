@@ -24,10 +24,14 @@ function profileFact(
   return profile.facts.find((fact) => fact.key === key);
 }
 
-function confirmedAndUsable(fact: ProfileFact | undefined): fact is ProfileFact {
+function confirmedAndUsable(
+  fact: ProfileFact | undefined,
+): fact is ProfileFact {
   if (!fact || !trustedFactLevels.has(fact.trustLevel)) return false;
   if (fact.protected && !fact.confirmedAt) return false;
-  const value = Array.isArray(fact.value) ? fact.value.join(", ") : String(fact.value);
+  const value = Array.isArray(fact.value)
+    ? fact.value.join(", ")
+    : String(fact.value);
   return Boolean(value.trim());
 }
 
@@ -72,7 +76,11 @@ function confirmedLegalNameResolution(
   if (!confirmedAndUsable(firstName) || !confirmedAndUsable(lastName)) {
     return null;
   }
-  if (middleName && factText(middleName).trim() && !confirmedAndUsable(middleName)) {
+  if (
+    middleName &&
+    factText(middleName).trim() &&
+    !confirmedAndUsable(middleName)
+  ) {
     return null;
   }
 
