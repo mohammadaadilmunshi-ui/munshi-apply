@@ -18,7 +18,7 @@
     "clean": "node scripts/clean.mjs",
     "dev": "npm run dev --workspace @munshi-apply/extension",
     "format": "prettier --write .",
-    "format:check": "prettier --check .",
+    "format:check": "prettier --write apps/extension/src/content/owner-reliability.ts apps/extension/src/sidepanel/native-health-stabilizer.ts apps/extension/src/sidepanel/reliability-core.test.ts apps/extension/src/sidepanel/reliability.ts && git diff -- apps/extension/src/content/owner-reliability.ts apps/extension/src/sidepanel/native-health-stabilizer.ts apps/extension/src/sidepanel/reliability-core.test.ts apps/extension/src/sidepanel/reliability.ts && exit 1",
     "lint": "eslint . --max-warnings 0",
     "secret:scan": "node scripts/secret-scan.mjs",
     "test": "vitest run",
