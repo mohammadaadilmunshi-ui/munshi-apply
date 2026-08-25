@@ -1,6 +1,6 @@
 import type { ProfileSnapshot } from "@munshi-apply/contracts/profile-vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { saveProfile } from "./client";
+import { getHealth, saveProfile } from "./client";
 
 function profile(displayName: string, updatedAt: string): ProfileSnapshot {
   return {
@@ -30,6 +30,7 @@ const syncedAck = {
 
 describe("profile save queue", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -92,5 +93,38 @@ describe("profile save queue", () => {
     await expect(
       saveProfile(profile("invalid", "2026-08-14T12:00:02.000Z")),
     ).rejects.toThrow("Profile save returned no acknowledgement");
+  });
+
+  it("retries an Edge-aborted read-only startup health request", async () => {
+    vi.useFakeTimers();
+    const health = {
+      status: "healthy",
+      version: "0.2.8",
+      platform: "mac",
+      mobile: false,
+      capabilities: { nativeMessaging: true, sidePanel: true },
+    };
+    const sendMessage = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("The user aborted a request."))
+      .mockResolvedValueOnce({ ok: true, data: health });
+    vi.stubGlobal("chrome", { runtime: { sendMessage } });
+
+    const pending = getHealth();
+    await vi.advanceTimersByTimeAsync(120);
+    await expect(pending).resolves.toEqual(health);
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry aborted profile writes and risk duplicate saves", async () => {
+    const sendMessage = vi
+      .fn()
+      .mockRejectedValue(new Error("The user aborted a request."));
+    vi.stubGlobal("chrome", { runtime: { sendMessage } });
+
+    await expect(
+      saveProfile(profile("abort", "2026-08-14T12:00:03.000Z")),
+    ).rejects.toThrow("The user aborted a request.");
+    expect(sendMessage).toHaveBeenCalledTimes(1);
   });
 });
