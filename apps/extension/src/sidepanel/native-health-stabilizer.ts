@@ -8,9 +8,9 @@ type CachedResponse = {
 function successfulResponse(value: unknown): boolean {
   return Boolean(
     value &&
-      typeof value === "object" &&
-      "ok" in value &&
-      (value as { ok?: unknown }).ok === true,
+    typeof value === "object" &&
+    "ok" in value &&
+    (value as { ok?: unknown }).ok === true,
   );
 }
 

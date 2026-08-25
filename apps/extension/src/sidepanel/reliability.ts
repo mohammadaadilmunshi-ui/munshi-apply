@@ -74,16 +74,20 @@ function extensionResponse(value: unknown): {
 
 function installNativeHealthStabilizer(): void {
   if (!hasNativeMessagingPermission()) return;
-  const runtime = chrome.runtime as unknown as { sendMessage: GenericRuntimeSend };
-  const original = runtime.sendMessage.bind(chrome.runtime) as GenericRuntimeSend;
+  const runtime = chrome.runtime as unknown as {
+    sendMessage: GenericRuntimeSend;
+  };
+  const original = runtime.sendMessage.bind(
+    chrome.runtime,
+  ) as GenericRuntimeSend;
   originalRuntimeSend = original;
   try {
     runtime.sendMessage = (...args: unknown[]) => {
       const request = args.length === 1 ? args[0] : null;
       const isNativeHealth = Boolean(
         request &&
-          typeof request === "object" &&
-          (request as { type?: unknown }).type === "NATIVE_HEALTH",
+        typeof request === "object" &&
+        (request as { type?: unknown }).type === "NATIVE_HEALTH",
       );
       if (!isNativeHealth) return original(...args);
       return nativeHealth.request(() => Promise.resolve(original(...args)));
@@ -94,16 +98,20 @@ function installNativeHealthStabilizer(): void {
 }
 
 function rawRuntimeRequest(message: unknown): Promise<unknown> {
-  const send = originalRuntimeSend ??
-    (chrome.runtime.sendMessage.bind(chrome.runtime) as unknown as GenericRuntimeSend);
+  const send =
+    originalRuntimeSend ??
+    (chrome.runtime.sendMessage.bind(
+      chrome.runtime,
+    ) as unknown as GenericRuntimeSend);
   return Promise.resolve(send(message));
 }
 
 function parsePage(value: unknown, tabId?: number): ApplicationPage | null {
   if (!value || typeof value !== "object") return null;
-  const candidate = tabId === undefined
-    ? value
-    : { ...(value as Record<string, unknown>), tabId };
+  const candidate =
+    tabId === undefined
+      ? value
+      : { ...(value as Record<string, unknown>), tabId };
   const parsed = ApplicationPageSchema.safeParse(candidate);
   return parsed.success ? parsed.data : null;
 }
@@ -143,10 +151,11 @@ async function restoreRecentContext(): Promise<void> {
 
 function applicationSection(): HTMLElement | null {
   return (
-    Array.from(document.querySelectorAll<HTMLElement>("section")).find((section) =>
-      /current application/i.test(
-        section.querySelector(".section-heading .eyebrow")?.textContent ?? "",
-      ),
+    Array.from(document.querySelectorAll<HTMLElement>("section")).find(
+      (section) =>
+        /current application/i.test(
+          section.querySelector(".section-heading .eyebrow")?.textContent ?? "",
+        ),
     ) ?? null
   );
 }
@@ -156,8 +165,8 @@ function restoreRetainedHeading(): void {
     "[data-munshi-retained-original-title]",
   );
   if (!heading) return;
-  heading.textContent = heading.dataset.munshiRetainedOriginalTitle ??
-    "No application detected";
+  heading.textContent =
+    heading.dataset.munshiRetainedOriginalTitle ?? "No application detected";
   delete heading.dataset.munshiRetainedOriginalTitle;
 }
 
@@ -175,8 +184,8 @@ function setRetainedHeading(title: string): void {
   const heading = section?.querySelector<HTMLElement>(".section-heading h2");
   if (!heading) return;
   if (!heading.dataset.munshiRetainedOriginalTitle) {
-    heading.dataset.munshiRetainedOriginalTitle = heading.textContent ??
-      "No application detected";
+    heading.dataset.munshiRetainedOriginalTitle =
+      heading.textContent ?? "No application detected";
   }
   heading.textContent = title;
 }
@@ -231,7 +240,10 @@ function recentQuestionRow(
   button.type = "button";
   button.className = "munshi-question-jump";
   button.textContent = "Jump";
-  button.addEventListener("click", () => void jumpToQuestion(page, question, button));
+  button.addEventListener(
+    "click",
+    () => void jumpToQuestion(page, question, button),
+  );
   row.append(text, button);
   return row;
 }
@@ -282,7 +294,9 @@ function renderRecentContextCard(record: RecentJobContextRecord): void {
     returnButton.className = "munshi-return-job";
     returnButton.textContent = "Return to job tab";
     returnButton.addEventListener("click", () => {
-      void chrome.tabs.update(record.page.tabId, { active: true }).catch(() => undefined);
+      void chrome.tabs
+        .update(record.page.tabId, { active: true })
+        .catch(() => undefined);
     });
     actions.append(returnButton);
   }
@@ -308,7 +322,8 @@ function renderRecentContextCard(record: RecentJobContextRecord): void {
   else section.prepend(card);
 
   const updateCountdown = () => {
-    if (!recentContext || recentContext.page.pageId !== record.page.pageId) return;
+    if (!recentContext || recentContext.page.pageId !== record.page.pageId)
+      return;
     if (record.retainedUntil === null) {
       countdown.textContent = "Active";
       card.classList.remove("fading");
@@ -361,11 +376,14 @@ async function retainCurrentContext(): Promise<void> {
     recentContext = beginRecentContextRetention(recentContext);
     await persistRecentContext();
   }
-  if (recentContextIsVisible(recentContext)) renderRecentContextCard(recentContext);
+  if (recentContextIsVisible(recentContext))
+    renderRecentContextCard(recentContext);
   else await expireRecentContext();
 }
 
-async function readPageContextFromTab(tabId: number): Promise<ApplicationPage | null> {
+async function readPageContextFromTab(
+  tabId: number,
+): Promise<ApplicationPage | null> {
   try {
     const response = (await chrome.tabs.sendMessage(
       tabId,
@@ -443,7 +461,9 @@ function patchTeachCopy(): void {
 
 function profileFactLabel(question: Question): string {
   const target = permanentProfileTarget(question.semanticType);
-  return target ? humanizeSemanticType(target.key) : humanizeSemanticType(question.semanticType);
+  return target
+    ? humanizeSemanticType(target.key)
+    : humanizeSemanticType(question.semanticType);
 }
 
 function appendTeachNote(result: HTMLElement, text: string): void {
@@ -500,7 +520,9 @@ async function promoteSuccessfulTeach(
       await rawRuntimeRequest({ type: "GET_PROFILE" }),
     );
     if (!profileResponse?.ok || profileResponse.data == null) {
-      throw new Error(profileResponse?.error || "Personal Profile is unavailable");
+      throw new Error(
+        profileResponse?.error || "Personal Profile is unavailable",
+      );
     }
     const profile = parseProfileSnapshot(profileResponse.data);
     const approvedAt = new Date().toISOString();
@@ -574,7 +596,10 @@ function lessonStateLabel(state: NativeRecipeSummary["state"]): string {
   return "Testing";
 }
 
-function nativeRequest(message: Record<string, unknown>, timeoutMs = 4_000): Promise<unknown> {
+function nativeRequest(
+  message: Record<string, unknown>,
+  timeoutMs = 4_000,
+): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const port = chrome.runtime.connectNative(NATIVE_HOST_NAME);
     const timeout = window.setTimeout(() => {
@@ -639,7 +664,10 @@ async function listLearnedRecipes(): Promise<NativeRecipeSummary[]> {
     : new Error("Learned lessons are unavailable");
 }
 
-function renderLearnedItems(container: HTMLElement, items: NativeRecipeSummary[]): void {
+function renderLearnedItems(
+  container: HTMLElement,
+  items: NativeRecipeSummary[],
+): void {
   container.replaceChildren();
   if (items.length === 0) {
     const empty = document.createElement("p");
@@ -707,7 +735,9 @@ function ensureLearnedPanel(): void {
   panel.append(header, copy, list);
   teach.append(panel);
   if (hasNativeMessagingPermission()) void refreshLearnedPanel(panel);
-  else list.textContent = "Learned controls are available on the desktop companion.";
+  else
+    list.textContent =
+      "Learned controls are available on the desktop companion.";
 }
 
 function processTeachResult(): void {
@@ -720,7 +750,9 @@ function processTeachResult(): void {
   pendingTeachPromotion = null;
   if (pending) {
     void promoteSuccessfulTeach(pending, result).finally(() => {
-      const panel = document.querySelector<HTMLElement>(".munshi-learned-panel");
+      const panel = document.querySelector<HTMLElement>(
+        ".munshi-learned-panel",
+      );
       if (panel) void refreshLearnedPanel(panel);
     });
   }

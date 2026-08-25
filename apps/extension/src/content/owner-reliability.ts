@@ -27,8 +27,7 @@ function selectedRadioValue(element: HTMLInputElement): string {
     root.querySelectorAll<HTMLInputElement>("input[type='radio']"),
   ).find(
     (candidate) =>
-      candidate.checked &&
-      (!element.name || candidate.name === element.name),
+      candidate.checked && (!element.name || candidate.name === element.name),
   );
   if (!selected) return "";
   return inputLabel(selected) || compact(selected.value);
@@ -107,34 +106,39 @@ export function focusOwnerControl(controlId: string): OwnerFocusResult {
 
 function registerOwnerReliabilityMessages(): void {
   if (typeof chrome === "undefined" || !chrome.runtime?.onMessage) return;
-  chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
-    if (!message || typeof message !== "object") return false;
-    const candidate = message as { type?: unknown; controlId?: unknown };
-    if (
-      candidate.type === "MUNSHI_OWNER_FOCUS_CONTROL" &&
-      typeof candidate.controlId === "string"
-    ) {
-      sendResponse({ ok: true, result: focusOwnerControl(candidate.controlId) });
+  chrome.runtime.onMessage.addListener(
+    (message: unknown, _sender, sendResponse) => {
+      if (!message || typeof message !== "object") return false;
+      const candidate = message as { type?: unknown; controlId?: unknown };
+      if (
+        candidate.type === "MUNSHI_OWNER_FOCUS_CONTROL" &&
+        typeof candidate.controlId === "string"
+      ) {
+        sendResponse({
+          ok: true,
+          result: focusOwnerControl(candidate.controlId),
+        });
+        return false;
+      }
+      if (
+        candidate.type === "MUNSHI_OWNER_READ_CONTROL_VALUE" &&
+        typeof candidate.controlId === "string"
+      ) {
+        const resolved = resolveControlElement(candidate.controlId);
+        sendResponse({
+          ok: Boolean(resolved),
+          value: resolved ? ownerControlValue(resolved.element) : "",
+          rebound: resolved?.rebound ?? false,
+        });
+        return false;
+      }
+      if (candidate.type === "MUNSHI_OWNER_PAGE_CONTEXT") {
+        sendResponse({ ok: true, page: scanDocument() });
+        return false;
+      }
       return false;
-    }
-    if (
-      candidate.type === "MUNSHI_OWNER_READ_CONTROL_VALUE" &&
-      typeof candidate.controlId === "string"
-    ) {
-      const resolved = resolveControlElement(candidate.controlId);
-      sendResponse({
-        ok: Boolean(resolved),
-        value: resolved ? ownerControlValue(resolved.element) : "",
-        rebound: resolved?.rebound ?? false,
-      });
-      return false;
-    }
-    if (candidate.type === "MUNSHI_OWNER_PAGE_CONTEXT") {
-      sendResponse({ ok: true, page: scanDocument() });
-      return false;
-    }
-    return false;
-  });
+    },
+  );
 }
 
 registerOwnerReliabilityMessages();

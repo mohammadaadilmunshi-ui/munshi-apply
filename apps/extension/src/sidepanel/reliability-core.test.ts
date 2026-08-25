@@ -63,7 +63,10 @@ describe("recent job context", () => {
       RECENT_JOB_CONTEXT_GRACE_MS,
     );
     expect(
-      recentContextIsVisible(retained, started + RECENT_JOB_CONTEXT_GRACE_MS - 1),
+      recentContextIsVisible(
+        retained,
+        started + RECENT_JOB_CONTEXT_GRACE_MS - 1,
+      ),
     ).toBe(true);
     expect(
       recentContextIsVisible(retained, started + RECENT_JOB_CONTEXT_GRACE_MS),
