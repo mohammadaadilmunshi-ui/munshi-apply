@@ -133,8 +133,7 @@ function candidateMemoryKeys(
     `question:${exact}`,
     exact,
   ].filter(
-    (value, index, values) =>
-      Boolean(value) && values.indexOf(value) === index,
+    (value, index, values) => Boolean(value) && values.indexOf(value) === index,
   );
 }
 
