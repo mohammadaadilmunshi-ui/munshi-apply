@@ -23,7 +23,7 @@ dev = [
 ]
 
 [project.scripts]
-munshi-apply-native = "munshi_apply_native.native_messaging:main"
+munshi-apply-native = "munshi_apply_native.native_messaging_reliable:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/munshi_apply_native"]

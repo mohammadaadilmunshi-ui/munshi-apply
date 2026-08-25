@@ -19,7 +19,7 @@ await Promise.all([
   }),
   build({
     ...shared,
-    entryPoints: ["src/content/bootstrap.ts"],
+    entryPoints: ["src/content/entry.ts"],
     format: "iife",
     globalName: "MunshiApplyContent",
     outfile: "dist/content/bootstrap.js",
