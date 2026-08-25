@@ -1,0 +1,26 @@
+.answer-heading[data-munshi-jump-ready="true"] {
+  cursor: pointer;
+  border-radius: 10px;
+  transition: background 120ms ease, outline-color 120ms ease;
+}
+
+.answer-heading[data-munshi-jump-ready="true"]:hover {
+  background: color-mix(in srgb, currentColor 6%, transparent);
+}
+
+.answer-heading[data-munshi-jump-ready="true"]:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 4px;
+}
+
+.answer-heading[data-munshi-jump-busy="true"] {
+  opacity: 0.7;
+}
+
+.munshi-retained-context {
+  margin: 10px 0 14px;
+}
+
+#munshi-question-jump-status {
+  margin: 10px 0 14px;
+}
