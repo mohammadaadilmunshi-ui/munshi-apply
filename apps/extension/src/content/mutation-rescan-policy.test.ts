@@ -54,7 +54,7 @@ describe("mutation rescan policy", () => {
     ).toBe(false);
   });
 
-  it("rescans when attributes can affect a control subtree", () => {
+  it("rescans when visibility attributes can affect a control subtree", () => {
     const section = document.createElement("section");
     section.innerHTML = `<label for="email">Email</label><input id="email">`;
     expect(shouldRescanFromMutations([attributeRecord(section, "class")])).toBe(
@@ -62,6 +62,24 @@ describe("mutation rescan policy", () => {
     );
     expect(
       shouldRescanFromMutations([attributeRecord(section, "aria-hidden")]),
+    ).toBe(true);
+  });
+
+  it("ignores unrelated aria state churn on broad containers even when a form exists below", () => {
+    const pageShell = document.createElement("main");
+    pageShell.innerHTML = `<form><input name="email"></form>`;
+    expect(
+      shouldRescanFromMutations([attributeRecord(pageShell, "aria-busy")]),
+    ).toBe(false);
+    expect(
+      shouldRescanFromMutations([attributeRecord(pageShell, "aria-label")]),
+    ).toBe(false);
+  });
+
+  it("rescans direct control aria state changes", () => {
+    const input = document.createElement("input");
+    expect(
+      shouldRescanFromMutations([attributeRecord(input, "aria-invalid")]),
     ).toBe(true);
   });
 
