@@ -109,7 +109,10 @@ function scheduleScan(force = false): void {
   const throttleDelay =
     lastScanStartedAt === 0
       ? 0
-      : Math.max(0, automaticInterval - (current - lastScanStartedAt));
+      : Math.max(
+          0,
+          automaticInterval - (current - lastScanStartedAt),
+        );
 
   clearPendingScan();
   pending = window.setTimeout(
