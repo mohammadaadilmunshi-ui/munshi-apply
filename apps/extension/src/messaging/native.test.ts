@@ -1,6 +1,5 @@
 import type { ProfileSnapshot } from "@munshi-apply/contracts/profile-vault";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { getNativeProfileSnapshot, saveNativeProfileSnapshot } from "./native";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const timestamp = "2026-08-14T18:00:00.000Z";
 
@@ -45,13 +44,22 @@ function installNativePort(response: unknown) {
   return { connectNative, port };
 }
 
+async function nativeModule() {
+  return import("./native");
+}
+
 describe("native profile snapshot messages", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
   it("loads and validates the canonical snapshot", async () => {
     const native = installNativePort({ ok: true, data: profile() });
+    const { getNativeProfileSnapshot } = await nativeModule();
 
     await expect(getNativeProfileSnapshot()).resolves.toEqual(profile());
     expect(native.connectNative).toHaveBeenCalledWith("systems.munshi.apply");
@@ -62,12 +70,14 @@ describe("native profile snapshot messages", () => {
 
   it("rejects malformed native profile data", async () => {
     installNativePort({ ok: true, data: { profileId: "incomplete" } });
+    const { getNativeProfileSnapshot } = await nativeModule();
 
     await expect(getNativeProfileSnapshot()).rejects.toThrow();
   });
 
   it("validates before saving and sends the canonical message", async () => {
     const native = installNativePort({ ok: true, data: { saved: true } });
+    const { saveNativeProfileSnapshot } = await nativeModule();
 
     await saveNativeProfileSnapshot(profile());
     expect(native.port.postMessage).toHaveBeenCalledWith({
