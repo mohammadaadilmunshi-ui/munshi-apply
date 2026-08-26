@@ -102,6 +102,30 @@ const keysStore = "keys";
 const connectionKey = "connection";
 const devicePrivateKey = "device-private-key";
 const workspaceEncryptionKey = "workspace-encryption-key-v1";
+const DEFAULT_CLOUD_REQUEST_TIMEOUT_MS = 5_000;
+const CLOUD_WRITE_TIMEOUT_MS = 8_000;
+const CLOUD_UPLOAD_TIMEOUT_MS = 20_000;
+
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+  timeoutMilliseconds = DEFAULT_CLOUD_REQUEST_TIMEOUT_MS,
+  timeoutMessage = "Encrypted workspace request timed out",
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = globalThis.setTimeout(
+    () => controller.abort(),
+    Math.max(1, timeoutMilliseconds),
+  );
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error(timeoutMessage);
+    throw error;
+  } finally {
+    globalThis.clearTimeout(timeout);
+  }
+}
 
 function openCloudVault(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -306,19 +330,24 @@ export async function enrollCloudDevice(input: {
   );
   const randomLabel = crypto.getRandomValues(new Uint8Array(32));
 
-  const response = await fetch(`${baseUrl}/api/device-enrollment`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      challengeId: bundle.challengeId,
-      secret: bundle.secret,
-      deviceId,
-      labelCiphertext: base64Url(randomLabel),
-      platform: input.platform,
-      publicKeyJwk,
-      signature: base64Url(signature),
-    }),
-  });
+  const response = await fetchWithTimeout(
+    `${baseUrl}/api/device-enrollment`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        challengeId: bundle.challengeId,
+        secret: bundle.secret,
+        deviceId,
+        labelCiphertext: base64Url(randomLabel),
+        platform: input.platform,
+        publicKeyJwk,
+        signature: base64Url(signature),
+      }),
+    },
+    10_000,
+    "Device enrollment timed out after 10 seconds",
+  );
   const payload = (await response.json()) as {
     credential?: string;
     error?: string;
@@ -344,21 +373,23 @@ export async function enrollCloudDevice(input: {
   return connection;
 }
 
-export async function getCloudHealth(
+let cloudHealthInFlight: Promise<CloudHealth> | null = null;
+
+export function getCloudHealth(
   connection: CloudConnection,
 ): Promise<CloudHealth> {
-  const controller = new AbortController();
-  const timeout = globalThis.setTimeout(() => controller.abort(), 5_000);
-  try {
-    const response = await fetch(
+  if (cloudHealthInFlight) return cloudHealthInFlight;
+  const operation = (async (): Promise<CloudHealth> => {
+    const response = await fetchWithTimeout(
       `${connection.baseUrl}/api/sync/events?cursor=0`,
       {
         headers: {
           accept: "application/json",
           authorization: `Bearer ${connection.credential}`,
         },
-        signal: controller.signal,
       },
+      5_000,
+      "Encrypted workspace check timed out. Local profile data remains protected.",
     );
     const payload = (await response.json()) as {
       workspaceId?: string;
@@ -378,16 +409,12 @@ export async function getCloudHealth(
       nextCursor: payload.nextCursor ?? 0,
       encryptionReady: rawKey !== null,
     };
-  } catch (error) {
-    if (controller.signal.aborted) {
-      throw new Error(
-        "Encrypted workspace check timed out. Local profile data remains protected.",
-      );
-    }
-    throw error;
-  } finally {
-    globalThis.clearTimeout(timeout);
-  }
+  })();
+  cloudHealthInFlight = operation;
+  void operation.finally(() => {
+    if (cloudHealthInFlight === operation) cloudHealthInFlight = null;
+  });
+  return operation;
 }
 
 export async function getWorkspaceEncryptionKey(): Promise<string | null> {
@@ -410,17 +437,22 @@ export async function activateCloudEncryption(
       "Create a new code from the updated private workspace to enable encrypted sync",
     );
   }
-  const response = await fetch(`${connection.baseUrl}/api/device-encryption`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${connection.credential}`,
+  const response = await fetchWithTimeout(
+    `${connection.baseUrl}/api/device-encryption`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${connection.credential}`,
+      },
+      body: JSON.stringify({
+        challengeId: bundle.challengeId,
+        secret: bundle.secret,
+      }),
     },
-    body: JSON.stringify({
-      challengeId: bundle.challengeId,
-      secret: bundle.secret,
-    }),
-  });
+    10_000,
+    "Encrypted synchronization activation timed out after 10 seconds",
+  );
   const payload = (await response.json()) as { error?: string };
   if (!response.ok) {
     throw new Error(
@@ -512,7 +544,7 @@ export async function fetchCloudEvents(
   let workspaceId: string | null = null;
 
   for (let page = 0; page < 100; page += 1) {
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       `${connection.baseUrl}/api/sync/events?cursor=${nextCursor}`,
       {
         headers: {
@@ -520,6 +552,8 @@ export async function fetchCloudEvents(
           authorization: `Bearer ${connection.credential}`,
         },
       },
+      DEFAULT_CLOUD_REQUEST_TIMEOUT_MS,
+      "Encrypted workspace event download timed out after 5 seconds",
     );
     const payload = (await response.json()) as {
       workspaceId?: string;
@@ -572,23 +606,28 @@ export async function postEncryptedEntity(input: {
   value: unknown;
 }): Promise<number> {
   const payloadCiphertext = await encryptJson(input.rawKey, input.value);
-  const response = await fetch(`${input.connection.baseUrl}/api/sync/events`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${input.connection.credential}`,
+  const response = await fetchWithTimeout(
+    `${input.connection.baseUrl}/api/sync/events`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${input.connection.credential}`,
+      },
+      body: JSON.stringify({
+        id: `evt-${crypto.randomUUID()}`,
+        correlationId: `cor-${crypto.randomUUID()}`,
+        entityType: input.entityType,
+        entityId: input.entityId,
+        baseVersion: input.baseVersion,
+        schemaVersion: "1.0",
+        payloadCiphertext,
+        payloadSha256: await sha256Hex(payloadCiphertext),
+      }),
     },
-    body: JSON.stringify({
-      id: `evt-${crypto.randomUUID()}`,
-      correlationId: `cor-${crypto.randomUUID()}`,
-      entityType: input.entityType,
-      entityId: input.entityId,
-      baseVersion: input.baseVersion,
-      schemaVersion: "1.0",
-      payloadCiphertext,
-      payloadSha256: await sha256Hex(payloadCiphertext),
-    }),
-  });
+    CLOUD_WRITE_TIMEOUT_MS,
+    "Encrypted workspace update timed out after 8 seconds",
+  );
   const payload = (await response.json()) as {
     event?: { version?: number };
     conflict?: { expectedVersion?: number };
@@ -611,62 +650,72 @@ export async function postEncryptedEntity(input: {
   return expectedVersion;
 }
 
-export async function getCloudSnapshot(
+let cloudSnapshotInFlight: Promise<CloudSnapshot> | null = null;
+
+export function getCloudSnapshot(
   connection: CloudConnection,
 ): Promise<CloudSnapshot> {
-  const rawKey = await getWorkspaceEncryptionKey();
-  if (!rawKey) throw new Error("Encrypted synchronization is not enabled");
-  const { events, nextCursor, workspaceId } = await fetchCloudEvents(
-    connection,
-    0,
-  );
-  const latest = latestEvents(events);
-  let profile: ProfileSnapshot | null = null;
-  let profileVersion = 0;
-  const applications: ApplicationPage[] = [];
-  const reviews: ApplicationReview[] = [];
-  const resumes: ResumeRecord[] = [];
-  for (const event of latest.values()) {
-    if (event.entityType === "PROFILE.V1") {
-      profile = parseProfileSnapshot(
-        await decryptJson<unknown>(rawKey, event.payloadCiphertext),
-      );
-      profileVersion = event.baseVersion + 1;
-    } else if (event.entityType === "APPLICATION.V1") {
-      const application = parseCloudApplicationPage(
-        await decryptJson<unknown>(rawKey, event.payloadCiphertext),
-      );
-      if (
-        application &&
-        shouldPublishApplicationSnapshot(connection, application)
-      ) {
-        applications.push(application);
+  if (cloudSnapshotInFlight) return cloudSnapshotInFlight;
+  const operation = (async (): Promise<CloudSnapshot> => {
+    const rawKey = await getWorkspaceEncryptionKey();
+    if (!rawKey) throw new Error("Encrypted synchronization is not enabled");
+    const { events, nextCursor, workspaceId } = await fetchCloudEvents(
+      connection,
+      0,
+    );
+    const latest = latestEvents(events);
+    let profile: ProfileSnapshot | null = null;
+    let profileVersion = 0;
+    const applications: ApplicationPage[] = [];
+    const reviews: ApplicationReview[] = [];
+    const resumes: ResumeRecord[] = [];
+    for (const event of latest.values()) {
+      if (event.entityType === "PROFILE.V1") {
+        profile = parseProfileSnapshot(
+          await decryptJson<unknown>(rawKey, event.payloadCiphertext),
+        );
+        profileVersion = event.baseVersion + 1;
+      } else if (event.entityType === "APPLICATION.V1") {
+        const application = parseCloudApplicationPage(
+          await decryptJson<unknown>(rawKey, event.payloadCiphertext),
+        );
+        if (
+          application &&
+          shouldPublishApplicationSnapshot(connection, application)
+        ) {
+          applications.push(application);
+        }
+      } else if (event.entityType === "APPLICATION.REVIEW.V1") {
+        reviews.push(
+          await decryptJson<ApplicationReview>(rawKey, event.payloadCiphertext),
+        );
+      } else if (event.entityType === "RESUME.V1") {
+        const resume = await decryptJson<ResumeRecord>(
+          rawKey,
+          event.payloadCiphertext,
+        );
+        if (!resume.deletedAt) resumes.push(resume);
       }
-    } else if (event.entityType === "APPLICATION.REVIEW.V1") {
-      reviews.push(
-        await decryptJson<ApplicationReview>(rawKey, event.payloadCiphertext),
-      );
-    } else if (event.entityType === "RESUME.V1") {
-      const resume = await decryptJson<ResumeRecord>(
-        rawKey,
-        event.payloadCiphertext,
-      );
-      if (!resume.deletedAt) resumes.push(resume);
     }
-  }
-  applications.sort((left, right) =>
-    right.observedAt.localeCompare(left.observedAt),
-  );
-  resumes.sort((left, right) => right.addedAt.localeCompare(left.addedAt));
-  return {
-    profile,
-    profileVersion,
-    applications,
-    reviews,
-    resumes,
-    nextCursor,
-    workspaceId,
-  };
+    applications.sort((left, right) =>
+      right.observedAt.localeCompare(left.observedAt),
+    );
+    resumes.sort((left, right) => right.addedAt.localeCompare(left.addedAt));
+    return {
+      profile,
+      profileVersion,
+      applications,
+      reviews,
+      resumes,
+      nextCursor,
+      workspaceId,
+    };
+  })();
+  cloudSnapshotInFlight = operation;
+  void operation.finally(() => {
+    if (cloudSnapshotInFlight === operation) cloudSnapshotInFlight = null;
+  });
+  return operation;
 }
 
 export async function publishApplicationSnapshot(
@@ -700,12 +749,11 @@ export async function publishApplicationSnapshot(
   });
 }
 
-export async function publishApplicationReview(
+async function publishApplicationReviewRemote(
   connection: CloudConnection,
+  rawKey: string,
   review: ApplicationReview,
 ): Promise<void> {
-  const rawKey = await getWorkspaceEncryptionKey();
-  if (!rawKey) throw new Error("Encrypted synchronization is not enabled");
   const { events } = await fetchCloudEvents(connection, 0);
   const latest = latestEvents(events).get(
     `APPLICATION.REVIEW.V1:${review.reviewId}`,
@@ -718,6 +766,22 @@ export async function publishApplicationReview(
     baseVersion: latest ? latest.baseVersion + 1 : 0,
     value: review,
   });
+}
+
+export async function publishApplicationReview(
+  connection: CloudConnection,
+  review: ApplicationReview,
+): Promise<void> {
+  const rawKey = await getWorkspaceEncryptionKey();
+  if (!rawKey) throw new Error("Encrypted synchronization is not enabled");
+
+  // Review attribution is important, but it must never sit in front of an
+  // employer-page action. Network work is bounded and intentionally detached
+  // from the fill critical path; the next cloud reconciliation can recover the
+  // canonical application state even if this best-effort publish is unavailable.
+  void publishApplicationReviewRemote(connection, rawKey, review).catch(
+    () => undefined,
+  );
 }
 
 const allowedResumeExtensions = new Set(["pdf", "doc", "docx"]);
@@ -794,19 +858,24 @@ export async function uploadEncryptedResume(
   );
   const bytes = new TextEncoder().encode(encryptedPayload);
   const metadataCiphertext = await encryptJson(rawKey, record);
-  const response = await fetch(`${connection.baseUrl}/api/objects`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/octet-stream",
-      authorization: `Bearer ${connection.credential}`,
-      "x-munshi-object-id": objectId,
-      "x-munshi-purpose": "RESUME",
-      "x-munshi-metadata-ciphertext": metadataCiphertext,
-      "x-munshi-wrapped-key": "workspace-key-v1",
-      "x-munshi-payload-sha256": await sha256Hex(bytes.buffer),
+  const response = await fetchWithTimeout(
+    `${connection.baseUrl}/api/objects`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/octet-stream",
+        authorization: `Bearer ${connection.credential}`,
+        "x-munshi-object-id": objectId,
+        "x-munshi-purpose": "RESUME",
+        "x-munshi-metadata-ciphertext": metadataCiphertext,
+        "x-munshi-wrapped-key": "workspace-key-v1",
+        "x-munshi-payload-sha256": await sha256Hex(bytes.buffer),
+      },
+      body: bytes,
     },
-    body: bytes,
-  });
+    CLOUD_UPLOAD_TIMEOUT_MS,
+    "Encrypted résumé upload timed out after 20 seconds",
+  );
   const payload = (await response.json()) as { error?: string };
   if (!response.ok) {
     throw new Error(payload.error ?? "Encrypted résumé upload failed");
