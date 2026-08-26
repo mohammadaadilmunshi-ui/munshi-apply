@@ -1,0 +1,57 @@
+name: Browser tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Tasks 1-5 final verification boundary after native analytics compatibility reconciliation.
+jobs:
+  synthetic-browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Enforce isolated 300-field scanner performance budget
+        run: MUNSHI_PERF_STRICT=1 ./node_modules/.bin/vitest run apps/extension/src/content/ats-endurance.test.ts
+      - name: Run ATS, lifecycle, intelligence, and performance endurance suite
+        run: |
+          ./node_modules/.bin/vitest run \
+            apps/extension/src/content/scanner.test.ts \
+            apps/extension/src/content/scanner-page-identity.test.ts \
+            apps/extension/src/content/fill.test.ts \
+            apps/extension/src/content/autofill-advanced.test.ts \
+            apps/extension/src/content/advanced-controls.test.ts \
+            apps/extension/src/content/ats-endurance.test.ts \
+            apps/extension/src/content/runtime-lifecycle.test.ts \
+            apps/extension/src/content/snapshot-retry.test.ts \
+            apps/extension/src/content/snapshot-coalescer.test.ts \
+            apps/extension/src/content/mutation-rescan-policy.test.ts \
+            apps/extension/src/background/content-runtime.test.ts \
+            apps/extension/src/background/history-state-recovery.test.ts \
+            apps/extension/src/background/page-merge.test.ts \
+            apps/extension/src/background/autopilot-application-identity.test.ts \
+            apps/extension/src/background/autopilot-controller.test.ts \
+            apps/extension/src/background/autopilot-navigation-interruption.test.ts \
+            apps/extension/src/background/autopilot-navigation-safety.integration.test.ts \
+            apps/extension/src/messaging/native-application-analytics.test.ts \
+            apps/extension/src/sidepanel/job-signal-view.test.ts \
+            apps/extension/src/sidepanel/JobSignalPanel.test.tsx \
+            packages/application-model/src/job-opportunity.test.ts \
+            packages/application-model/src/job-signals-fixtures.test.ts \
+            packages/application-model/src/application-analytics.test.ts \
+            packages/application-model/src/job-signal-page.test.ts
+      - run: npm run build
+      - run: npm run verify
+      - uses: actions/upload-artifact@v7
+        with:
+          name: browser-test-extension
+          path: apps/extension/dist
+          if-no-files-found: error

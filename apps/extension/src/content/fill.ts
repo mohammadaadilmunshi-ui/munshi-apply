@@ -1,0 +1,1003 @@
+import type { RecipeAction } from "@munshi-apply/application-model";
+import type { FillInstruction, FillResult } from "@munshi-apply/contracts";
+import { fillNativeMultiSelect } from "./multi-select";
+import {
+  fillAriaMultiSelectControl,
+  fillStrictTemporalInput,
+  isAriaMultiSelectControl,
+} from "./advanced-controls";
+import { resolveControlElement } from "./scanner";
+import {
+  defaultAdaptiveTiming,
+  fillAriaBooleanControl,
+  fillAriaRadioControl,
+  fillCustomDateControl,
+  fillDateLikeTextInput,
+  interactionContext,
+  isPopupChoiceControl,
+  optionEquivalent,
+  uniqueOptionCandidate,
+  validationFailureReason,
+  waitForDomStability,
+} from "./adaptive";
+
+export type FillInteractionOptions = {
+  optionTimeoutMs?: number;
+  pollIntervalMs?: number;
+  verificationTimeoutMs?: number;
+  stabilityQuietMs?: number;
+  stabilityTimeoutMs?: number;
+};
+
+export type PreferredInteractionRecipe = {
+  recipeId: string;
+  strategy: "TAUGHT_RECIPE";
+  actions: readonly RecipeAction[];
+  state: "SHADOW" | "PROMOTED";
+  version: number;
+};
+
+const DEFAULT_OPTION_TIMEOUT_MS = 1_200;
+const DEFAULT_POLL_INTERVAL_MS = 25;
+const DEFAULT_VERIFICATION_TIMEOUT_MS = 500;
+
+function dispatchValueEvents(element: HTMLElement): void {
+  element.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+  element.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+  element.dispatchEvent(new Event("blur", { bubbles: true, composed: true }));
+}
+
+function dispatchInputEvent(element: HTMLElement): void {
+  element.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+}
+
+function setNativeValue(
+  element: HTMLInputElement | HTMLTextAreaElement,
+  value: string,
+): void {
+  const prototype =
+    element instanceof HTMLInputElement
+      ? HTMLInputElement.prototype
+      : HTMLTextAreaElement.prototype;
+  const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
+  descriptor?.set?.call(element, value);
+}
+
+function setNativeChecked(element: HTMLInputElement, checked: boolean): void {
+  const descriptor = Object.getOwnPropertyDescriptor(
+    HTMLInputElement.prototype,
+    "checked",
+  );
+  descriptor?.set?.call(element, checked);
+}
+
+function compactText(value: string | null | undefined): string {
+  return (value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function normalized(value: string): string {
+  return compactText(value).toLowerCase();
+}
+
+function inputLabel(element: HTMLInputElement): string {
+  return Array.from(element.labels ?? [])
+    .map((label) => compactText(label.textContent))
+    .filter(Boolean)
+    .join(" ");
+}
+
+function radioCandidates(element: HTMLInputElement): HTMLInputElement[] {
+  const root = element.getRootNode();
+  const candidates =
+    root instanceof Document || root instanceof ShadowRoot
+      ? Array.from(root.querySelectorAll("input[type='radio']"))
+      : [];
+  if (!element.name) return [element];
+  return candidates.filter(
+    (candidate): candidate is HTMLInputElement =>
+      candidate instanceof HTMLInputElement && candidate.name === element.name,
+  );
+}
+
+function radioCandidateValues(element: HTMLInputElement): string[] {
+  return [
+    compactText(element.value),
+    compactText(inputLabel(element)),
+    compactText(element.getAttribute("aria-label")),
+  ].filter(Boolean);
+}
+
+function radioMatches(candidate: HTMLInputElement, requested: string): boolean {
+  const context = interactionContext(candidate);
+  return radioCandidateValues(candidate).some((value) =>
+    optionEquivalent(value, requested, context),
+  );
+}
+
+function fillRadio(element: HTMLInputElement, value: string): boolean {
+  const candidates = radioCandidates(element).filter((candidate) =>
+    radioMatches(candidate, value),
+  );
+  if (candidates.length !== 1) return false;
+  const match = candidates[0]!;
+  match.focus();
+  match.click();
+  if (!match.checked) {
+    setNativeChecked(match, true);
+    dispatchValueEvents(match);
+  }
+  return match.checked;
+}
+
+function fillCheckbox(element: HTMLInputElement, value: string): boolean {
+  const requested = normalized(value);
+  const truthy = ["true", "yes", "1", "checked"];
+  const falsy = ["false", "no", "0", "unchecked"];
+  if (!truthy.includes(requested) && !falsy.includes(requested)) {
+    return false;
+  }
+
+  const shouldCheck = truthy.includes(requested);
+  element.focus();
+  if (element.checked !== shouldCheck) element.click();
+  if (element.checked !== shouldCheck) {
+    setNativeChecked(element, shouldCheck);
+    dispatchValueEvents(element);
+  }
+  return element.checked === shouldCheck;
+}
+
+function canonicalDate(value: string): string | null {
+  const requested = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(requested)) return null;
+  const parsed = new Date(`${requested}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().slice(0, 10) === requested ? requested : null;
+}
+
+function fillDate(element: HTMLInputElement, value: string): boolean {
+  const requested = canonicalDate(value);
+  if (!requested) return false;
+  element.focus();
+  setNativeValue(element, requested);
+  dispatchValueEvents(element);
+  return element.value === requested;
+}
+
+function collectOpenShadowRoots(root: Document | ShadowRoot): ShadowRoot[] {
+  const roots: ShadowRoot[] = [];
+  for (const candidate of Array.from(root.querySelectorAll("*"))) {
+    if (!(candidate instanceof HTMLElement) || !candidate.shadowRoot) continue;
+    roots.push(candidate.shadowRoot);
+    roots.push(...collectOpenShadowRoots(candidate.shadowRoot));
+  }
+  return roots;
+}
+
+function optionSearchRoots(element: Element): Array<Document | ShadowRoot> {
+  const roots: Array<Document | ShadowRoot> = [];
+  const ownRoot = element.getRootNode();
+  if (ownRoot instanceof Document || ownRoot instanceof ShadowRoot) {
+    roots.push(ownRoot);
+  }
+  if (!roots.includes(document)) roots.push(document);
+  for (const shadowRoot of collectOpenShadowRoots(document)) {
+    if (!roots.includes(shadowRoot)) roots.push(shadowRoot);
+  }
+  return roots;
+}
+
+function elementById(root: Document | ShadowRoot, id: string): Element | null {
+  return root instanceof Document
+    ? root.getElementById(id)
+    : root.querySelector(`#${CSS.escape(id)}`);
+}
+
+function optionsInside(container: Element): HTMLElement[] {
+  const options: HTMLElement[] = [];
+  if (
+    container instanceof HTMLElement &&
+    container.getAttribute("role") === "option"
+  ) {
+    options.push(container);
+  }
+  for (const option of Array.from(
+    container.querySelectorAll("[role='option']"),
+  )) {
+    if (option instanceof HTMLElement) options.push(option);
+  }
+  return options;
+}
+
+function controlledComboboxOptions(element: Element): HTMLElement[] {
+  const ids = [
+    element.getAttribute("aria-controls"),
+    element.getAttribute("aria-owns"),
+  ]
+    .filter((value): value is string => Boolean(value))
+    .flatMap((value) => value.split(/\s+/))
+    .filter(Boolean);
+  const options: HTMLElement[] = [];
+  for (const root of optionSearchRoots(element)) {
+    for (const id of ids) {
+      const container = elementById(root, id);
+      if (container) options.push(...optionsInside(container));
+    }
+  }
+  return [...new Set(options)];
+}
+
+function portaledComboboxOptions(element: Element): HTMLElement[] {
+  const options: HTMLElement[] = [];
+  for (const root of optionSearchRoots(element)) {
+    for (const option of Array.from(
+      root.querySelectorAll(
+        "[role='option'], [role='menuitem'], [data-value], [data-option-value], li",
+      ),
+    )) {
+      if (option instanceof HTMLElement) options.push(option);
+    }
+  }
+  return [...new Set(options)];
+}
+
+function comboboxOptionValues(option: HTMLElement): string[] {
+  return [
+    compactText(option.textContent),
+    compactText(option.getAttribute("aria-label")),
+    compactText(option.getAttribute("data-value")),
+    compactText(option.getAttribute("value")),
+  ].filter(Boolean);
+}
+
+function optionAvailable(option: HTMLElement): boolean {
+  return (
+    !option.hidden &&
+    option.getAttribute("aria-hidden") !== "true" &&
+    option.getAttribute("aria-disabled") !== "true" &&
+    !option.hasAttribute("disabled")
+  );
+}
+
+type ExactOptionResult =
+  | { status: "FOUND"; option: HTMLElement }
+  | { status: "WAIT" }
+  | { status: "AMBIGUOUS" };
+
+function exactComboboxOption(
+  element: Element,
+  requested: string,
+): ExactOptionResult {
+  const context = interactionContext(element);
+  const controlled = controlledComboboxOptions(element).filter(optionAvailable);
+  const controlledMatch = uniqueOptionCandidate(
+    requested,
+    controlled.map((option) => ({
+      item: option,
+      values: comboboxOptionValues(option),
+    })),
+    context,
+  );
+  if (controlledMatch) {
+    return { status: "FOUND", option: controlledMatch };
+  }
+
+  const portaled = portaledComboboxOptions(element).filter(optionAvailable);
+  const portaledMatch = uniqueOptionCandidate(
+    requested,
+    portaled.map((option) => ({
+      item: option,
+      values: comboboxOptionValues(option),
+    })),
+    context,
+  );
+  if (portaledMatch) {
+    return { status: "FOUND", option: portaledMatch };
+  }
+
+  const hasSemanticCandidates = [...controlled, ...portaled].some((option) =>
+    comboboxOptionValues(option).some((value) =>
+      optionEquivalent(value, requested, context),
+    ),
+  );
+  return hasSemanticCandidates ? { status: "AMBIGUOUS" } : { status: "WAIT" };
+}
+
+function comboboxVerified(
+  element: HTMLElement,
+  option: HTMLElement,
+  requested: string,
+): boolean {
+  const context = interactionContext(element);
+  if (
+    element instanceof HTMLInputElement &&
+    optionEquivalent(element.value, requested, context)
+  ) {
+    return true;
+  }
+  if (optionEquivalent(element.textContent ?? "", requested, context))
+    return true;
+  if (option.getAttribute("aria-selected") === "true") return true;
+  return (
+    element.getAttribute("aria-activedescendant") === option.id &&
+    Boolean(option.id)
+  );
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function waitForExactComboboxOption(
+  element: HTMLElement,
+  requested: string,
+  timeoutMilliseconds: number,
+  pollIntervalMilliseconds: number,
+): Promise<HTMLElement | null> {
+  const deadline = Date.now() + timeoutMilliseconds;
+  while (Date.now() <= deadline) {
+    const result = exactComboboxOption(element, requested);
+    if (result.status === "FOUND") return result.option;
+    if (result.status === "AMBIGUOUS") return null;
+    await delay(pollIntervalMilliseconds);
+  }
+  return null;
+}
+
+async function waitForComboboxVerification(
+  element: HTMLElement,
+  option: HTMLElement,
+  requested: string,
+  timeoutMilliseconds: number,
+  pollIntervalMilliseconds: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMilliseconds;
+  while (Date.now() <= deadline) {
+    if (comboboxVerified(element, option, requested)) return true;
+    await delay(pollIntervalMilliseconds);
+  }
+  return false;
+}
+
+async function fillCombobox(
+  element: HTMLElement,
+  value: string,
+  options: Required<FillInteractionOptions>,
+): Promise<boolean> {
+  const requested = compactText(value);
+  if (!requested) return false;
+  const originalValue =
+    element instanceof HTMLInputElement ? element.value : null;
+  element.focus();
+  element.click();
+  if (element instanceof HTMLInputElement) {
+    setNativeValue(element, value);
+    dispatchInputEvent(element);
+  }
+
+  const match = await waitForExactComboboxOption(
+    element,
+    requested,
+    options.optionTimeoutMs,
+    options.pollIntervalMs,
+  );
+  if (!match) {
+    if (element instanceof HTMLInputElement && originalValue !== null) {
+      setNativeValue(element, originalValue);
+      dispatchValueEvents(element);
+    }
+    return false;
+  }
+
+  match.click();
+  element.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+  const verified = await waitForComboboxVerification(
+    element,
+    match,
+    requested,
+    Math.min(options.optionTimeoutMs, 500),
+    options.pollIntervalMs,
+  );
+  if (
+    !verified &&
+    element instanceof HTMLInputElement &&
+    originalValue !== null
+  ) {
+    setNativeValue(element, originalValue);
+    dispatchValueEvents(element);
+  }
+  return verified;
+}
+
+function elementUnavailable(element: Element): boolean {
+  if (!(element instanceof HTMLElement)) return true;
+  if (element.getAttribute("aria-disabled") === "true") return true;
+  if ("disabled" in element && Boolean((element as HTMLInputElement).disabled))
+    return true;
+  return false;
+}
+
+async function waitForVerification(
+  verify: () => boolean,
+  timeoutMilliseconds: number,
+  pollIntervalMilliseconds: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMilliseconds;
+  while (Date.now() <= deadline) {
+    if (verify()) return true;
+    await delay(pollIntervalMilliseconds);
+  }
+  return verify();
+}
+
+function radioVerified(element: HTMLInputElement, value: string): boolean {
+  const checked = radioCandidates(element).filter(
+    (candidate) => candidate.checked,
+  );
+  return checked.length === 1 && radioMatches(checked[0]!, value);
+}
+
+function recipeValueCommitted(element: HTMLElement, value: string): boolean {
+  const context = interactionContext(element);
+  if (element instanceof HTMLSelectElement) {
+    const selected = Array.from(element.selectedOptions).flatMap((option) => [
+      option.value,
+      option.text,
+    ]);
+    return selected.some((candidate) =>
+      optionEquivalent(candidate, value, context),
+    );
+  }
+  if (element instanceof HTMLInputElement) {
+    if (element.type === "radio") return radioVerified(element, value);
+    if (element.type === "checkbox") {
+      const requested = normalized(value);
+      const shouldCheck = ["true", "yes", "1", "checked"].includes(requested);
+      return element.checked === shouldCheck;
+    }
+    return (
+      optionEquivalent(element.value, value, context) || element.value === value
+    );
+  }
+  if (element instanceof HTMLTextAreaElement) return element.value === value;
+  if (element.isContentEditable)
+    return compactText(element.textContent) === compactText(value);
+  const ariaChecked = element.getAttribute("aria-checked");
+  if (ariaChecked !== null) {
+    const requested = normalized(value);
+    if (["true", "yes", "1", "checked"].includes(requested))
+      return ariaChecked === "true";
+    if (["false", "no", "0", "unchecked"].includes(requested))
+      return ariaChecked === "false";
+  }
+  return optionEquivalent(element.textContent ?? "", value, context);
+}
+
+function typeRecipeValue(element: HTMLElement, value: string): boolean {
+  if (
+    element instanceof HTMLInputElement ||
+    element instanceof HTMLTextAreaElement
+  ) {
+    setNativeValue(element, value);
+    dispatchInputEvent(element);
+    return true;
+  }
+  if (element.isContentEditable) {
+    element.textContent = value;
+    dispatchInputEvent(element);
+    return true;
+  }
+  return false;
+}
+
+function dispatchRecipeKey(element: HTMLElement, key: string): void {
+  element.dispatchEvent(
+    new KeyboardEvent("keydown", { key, bubbles: true, composed: true }),
+  );
+  element.dispatchEvent(
+    new KeyboardEvent("keyup", { key, bubbles: true, composed: true }),
+  );
+}
+
+async function executeInteractionRecipe(
+  element: HTMLElement,
+  value: string,
+  recipe: PreferredInteractionRecipe,
+  options: Required<FillInteractionOptions>,
+): Promise<boolean> {
+  if (recipe.actions.length === 0 || recipe.actions.length > 16) return false;
+  for (const action of recipe.actions) {
+    if (action.type === "FOCUS") {
+      element.focus();
+      continue;
+    }
+    if (action.type === "CLICK") {
+      if (element instanceof HTMLInputElement && element.type === "radio") {
+        if (!fillRadio(element, value)) return false;
+        continue;
+      }
+      if (element instanceof HTMLInputElement && element.type === "checkbox") {
+        if (!fillCheckbox(element, value)) return false;
+        continue;
+      }
+      const ariaRadio = await fillAriaRadioControl(element, value, options);
+      if (ariaRadio !== null) {
+        if (!ariaRadio) return false;
+        continue;
+      }
+      const ariaBoolean = await fillAriaBooleanControl(element, value, options);
+      if (ariaBoolean !== null) {
+        if (!ariaBoolean) return false;
+        continue;
+      }
+      element.click();
+      continue;
+    }
+    if (action.type === "TYPE") {
+      if (!typeRecipeValue(element, value)) return false;
+      continue;
+    }
+    if (action.type === "KEY") {
+      dispatchRecipeKey(element, action.key);
+      continue;
+    }
+    if (action.type === "SELECT_EXACT_OPTION") {
+      if (element instanceof HTMLSelectElement) {
+        const context = interactionContext(element);
+        const option = uniqueOptionCandidate(
+          value,
+          Array.from(element.options)
+            .filter((candidate) => !candidate.disabled)
+            .map((candidate) => ({
+              item: candidate,
+              values: [candidate.value, candidate.text],
+            })),
+          context,
+        );
+        if (!option) return false;
+        element.value = option.value;
+        dispatchValueEvents(element);
+        continue;
+      }
+      const option = await waitForExactComboboxOption(
+        element,
+        value,
+        options.optionTimeoutMs,
+        options.pollIntervalMs,
+      );
+      if (!option) return false;
+      option.click();
+      element.dispatchEvent(
+        new Event("change", { bubbles: true, composed: true }),
+      );
+      continue;
+    }
+    if (
+      action.type === "WAIT_FOR_STATE" &&
+      action.state === "OPTIONS_VISIBLE"
+    ) {
+      if (element instanceof HTMLSelectElement) continue;
+      const option = await waitForExactComboboxOption(
+        element,
+        value,
+        options.optionTimeoutMs,
+        options.pollIntervalMs,
+      );
+      if (!option) return false;
+      continue;
+    }
+    if (
+      action.type === "WAIT_FOR_STATE" &&
+      action.state === "VALUE_COMMITTED"
+    ) {
+      const committed = await waitForVerification(
+        () => recipeValueCommitted(element, value),
+        options.verificationTimeoutMs,
+        options.pollIntervalMs,
+      );
+      if (!committed) return false;
+      continue;
+    }
+    return false;
+  }
+  return waitForVerification(
+    () => recipeValueCommitted(element, value),
+    options.verificationTimeoutMs,
+    options.pollIntervalMs,
+  );
+}
+
+async function fillElement(
+  element: Element,
+  value: string,
+  options: Required<FillInteractionOptions>,
+): Promise<boolean> {
+  if (elementUnavailable(element)) return false;
+  if (element.getAttribute("aria-readonly") === "true") return false;
+  if (element instanceof HTMLElement) {
+    const ariaMultiSelect = await fillAriaMultiSelectControl(
+      element,
+      value,
+      options,
+    );
+    if (ariaMultiSelect !== null) return ariaMultiSelect;
+    const customDate = await fillCustomDateControl(element, value, options);
+    if (customDate !== null) return customDate;
+    const ariaBoolean = await fillAriaBooleanControl(element, value, options);
+    if (ariaBoolean !== null) return ariaBoolean;
+    const ariaRadio = await fillAriaRadioControl(element, value, options);
+    if (ariaRadio !== null) return ariaRadio;
+    if (isPopupChoiceControl(element)) {
+      return fillCombobox(element, value, options);
+    }
+  }
+  if (element instanceof HTMLInputElement) {
+    if (
+      ["file", "password", "hidden", "submit", "button", "reset"].includes(
+        element.type,
+      )
+    ) {
+      return false;
+    }
+    if (element.readOnly && !["radio", "checkbox"].includes(element.type)) {
+      return false;
+    }
+    const dateLikeText = await fillDateLikeTextInput(element, value, options);
+    if (dateLikeText !== null) return dateLikeText;
+    const strictTemporal = fillStrictTemporalInput(element, value);
+    if (strictTemporal !== null) return strictTemporal;
+    if (element.type === "radio") {
+      const group = radioCandidates(element);
+      const original = group.map((candidate) => candidate.checked);
+      if (!fillRadio(element, value)) return false;
+      const verified = await waitForVerification(
+        () => radioVerified(element, value),
+        options.verificationTimeoutMs,
+        options.pollIntervalMs,
+      );
+      if (!verified) {
+        group.forEach((candidate, index) => {
+          setNativeChecked(candidate, original[index] ?? false);
+          dispatchValueEvents(candidate);
+        });
+      }
+      return verified;
+    }
+    if (element.type === "checkbox") {
+      const original = element.checked;
+      if (!fillCheckbox(element, value)) return false;
+      const requested = normalized(value);
+      const shouldCheck = ["true", "yes", "1", "checked"].includes(requested);
+      const verified = await waitForVerification(
+        () => element.checked === shouldCheck,
+        options.verificationTimeoutMs,
+        options.pollIntervalMs,
+      );
+      if (!verified) {
+        setNativeChecked(element, original);
+        dispatchValueEvents(element);
+      }
+      return verified;
+    }
+    if (element.type === "date") {
+      const original = element.value;
+      if (!fillDate(element, value)) return false;
+      const requested = canonicalDate(value);
+      const verified =
+        Boolean(requested) &&
+        (await waitForVerification(
+          () => element.value === requested && element.validity.valid,
+          options.verificationTimeoutMs,
+          options.pollIntervalMs,
+        ));
+      if (!verified) {
+        setNativeValue(element, original);
+        dispatchValueEvents(element);
+      }
+      return verified;
+    }
+    const original = element.value;
+    if (element.maxLength >= 0 && value.length > element.maxLength)
+      return false;
+    element.focus();
+    setNativeValue(element, value);
+    dispatchValueEvents(element);
+    const verified = await waitForVerification(
+      () => element.value === value && element.validity.valid,
+      options.verificationTimeoutMs,
+      options.pollIntervalMs,
+    );
+    if (!verified) {
+      setNativeValue(element, original);
+      dispatchValueEvents(element);
+    }
+    return verified;
+  }
+  if (element instanceof HTMLTextAreaElement) {
+    if (element.readOnly) return false;
+    if (element.maxLength >= 0 && value.length > element.maxLength)
+      return false;
+    const original = element.value;
+    element.focus();
+    setNativeValue(element, value);
+    dispatchValueEvents(element);
+    const verified = await waitForVerification(
+      () => element.value === value && element.validity.valid,
+      options.verificationTimeoutMs,
+      options.pollIntervalMs,
+    );
+    if (!verified) {
+      setNativeValue(element, original);
+      dispatchValueEvents(element);
+    }
+    return verified;
+  }
+  if (element instanceof HTMLSelectElement) {
+    if (element.multiple) return fillNativeMultiSelect(element, value);
+    const context = interactionContext(element);
+    const option = uniqueOptionCandidate(
+      value,
+      Array.from(element.options)
+        .filter((candidate) => !candidate.disabled)
+        .map((candidate) => ({
+          item: candidate,
+          values: [candidate.value, candidate.text],
+        })),
+      context,
+    );
+    if (!option) return false;
+    const original = element.value;
+    element.focus();
+    element.value = option.value;
+    dispatchValueEvents(element);
+    const verified = await waitForVerification(
+      () => element.value === option.value && element.validity.valid,
+      options.verificationTimeoutMs,
+      options.pollIntervalMs,
+    );
+    if (!verified) {
+      element.value = original;
+      dispatchValueEvents(element);
+    }
+    return verified;
+  }
+  if (element instanceof HTMLElement && element.isContentEditable) {
+    const original = element.textContent ?? "";
+    element.focus();
+    element.textContent = value;
+    dispatchValueEvents(element);
+    const verified = await waitForVerification(
+      () => element.textContent === value,
+      options.verificationTimeoutMs,
+      options.pollIntervalMs,
+    );
+    if (!verified) {
+      element.textContent = original;
+      dispatchValueEvents(element);
+    }
+    return verified;
+  }
+  return false;
+}
+
+export type FilePickerAssistResult = {
+  status: "OWNER_ACTION_REQUESTED" | "REFUSED";
+  reason: string;
+};
+
+const FILE_PICKER_HANDOFF_ID = "munshi-apply-file-picker-handoff";
+
+function removeFilePickerHandoff(): void {
+  document.getElementById(FILE_PICKER_HANDOFF_ID)?.remove();
+}
+
+function mountFilePickerHandoff(element: HTMLInputElement): void {
+  removeFilePickerHandoff();
+  const host = document.createElement("div");
+  host.id = FILE_PICKER_HANDOFF_ID;
+  host.style.position = "fixed";
+  host.style.right = "20px";
+  host.style.bottom = "20px";
+  host.style.zIndex = "2147483647";
+  host.style.maxWidth = "360px";
+  document.body.append(host);
+
+  const shadow = host.attachShadow({ mode: "closed" });
+  const card = document.createElement("div");
+  card.setAttribute("role", "dialog");
+  card.setAttribute("aria-label", "MUNSHI file upload handoff");
+  card.style.cssText =
+    "font: 14px/1.4 system-ui, sans-serif; background:#1c2331; color:#fff; border-radius:12px; padding:14px; box-shadow:0 12px 36px rgba(0,0,0,.35);";
+
+  const title = document.createElement("strong");
+  title.textContent = "MUNSHI file upload handoff";
+  title.style.display = "block";
+  title.style.marginBottom = "6px";
+
+  const detail = document.createElement("div");
+  detail.textContent =
+    "Choose the file yourself. MUNSHI will verify the selected file after Edge returns to the application.";
+  detail.style.marginBottom = "10px";
+
+  const choose = document.createElement("button");
+  choose.type = "button";
+  choose.textContent = `Choose file${inputLabel(element) ? ` · ${inputLabel(element)}` : ""}`;
+  choose.style.cssText =
+    "font:inherit; font-weight:700; border:0; border-radius:8px; padding:9px 12px; cursor:pointer; background:#fff; color:#111; margin-right:8px;";
+  choose.addEventListener("click", () => {
+    element.focus();
+    element.click();
+  });
+
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.textContent = "Cancel";
+  cancel.style.cssText =
+    "font:inherit; border:1px solid rgba(255,255,255,.45); border-radius:8px; padding:8px 11px; cursor:pointer; background:transparent; color:#fff;";
+  cancel.addEventListener("click", removeFilePickerHandoff);
+
+  card.append(title, detail, choose, cancel);
+  shadow.append(card);
+  element.addEventListener("change", removeFilePickerHandoff, { once: true });
+}
+
+export function assistFilePicker(controlId: string): FilePickerAssistResult {
+  const resolved = resolveControlElement(controlId);
+  const element = resolved?.element;
+  if (
+    !(element instanceof HTMLInputElement) ||
+    element.type !== "file" ||
+    element.disabled ||
+    element.getAttribute("aria-disabled") === "true"
+  ) {
+    return {
+      status: "REFUSED",
+      reason: "The employer file input changed, is disabled, or is unavailable",
+    };
+  }
+  element.scrollIntoView?.({ block: "center", inline: "nearest" });
+  element.focus();
+  mountFilePickerHandoff(element);
+  return {
+    status: "OWNER_ACTION_REQUESTED",
+    reason:
+      "Use the temporary on-page MUNSHI Choose file button. The chooser opens only from that direct owner gesture, and MUNSHI verifies the selected file afterward.",
+  };
+}
+
+function strategyFor(element: Element): string {
+  if (isAriaMultiSelectControl(element)) return "CUSTOM_MULTI_SELECT";
+  if (isPopupChoiceControl(element)) {
+    return element.getAttribute("aria-haspopup") === "dialog"
+      ? "CUSTOM_DATE"
+      : "ARIA_COMBOBOX";
+  }
+  if (element.getAttribute("role") === "radio") return "ARIA_RADIO";
+  if (["checkbox", "switch"].includes(element.getAttribute("role") ?? "")) {
+    return "ARIA_BOOLEAN";
+  }
+  if (element instanceof HTMLSelectElement) {
+    return element.multiple ? "NATIVE_MULTI_SELECT" : "NATIVE_SELECT";
+  }
+  if (element instanceof HTMLInputElement)
+    return `NATIVE_${element.type.toUpperCase()}`;
+  if (element instanceof HTMLTextAreaElement) return "NATIVE_TEXTAREA";
+  if (element instanceof HTMLElement && element.isContentEditable)
+    return "CONTENTEDITABLE";
+  return "UNKNOWN";
+}
+
+async function resolveWithRetry(
+  controlId: string,
+  options: Required<FillInteractionOptions>,
+): Promise<ReturnType<typeof resolveControlElement>> {
+  const deadline = Date.now() + Math.min(350, options.verificationTimeoutMs);
+  while (Date.now() <= deadline) {
+    const resolved = resolveControlElement(controlId);
+    if (resolved) return resolved;
+    await delay(options.pollIntervalMs);
+  }
+  return resolveControlElement(controlId);
+}
+
+export async function applyFillInstructions(
+  instructions: FillInstruction[],
+  interactionOptions: FillInteractionOptions = {},
+  preferredRecipes: Record<string, PreferredInteractionRecipe> = {},
+): Promise<FillResult[]> {
+  const adaptive = defaultAdaptiveTiming();
+  const options: Required<FillInteractionOptions> = {
+    optionTimeoutMs:
+      interactionOptions.optionTimeoutMs ??
+      adaptive.optionTimeoutMs ??
+      DEFAULT_OPTION_TIMEOUT_MS,
+    pollIntervalMs:
+      interactionOptions.pollIntervalMs ??
+      adaptive.pollIntervalMs ??
+      DEFAULT_POLL_INTERVAL_MS,
+    verificationTimeoutMs:
+      interactionOptions.verificationTimeoutMs ??
+      adaptive.verificationTimeoutMs ??
+      DEFAULT_VERIFICATION_TIMEOUT_MS,
+    stabilityQuietMs:
+      interactionOptions.stabilityQuietMs ?? adaptive.stabilityQuietMs,
+    stabilityTimeoutMs:
+      interactionOptions.stabilityTimeoutMs ?? adaptive.stabilityTimeoutMs,
+  };
+  const results: FillResult[] = [];
+
+  for (const instruction of instructions) {
+    if (!instruction.approved) {
+      results.push({
+        controlId: instruction.controlId,
+        status: "SKIPPED",
+        reason: instruction.sensitive
+          ? "Sensitive answer requires explicit approval"
+          : "Answer was not approved",
+      });
+      continue;
+    }
+    const resolved = await resolveWithRetry(instruction.controlId, options);
+    const element = resolved?.element;
+    if (!element) {
+      results.push({
+        controlId: instruction.controlId,
+        status: "FAILED",
+        reason: "Visible control changed or is no longer available",
+      });
+      continue;
+    }
+
+    let filled = false;
+    const fallbackStrategy = strategyFor(element);
+    const recipe = preferredRecipes[instruction.controlId];
+    let recipeAttempted = false;
+    let recipeSucceeded = false;
+    if (recipe) {
+      recipeAttempted = true;
+      try {
+        recipeSucceeded = await executeInteractionRecipe(
+          element as HTMLElement,
+          instruction.value,
+          recipe,
+          options,
+        );
+      } catch {
+        recipeSucceeded = false;
+      }
+      filled = recipeSucceeded;
+    }
+    if (!filled) {
+      try {
+        filled = await fillElement(element, instruction.value, options);
+      } catch {
+        filled = false;
+      }
+    }
+    const stabilized = filled
+      ? await waitForDomStability(
+          options.stabilityQuietMs,
+          options.stabilityTimeoutMs,
+        )
+      : false;
+    results.push({
+      controlId: instruction.controlId,
+      status: filled ? "FILLED" : "FAILED",
+      reason: filled
+        ? stabilized
+          ? "Value applied, verified, and the dependent DOM reached a quiet state"
+          : "Value applied and verified; the dependent DOM was still changing at the stability timeout"
+        : `${validationFailureReason(element, instruction.value)}; the control may also be unsupported or ambiguous`,
+      strategy: recipeSucceeded ? recipe!.strategy : fallbackStrategy,
+      verification: filled ? "POST_ACTION_DOM_VERIFIED" : "FAILED_CLOSED",
+      rebound: resolved?.rebound ?? false,
+      stabilized,
+      componentFingerprint: resolved?.control.componentFingerprint,
+      recipeId: recipe?.recipeId,
+      recipeAttempted,
+      recipeSucceeded: recipeAttempted ? recipeSucceeded : undefined,
+    });
+  }
+
+  return results;
+}

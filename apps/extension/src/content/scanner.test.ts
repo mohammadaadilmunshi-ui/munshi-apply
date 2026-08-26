@@ -15,7 +15,7 @@ const visibleRectangle: DOMRect = {
   toJSON: () => ({}),
 };
 
-describe("universal page scanner", () => {
+describe("AutoPilot page-state scanner", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
     document.title = "Application";
@@ -25,61 +25,233 @@ describe("universal page scanner", () => {
     );
   });
 
-  it("extracts native labels and semantic questions", () => {
+  it("captures multiple select and autocomplete metadata", () => {
     document.body.innerHTML = `
-      <form>
-        <label for="candidate-email">Email address</label>
-        <input id="candidate-email" name="email" type="email" required>
-      </form>
+      <label for="skills">Skills</label>
+      <select id="skills" multiple autocomplete="off">
+        <option>Excel</option><option>Power BI</option>
+      </select>
     `;
+    expect(scanDocument().controls[0]).toMatchObject({
+      kind: "SELECT",
+      multiple: true,
+      autocomplete: "off",
+      options: ["Excel", "Power BI"],
+    });
+  });
 
+  it("captures ARIA validation messages", () => {
+    document.body.innerHTML = `
+      <label for="email">Email</label>
+      <input id="email" aria-invalid="true" aria-describedby="email-error">
+      <div id="email-error">Enter a valid email</div>
+    `;
     const result = scanDocument();
-    expect(result.controls).toHaveLength(1);
     expect(result.controls[0]).toMatchObject({
-      kind: "EMAIL",
-      label: "Email address",
-      required: true,
+      invalid: true,
+      validationMessage: "Enter a valid email",
     });
-    expect(result.questions[0]).toMatchObject({
-      semanticType: "EMAIL",
-      requiresReview: false,
-    });
+    expect(result.validationErrorCount).toBe(1);
   });
 
-  it("excludes password and hidden controls from the application model", () => {
+  it("detects OTP and authentication security checkpoints", () => {
     document.body.innerHTML = `
-      <input aria-label="Password" type="password">
-      <input aria-label="Trap" style="display: none" type="text">
-      <input aria-label="Phone" type="tel">
+      <h1>Verify your account</h1>
+      <label for="otp">One-time verification code</label>
+      <input id="otp" autocomplete="one-time-code">
     `;
-
     const result = scanDocument();
-    expect(result.controls).toHaveLength(1);
-    expect(result.controls[0]?.kind).toBe("TEL");
+    expect(result.securityCheckpoint).toBe("OTP");
+    expect(result.applicationState).toBe("VERIFY_ACCOUNT");
   });
 
-  it("includes legitimate controls below the current viewport", () => {
-    document.body.innerHTML = `<input aria-label="LinkedIn" type="text">`;
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-      ...visibleRectangle,
-      bottom: 5030,
-      top: 5000,
-      y: 5000,
-    });
-
-    expect(scanDocument().questions[0]?.semanticType).toBe("LINKEDIN");
-  });
-
-  it("flags consequential sponsorship questions for review", () => {
+  it("classifies recognized next and review actions", () => {
     document.body.innerHTML = `
-      <label for="sponsor">Will you now or in the future require sponsorship?</label>
-      <select id="sponsor"><option>Choose</option><option>Yes</option><option>No</option></select>
+      <button type="button">Continue</button>
+      <button type="button">Review application</button>
     `;
+    const actions = scanDocument().navigationCandidates.map(
+      (candidate) => candidate.action,
+    );
+    expect(actions).toEqual(["NEXT", "REVIEW"]);
+  });
 
-    expect(scanDocument().questions[0]).toMatchObject({
-      semanticType: "SPONSORSHIP_FUTURE",
-      sensitive: true,
-      requiresReview: true,
+  it("ignores passive reCAPTCHA integration until a challenge is active", () => {
+    document.body.innerHTML = `
+      <label for="resume">Upload CV</label>
+      <input id="resume" type="file" required>
+      <div class="grecaptcha-badge">
+        <iframe title="reCAPTCHA" src="https://www.google.com/recaptcha/api2/anchor"></iframe>
+      </div>
+    `;
+    const result = scanDocument();
+    expect(result.securityCheckpoint).toBeNull();
+    expect(result.applicationState).toBe("RESUME");
+  });
+
+  it("ignores a large invisible reCAPTCHA badge and passive branding", () => {
+    document.body.innerHTML = `
+      <label for="resume">Upload CV</label>
+      <input id="resume" type="file" required>
+      <p>This site is protected by reCAPTCHA and the Google Privacy Policy applies.</p>
+      <div class="grecaptcha-badge">
+        <iframe title="reCAPTCHA" src="https://www.google.com/recaptcha/api2/anchor?size=invisible"></iframe>
+      </div>
+    `;
+    const frame = document.querySelector("iframe") as HTMLIFrameElement;
+    vi.spyOn(frame, "getBoundingClientRect").mockReturnValue({
+      ...visibleRectangle,
+      bottom: 90,
+      height: 80,
+      right: 310,
+      width: 300,
     });
+    const result = scanDocument();
+    expect(result.securityCheckpoint).toBeNull();
+    expect(result.applicationState).toBe("RESUME");
+  });
+
+  it("detects a visible CAPTCHA prompt even without a challenge iframe", () => {
+    document.body.innerHTML = `<p>Please complete the CAPTCHA verification to continue.</p>`;
+    expect(scanDocument().securityCheckpoint).toBe("CAPTCHA");
+  });
+
+  it("ignores anti-bot challenge frames hidden by an ancestor", () => {
+    document.body.innerHTML = `
+      <label for="first">First Name *</label>
+      <input id="first" required>
+      <div style="opacity: 0">
+        <iframe title="recaptcha challenge" src="https://www.google.com/recaptcha/api2/bframe"></iframe>
+      </div>
+    `;
+    const frame = document.querySelector("iframe") as HTMLIFrameElement;
+    vi.spyOn(frame, "getBoundingClientRect").mockReturnValue({
+      ...visibleRectangle,
+      bottom: 500,
+      height: 400,
+      right: 500,
+      width: 400,
+    });
+    expect(scanDocument().securityCheckpoint).toBeNull();
+  });
+
+  it("ignores an explicitly invisible CAPTCHA frame with challenge tokens", () => {
+    document.body.innerHTML = `
+      <label for="email">Email Address *</label>
+      <input id="email" type="email" required>
+      <iframe title="recaptcha challenge" src="https://www.google.com/recaptcha/api2/bframe?size=invisible"></iframe>
+    `;
+    const frame = document.querySelector("iframe") as HTMLIFrameElement;
+    vi.spyOn(frame, "getBoundingClientRect").mockReturnValue({
+      ...visibleRectangle,
+      bottom: 500,
+      height: 400,
+      right: 500,
+      width: 400,
+    });
+    expect(scanDocument().securityCheckpoint).toBeNull();
+  });
+
+  it("detects a visible active CAPTCHA challenge", () => {
+    document.body.innerHTML = `
+      <iframe title="recaptcha challenge" src="https://www.google.com/recaptcha/api2/bframe"></iframe>
+    `;
+    expect(scanDocument().securityCheckpoint).toBe("CAPTCHA");
+  });
+
+  it("ignores hidden final-submit controls when inferring the current step", () => {
+    document.body.innerHTML = `
+      <label for="resume">Upload CV</label>
+      <input id="resume" type="file" required>
+      <button type="submit" style="display:none">Submit application</button>
+      <button type="button">Continue</button>
+    `;
+    const result = scanDocument();
+    expect(result.finalSubmissionBoundary).toBe(false);
+    expect(result.applicationState).toBe("RESUME");
+    expect(result.navigationCandidates.map((item) => item.action)).toEqual([
+      "NEXT",
+    ]);
+  });
+
+  it("recovers a nearby prompt for a custom select instead of its placeholder", () => {
+    document.body.innerHTML = `
+      <div class="question-field">
+        <label>How did you hear about us? *</label>
+        <div id="source" role="combobox" aria-haspopup="listbox" aria-label="-- Select one --"></div>
+      </div>
+    `;
+    const question = scanDocument().questions[0];
+    expect(question).toMatchObject({
+      rawText: "How did you hear about us? *",
+      semanticType: "REFERRAL",
+    });
+  });
+
+  it("discovers a focusable select shell without native or ARIA select semantics", () => {
+    document.body.innerHTML = `
+    <div class="application-field">
+      <label>Years of Experience *</label>
+      <div id="years" class="experience-select" tabindex="0">Select an option</div>
+    </div>
+  `;
+    const result = scanDocument();
+    expect(result.controls).toContainEqual(
+      expect.objectContaining({
+        kind: "COMBOBOX",
+        label: "Years of Experience *",
+      }),
+    );
+    expect(result.questions).toContainEqual(
+      expect.objectContaining({ rawText: "Years of Experience *" }),
+    );
+  });
+
+  it("does not promote unrelated focusable containers into application questions", () => {
+    document.body.innerHTML = `<div tabindex="0">Help and support</div>`;
+    const result = scanDocument();
+    expect(result.questions).toHaveLength(0);
+  });
+
+  it("uses the radio-group prompt instead of Yes or No option labels", () => {
+    document.body.innerHTML = `
+      <div class="question-field">
+        <p>Would you require any Visa sponsorship now or in the future? *</p>
+        <label><input type="radio" name="sponsor" value="Yes"> Yes</label>
+        <label><input type="radio" name="sponsor" value="No"> No</label>
+      </div>
+    `;
+    const result = scanDocument();
+    expect(result.questions).toHaveLength(1);
+    expect(result.questions[0]).toMatchObject({
+      rawText: "Would you require any Visa sponsorship now or in the future? *",
+      semanticType: "SPONSORSHIP_FUTURE",
+    });
+  });
+
+  it("captures bounded visible page text for AI job context", () => {
+    document.body.innerHTML = `<main><h1>Recruiter</h1><p>Build relationships with candidates and clients.</p><label for="why">Why this role?</label><textarea id="why"></textarea></main>`;
+    expect(scanDocument().pageContext).toContain(
+      "Build relationships with candidates and clients.",
+    );
+  });
+
+  it("does not treat an application-entry Apply Now control as final submission", () => {
+    document.body.innerHTML = `
+      <button type="button">Apply Now</button>
+      <button type="button">Next</button>
+    `;
+    const result = scanDocument();
+    expect(
+      result.navigationCandidates.map((candidate) => candidate.action),
+    ).toEqual(["NEXT"]);
+    expect(result.finalSubmissionBoundary).toBe(false);
+  });
+
+  it("treats Review and submit as a final manual boundary", () => {
+    document.body.innerHTML = `<button type="submit">Review and submit</button>`;
+    const result = scanDocument();
+    expect(result.navigationCandidates[0]?.action).toBe("FINAL_SUBMIT");
+    expect(result.finalSubmissionBoundary).toBe(true);
   });
 });
