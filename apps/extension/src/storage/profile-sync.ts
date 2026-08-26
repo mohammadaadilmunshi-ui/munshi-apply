@@ -6,10 +6,9 @@ import {
   type ProfileSnapshot,
 } from "@munshi-apply/contracts/profile-vault";
 import {
-  encryptJson,
   getCloudSnapshot,
   getWorkspaceEncryptionKey,
-  sha256Hex,
+  postEncryptedEntity,
   type CloudConnection,
 } from "./cloud";
 
@@ -373,44 +372,14 @@ async function postProfile(
   profile: ProfileSnapshot,
   baseVersion: number,
 ): Promise<number> {
-  const payloadCiphertext = await encryptJson(rawKey, profile);
-  const response = await fetch(`${connection.baseUrl}/api/sync/events`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${connection.credential}`,
-    },
-    body: JSON.stringify({
-      id: `evt-${crypto.randomUUID()}`,
-      correlationId: `cor-${crypto.randomUUID()}`,
-      entityType: "PROFILE.V1",
-      entityId: "profile-master",
-      baseVersion,
-      schemaVersion: "1.0",
-      payloadCiphertext,
-      payloadSha256: await sha256Hex(payloadCiphertext),
-    }),
+  return postEncryptedEntity({
+    connection,
+    rawKey,
+    entityType: "PROFILE.V1",
+    entityId: "profile-master",
+    baseVersion,
+    value: profile,
   });
-  const payload = (await response.json()) as {
-    event?: { version?: number };
-    conflict?: { expectedVersion?: number };
-    error?: string;
-  };
-  if (response.status === 409) {
-    throw new Error(
-      `Profile changed on another device (version ${payload.conflict?.expectedVersion ?? "unknown"}). Refresh and review before saving again.`,
-    );
-  }
-  if (!response.ok) {
-    throw new Error(payload.error ?? "Encrypted profile update failed");
-  }
-  const expectedVersion = baseVersion + 1;
-  if (payload.event?.version !== expectedVersion) {
-    throw new Error(
-      "Encrypted profile update was not acknowledged at the expected version",
-    );
-  }
-  return expectedVersion;
 }
 
 export async function resolveProtectedProfileConflict(
