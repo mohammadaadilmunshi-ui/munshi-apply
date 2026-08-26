@@ -1,6 +1,5 @@
 type NativeResponse =
-  | { ok: true; data?: unknown }
-  | { ok: false; error: string };
+  { ok: true; data?: unknown } | { ok: false; error: string };
 
 type QueuedRequest = {
   message: Record<string, unknown>;
@@ -90,7 +89,9 @@ export function createNativeRequestBroker(options: {
           active = null;
           clearRequestTimeout();
           if (!response.ok) {
-            current.reject(new Error(response.error || "Native companion failed"));
+            current.reject(
+              new Error(response.error || "Native companion failed"),
+            );
           } else {
             current.resolve(response.data);
           }
