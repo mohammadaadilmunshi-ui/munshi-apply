@@ -17,8 +17,22 @@ const APPLICATION_RELEVANT_SELECTOR = [
   "[aria-required='true']",
 ].join(",");
 
+const SUBTREE_VISIBILITY_ATTRIBUTES = new Set([
+  "aria-hidden",
+  "class",
+  "hidden",
+  "style",
+]);
+
 function elementIsApplicationRelevant(element: Element): boolean {
   return element.matches(APPLICATION_RELEVANT_SELECTOR);
+}
+
+function elementIsInsideApplicationControl(element: Element): boolean {
+  return (
+    elementIsApplicationRelevant(element) ||
+    element.closest(APPLICATION_RELEVANT_SELECTOR) !== null
+  );
 }
 
 function elementContainsApplicationControl(element: Element): boolean {
@@ -27,8 +41,7 @@ function elementContainsApplicationControl(element: Element): boolean {
 
 function elementTouchesApplication(element: Element): boolean {
   return (
-    elementIsApplicationRelevant(element) ||
-    element.closest(APPLICATION_RELEVANT_SELECTOR) !== null ||
+    elementIsInsideApplicationControl(element) ||
     elementContainsApplicationControl(element)
   );
 }
@@ -60,7 +73,15 @@ export function shouldRescanFromMutations(
     if (record.type !== "attributes") continue;
     if (!(record.target instanceof Element)) continue;
 
-    if (elementTouchesApplication(record.target)) return true;
+    if (elementIsInsideApplicationControl(record.target)) return true;
+
+    const attribute = record.attributeName ?? "";
+    if (
+      SUBTREE_VISIBILITY_ATTRIBUTES.has(attribute) &&
+      elementContainsApplicationControl(record.target)
+    ) {
+      return true;
+    }
   }
   return false;
 }
