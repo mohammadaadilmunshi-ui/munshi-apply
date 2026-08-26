@@ -25,12 +25,22 @@ function elementContainsApplicationControl(element: Element): boolean {
   return element.querySelector(APPLICATION_RELEVANT_SELECTOR) !== null;
 }
 
-function nodeAddsOrRemovesApplicationControl(node: Node): boolean {
+function elementTouchesApplication(element: Element): boolean {
   return (
-    node instanceof Element &&
-    (elementIsApplicationRelevant(node) ||
-      elementContainsApplicationControl(node))
+    elementIsApplicationRelevant(element) ||
+    element.closest(APPLICATION_RELEVANT_SELECTOR) !== null ||
+    elementContainsApplicationControl(element)
   );
+}
+
+export function isApplicationRelevantTarget(
+  target: EventTarget | null,
+): boolean {
+  return target instanceof Element && elementTouchesApplication(target);
+}
+
+function nodeAddsOrRemovesApplicationControl(node: Node): boolean {
+  return node instanceof Element && elementTouchesApplication(node);
 }
 
 function childListTouchesApplication(record: MutationRecord): boolean {
@@ -50,22 +60,7 @@ export function shouldRescanFromMutations(
     if (record.type !== "attributes") continue;
     if (!(record.target instanceof Element)) continue;
 
-    const attribute = record.attributeName ?? "";
-    if (attribute === "hidden" || attribute === "aria-hidden") {
-      return true;
-    }
-
-    if (attribute === "class" || attribute === "style") {
-      if (
-        elementIsApplicationRelevant(record.target) ||
-        elementContainsApplicationControl(record.target)
-      ) {
-        return true;
-      }
-      continue;
-    }
-
-    return true;
+    if (elementTouchesApplication(record.target)) return true;
   }
   return false;
 }
