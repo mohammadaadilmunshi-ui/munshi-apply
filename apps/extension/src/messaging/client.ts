@@ -272,7 +272,10 @@ async function drainProfileSaveQueue(): Promise<void> {
 
 export async function getActivePage(): Promise<ApplicationPage | null> {
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const [tab] = await chrome.tabs.query({
+      active: true,
+      currentWindow: true,
+    });
     if (tab?.id !== undefined) {
       const cached = mergeApplicationPages(await getPagesForTab(tab.id));
       if (cached) {
