@@ -1,0 +1,30 @@
+name: Temporary format diff
+
+on:
+  push:
+    branches:
+      - feat/v3-foundation-alignment
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Show canonical Prettier diff
+        run: |
+          npx prettier --write \
+            apps/extension/src/content/bootstrap.ts \
+            apps/extension/src/messaging/native-transport.ts \
+            apps/extension/src/messaging/native-transport.test.ts
+          git diff -- \
+            apps/extension/src/content/bootstrap.ts \
+            apps/extension/src/messaging/native-transport.ts \
+            apps/extension/src/messaging/native-transport.test.ts
