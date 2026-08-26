@@ -1,3 +1,5 @@
+export const SNAPSHOT_COALESCE_COOLDOWN_MS = 500;
+
 export type SnapshotCoalescer = {
   request(force: boolean): Promise<void>;
   dispose(): void;
@@ -6,12 +8,15 @@ export type SnapshotCoalescer = {
 
 export function createSnapshotCoalescer(
   run: (force: boolean) => Promise<void>,
+  cooldownMs = SNAPSHOT_COALESCE_COOLDOWN_MS,
 ): SnapshotCoalescer {
   let disposed = false;
   let running = false;
   let requested = false;
   let forceRequested = false;
   let current: Promise<void> = Promise.resolve();
+
+  const cooldown = Math.max(0, cooldownMs);
 
   const drain = async (): Promise<void> => {
     while (!disposed && requested) {
@@ -25,8 +30,8 @@ export function createSnapshotCoalescer(
         forceRequested = false;
         throw error;
       }
-      if (!disposed && requested) {
-        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      if (!disposed && requested && cooldown > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, cooldown));
       }
     }
   };
