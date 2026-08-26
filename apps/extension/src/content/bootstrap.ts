@@ -19,6 +19,7 @@ import {
   shouldRescanFromMutations,
 } from "./mutation-rescan-policy";
 import { applyNavigationAction } from "./navigation";
+import { automaticScanIntervalMs } from "./scan-pacing";
 import { scanDocument, snapshotFingerprint } from "./scanner";
 import {
   disposePreviousContentRuntime,
@@ -31,13 +32,14 @@ disposePreviousContentRuntime();
 
 const SCAN_DEBOUNCE_MS = 300;
 const MAX_SCAN_DEBOUNCE_MS = 1_500;
-const MIN_AUTOMATIC_SCAN_INTERVAL_MS = 1_200;
 let previousFingerprint = "";
 let pending: number | undefined;
 let pendingForce = false;
 let pendingWhenVisible = false;
 let debounceStartedAt = 0;
 let lastScanStartedAt = 0;
+let lastScanDurationMs = 0;
+let unchangedScanStreak = 0;
 let disposed = false;
 const listenerAbortController = new AbortController();
 const snapshotRetry = createSnapshotRetryController();
@@ -45,9 +47,14 @@ const snapshotRetry = createSnapshotRetryController();
 async function publishSnapshot(force = false): Promise<void> {
   if (disposed) return;
   lastScanStartedAt = Date.now();
+  const scanStartedAt = performance.now();
   const page = scanDocument();
+  lastScanDurationMs = Math.max(0, performance.now() - scanStartedAt);
   const fingerprint = page.pageFingerprint || snapshotFingerprint(page);
-  if (!force && fingerprint === previousFingerprint) return;
+  const unchanged =
+    previousFingerprint !== "" && fingerprint === previousFingerprint;
+  unchangedScanStreak = unchanged ? unchangedScanStreak + 1 : 0;
+  if (!force && unchanged) return;
   const request: ExtensionRequest = { type: "PAGE_SNAPSHOT", payload: page };
   const response = (await chrome.runtime.sendMessage(request)) as
     ExtensionResponse | undefined;
@@ -93,13 +100,16 @@ function scheduleScan(force = false): void {
     elapsed >= MAX_SCAN_DEBOUNCE_MS
       ? 0
       : Math.min(SCAN_DEBOUNCE_MS, MAX_SCAN_DEBOUNCE_MS - elapsed);
+  const automaticInterval = force
+    ? 0
+    : automaticScanIntervalMs({
+        lastScanDurationMs,
+        unchangedScanStreak,
+      });
   const throttleDelay =
     lastScanStartedAt === 0
       ? 0
-      : Math.max(
-          0,
-          MIN_AUTOMATIC_SCAN_INTERVAL_MS - (current - lastScanStartedAt),
-        );
+      : Math.max(0, automaticInterval - (current - lastScanStartedAt));
 
   clearPendingScan();
   pending = window.setTimeout(
