@@ -14,7 +14,11 @@ import {
   parseProfileSnapshot,
   type ProfileSnapshot,
 } from "@munshi-apply/contracts/profile-vault";
-import { getProfile as getBrowserProfile } from "../storage/vault";
+import { mergeApplicationPages } from "../background/page-merge";
+import {
+  getPagesForTab,
+  getProfile as getBrowserProfile,
+} from "../storage/vault";
 import {
   parseProfileSaveAck,
   type ProfileSaveAck,
@@ -270,6 +274,18 @@ async function drainProfileSaveQueue(): Promise<void> {
 }
 
 export async function getActivePage(): Promise<ApplicationPage | null> {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id !== undefined) {
+      const cached = mergeApplicationPages(await getPagesForTab(tab.id));
+      if (cached) {
+        void send({ type: "GET_ACTIVE_PAGE" }).catch(() => undefined);
+        return cached;
+      }
+    }
+  } catch {
+    // Cache lookup is an optimization only; the service worker remains authoritative.
+  }
   return (await send({ type: "GET_ACTIVE_PAGE" })) as ApplicationPage | null;
 }
 
