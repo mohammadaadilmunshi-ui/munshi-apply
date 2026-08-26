@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { createSnapshotCoalescer } from "./snapshot-coalescer";
+import {
+  createSnapshotCoalescer,
+  SNAPSHOT_COALESCE_COOLDOWN_MS,
+} from "./snapshot-coalescer";
 
 function deferred(): {
   promise: Promise<void>;
@@ -16,6 +19,10 @@ function deferred(): {
 }
 
 describe("snapshot coalescer", () => {
+  it("uses a non-zero production cooldown between queued reruns", () => {
+    expect(SNAPSHOT_COALESCE_COOLDOWN_MS).toBeGreaterThanOrEqual(250);
+  });
+
   it("collapses a burst while one scan is running into one latest-state rerun", async () => {
     const first = deferred();
     const calls: boolean[] = [];
@@ -23,7 +30,7 @@ describe("snapshot coalescer", () => {
       calls.push(force);
       if (calls.length === 1) await first.promise;
     });
-    const coalescer = createSnapshotCoalescer(run);
+    const coalescer = createSnapshotCoalescer(run, 0);
 
     const active = coalescer.request(false);
     for (let index = 0; index < 100; index += 1) {
@@ -43,7 +50,7 @@ describe("snapshot coalescer", () => {
     const coalescer = createSnapshotCoalescer(async (force) => {
       calls.push(force);
       if (calls.length === 1) await first.promise;
-    });
+    }, 0);
 
     const active = coalescer.request(false);
     void coalescer.request(false);
@@ -60,7 +67,7 @@ describe("snapshot coalescer", () => {
     const coalescer = createSnapshotCoalescer(async () => {
       attempts += 1;
       if (attempts === 1) throw new Error("background unavailable");
-    });
+    }, 0);
 
     await expect(coalescer.request(false)).rejects.toThrow(
       "background unavailable",
@@ -72,7 +79,7 @@ describe("snapshot coalescer", () => {
 
   it("suppresses all new work after disposal", async () => {
     const run = vi.fn(async () => undefined);
-    const coalescer = createSnapshotCoalescer(run);
+    const coalescer = createSnapshotCoalescer(run, 0);
     coalescer.dispose();
 
     await coalescer.request(true);
