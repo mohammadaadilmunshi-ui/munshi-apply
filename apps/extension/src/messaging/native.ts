@@ -6,11 +6,14 @@ import {
   parseProfileSnapshot,
   type ProfileSnapshot,
 } from "@munshi-apply/contracts/profile-vault";
+import { createNativeRequestBroker } from "./native-transport";
 
 const nativeHostName = "systems.munshi.apply";
-
-type NativeResponse =
-  { ok: true; data?: unknown } | { ok: false; error: string };
+const nativeRequestBroker = createNativeRequestBroker({
+  connect: () => chrome.runtime.connectNative(nativeHostName),
+  getLastErrorMessage: () => chrome.runtime.lastError?.message,
+  idleDisconnectMilliseconds: 2_000,
+});
 
 export type AIProviderChoice = "openai" | "ollama" | "auto";
 
@@ -175,34 +178,7 @@ async function sendNative<T>(
   message: Record<string, unknown>,
   timeoutMilliseconds = 10_000,
 ): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const port = chrome.runtime.connectNative(nativeHostName);
-    const timeout = setTimeout(() => {
-      port.disconnect();
-      reject(new Error("Native companion request timed out"));
-    }, timeoutMilliseconds);
-
-    port.onMessage.addListener((response: NativeResponse) => {
-      clearTimeout(timeout);
-      port.disconnect();
-      if (!response.ok) {
-        reject(
-          new Error(
-            "error" in response ? response.error : "Native companion failed",
-          ),
-        );
-        return;
-      }
-      resolve(response.data as T);
-    });
-    port.onDisconnect.addListener(() => {
-      const lastError = chrome.runtime.lastError;
-      if (!lastError) return;
-      clearTimeout(timeout);
-      reject(new Error(lastError.message));
-    });
-    port.postMessage(message);
-  });
+  return nativeRequestBroker.request<T>(message, timeoutMilliseconds);
 }
 
 function objectValue(value: unknown, label: string): Record<string, unknown> {
