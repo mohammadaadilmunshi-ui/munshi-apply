@@ -14,7 +14,10 @@ import {
   finishTeachInteraction,
 } from "./teach";
 import { refreshFileFingerprint } from "./adaptive";
-import { shouldRescanFromMutations } from "./mutation-rescan-policy";
+import {
+  isApplicationRelevantTarget,
+  shouldRescanFromMutations,
+} from "./mutation-rescan-policy";
 import { applyNavigationAction } from "./navigation";
 import { scanDocument, snapshotFingerprint } from "./scanner";
 import {
@@ -26,19 +29,24 @@ import { createSnapshotRetryController } from "./snapshot-retry";
 
 disposePreviousContentRuntime();
 
-const SCAN_DEBOUNCE_MS = 150;
-const MAX_SCAN_DEBOUNCE_MS = 600;
+const SCAN_DEBOUNCE_MS = 300;
+const MAX_SCAN_DEBOUNCE_MS = 1_500;
+const MIN_AUTOMATIC_SCAN_INTERVAL_MS = 1_200;
 let previousFingerprint = "";
 let pending: number | undefined;
+let pendingForce = false;
+let pendingWhenVisible = false;
 let debounceStartedAt = 0;
+let lastScanStartedAt = 0;
 let disposed = false;
 const listenerAbortController = new AbortController();
 const snapshotRetry = createSnapshotRetryController();
 
 async function publishSnapshot(force = false): Promise<void> {
   if (disposed) return;
+  lastScanStartedAt = Date.now();
   const page = scanDocument();
-  const fingerprint = snapshotFingerprint(page);
+  const fingerprint = page.pageFingerprint || snapshotFingerprint(page);
   if (!force && fingerprint === previousFingerprint) return;
   const request: ExtensionRequest = { type: "PAGE_SNAPSHOT", payload: page };
   const response = (await chrome.runtime.sendMessage(request)) as
@@ -69,31 +77,40 @@ function clearPendingScan(): void {
 
 function scheduleScan(force = false): void {
   if (disposed) return;
-  if (force) {
+  pendingForce ||= force;
+
+  if (document.visibilityState !== "visible") {
+    pendingWhenVisible = true;
     clearPendingScan();
     debounceStartedAt = 0;
-    runSnapshot(true);
     return;
   }
 
   const current = Date.now();
   if (debounceStartedAt === 0) debounceStartedAt = current;
   const elapsed = current - debounceStartedAt;
-  if (elapsed >= MAX_SCAN_DEBOUNCE_MS) {
-    clearPendingScan();
-    debounceStartedAt = 0;
-    runSnapshot(false);
-    return;
-  }
+  const debounceDelay =
+    elapsed >= MAX_SCAN_DEBOUNCE_MS
+      ? 0
+      : Math.min(SCAN_DEBOUNCE_MS, MAX_SCAN_DEBOUNCE_MS - elapsed);
+  const throttleDelay =
+    lastScanStartedAt === 0
+      ? 0
+      : Math.max(
+          0,
+          MIN_AUTOMATIC_SCAN_INTERVAL_MS - (current - lastScanStartedAt),
+        );
 
   clearPendingScan();
   pending = window.setTimeout(
     () => {
       pending = undefined;
       debounceStartedAt = 0;
-      runSnapshot(false);
+      const forceNext = pendingForce;
+      pendingForce = false;
+      runSnapshot(forceNext);
     },
-    Math.min(SCAN_DEBOUNCE_MS, MAX_SCAN_DEBOUNCE_MS - elapsed),
+    Math.max(debounceDelay, throttleDelay),
   );
 }
 
@@ -163,13 +180,9 @@ const captureListenerOptions = {
 };
 
 document.addEventListener(
-  "input",
-  () => scheduleScan(),
-  captureListenerOptions,
-);
-document.addEventListener(
   "change",
   (event) => {
+    if (!isApplicationRelevantTarget(event.target)) return;
     const target = event.target;
     if (target instanceof HTMLInputElement && target.type === "file") {
       void refreshFileFingerprint(target)
@@ -183,15 +196,27 @@ document.addEventListener(
 );
 document.addEventListener(
   "invalid",
-  () => scheduleScan(true),
+  (event) => {
+    if (isApplicationRelevantTarget(event.target)) scheduleScan(true);
+  },
   captureListenerOptions,
 );
-document.addEventListener("blur", () => scheduleScan(), captureListenerOptions);
+document.addEventListener(
+  "blur",
+  (event) => {
+    if (isApplicationRelevantTarget(event.target)) scheduleScan();
+  },
+  captureListenerOptions,
+);
 window.addEventListener("pageshow", () => scheduleScan(true), listenerOptions);
 document.addEventListener(
   "visibilitychange",
   () => {
-    if (document.visibilityState === "visible") scheduleScan(true);
+    if (document.visibilityState !== "visible") return;
+    const force = pendingForce || pendingWhenVisible;
+    pendingForce = false;
+    pendingWhenVisible = false;
+    scheduleScan(force);
   },
   listenerOptions,
 );
@@ -199,7 +224,7 @@ window.addEventListener("popstate", () => scheduleScan(), listenerOptions);
 window.addEventListener("hashchange", () => scheduleScan(), listenerOptions);
 const restorePushState = wrapHistoryMethod("pushState");
 const restoreReplaceState = wrapHistoryMethod("replaceState");
-runSnapshot(false);
+scheduleScan(false);
 
 const runtimeMessageListener = (
   message: {
@@ -319,6 +344,8 @@ registerContentRuntime(() => {
   snapshotCoalescer.dispose();
   snapshotRetry.dispose();
   clearPendingScan();
+  pendingForce = false;
+  pendingWhenVisible = false;
   debounceStartedAt = 0;
   observer?.disconnect();
   listenerAbortController.abort();
