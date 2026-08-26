@@ -14,6 +14,7 @@ import {
   parseProfileSnapshot,
   type ProfileSnapshot,
 } from "@munshi-apply/contracts/profile-vault";
+import { getProfile as getBrowserProfile } from "../storage/vault";
 import {
   parseProfileSaveAck,
   type ProfileSaveAck,
@@ -172,6 +173,9 @@ const retryableRuntimeRequestTypes = new Set([
   "GET_ACTIVE_PAGE",
   "NATIVE_HEALTH",
 ]);
+const LOCAL_PROFILE_READ_TIMEOUT_MS = 750;
+const PROFILE_RECOVERY_TIMEOUT_MS = 6_000;
+const FILL_PLAN_TIMEOUT_MS = 20_000;
 
 function isTransientRuntimeError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error ?? "");
@@ -270,7 +274,26 @@ export async function getActivePage(): Promise<ApplicationPage | null> {
 }
 
 export async function getProfile(): Promise<ProfileSnapshot | null> {
-  const candidate = await send({ type: "GET_PROFILE" });
+  try {
+    const local = await withTimeout(
+      getBrowserProfile(),
+      LOCAL_PROFILE_READ_TIMEOUT_MS,
+      "Local profile read timed out",
+    );
+    if (local) {
+      void send({ type: "GET_PROFILE" }).catch(() => undefined);
+      return local;
+    }
+  } catch {
+    // Fall through to authoritative recovery when the browser mirror is absent,
+    // corrupt, or temporarily locked. This never writes an empty replacement.
+  }
+
+  const candidate = await withTimeout(
+    send({ type: "GET_PROFILE" }),
+    PROFILE_RECOVERY_TIMEOUT_MS,
+    "Profile recovery timed out. Your saved local data was not overwritten.",
+  );
   return candidate === null ? null : parseProfileSnapshot(candidate);
 }
 
@@ -312,7 +335,11 @@ export async function getNativeHealth(): Promise<NativeRuntimeHealth> {
 }
 
 export async function applyFillPlan(plan: FillPlan): Promise<FillResult[]> {
-  const result = (await send({ type: "APPLY_FILL_PLAN", payload: plan })) as {
+  const result = (await withTimeout(
+    send({ type: "APPLY_FILL_PLAN", payload: plan }),
+    FILL_PLAN_TIMEOUT_MS,
+    "Verified fill timed out after 20 seconds. MUNSHI stopped waiting so you can retry safely.",
+  )) as {
     results?: FillResult[];
   };
   return result.results ?? [];
