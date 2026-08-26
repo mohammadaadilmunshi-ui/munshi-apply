@@ -411,9 +411,14 @@ export function getCloudHealth(
     };
   })();
   cloudHealthInFlight = operation;
-  void operation.finally(() => {
-    if (cloudHealthInFlight === operation) cloudHealthInFlight = null;
-  });
+  void operation.then(
+    () => {
+      if (cloudHealthInFlight === operation) cloudHealthInFlight = null;
+    },
+    () => {
+      if (cloudHealthInFlight === operation) cloudHealthInFlight = null;
+    },
+  );
   return operation;
 }
 
@@ -712,9 +717,14 @@ export function getCloudSnapshot(
     };
   })();
   cloudSnapshotInFlight = operation;
-  void operation.finally(() => {
-    if (cloudSnapshotInFlight === operation) cloudSnapshotInFlight = null;
-  });
+  void operation.then(
+    () => {
+      if (cloudSnapshotInFlight === operation) cloudSnapshotInFlight = null;
+    },
+    () => {
+      if (cloudSnapshotInFlight === operation) cloudSnapshotInFlight = null;
+    },
+  );
   return operation;
 }
 

@@ -289,7 +289,8 @@ export async function getActivePage(): Promise<ApplicationPage | null> {
   } catch {
     // Cache lookup is an optimization only; the service worker remains authoritative.
   }
-  return (await send({ type: "GET_ACTIVE_PAGE" })) as ApplicationPage | null;
+  void send({ type: "GET_ACTIVE_PAGE" }).catch(() => undefined);
+  return null;
 }
 
 export async function getProfile(): Promise<ProfileSnapshot | null> {
@@ -312,6 +313,15 @@ export async function getProfile(): Promise<ProfileSnapshot | null> {
     send({ type: "GET_PROFILE" }),
     PROFILE_RECOVERY_TIMEOUT_MS,
     "Profile recovery timed out. Your saved local data was not overwritten.",
+  );
+  return candidate === null ? null : parseProfileSnapshot(candidate);
+}
+
+export async function reconcileProfile(): Promise<ProfileSnapshot | null> {
+  const candidate = await withTimeout(
+    send({ type: "GET_PROFILE" }),
+    12_000,
+    "Encrypted profile reconciliation timed out. Your local profile remains available.",
   );
   return candidate === null ? null : parseProfileSnapshot(candidate);
 }

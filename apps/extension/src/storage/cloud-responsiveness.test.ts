@@ -10,12 +10,13 @@ const connection = {
 };
 
 function installHangingFetch() {
-  const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) =>
-    new Promise<Response>((_resolve, reject) => {
-      init?.signal?.addEventListener("abort", () => {
-        reject(new DOMException("Aborted", "AbortError"));
-      });
-    }),
+  const fetchMock = vi.fn(
+    (_input: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reject(new DOMException("Aborted", "AbortError"));
+        });
+      }),
   );
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;

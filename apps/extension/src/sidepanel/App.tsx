@@ -24,6 +24,7 @@ import {
   getNativeHealth,
   getProfile,
   getProfileSyncStatus,
+  reconcileProfile,
   nativeRuntimeCompatibility,
   requestFilePickerAssist,
   resolveProfileSyncConflict,
@@ -298,6 +299,7 @@ export function App() {
   const [retryTick, setRetryTick] = useState(0);
   const retryTimer = useRef<number | null>(null);
   const profileRevision = useRef(0);
+  const cloudPullInFlight = useRef(false);
   const [protectedDrafts, setProtectedDrafts] = useState<
     Record<string, string>
   >({});
@@ -457,26 +459,45 @@ export function App() {
   }, [refreshAI]);
 
   const pullCloudChanges = useCallback(async () => {
-    if (profileDirty || Object.keys(protectedDrafts).length > 0) return;
-    const connection = await getCloudConnection();
-    if (!connection) return;
-    const cloudHealth = await getCloudHealth(connection);
-    setCloud({ status: "connected", data: cloudHealth });
-    if (!cloudHealth.encryptionReady) return;
-    const syncedProfile = await getProfile();
-    const syncStatus = await getProfileSyncStatus();
-    const snapshot = await getCloudSnapshot(connection);
-    setCloudSnapshot(snapshot);
-    setProfileSyncStatus(syncStatus);
-    if (syncedProfile) {
-      setProfile(syncedProfile);
-      setProfileRecoveryIssue(null);
-      setProfileLoaded(true);
-      setProfileDirty(false);
-      profileRevision.current += 1;
-      setSaveState(syncStatus.conflict ? "conflict" : "synced");
+    if (
+      cloudPullInFlight.current ||
+      profileDirty ||
+      Object.keys(protectedDrafts).length > 0
+    )
+      return;
+    cloudPullInFlight.current = true;
+    try {
+      const connection = await getCloudConnection();
+      if (!connection) {
+        setCloud({ status: "disconnected" });
+        return;
+      }
+      const cloudHealth = await getCloudHealth(connection);
+      setCloud({ status: "connected", data: cloudHealth });
+      if (!cloudHealth.encryptionReady) return;
+      const syncedProfile = await reconcileProfile();
+      const syncStatus = await getProfileSyncStatus();
+      const snapshot = await getCloudSnapshot(connection);
+      setCloudSnapshot(snapshot);
+      setProfileSyncStatus(syncStatus);
+      if (syncedProfile) {
+        setProfile(syncedProfile);
+        setProfileRecoveryIssue(null);
+        setProfileLoaded(true);
+        setProfileDirty(false);
+        profileRevision.current += 1;
+        setSaveState(syncStatus.conflict ? "conflict" : "synced");
+      }
+      setLastCloudPullAt(now());
+    } catch (error) {
+      setCloud({
+        status: "unavailable",
+        error: error instanceof Error ? error.message : "Cloud unavailable",
+      });
+      throw error;
+    } finally {
+      cloudPullInFlight.current = false;
     }
-    setLastCloudPullAt(now());
   }, [profileDirty, protectedDrafts]);
 
   useEffect(() => {
@@ -729,12 +750,14 @@ export function App() {
   const connectionLabel =
     health.toLowerCase() !== "healthy"
       ? "Unavailable"
-      : native.status === "healthy"
-        ? "Connected"
-        : native.status === "upgrade_required"
-          ? "Companion update"
-          : native.status === "checking"
-            ? "Checking"
+      : native.status === "upgrade_required"
+        ? "Companion update"
+        : native.status === "checking"
+          ? "Checking"
+          : native.status === "healthy"
+            ? cloud.status === "connected"
+              ? "Cloud synced"
+              : "Local ready"
             : "Extension ready";
   const connectionClass =
     native.status === "healthy" || cloud.status === "connected"
