@@ -15,10 +15,7 @@ import {
   type ProfileSnapshot,
 } from "@munshi-apply/contracts/profile-vault";
 import { mergeApplicationPages } from "../background/page-merge";
-import {
-  getPagesForTab,
-  getProfile as getBrowserProfile,
-} from "../storage/vault";
+import { getPagesForTab, getProfile as getBrowserProfile } from "../storage/vault";
 import {
   parseProfileSaveAck,
   type ProfileSaveAck,
