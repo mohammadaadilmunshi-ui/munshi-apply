@@ -19,6 +19,7 @@ export * from "./policies";
 export * from "./pricing";
 export * from "./progressive-memory";
 export * from "./resolution-task";
+export * from "./resolution-task-lifecycle";
 export * from "./resolution-task-parse";
 export * from "./resolver-smart";
 export * from "./retrieval";
