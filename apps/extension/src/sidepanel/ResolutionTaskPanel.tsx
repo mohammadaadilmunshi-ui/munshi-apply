@@ -20,7 +20,10 @@ function mergeTasks(groups: readonly ResolutionTask[][]): ResolutionTask[] {
   for (const group of groups) {
     for (const task of group) {
       const existing = byId.get(task.taskId);
-      if (!existing || Date.parse(task.updatedAt) > Date.parse(existing.updatedAt)) {
+      if (
+        !existing ||
+        Date.parse(task.updatedAt) > Date.parse(existing.updatedAt)
+      ) {
         byId.set(task.taskId, task);
       }
     }
@@ -103,7 +106,9 @@ export function ResolutionTaskQueueBody({
                       : "badge"
                   }
                 >
-                  {row.disposition === "OWNER_REQUIRED" ? "Needs you" : "Tracked"}
+                  {row.disposition === "OWNER_REQUIRED"
+                    ? "Needs you"
+                    : "Tracked"}
                 </span>
               </div>
               <span>{row.reason}</span>
@@ -121,7 +126,8 @@ export function ResolutionTaskQueueBody({
                 <div className="inline-note success">
                   Reusable scope detected across {row.reusableApplicationCount}{" "}
                   applications. A single confirmed source-of-truth update may
-                  clear the matching work in each application after revalidation.
+                  clear the matching work in each application after
+                  revalidation.
                 </div>
               )}
             </article>
@@ -140,8 +146,8 @@ export function ResolutionTaskQueueBody({
       {view.otherApplicationOpenCount > 0 && (
         <div className="inline-note">
           {view.otherApplicationOpenCount} additional open task
-          {view.otherApplicationOpenCount === 1 ? " is" : "s are"} tracked across
-          other applications.
+          {view.otherApplicationOpenCount === 1 ? " is" : "s are"} tracked
+          across other applications.
         </div>
       )}
 
