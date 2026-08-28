@@ -13,9 +13,7 @@ const openStatuses = new Set<ResolutionTaskStatus>([
 ]);
 
 export type ResolutionTaskQueueDisposition =
-  | "OWNER_REQUIRED"
-  | "GUARDED_RESOLUTION"
-  | "REVIEW";
+  "OWNER_REQUIRED" | "GUARDED_RESOLUTION" | "REVIEW";
 
 export type ResolutionTaskQueueRow = {
   taskId: string;

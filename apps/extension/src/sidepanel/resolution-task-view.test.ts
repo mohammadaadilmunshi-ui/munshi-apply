@@ -36,10 +36,7 @@ function legalTask(applicationId: string, createdAt: string): ResolutionTask {
 
 describe("Resolution Task queue view", () => {
   it("keeps only active lifecycle states open", () => {
-    const pending = relocationTask(
-      "application-a",
-      "2026-08-28T18:00:00.000Z",
-    );
+    const pending = relocationTask("application-a", "2026-08-28T18:00:00.000Z");
     expect(isOpenResolutionTask(pending)).toBe(true);
     expect(isOpenResolutionTask({ ...pending, status: "RESOLVED" })).toBe(
       false,
@@ -49,14 +46,8 @@ describe("Resolution Task queue view", () => {
   });
 
   it("prioritizes direct owner work ahead of lower-risk guarded candidates", () => {
-    const guarded = relocationTask(
-      "application-a",
-      "2026-08-28T18:05:00.000Z",
-    );
-    const owner = legalTask(
-      "application-a",
-      "2026-08-28T18:00:00.000Z",
-    );
+    const guarded = relocationTask("application-a", "2026-08-28T18:05:00.000Z");
+    const owner = legalTask("application-a", "2026-08-28T18:00:00.000Z");
 
     const view = buildResolutionTaskQueueView(
       [guarded, owner],
@@ -79,14 +70,8 @@ describe("Resolution Task queue view", () => {
   });
 
   it("counts reusable semantic work across applications without merging tasks", () => {
-    const current = relocationTask(
-      "application-a",
-      "2026-08-28T18:00:00.000Z",
-    );
-    const other = relocationTask(
-      "application-b",
-      "2026-08-28T18:01:00.000Z",
-    );
+    const current = relocationTask("application-a", "2026-08-28T18:00:00.000Z");
+    const other = relocationTask("application-b", "2026-08-28T18:01:00.000Z");
 
     const view = buildResolutionTaskQueueView(
       [current, other],
@@ -101,14 +86,8 @@ describe("Resolution Task queue view", () => {
   });
 
   it("treats WAITING_FOR_USER as owner-required even for an otherwise auto-resolvable category", () => {
-    const pending = relocationTask(
-      "application-a",
-      "2026-08-28T18:00:00.000Z",
-    );
-    const waiting = waitForResolutionUser(
-      pending,
-      "2026-08-28T18:01:00.000Z",
-    );
+    const pending = relocationTask("application-a", "2026-08-28T18:00:00.000Z");
+    const waiting = waitForResolutionUser(pending, "2026-08-28T18:01:00.000Z");
 
     const view = buildResolutionTaskQueueView([waiting], "application-a");
 
