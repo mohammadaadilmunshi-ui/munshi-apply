@@ -41,21 +41,12 @@ def _json_list(value: list[str]) -> str:
 
 
 def _payload_identity(task: ResolutionTaskPayload) -> tuple[object, ...]:
+    """Fields that define the logical task, not its refreshable execution context."""
     return (
         task.schema_version,
         task.application_id,
-        task.session_id,
-        task.checkpoint_id,
-        task.page_id,
-        task.control_id,
-        task.question_id,
         task.question,
         task.semantic_type,
-        task.category,
-        task.risk_level,
-        task.auto_resolvable,
-        task.grouping_scope,
-        task.group_key,
         tuple(task.source_refs),
         task.created_at,
     )
@@ -175,14 +166,26 @@ class ResolutionTaskStore:
             connection.execute(
                 """
                 UPDATE resolution_tasks
-                SET status = ?, requires_user = ?, evidence_refs_json = ?,
-                    attempted_resolvers_json = ?, reason = ?, resolution_json = ?,
-                    updated_at = ?
+                SET session_id = ?, checkpoint_id = ?, page_id = ?, control_id = ?,
+                    question_id = ?, category = ?, status = ?, risk_level = ?,
+                    auto_resolvable = ?, requires_user = ?, grouping_scope = ?,
+                    group_key = ?, evidence_refs_json = ?, attempted_resolvers_json = ?,
+                    reason = ?, resolution_json = ?, updated_at = ?
                 WHERE task_id = ?
                 """,
                 (
+                    record["session_id"],
+                    record["checkpoint_id"],
+                    record["page_id"],
+                    record["control_id"],
+                    record["question_id"],
+                    record["category"],
                     record["status"],
+                    record["risk_level"],
+                    int(record["auto_resolvable"]),
                     int(record["requires_user"]),
+                    record["grouping_scope"],
+                    record["group_key"],
                     _json_list(record["evidence_refs"]),
                     _json_list(record["attempted_resolvers"]),
                     record["reason"],
