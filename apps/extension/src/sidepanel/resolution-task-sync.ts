@@ -1,5 +1,6 @@
 import {
   durableResolutionTaskFromPreflightFinding,
+  failResolutionTask,
   preflightResolutionTaskId,
   reconcilePreflightResolutionTask,
   type AutoPilotSession,
@@ -106,13 +107,31 @@ export function planPreflightResolutionTaskSync(
   const writes: ResolutionTask[] = [];
 
   for (const finding of input.findings) {
-    if (finding.state === "READY") continue;
-    const question = questionForFinding(input.page, finding);
     const taskId = preflightResolutionTaskId(
       input.applicationId,
       finding.requirement.requirementId,
     );
     const existing = existingById.get(taskId);
+
+    if (finding.state === "READY") {
+      if (
+        !existing ||
+        ["RESOLVED", "FAILED", "EXPIRED"].includes(existing.status)
+      ) {
+        continue;
+      }
+      writes.push(
+        failResolutionTask(existing, {
+          reason:
+            "Current verified employer preflight no longer requires this Resolution Task",
+          at: strictlyLaterTimestamp(input.observedAt, existing.updatedAt),
+          expired: true,
+        }),
+      );
+      continue;
+    }
+
+    const question = questionForFinding(input.page, finding);
 
     if (!existing) {
       const created = durableResolutionTaskFromPreflightFinding({

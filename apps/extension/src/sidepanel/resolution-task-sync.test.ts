@@ -224,6 +224,26 @@ describe("preflight Resolution Task sync planner", () => {
     ).toEqual([]);
   });
 
+  it("expires an existing open task when the same preflight finding becomes READY", () => {
+    const existing = firstWrite();
+    const writes = planPreflightResolutionTaskSync(
+      {
+        applicationId: "application-1",
+        page: page(),
+        findings: [finding("READY")],
+        session: session(),
+        observedAt: "2026-08-28T18:42:00.000Z",
+      },
+      [existing],
+    );
+
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({
+      taskId: existing.taskId,
+      status: "EXPIRED",
+    });
+    expect(writes[0]!.reason).toMatch(/verified employer preflight/i);
+  });
   it("does not bind a session belonging to another application", () => {
     expect(
       firstWrite(
