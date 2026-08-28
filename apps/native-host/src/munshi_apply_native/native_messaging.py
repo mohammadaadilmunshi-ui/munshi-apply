@@ -20,6 +20,7 @@ from .interaction_recipe_service import InteractionRecipeService
 from .job_signal_store import JobSignalStore
 from .models import ApplicationCheckpointPayload, EventEnvelope
 from .profile_store import ProfileStore
+from .resolution_task_messages import handle_resolution_task_message
 from .settings import Settings
 from .writing_style import WritingStyleStore
 
@@ -42,6 +43,7 @@ NATIVE_CAPABILITIES: dict[str, bool] = {
     "job_signal_intelligence": True,
     "job_signal_identity_binding": True,
     "application_analytics": True,
+    "resolution_tasks": True,
 }
 
 
@@ -155,6 +157,11 @@ def handle(
         health["protocol_version"] = NATIVE_PROTOCOL_VERSION
         health["capabilities"] = dict(NATIVE_CAPABILITIES)
         return {"ok": True, "data": health}
+
+    resolution_response = handle_resolution_task_message(message, database)
+    if resolution_response is not None:
+        return resolution_response
+
     if message_type == "APPEND_EVENT":
         event = EventEnvelope.model_validate(message.get("payload"))
         database.append_event(event.database_record())
