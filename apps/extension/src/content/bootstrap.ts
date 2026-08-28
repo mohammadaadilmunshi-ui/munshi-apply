@@ -27,6 +27,7 @@ import {
 } from "./runtime-lifecycle";
 import { createSnapshotCoalescer } from "./snapshot-coalescer";
 import { createSnapshotRetryController } from "./snapshot-retry";
+import { handleOwnerReliabilityMessage } from "./owner-reliability";
 
 disposePreviousContentRuntime();
 
@@ -248,6 +249,13 @@ const runtimeMessageListener = (
   sendResponse: (response?: unknown) => void,
 ): boolean => {
   if (disposed) return false;
+
+  const ownerMessage = handleOwnerReliabilityMessage(message);
+  if (ownerMessage.handled) {
+    sendResponse(ownerMessage.response);
+    return false;
+  }
+
   if (message.type === "CONTENT_PING") {
     sendResponse({ ok: true });
     return false;
