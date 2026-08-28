@@ -40,38 +40,15 @@ jobs:
                   raise SystemExit("resolution revision state anchor not found")
               text = text.replace(state_anchor, state_anchor + state_line, 1)
 
-          old_then = '''    })
-      .then(() => {
-        if (!cancelled) setResolutionSyncError("");
-      })
-'''
-          new_then = '''    })
-      .then((writes) => {
-        if (!cancelled) {
-          if (writes.length > 0) {
-            setResolutionTaskRevision((value) => value + 1);
-          }
-          setResolutionSyncError("");
-        }
-      })
-'''
+          old_then = "    })\n      .then(() => {\n        if (!cancelled) setResolutionSyncError(\"\");\n      })\n"
+          new_then = "    })\n      .then((writes) => {\n        if (!cancelled) {\n          if (writes.length > 0) {\n            setResolutionTaskRevision((value) => value + 1);\n          }\n          setResolutionSyncError(\"\");\n        }\n      })\n"
           if old_then in text:
               text = text.replace(old_then, new_then, 1)
           elif 'setResolutionTaskRevision((value) => value + 1);' not in text:
               raise SystemExit("resolution sync completion anchor not found")
 
-          render_anchor = '''          {plan && (
-            <JobSignalPanel
-'''
-          panel_render = '''          {plan && (
-            <ResolutionTaskPanel
-              applicationId={applicationId}
-              nativeAvailable={nativeAvailable}
-              refreshRevision={resolutionTaskRevision}
-            />
-          )}
-
-'''
+          render_anchor = "          {plan && (\n            <JobSignalPanel\n"
+          panel_render = "          {plan && (\n            <ResolutionTaskPanel\n              applicationId={applicationId}\n              nativeAvailable={nativeAvailable}\n              refreshRevision={resolutionTaskRevision}\n            />\n          )}\n\n"
           if '<ResolutionTaskPanel' not in text:
               if render_anchor not in text:
                   raise SystemExit("ResolutionTaskPanel render anchor not found")
