@@ -216,34 +216,35 @@ class ResolutionTaskStore:
     ) -> list[ResolutionTaskPayload]:
         if limit < 1 or limit > 500:
             raise ValueError("Resolution task list limit must be between 1 and 500")
-        clauses: list[str] = []
-        parameters: list[object] = []
+        normalized_application_id: str | None = None
         if application_id is not None:
             normalized_application_id = application_id.strip()
             if not normalized_application_id:
                 raise ValueError("Resolution task applicationId must not be blank")
-            clauses.append("application_id = ?")
-            parameters.append(normalized_application_id)
-        if status is not None:
-            clauses.append("status = ?")
-            parameters.append(status)
+        normalized_group_key: str | None = None
         if group_key is not None:
             normalized_group_key = group_key.strip()
             if not normalized_group_key:
                 raise ValueError("Resolution task groupKey must not be blank")
-            clauses.append("group_key = ?")
-            parameters.append(normalized_group_key)
 
-        where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        parameters.append(limit)
         with self.database.connect() as connection:
             rows = connection.execute(
-                f"""
+                """
                 SELECT * FROM resolution_tasks
-                {where_clause}
+                WHERE (? IS NULL OR application_id = ?)
+                  AND (? IS NULL OR status = ?)
+                  AND (? IS NULL OR group_key = ?)
                 ORDER BY updated_at DESC, task_id
                 LIMIT ?
                 """,
-                tuple(parameters),
+                (
+                    normalized_application_id,
+                    normalized_application_id,
+                    status,
+                    status,
+                    normalized_group_key,
+                    normalized_group_key,
+                    limit,
+                ),
             ).fetchall()
         return [_row_to_payload(row) for row in rows]
