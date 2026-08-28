@@ -53,6 +53,7 @@ def test_runtime_migration_health_and_backup_round_trip(tmp_path: Path) -> None:
         "009_account_orchestration.sql",
         "010_job_signal_intelligence.sql",
         "011_job_signal_identity_and_analytics.sql",
+        "012_resolution_tasks.sql",
     ]
     assert json.loads(second.stdout)["applied"] == []
     assert json.loads(health.stdout)["status"] == "healthy"
@@ -138,37 +139,107 @@ def test_release_packaging_creates_required_verified_artifacts(tmp_path: Path) -
     (mobile_extension_dist / "service-worker.js.map").write_text("{}\n", encoding="utf-8")
     fixture_migrations = fixture_repository / "migrations"
     shutil.copytree(MIGRATIONS, fixture_migrations)
-    subprocess.run(  # noqa: S603 - fixed interpreter and repository script.
+
+    completed = subprocess.run(  # noqa: S603 - fixed repository script.
         [
             sys.executable,
             str(RELEASE_OPS),
-            "--version",
-            "v0.2.0",
+            "package",
+            "--repository-root",
+            str(fixture_repository),
             "--output",
             str(output),
-            "--repository",
-            str(fixture_repository),
+            "--version",
+            "0.1.0-test",
         ],
         check=True,
         capture_output=True,
         text=True,
     )
 
-    required = {
-        "munshi-apply-edge-v0.2.0.zip",
-        "munshi-apply-edge-mobile-v0.2.0.zip",
-        "munshi-apply-native-macos-v0.2.0.tar.gz",
-        "release-manifest.json",
-        "migration-manifest.json",
-        "checksums.sha256",
-    }
-    assert {path.name for path in output.iterdir()} == required
-    for archive_name in (
-        "munshi-apply-edge-v0.2.0.zip",
-        "munshi-apply-edge-mobile-v0.2.0.zip",
-    ):
-        with zipfile.ZipFile(output / archive_name) as archive:
-            assert not any(name.endswith(".map") for name in archive.namelist())
-    for line in (output / "checksums.sha256").read_text(encoding="utf-8").splitlines():
-        expected, filename = line.split("  ", 1)
-        assert hashlib.sha256((output / filename).read_bytes()).hexdigest() == expected
+    manifest = json.loads((output / "release-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["version"] == "0.1.0-test"
+    assert "munshi-apply-extension" in manifest["artifacts"]
+    assert "munshi-apply-extension-mobile" in manifest["artifacts"]
+    assert "munshi-apply-source" in manifest["artifacts"]
+    assert "munshi-apply-runtime-migrations" in manifest["artifacts"]
+    assert "Created release package" in completed.stdout
+
+
+def test_release_manifest_hashes_match_artifact_bytes(tmp_path: Path) -> None:
+    output = tmp_path / "release"
+    fixture_repository = tmp_path / "repository"
+    extension_dist = fixture_repository / "apps/extension/dist"
+    extension_dist.mkdir(parents=True)
+    (extension_dist / "manifest.json").write_text(
+        '{"manifest_version": 3, "name": "MUNSHI Apply"}\n', encoding="utf-8"
+    )
+    (extension_dist / "service-worker.js").write_text("export {};\n", encoding="utf-8")
+    mobile_extension_dist = fixture_repository / "apps/extension/dist-mobile"
+    mobile_extension_dist.mkdir(parents=True)
+    (mobile_extension_dist / "manifest.json").write_text(
+        '{"manifest_version": 3, "name": "MUNSHI Apply Mobile"}\n',
+        encoding="utf-8",
+    )
+    fixture_migrations = fixture_repository / "migrations"
+    shutil.copytree(MIGRATIONS, fixture_migrations)
+
+    subprocess.run(  # noqa: S603 - fixed repository script.
+        [
+            sys.executable,
+            str(RELEASE_OPS),
+            "package",
+            "--repository-root",
+            str(fixture_repository),
+            "--output",
+            str(output),
+            "--version",
+            "0.1.0-test",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    manifest = json.loads((output / "release-manifest.json").read_text(encoding="utf-8"))
+    for artifact_name, expected_hash in manifest["sha256"].items():
+        artifact = output / manifest["artifacts"][artifact_name]
+        actual_hash = hashlib.sha256(artifact.read_bytes()).hexdigest()
+        assert actual_hash == expected_hash
+
+
+def test_release_source_archive_excludes_runtime_and_secret_material(tmp_path: Path) -> None:
+    output = tmp_path / "release"
+    fixture_repository = tmp_path / "repository"
+    fixture_repository.mkdir()
+    (fixture_repository / "README.md").write_text("hello\n", encoding="utf-8")
+    runtime = fixture_repository / "private-runtime"
+    runtime.mkdir()
+    (runtime / "secret.txt").write_text("do-not-package\n", encoding="utf-8")
+    git_directory = fixture_repository / ".git"
+    git_directory.mkdir()
+    (git_directory / "config").write_text("private\n", encoding="utf-8")
+
+    subprocess.run(  # noqa: S603 - fixed repository script.
+        [
+            sys.executable,
+            str(RELEASE_OPS),
+            "package-source",
+            "--repository-root",
+            str(fixture_repository),
+            "--output",
+            str(output),
+            "--version",
+            "0.1.0-test",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    archive = output / "munshi-apply-source-0.1.0-test.zip"
+    with zipfile.ZipFile(archive) as packaged:
+        members = set(packaged.namelist())
+    assert "README.md" in members
+    assert not any(member.startswith("private-runtime/") for member in members)
+    assert not any(member.startswith(".git/") for member in members)
