@@ -1,0 +1,40 @@
+name: Format diff debug
+
+on:
+  pull_request:
+    branches:
+      - feat/v3-foundation-alignment
+
+permissions:
+  contents: read
+
+jobs:
+  format-diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Print canonical Prettier repair diff
+        run: |
+          npx prettier --write \
+            apps/extension/scripts/build-extension.mjs \
+            apps/extension/src/content/bootstrap.ts \
+            apps/extension/src/content/owner-reliability.ts \
+            apps/extension/src/storage/answer-memory.test.ts \
+            apps/extension/src/storage/answer-memory.ts \
+            packages/application-model/src/index.ts \
+            packages/application-model/src/resolution-task.test.ts \
+            packages/application-model/src/resolution-task.ts
+          git diff -- \
+            apps/extension/scripts/build-extension.mjs \
+            apps/extension/src/content/bootstrap.ts \
+            apps/extension/src/content/owner-reliability.ts \
+            apps/extension/src/storage/answer-memory.test.ts \
+            apps/extension/src/storage/answer-memory.ts \
+            packages/application-model/src/index.ts \
+            packages/application-model/src/resolution-task.test.ts \
+            packages/application-model/src/resolution-task.ts
