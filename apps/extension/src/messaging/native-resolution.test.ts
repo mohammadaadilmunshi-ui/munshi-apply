@@ -132,9 +132,7 @@ describe("native Resolution Task client", () => {
   });
 
   it("rejects malformed native tasks instead of trusting them", async () => {
-    installNativePort([
-      { ok: true, data: { ...task(), riskLevel: "HIGH" } },
-    ]);
+    installNativePort([{ ok: true, data: { ...task(), riskLevel: "HIGH" } }]);
     const { getNativeResolutionTask } = await nativeResolutionModule();
 
     await expect(getNativeResolutionTask("resolution-1")).rejects.toThrow(

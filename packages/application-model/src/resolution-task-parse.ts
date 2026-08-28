@@ -86,7 +86,10 @@ function parseResolution(value: unknown): ResolutionTaskResolution {
   return {
     value: candidate.value,
     source: source as ResolverStage,
-    evidenceRefs: uniqueStrings(candidate.evidenceRefs, "Resolution evidenceRefs"),
+    evidenceRefs: uniqueStrings(
+      candidate.evidenceRefs,
+      "Resolution evidenceRefs",
+    ),
     approvedByUser: candidate.approvedByUser,
     resolvedAt: timestamp(candidate.resolvedAt, "Resolution resolvedAt"),
   };
@@ -99,11 +102,13 @@ export function parseResolutionTask(value: unknown): ResolutionTask {
   }
 
   const category = requiredString(candidate.category, "Resolution category");
-  if (!categorySet.has(category)) throw new Error("Resolution category is invalid");
+  if (!categorySet.has(category))
+    throw new Error("Resolution category is invalid");
   const status = requiredString(candidate.status, "Resolution status");
   if (!statusSet.has(status)) throw new Error("Resolution status is invalid");
   const riskLevel = requiredString(candidate.riskLevel, "Resolution riskLevel");
-  if (!riskSet.has(riskLevel)) throw new Error("Resolution riskLevel is invalid");
+  if (!riskSet.has(riskLevel))
+    throw new Error("Resolution riskLevel is invalid");
   const groupingScope = requiredString(
     candidate.groupingScope,
     "Resolution groupingScope",
@@ -121,7 +126,10 @@ export function parseResolutionTask(value: unknown): ResolutionTask {
   const semanticTypeValue = candidate.semanticType;
   let semanticType: SemanticType | null = null;
   if (semanticTypeValue !== null) {
-    const normalized = requiredString(semanticTypeValue, "Resolution semanticType");
+    const normalized = requiredString(
+      semanticTypeValue,
+      "Resolution semanticType",
+    );
     if (!semanticTypeSet.has(normalized)) {
       throw new Error("Resolution semanticType is invalid");
     }
@@ -144,15 +152,21 @@ export function parseResolutionTask(value: unknown): ResolutionTask {
 
   const attemptedResolvers = parseResolverStages(candidate.attemptedResolvers);
   const resolution =
-    candidate.resolution === null ? null : parseResolution(candidate.resolution);
+    candidate.resolution === null
+      ? null
+      : parseResolution(candidate.resolution);
   if (status === "RESOLVED" && resolution === null) {
     throw new Error("Resolved Resolution Tasks require resolution details");
   }
   if (status !== "RESOLVED" && resolution !== null) {
-    throw new Error("Non-resolved Resolution Tasks cannot contain resolution details");
+    throw new Error(
+      "Non-resolved Resolution Tasks cannot contain resolution details",
+    );
   }
   if (status === "WAITING_FOR_USER" && candidate.requiresUser !== true) {
-    throw new Error("Resolution Tasks waiting for the user must require the user");
+    throw new Error(
+      "Resolution Tasks waiting for the user must require the user",
+    );
   }
 
   const typedCategory = category as ResolutionTaskCategory;
@@ -161,11 +175,15 @@ export function parseResolutionTask(value: unknown): ResolutionTask {
     throw new Error("Resolution riskLevel conflicts with canonical policy");
   }
   if (candidate.autoResolvable !== policy.allowAutomaticResolution) {
-    throw new Error("Resolution autoResolvable conflicts with canonical policy");
+    throw new Error(
+      "Resolution autoResolvable conflicts with canonical policy",
+    );
   }
   for (const stage of attemptedResolvers) {
     if (!policy.resolverStages.includes(stage)) {
-      throw new Error(`Resolver stage ${stage} is not permitted for ${typedCategory}`);
+      throw new Error(
+        `Resolver stage ${stage} is not permitted for ${typedCategory}`,
+      );
     }
   }
   if (resolution && !policy.resolverStages.includes(resolution.source)) {
@@ -179,7 +197,9 @@ export function parseResolutionTask(value: unknown): ResolutionTask {
     resolution.source !== "USER" &&
     !resolution.approvedByUser
   ) {
-    throw new Error(`${typedCategory} resolution requires explicit user approval`);
+    throw new Error(
+      `${typedCategory} resolution requires explicit user approval`,
+    );
   }
 
   return {
@@ -220,6 +240,7 @@ export function parseResolutionTask(value: unknown): ResolutionTask {
 }
 
 export function parseResolutionTasks(value: unknown): ResolutionTask[] {
-  if (!Array.isArray(value)) throw new Error("Resolution Task list must be an array");
+  if (!Array.isArray(value))
+    throw new Error("Resolution Task list must be an array");
   return value.map(parseResolutionTask);
 }

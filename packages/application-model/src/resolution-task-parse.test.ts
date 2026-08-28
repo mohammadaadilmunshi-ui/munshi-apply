@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { parseResolutionTask, parseResolutionTasks } from "./resolution-task-parse";
+import {
+  parseResolutionTask,
+  parseResolutionTasks,
+} from "./resolution-task-parse";
 
 const pendingTask = {
   schemaVersion: 1,

@@ -44,7 +44,9 @@ function requiredString(value: unknown, label: string): string {
 function parseSaveResult(value: unknown): NativeResolutionTaskSaveResult {
   const candidate = objectValue(value, "Native Resolution Task save response");
   if (typeof candidate.created !== "boolean") {
-    throw new Error("Native Resolution Task save response.created must be boolean");
+    throw new Error(
+      "Native Resolution Task save response.created must be boolean",
+    );
   }
   return {
     created: candidate.created,
