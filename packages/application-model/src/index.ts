@@ -18,6 +18,7 @@ export * from "./learning";
 export * from "./policies";
 export * from "./pricing";
 export * from "./progressive-memory";
+export * from "./resolution-task";
 export * from "./resolver-smart";
 export * from "./retrieval";
 export * from "./router";
