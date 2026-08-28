@@ -56,7 +56,9 @@ function strictlyLaterTimestamp(candidate: string, previous: string): string {
   const candidateTime = Date.parse(candidate);
   const previousTime = Date.parse(previous);
   if (Number.isNaN(candidateTime) || Number.isNaN(previousTime)) {
-    throw new Error("Resolution Task sync timestamps must be valid ISO timestamps");
+    throw new Error(
+      "Resolution Task sync timestamps must be valid ISO timestamps",
+    );
   }
   return new Date(Math.max(candidateTime, previousTime + 1)).toISOString();
 }
@@ -92,7 +94,9 @@ export function planPreflightResolutionTaskSync(
   input: PreflightResolutionSyncInput,
   existingTasks: readonly ResolutionTask[],
 ): ResolutionTask[] {
-  const existingById = new Map(existingTasks.map((task) => [task.taskId, task]));
+  const existingById = new Map(
+    existingTasks.map((task) => [task.taskId, task]),
+  );
   const session = sessionForApplication(input.session, input.applicationId);
   const writes: ResolutionTask[] = [];
 
