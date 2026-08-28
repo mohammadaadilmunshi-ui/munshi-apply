@@ -87,10 +87,7 @@ function cleanQuestion(value: string): string {
   return value.trim().slice(0, maxQuestionLength);
 }
 
-function boundedString(
-  value: unknown,
-  maxLength: number,
-): value is string {
+function boundedString(value: unknown, maxLength: number): value is string {
   return (
     typeof value === "string" &&
     value.trim().length > 0 &&
@@ -119,7 +116,8 @@ export function parseRememberedAnswer(value: unknown): RememberedAnswer | null {
     return null;
   }
   if (!boundedString(candidate.question, maxQuestionLength)) return null;
-  if (!boundedString(candidate.semanticType, maxSemanticTypeLength)) return null;
+  if (!boundedString(candidate.semanticType, maxSemanticTypeLength))
+    return null;
   if (!boundedString(candidate.value, maxAnswerLength)) return null;
   if (typeof candidate.sensitive !== "boolean") return null;
   if (!validTimestamp(candidate.approvedAt)) return null;
