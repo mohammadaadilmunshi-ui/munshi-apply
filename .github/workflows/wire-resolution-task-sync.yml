@@ -1,0 +1,194 @@
+name: Wire resolution task sync
+
+on:
+  push:
+    branches:
+      - chatgpt/resolution-orchestrator-usability
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Apply surgical Resolution Task sync wiring
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          sync_path = Path("apps/extension/src/sidepanel/resolution-task-sync.ts")
+          sync = sync_path.read_text()
+
+          input_anchor = "export type PreflightResolutionSyncInput = {\n"
+          if "export type PreflightResolutionSession = Pick<" not in sync:
+              if input_anchor not in sync:
+                  raise SystemExit("sync input anchor not found")
+              sync = sync.replace(
+                  input_anchor,
+                  "export type PreflightResolutionSession = Pick<\n"
+                  "  AutoPilotSession,\n"
+                  '  "applicationId" | "sessionId" | "lastCheckpointId"\n'
+                  ">;\n\n"
+                  + input_anchor,
+                  1,
+              )
+
+          sync = sync.replace(
+              "  session: AutoPilotSession | null;\n",
+              "  session: PreflightResolutionSession | null;\n",
+              1,
+          )
+          old_session_fn = (
+              "function sessionForApplication(\n"
+              "  session: AutoPilotSession | null,\n"
+              "  applicationId: string,\n"
+              "): AutoPilotSession | null {"
+          )
+          new_session_fn = (
+              "function sessionForApplication(\n"
+              "  session: PreflightResolutionSession | null,\n"
+              "  applicationId: string,\n"
+              "): PreflightResolutionSession | null {"
+          )
+          if old_session_fn in sync:
+              sync = sync.replace(old_session_fn, new_session_fn, 1)
+          elif new_session_fn not in sync:
+              raise SystemExit("session projection anchor not found")
+          sync_path.write_text(sync)
+
+          component_path = Path(
+              "apps/extension/src/sidepanel/AutoPilotControlCenter.tsx"
+          )
+          component = component_path.read_text()
+
+          import_anchor = 'import { TeachMunshiPanel } from "./TeachMunshiPanel";\n'
+          sync_import = (
+              'import { syncPreflightResolutionTasks } from "./resolution-task-sync";\n'
+          )
+          if sync_import not in component:
+              if import_anchor not in component:
+                  raise SystemExit("component import anchor not found")
+              component = component.replace(
+                  import_anchor,
+                  import_anchor + sync_import,
+                  1,
+              )
+
+          state_anchor = '  const [accountMessage, setAccountMessage] = useState("");\n'
+          state_line = '  const [resolutionSyncError, setResolutionSyncError] = useState("");\n'
+          if state_line not in component:
+              if state_anchor not in component:
+                  raise SystemExit("component state anchor not found")
+              component = component.replace(
+                  state_anchor,
+                  state_anchor + state_line,
+                  1,
+              )
+
+          effect_marker = "\n  async function run(\n"
+          effect_block = '''
+  const resolutionSessionApplicationId = status?.session.applicationId ?? null;
+  const resolutionSessionId = status?.session.sessionId ?? null;
+  const resolutionCheckpointId = status?.session.lastCheckpointId ?? null;
+  const resolutionSession = useMemo(
+    () =>
+      resolutionSessionApplicationId && resolutionSessionId
+        ? {
+            applicationId: resolutionSessionApplicationId,
+            sessionId: resolutionSessionId,
+            lastCheckpointId: resolutionCheckpointId,
+          }
+        : null,
+    [
+      resolutionCheckpointId,
+      resolutionSessionApplicationId,
+      resolutionSessionId,
+    ],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!nativeAvailable || !page || !plan || !applicationId) {
+      setResolutionSyncError("");
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void syncPreflightResolutionTasks({
+      applicationId,
+      page,
+      findings: plan.employerKnockoutFindings,
+      session: resolutionSession,
+      observedAt: page.observedAt,
+    })
+      .then(() => {
+        if (!cancelled) setResolutionSyncError("");
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setResolutionSyncError(
+            error instanceof Error
+              ? error.message
+              : "Unable to persist Resolution Tasks",
+          );
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applicationId, nativeAvailable, page, plan, resolutionSession]);
+'''
+          if "const resolutionSessionApplicationId =" not in component:
+              if effect_marker not in component:
+                  raise SystemExit("component effect anchor not found")
+              component = component.replace(
+                  effect_marker,
+                  "\n" + effect_block + effect_marker,
+                  1,
+              )
+
+          ui_anchor = "              <strong>Live pre-flight: {plan.preflight.state}</strong>\n"
+          ui_block = '''              {resolutionSyncError && (
+                <span className="diagnostic-error">
+                  Resolution Task persistence warning: {resolutionSyncError}
+                </span>
+              )}
+'''
+          if "Resolution Task persistence warning:" not in component:
+              if ui_anchor not in component:
+                  raise SystemExit("component preflight UI anchor not found")
+              component = component.replace(
+                  ui_anchor,
+                  ui_anchor + ui_block,
+                  1,
+              )
+
+          component_path.write_text(component)
+          PY
+      - name: Apply pinned formatting
+        run: |
+          npx prettier --write \
+            apps/extension/src/sidepanel/resolution-task-sync.ts \
+            apps/extension/src/sidepanel/AutoPilotControlCenter.tsx
+      - name: Commit wiring
+        run: |
+          if git diff --quiet; then
+            echo "No wiring changes needed."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            apps/extension/src/sidepanel/resolution-task-sync.ts \
+            apps/extension/src/sidepanel/AutoPilotControlCenter.tsx
+          git commit -m "feat(resolution): persist preflight tasks from AutoPilot"
+          git push origin HEAD:chatgpt/resolution-orchestrator-usability
