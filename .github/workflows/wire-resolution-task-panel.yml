@@ -1,0 +1,94 @@
+name: Wire Resolution Task panel
+
+on:
+  push:
+    branches:
+      - chatgpt/resolution-orchestrator-usability
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Wire owner Resolution Task queue into AutoPilot
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("apps/extension/src/sidepanel/AutoPilotControlCenter.tsx")
+          text = path.read_text()
+
+          import_anchor = 'import { JobSignalPanel } from "./JobSignalPanel";\n'
+          panel_import = 'import { ResolutionTaskPanel } from "./ResolutionTaskPanel";\n'
+          if panel_import not in text:
+              if import_anchor not in text:
+                  raise SystemExit("ResolutionTaskPanel import anchor not found")
+              text = text.replace(import_anchor, import_anchor + panel_import, 1)
+
+          state_anchor = '  const [resolutionSyncError, setResolutionSyncError] = useState("");\n'
+          state_line = '  const [resolutionTaskRevision, setResolutionTaskRevision] = useState(0);\n'
+          if state_line not in text:
+              if state_anchor not in text:
+                  raise SystemExit("resolution revision state anchor not found")
+              text = text.replace(state_anchor, state_anchor + state_line, 1)
+
+          old_then = '''    })
+      .then(() => {
+        if (!cancelled) setResolutionSyncError("");
+      })
+'''
+          new_then = '''    })
+      .then((writes) => {
+        if (!cancelled) {
+          if (writes.length > 0) {
+            setResolutionTaskRevision((value) => value + 1);
+          }
+          setResolutionSyncError("");
+        }
+      })
+'''
+          if old_then in text:
+              text = text.replace(old_then, new_then, 1)
+          elif 'setResolutionTaskRevision((value) => value + 1);' not in text:
+              raise SystemExit("resolution sync completion anchor not found")
+
+          render_anchor = '''          {plan && (
+            <JobSignalPanel
+'''
+          panel_render = '''          {plan && (
+            <ResolutionTaskPanel
+              applicationId={applicationId}
+              nativeAvailable={nativeAvailable}
+              refreshRevision={resolutionTaskRevision}
+            />
+          )}
+
+'''
+          if '<ResolutionTaskPanel' not in text:
+              if render_anchor not in text:
+                  raise SystemExit("ResolutionTaskPanel render anchor not found")
+              text = text.replace(render_anchor, panel_render + render_anchor, 1)
+
+          path.write_text(text)
+          PY
+      - name: Apply pinned formatting
+        run: npx prettier --write apps/extension/src/sidepanel/AutoPilotControlCenter.tsx
+      - name: Commit panel integration
+        run: |
+          if git diff --quiet; then
+            echo "No panel integration changes needed."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/extension/src/sidepanel/AutoPilotControlCenter.tsx
+          git commit -m "feat(resolution): surface owner queue in AutoPilot"
+          git push origin HEAD:chatgpt/resolution-orchestrator-usability
