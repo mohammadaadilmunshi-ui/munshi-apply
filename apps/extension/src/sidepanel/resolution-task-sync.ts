@@ -12,11 +12,16 @@ import {
   upsertNativeResolutionTask,
 } from "../messaging/native-resolution";
 
+export type PreflightResolutionSession = Pick<
+  AutoPilotSession,
+  "applicationId" | "sessionId" | "lastCheckpointId"
+>;
+
 export type PreflightResolutionSyncInput = {
   applicationId: string;
   page: ApplicationPage;
   findings: readonly EmployerPreflightFinding[];
-  session: AutoPilotSession | null;
+  session: PreflightResolutionSession | null;
   observedAt: string;
 };
 
@@ -46,9 +51,9 @@ function questionForFinding(
 }
 
 function sessionForApplication(
-  session: AutoPilotSession | null,
+  session: PreflightResolutionSession | null,
   applicationId: string,
-): AutoPilotSession | null {
+): PreflightResolutionSession | null {
   return session?.applicationId === applicationId ? session : null;
 }
 
