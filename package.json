@@ -18,7 +18,7 @@
     "clean": "node scripts/clean.mjs",
     "dev": "npm run dev --workspace @munshi-apply/extension",
     "format": "prettier --write .",
-    "format:check": "prettier --write . && git diff",
+    "format:check": "prettier --check .",
     "lint": "eslint . --max-warnings 0",
     "secret:scan": "node scripts/secret-scan.mjs",
     "test": "vitest run",
