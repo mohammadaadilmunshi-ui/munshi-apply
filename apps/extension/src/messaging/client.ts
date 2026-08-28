@@ -61,6 +61,7 @@ export type NativeRuntimeHealth = {
     job_signal_intelligence?: boolean;
     job_signal_identity_binding?: boolean;
     application_analytics?: boolean;
+    resolution_tasks?: boolean;
   };
 };
 
@@ -96,6 +97,7 @@ export function nativeRuntimeCompatibility(
     "job_signal_intelligence",
     "job_signal_identity_binding",
     "application_analytics",
+    "resolution_tasks",
   ] as const;
   const missing = requiredCapabilities.filter(
     (capability) => health.capabilities?.[capability] !== true,
