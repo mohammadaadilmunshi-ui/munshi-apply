@@ -4,6 +4,7 @@ import {
   canonicalAnswerMemoryKey,
   canAutoApproveRememberedAnswer,
   normalizeQuestionForMemory,
+  parseRememberedAnswer,
 } from "./answer-memory";
 
 describe("owner answer memory", () => {
@@ -38,6 +39,49 @@ describe("owner answer memory", () => {
         "WHY_COMPANY",
       ),
     ).toBe("question:why do you want to work for example company");
+  });
+
+  it("accepts a complete persisted answer record at the IndexedDB boundary", () => {
+    const record = {
+      memoryKey: "semantic:RELOCATION",
+      normalizedQuestion: "are you willing to relocate",
+      question: "Are you willing to relocate?",
+      semanticType: "RELOCATION",
+      value: "Yes",
+      sensitive: false,
+      approvedAt: "2026-08-28T12:00:00.000Z",
+      updatedAt: "2026-08-28T12:00:01.000Z",
+    };
+
+    expect(parseRememberedAnswer(record)).toEqual(record);
+  });
+
+  it("rejects malformed or stale-shaped records before they enter reuse decisions", () => {
+    expect(parseRememberedAnswer(null)).toBeNull();
+    expect(
+      parseRememberedAnswer({
+        memoryKey: "semantic:RELOCATION",
+        normalizedQuestion: "are you willing to relocate",
+        question: "Are you willing to relocate?",
+        semanticType: "RELOCATION",
+        value: "Yes",
+        sensitive: "false",
+        approvedAt: "2026-08-28T12:00:00.000Z",
+        updatedAt: "2026-08-28T12:00:01.000Z",
+      }),
+    ).toBeNull();
+    expect(
+      parseRememberedAnswer({
+        memoryKey: "semantic:RELOCATION",
+        normalizedQuestion: "are you willing to relocate",
+        question: "Are you willing to relocate?",
+        semanticType: "RELOCATION",
+        value: "Yes",
+        sensitive: false,
+        approvedAt: "not-a-timestamp",
+        updatedAt: "2026-08-28T12:00:01.000Z",
+      }),
+    ).toBeNull();
   });
 
   it("auto-approves exact short operational answers after owner approval", () => {
