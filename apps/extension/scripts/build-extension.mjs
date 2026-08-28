@@ -2,11 +2,12 @@ import { build } from "esbuild";
 import { cp, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
+const debugArtifacts = process.env.MUNSHI_EXTENSION_DEBUG_ARTIFACTS === "1";
 const shared = {
   bundle: true,
   legalComments: "none",
-  minify: false,
-  sourcemap: true,
+  minify: !debugArtifacts,
+  sourcemap: debugArtifacts,
   target: "chrome120",
 };
 
