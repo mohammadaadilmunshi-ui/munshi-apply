@@ -20,8 +20,7 @@ export const resolutionTaskCategories = [
   "TEMPORARY_FAILURE",
   "BLOCKING_CONFLICT",
 ] as const;
-export type ResolutionTaskCategory =
-  (typeof resolutionTaskCategories)[number];
+export type ResolutionTaskCategory = (typeof resolutionTaskCategories)[number];
 
 export const resolutionTaskStatuses = [
   "PENDING",
@@ -210,7 +209,9 @@ function stableHash(value: string): string {
 }
 
 function uniqueStrings(values: readonly string[]): string[] {
-  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+  return Array.from(
+    new Set(values.map((value) => value.trim()).filter(Boolean)),
+  );
 }
 
 function isHighRiskSemanticType(
@@ -450,9 +451,7 @@ function preflightCategory(
 ): ResolutionTaskCategory {
   if (finding.state === "BLOCKED") return "BLOCKING_CONFLICT";
   if (legalRequirementKinds.has(finding.requirement.kind)) {
-    return finding.state === "REVIEW"
-      ? "LEGAL_CONFIRMATION"
-      : "MISSING_FACT";
+    return finding.state === "REVIEW" ? "LEGAL_CONFIRMATION" : "MISSING_FACT";
   }
   if (finding.candidateValue === null) return "MISSING_FACT";
   return "LOW_CONFIDENCE";
@@ -559,10 +558,7 @@ export function resolveResolutionTask(
   ) {
     throw new Error(`${task.category} requires explicit user approval`);
   }
-  if (
-    task.riskLevel === "HIGH" &&
-    input.source === "GROUNDED_AI"
-  ) {
+  if (task.riskLevel === "HIGH" && input.source === "GROUNDED_AI") {
     throw new Error("High-risk resolution tasks cannot be resolved by AI");
   }
   const resolvedAt = assertTimestamp(input.resolvedAt, "resolvedAt");

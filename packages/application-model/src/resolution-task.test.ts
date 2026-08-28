@@ -29,7 +29,10 @@ function relocationTask(applicationId: string, question: string) {
 
 describe("resolution task orchestration", () => {
   it("groups semantically equivalent reusable questions across applications", () => {
-    const first = relocationTask("application-a", "Are you willing to relocate?");
+    const first = relocationTask(
+      "application-a",
+      "Are you willing to relocate?",
+    );
     const second = relocationTask(
       "application-b",
       "Would you relocate for this position?",
@@ -102,7 +105,10 @@ describe("resolution task orchestration", () => {
   });
 
   it("preserves the application checkpoint while an asynchronous user resolution completes", () => {
-    const task = relocationTask("application-a", "Are you willing to relocate?");
+    const task = relocationTask(
+      "application-a",
+      "Are you willing to relocate?",
+    );
     const attempted = recordResolutionAttempt(
       task,
       "MASTER_PROFILE",
