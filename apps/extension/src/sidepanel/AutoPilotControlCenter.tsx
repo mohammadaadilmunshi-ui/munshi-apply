@@ -3,6 +3,7 @@ import type { ApplicationPage } from "@munshi-apply/contracts";
 import type { AccountRecord } from "@munshi-apply/application-model";
 import { ApplicationAnalyticsPanel } from "./ApplicationAnalyticsPanel";
 import { JobSignalPanel } from "./JobSignalPanel";
+import { ResolutionTaskPanel } from "./ResolutionTaskPanel";
 import { TeachMunshiPanel } from "./TeachMunshiPanel";
 import { syncPreflightResolutionTasks } from "./resolution-task-sync";
 import {
@@ -63,6 +64,7 @@ export function AutoPilotControlCenter({
   const [accountBusy, setAccountBusy] = useState(false);
   const [accountMessage, setAccountMessage] = useState("");
   const [resolutionSyncError, setResolutionSyncError] = useState("");
+  const [resolutionTaskRevision, setResolutionTaskRevision] = useState(0);
   const accountEmail = useMemo(
     () => (page ? inferredAccountEmail(page, answers) : null),
     [answers, page],
@@ -149,8 +151,13 @@ export function AutoPilotControlCenter({
       session: resolutionSession,
       observedAt: page.observedAt,
     })
-      .then(() => {
-        if (!cancelled) setResolutionSyncError("");
+      .then((writes) => {
+        if (!cancelled) {
+          if (writes.length > 0) {
+            setResolutionTaskRevision((value) => value + 1);
+          }
+          setResolutionSyncError("");
+        }
       })
       .catch((error) => {
         if (!cancelled) {
@@ -427,6 +434,14 @@ export function AutoPilotControlCenter({
                 </span>
               )}
             </div>
+          )}
+
+          {plan && (
+            <ResolutionTaskPanel
+              applicationId={applicationId}
+              nativeAvailable={nativeAvailable}
+              refreshRevision={resolutionTaskRevision}
+            />
           )}
 
           {plan && (
