@@ -64,10 +64,7 @@ describe("Resolution Task durable lifecycle", () => {
       pageId: "page-a",
       createdAt: "2026-08-28T18:30:00.000Z",
     })!;
-    const waiting = waitForResolutionUser(
-      initial,
-      "2026-08-28T18:30:30.000Z",
-    );
+    const waiting = waitForResolutionUser(initial, "2026-08-28T18:30:30.000Z");
     const refreshed = reconcilePreflightResolutionTask(waiting, {
       finding: unresolved,
       sessionId: "session-b",

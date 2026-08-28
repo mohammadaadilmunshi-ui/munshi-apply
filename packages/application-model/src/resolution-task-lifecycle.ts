@@ -102,21 +102,26 @@ export function reconcilePreflightResolutionTask(
     input.finding.requirement.requirementId,
   );
   if (existing.taskId !== expectedTaskId) {
-    throw new Error("Existing Resolution Task does not match this employer requirement");
+    throw new Error(
+      "Existing Resolution Task does not match this employer requirement",
+    );
   }
 
   const refreshed = durableResolutionTaskFromPreflightFinding({
     finding: input.finding,
     applicationId: existing.applicationId,
     sessionId: normalizedOptional(input.sessionId) ?? existing.sessionId,
-    checkpointId: normalizedOptional(input.checkpointId) ?? existing.checkpointId,
+    checkpointId:
+      normalizedOptional(input.checkpointId) ?? existing.checkpointId,
     pageId: normalizedOptional(input.pageId) ?? existing.pageId,
     controlId: normalizedOptional(input.controlId) ?? existing.controlId,
     questionId: normalizedOptional(input.questionId) ?? existing.questionId,
     createdAt: existing.createdAt,
   });
   if (!refreshed) {
-    throw new Error("READY employer findings do not require task reconciliation");
+    throw new Error(
+      "READY employer findings do not require task reconciliation",
+    );
   }
 
   const updatedAt = timestamp(input.updatedAt, "updatedAt");
