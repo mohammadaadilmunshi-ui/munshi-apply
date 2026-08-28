@@ -75,78 +75,71 @@ jobs:
           if sync_import not in component:
               if import_anchor not in component:
                   raise SystemExit("component import anchor not found")
-              component = component.replace(
-                  import_anchor,
-                  import_anchor + sync_import,
-                  1,
-              )
+              component = component.replace(import_anchor, import_anchor + sync_import, 1)
 
           state_anchor = '  const [accountMessage, setAccountMessage] = useState("");\n'
           state_line = '  const [resolutionSyncError, setResolutionSyncError] = useState("");\n'
           if state_line not in component:
               if state_anchor not in component:
                   raise SystemExit("component state anchor not found")
-              component = component.replace(
-                  state_anchor,
-                  state_anchor + state_line,
-                  1,
-              )
+              component = component.replace(state_anchor, state_anchor + state_line, 1)
 
           effect_marker = "\n  async function run(\n"
-          effect_block = '''
-  const resolutionSessionApplicationId = status?.session.applicationId ?? null;
-  const resolutionSessionId = status?.session.sessionId ?? null;
-  const resolutionCheckpointId = status?.session.lastCheckpointId ?? null;
-  const resolutionSession = useMemo(
-    () =>
-      resolutionSessionApplicationId && resolutionSessionId
-        ? {
-            applicationId: resolutionSessionApplicationId,
-            sessionId: resolutionSessionId,
-            lastCheckpointId: resolutionCheckpointId,
-          }
-        : null,
-    [
-      resolutionCheckpointId,
-      resolutionSessionApplicationId,
-      resolutionSessionId,
-    ],
-  );
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!nativeAvailable || !page || !plan || !applicationId) {
-      setResolutionSyncError("");
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    void syncPreflightResolutionTasks({
-      applicationId,
-      page,
-      findings: plan.employerKnockoutFindings,
-      session: resolutionSession,
-      observedAt: page.observedAt,
-    })
-      .then(() => {
-        if (!cancelled) setResolutionSyncError("");
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setResolutionSyncError(
-            error instanceof Error
-              ? error.message
-              : "Unable to persist Resolution Tasks",
-          );
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [applicationId, nativeAvailable, page, plan, resolutionSession]);
-'''
+          effect_block = "\n".join([
+              "  const resolutionSessionApplicationId = status?.session.applicationId ?? null;",
+              "  const resolutionSessionId = status?.session.sessionId ?? null;",
+              "  const resolutionCheckpointId = status?.session.lastCheckpointId ?? null;",
+              "  const resolutionSession = useMemo(",
+              "    () =>",
+              "      resolutionSessionApplicationId && resolutionSessionId",
+              "        ? {",
+              "            applicationId: resolutionSessionApplicationId,",
+              "            sessionId: resolutionSessionId,",
+              "            lastCheckpointId: resolutionCheckpointId,",
+              "          }",
+              "        : null,",
+              "    [",
+              "      resolutionCheckpointId,",
+              "      resolutionSessionApplicationId,",
+              "      resolutionSessionId,",
+              "    ],",
+              "  );",
+              "",
+              "  useEffect(() => {",
+              "    let cancelled = false;",
+              "    if (!nativeAvailable || !page || !plan || !applicationId) {",
+              '      setResolutionSyncError("");',
+              "      return () => {",
+              "        cancelled = true;",
+              "      };",
+              "    }",
+              "",
+              "    void syncPreflightResolutionTasks({",
+              "      applicationId,",
+              "      page,",
+              "      findings: plan.employerKnockoutFindings,",
+              "      session: resolutionSession,",
+              "      observedAt: page.observedAt,",
+              "    })",
+              "      .then(() => {",
+              '        if (!cancelled) setResolutionSyncError("");',
+              "      })",
+              "      .catch((error) => {",
+              "        if (!cancelled) {",
+              "          setResolutionSyncError(",
+              "            error instanceof Error",
+              "              ? error.message",
+              '              : "Unable to persist Resolution Tasks",',
+              "          );",
+              "        }",
+              "      });",
+              "",
+              "    return () => {",
+              "      cancelled = true;",
+              "    };",
+              "  }, [applicationId, nativeAvailable, page, plan, resolutionSession]);",
+              "",
+          ])
           if "const resolutionSessionApplicationId =" not in component:
               if effect_marker not in component:
                   raise SystemExit("component effect anchor not found")
@@ -157,20 +150,18 @@ jobs:
               )
 
           ui_anchor = "              <strong>Live pre-flight: {plan.preflight.state}</strong>\n"
-          ui_block = '''              {resolutionSyncError && (
-                <span className="diagnostic-error">
-                  Resolution Task persistence warning: {resolutionSyncError}
-                </span>
-              )}
-'''
+          ui_block = "\n".join([
+              "              {resolutionSyncError && (",
+              '                <span className="diagnostic-error">',
+              "                  Resolution Task persistence warning: {resolutionSyncError}",
+              "                </span>",
+              "              )}",
+              "",
+          ])
           if "Resolution Task persistence warning:" not in component:
               if ui_anchor not in component:
                   raise SystemExit("component preflight UI anchor not found")
-              component = component.replace(
-                  ui_anchor,
-                  ui_anchor + ui_block,
-                  1,
-              )
+              component = component.replace(ui_anchor, ui_anchor + ui_block, 1)
 
           component_path.write_text(component)
           PY
