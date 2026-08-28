@@ -7,8 +7,8 @@ function health(
   return {
     status: "healthy",
     database: "healthy",
-    migration_count: 11,
-    schema_version: "011_job_signal_identity_and_analytics.sql",
+    migration_count: 12,
+    schema_version: "012_resolution_tasks.sql",
     outbox: {},
     protocol_version: 3,
     capabilities,
@@ -32,6 +32,7 @@ const currentCapabilities: NonNullable<NativeRuntimeHealth["capabilities"]> = {
   job_signal_intelligence: true,
   job_signal_identity_binding: true,
   application_analytics: true,
+  resolution_tasks: true,
 };
 
 describe("native runtime compatibility", () => {
@@ -78,6 +79,16 @@ describe("native runtime compatibility", () => {
     expect(result.compatible).toBe(false);
     if (!result.compatible) {
       expect(result.reason).toContain("application_analytics");
+    }
+  });
+
+  it("rejects an older protocol-v3 companion without Resolution Tasks", () => {
+    const result = nativeRuntimeCompatibility(
+      health({ ...currentCapabilities, resolution_tasks: undefined }),
+    );
+    expect(result.compatible).toBe(false);
+    if (!result.compatible) {
+      expect(result.reason).toContain("resolution_tasks");
     }
   });
 

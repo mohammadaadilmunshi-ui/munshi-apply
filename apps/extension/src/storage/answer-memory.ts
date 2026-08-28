@@ -22,6 +22,8 @@ const databaseVersion = 1;
 const answersStore = "answers";
 const maxQuestionLength = 2_000;
 const maxAnswerLength = 8_000;
+const maxMemoryKeyLength = maxQuestionLength + 64;
+const maxSemanticTypeLength = 128;
 
 const contextSpecificSemanticTypes = new Set([
   "WHY_COMPANY",
@@ -83,6 +85,54 @@ function openDatabase(): Promise<IDBDatabase> {
 
 function cleanQuestion(value: string): string {
   return value.trim().slice(0, maxQuestionLength);
+}
+
+function boundedString(value: unknown, maxLength: number): value is string {
+  return (
+    typeof value === "string" &&
+    value.trim().length > 0 &&
+    value.length <= maxLength
+  );
+}
+
+function validTimestamp(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    Number.isFinite(Date.parse(value))
+  );
+}
+
+/**
+ * IndexedDB is a persistence boundary and can contain records written by an
+ * older extension version or corrupted by tooling. Validate before allowing a
+ * stored answer into reuse/promotion decisions.
+ */
+export function parseRememberedAnswer(value: unknown): RememberedAnswer | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  if (!boundedString(candidate.memoryKey, maxMemoryKeyLength)) return null;
+  if (!boundedString(candidate.normalizedQuestion, maxQuestionLength)) {
+    return null;
+  }
+  if (!boundedString(candidate.question, maxQuestionLength)) return null;
+  if (!boundedString(candidate.semanticType, maxSemanticTypeLength))
+    return null;
+  if (!boundedString(candidate.value, maxAnswerLength)) return null;
+  if (typeof candidate.sensitive !== "boolean") return null;
+  if (!validTimestamp(candidate.approvedAt)) return null;
+  if (!validTimestamp(candidate.updatedAt)) return null;
+
+  return {
+    memoryKey: candidate.memoryKey,
+    normalizedQuestion: candidate.normalizedQuestion,
+    question: candidate.question,
+    semanticType: candidate.semanticType,
+    value: candidate.value,
+    sensitive: candidate.sensitive,
+    approvedAt: candidate.approvedAt,
+    updatedAt: candidate.updatedAt,
+  };
 }
 
 export function normalizeQuestionForMemory(value: string): string {
@@ -158,10 +208,7 @@ async function readRememberedAnswer(
     const request = transaction.objectStore(answersStore).get(memoryKey);
     request.onerror = () =>
       reject(request.error ?? new Error("Answer memory read failed"));
-    request.onsuccess = () => {
-      const value = request.result as RememberedAnswer | undefined;
-      resolve(value ?? null);
-    };
+    request.onsuccess = () => resolve(parseRememberedAnswer(request.result));
     transaction.oncomplete = () => database.close();
   });
 }

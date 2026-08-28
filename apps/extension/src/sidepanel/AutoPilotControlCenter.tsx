@@ -3,7 +3,9 @@ import type { ApplicationPage } from "@munshi-apply/contracts";
 import type { AccountRecord } from "@munshi-apply/application-model";
 import { ApplicationAnalyticsPanel } from "./ApplicationAnalyticsPanel";
 import { JobSignalPanel } from "./JobSignalPanel";
+import { ResolutionTaskPanel } from "./ResolutionTaskPanel";
 import { TeachMunshiPanel } from "./TeachMunshiPanel";
+import { syncPreflightResolutionTasks } from "./resolution-task-sync";
 import {
   getAutoPilotStatus,
   pauseAutoPilot,
@@ -61,6 +63,8 @@ export function AutoPilotControlCenter({
   const [knownAccounts, setKnownAccounts] = useState<AccountRecord[]>([]);
   const [accountBusy, setAccountBusy] = useState(false);
   const [accountMessage, setAccountMessage] = useState("");
+  const [resolutionSyncError, setResolutionSyncError] = useState("");
+  const [resolutionTaskRevision, setResolutionTaskRevision] = useState(0);
   const accountEmail = useMemo(
     () => (page ? inferredAccountEmail(page, answers) : null),
     [answers, page],
@@ -111,6 +115,64 @@ export function AutoPilotControlCenter({
     }, 900);
     return () => window.clearInterval(timer);
   }, [refresh]);
+
+  const resolutionSessionApplicationId = status?.session.applicationId ?? null;
+  const resolutionSessionId = status?.session.sessionId ?? null;
+  const resolutionCheckpointId = status?.session.lastCheckpointId ?? null;
+  const resolutionSession = useMemo(
+    () =>
+      resolutionSessionApplicationId && resolutionSessionId
+        ? {
+            applicationId: resolutionSessionApplicationId,
+            sessionId: resolutionSessionId,
+            lastCheckpointId: resolutionCheckpointId,
+          }
+        : null,
+    [
+      resolutionCheckpointId,
+      resolutionSessionApplicationId,
+      resolutionSessionId,
+    ],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!nativeAvailable || !page || !plan || !applicationId) {
+      setResolutionSyncError("");
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void syncPreflightResolutionTasks({
+      applicationId,
+      page,
+      findings: plan.employerKnockoutFindings,
+      session: resolutionSession,
+      observedAt: page.observedAt,
+    })
+      .then((writes) => {
+        if (!cancelled) {
+          if (writes.length > 0) {
+            setResolutionTaskRevision((value) => value + 1);
+          }
+          setResolutionSyncError("");
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setResolutionSyncError(
+            error instanceof Error
+              ? error.message
+              : "Unable to persist Resolution Tasks",
+          );
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applicationId, nativeAvailable, page, plan, resolutionSession]);
 
   async function run(
     action: () => Promise<unknown>,
@@ -281,6 +343,11 @@ export function AutoPilotControlCenter({
           {plan && (
             <div className="cloud-connection">
               <strong>Live pre-flight: {plan.preflight.state}</strong>
+              {resolutionSyncError && (
+                <span className="diagnostic-error">
+                  Resolution Task persistence warning: {resolutionSyncError}
+                </span>
+              )}
               {page.securityCheckpoint && (
                 <span className="diagnostic-error">
                   Security checkpoint detected:{" "}
@@ -367,6 +434,14 @@ export function AutoPilotControlCenter({
                 </span>
               )}
             </div>
+          )}
+
+          {plan && (
+            <ResolutionTaskPanel
+              applicationId={applicationId}
+              nativeAvailable={nativeAvailable}
+              refreshRevision={resolutionTaskRevision}
+            />
           )}
 
           {plan && (

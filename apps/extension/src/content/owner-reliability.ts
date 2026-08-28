@@ -7,6 +7,9 @@ export type OwnerFocusResult = {
   reason: string;
 };
 
+export type OwnerReliabilityMessageResult =
+  { handled: false } | { handled: true; response: unknown };
+
 function compact(value: string | null | undefined): string {
   return (value ?? "").replace(/\s+/g, " ").trim();
 }
@@ -104,41 +107,51 @@ export function focusOwnerControl(controlId: string): OwnerFocusResult {
   };
 }
 
-function registerOwnerReliabilityMessages(): void {
-  if (typeof chrome === "undefined" || !chrome.runtime?.onMessage) return;
-  chrome.runtime.onMessage.addListener(
-    (message: unknown, _sender, sendResponse) => {
-      if (!message || typeof message !== "object") return false;
-      const candidate = message as { type?: unknown; controlId?: unknown };
-      if (
-        candidate.type === "MUNSHI_OWNER_FOCUS_CONTROL" &&
-        typeof candidate.controlId === "string"
-      ) {
-        sendResponse({
-          ok: true,
-          result: focusOwnerControl(candidate.controlId),
-        });
-        return false;
-      }
-      if (
-        candidate.type === "MUNSHI_OWNER_READ_CONTROL_VALUE" &&
-        typeof candidate.controlId === "string"
-      ) {
-        const resolved = resolveControlElement(candidate.controlId);
-        sendResponse({
-          ok: Boolean(resolved),
-          value: resolved ? ownerControlValue(resolved.element) : "",
-          rebound: resolved?.rebound ?? false,
-        });
-        return false;
-      }
-      if (candidate.type === "MUNSHI_OWNER_PAGE_CONTEXT") {
-        sendResponse({ ok: true, page: scanDocument() });
-        return false;
-      }
-      return false;
-    },
-  );
-}
+/**
+ * Handles owner-facing content messages without registering its own runtime
+ * listener. bootstrap.ts owns the single disposable content listener so an
+ * extension recovery re-injection cannot accumulate parallel listeners.
+ */
+export function handleOwnerReliabilityMessage(
+  message: unknown,
+): OwnerReliabilityMessageResult {
+  if (!message || typeof message !== "object") return { handled: false };
+  const candidate = message as { type?: unknown; controlId?: unknown };
 
-registerOwnerReliabilityMessages();
+  if (
+    candidate.type === "MUNSHI_OWNER_FOCUS_CONTROL" &&
+    typeof candidate.controlId === "string"
+  ) {
+    return {
+      handled: true,
+      response: {
+        ok: true,
+        result: focusOwnerControl(candidate.controlId),
+      },
+    };
+  }
+
+  if (
+    candidate.type === "MUNSHI_OWNER_READ_CONTROL_VALUE" &&
+    typeof candidate.controlId === "string"
+  ) {
+    const resolved = resolveControlElement(candidate.controlId);
+    return {
+      handled: true,
+      response: {
+        ok: Boolean(resolved),
+        value: resolved ? ownerControlValue(resolved.element) : "",
+        rebound: resolved?.rebound ?? false,
+      },
+    };
+  }
+
+  if (candidate.type === "MUNSHI_OWNER_PAGE_CONTEXT") {
+    return {
+      handled: true,
+      response: { ok: true, page: scanDocument() },
+    };
+  }
+
+  return { handled: false };
+}
