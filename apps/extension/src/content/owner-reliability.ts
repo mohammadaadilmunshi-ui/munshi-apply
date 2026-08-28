@@ -8,8 +8,7 @@ export type OwnerFocusResult = {
 };
 
 export type OwnerReliabilityMessageResult =
-  | { handled: false }
-  | { handled: true; response: unknown };
+  { handled: false } | { handled: true; response: unknown };
 
 function compact(value: string | null | undefined): string {
   return (value ?? "").replace(/\s+/g, " ").trim();
