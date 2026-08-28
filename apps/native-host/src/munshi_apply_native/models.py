@@ -54,6 +54,51 @@ ApplicationState = Literal[
     "COMPLETE",
 ]
 
+ResolutionTaskCategory = Literal[
+    "MISSING_FACT",
+    "AMBIGUOUS_QUESTION",
+    "LOW_CONFIDENCE",
+    "AUTHENTICATION",
+    "EMAIL_VERIFICATION",
+    "INTERACTION_FAILURE",
+    "DOCUMENT_REQUIRED",
+    "LEGAL_CONFIRMATION",
+    "CAPTCHA",
+    "EXTERNAL_ACTION",
+    "TEMPORARY_FAILURE",
+    "BLOCKING_CONFLICT",
+]
+
+ResolutionTaskStatus = Literal[
+    "PENDING",
+    "RESOLVING",
+    "WAITING_FOR_USER",
+    "RESOLVED",
+    "FAILED",
+    "EXPIRED",
+]
+
+ResolutionRiskLevel = Literal["LOW", "MEDIUM", "HIGH"]
+ResolutionGroupingScope = Literal["NONE", "EXACT_QUESTION", "SEMANTIC"]
+ResolverStage = Literal[
+    "CURRENT_SESSION",
+    "MASTER_PROFILE",
+    "EVIDENCE_GRAPH",
+    "APPROVED_ANSWER_MEMORY",
+    "SCOPED_MEMORY",
+    "DETERMINISTIC_DERIVATION",
+    "GROUNDED_AI",
+    "EXTERNAL_RESOLVER",
+    "USER_POLICY",
+    "USER",
+]
+
+
+def _wire_datetime(value: datetime) -> str:
+    if value.tzinfo is None:
+        return value.isoformat()
+    return value.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
 
 class EventEnvelope(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -164,11 +209,178 @@ class ApplicationCheckpointPayload(BaseModel):
 
     def wire_payload(self) -> dict[str, Any]:
         payload = self.model_dump(mode="json", by_alias=True)
-        created_at = self.created_at
-        if created_at.tzinfo is not None:
-            payload["createdAt"] = (
-                created_at.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-            )
+        payload["createdAt"] = _wire_datetime(self.created_at)
+        return payload
+
+
+class ResolutionTaskResolutionPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    value: Any
+    source: ResolverStage
+    evidence_refs: list[str] = Field(alias="evidenceRefs", default_factory=list)
+    approved_by_user: bool = Field(alias="approvedByUser")
+    resolved_at: datetime = Field(alias="resolvedAt")
+
+    @field_validator("evidence_refs")
+    @classmethod
+    def validate_evidence_refs(cls, value: list[str]) -> list[str]:
+        normalized = [item.strip() for item in value]
+        if any(not item for item in normalized):
+            raise ValueError("Resolution evidence refs must not be blank")
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("Resolution evidence refs must not contain duplicates")
+        return normalized
+
+
+class ResolutionTaskPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    schema_version: Literal[1] = Field(alias="schemaVersion")
+    task_id: str = Field(alias="taskId", min_length=1, max_length=128)
+    application_id: str = Field(alias="applicationId", min_length=1, max_length=128)
+    session_id: str | None = Field(alias="sessionId", default=None, max_length=128)
+    checkpoint_id: str | None = Field(alias="checkpointId", default=None, max_length=128)
+    page_id: str | None = Field(alias="pageId", default=None, max_length=256)
+    control_id: str | None = Field(alias="controlId", default=None, max_length=512)
+    question_id: str | None = Field(alias="questionId", default=None, max_length=128)
+    question: str | None = Field(default=None, max_length=2_000)
+    semantic_type: str | None = Field(alias="semanticType", default=None, max_length=128)
+    category: ResolutionTaskCategory
+    status: ResolutionTaskStatus
+    risk_level: ResolutionRiskLevel = Field(alias="riskLevel")
+    auto_resolvable: bool = Field(alias="autoResolvable")
+    requires_user: bool = Field(alias="requiresUser")
+    grouping_scope: ResolutionGroupingScope = Field(alias="groupingScope")
+    group_key: str | None = Field(alias="groupKey", default=None, max_length=2_128)
+    source_refs: list[str] = Field(alias="sourceRefs", default_factory=list)
+    evidence_refs: list[str] = Field(alias="evidenceRefs", default_factory=list)
+    attempted_resolvers: list[ResolverStage] = Field(
+        alias="attemptedResolvers", default_factory=list
+    )
+    reason: str = Field(min_length=1, max_length=4_000)
+    resolution: ResolutionTaskResolutionPayload | None = None
+    created_at: datetime = Field(alias="createdAt")
+    updated_at: datetime = Field(alias="updatedAt")
+
+    @field_validator("task_id", "application_id", "reason")
+    @classmethod
+    def strip_required_text(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("Resolution task required text must not be blank")
+        return stripped
+
+    @field_validator(
+        "session_id",
+        "checkpoint_id",
+        "page_id",
+        "control_id",
+        "question_id",
+        "question",
+        "semantic_type",
+        "group_key",
+    )
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+    @field_validator("source_refs", "evidence_refs")
+    @classmethod
+    def validate_refs(cls, value: list[str]) -> list[str]:
+        normalized = [item.strip() for item in value]
+        if any(not item for item in normalized):
+            raise ValueError("Resolution task refs must not be blank")
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("Resolution task refs must not contain duplicates")
+        return normalized
+
+    @field_validator("attempted_resolvers")
+    @classmethod
+    def validate_resolver_attempts(cls, value: list[ResolverStage]) -> list[ResolverStage]:
+        if len(set(value)) != len(value):
+            raise ValueError("Attempted resolvers must not contain duplicates")
+        return value
+
+    @model_validator(mode="after")
+    def validate_consistency(self) -> ResolutionTaskPayload:
+        if self.updated_at < self.created_at:
+            raise ValueError("Resolution task updatedAt cannot precede createdAt")
+        if self.grouping_scope == "NONE" and self.group_key is not None:
+            raise ValueError("Ungrouped resolution tasks cannot have a groupKey")
+        if self.grouping_scope != "NONE" and self.group_key is None:
+            raise ValueError("Grouped resolution tasks require a groupKey")
+        if self.status == "RESOLVED" and self.resolution is None:
+            raise ValueError("Resolved tasks require resolution details")
+        if self.status != "RESOLVED" and self.resolution is not None:
+            raise ValueError("Non-resolved tasks cannot contain resolution details")
+        if self.status == "WAITING_FOR_USER" and not self.requires_user:
+            raise ValueError("Tasks waiting for the user must set requiresUser")
+        if self.risk_level == "HIGH" and "GROUNDED_AI" in self.attempted_resolvers:
+            raise ValueError("High-risk resolution tasks cannot attempt grounded AI")
+        if (
+            self.resolution is not None
+            and self.risk_level == "HIGH"
+            and self.resolution.source == "GROUNDED_AI"
+        ):
+            raise ValueError("High-risk resolution tasks cannot be resolved by grounded AI")
+        if self.category == "CAPTCHA":
+            if self.grouping_scope != "NONE":
+                raise ValueError("CAPTCHA tasks cannot be grouped")
+            if self.auto_resolvable or not self.requires_user:
+                raise ValueError("CAPTCHA tasks must require direct user resolution")
+        if self.category in {"LEGAL_CONFIRMATION", "BLOCKING_CONFLICT"}:
+            if self.auto_resolvable:
+                raise ValueError("Legal and blocking tasks cannot be auto-resolvable")
+            if self.resolution is not None and not (
+                self.resolution.source == "USER" or self.resolution.approved_by_user
+            ):
+                raise ValueError("Legal and blocking resolutions require user approval")
+        return self
+
+    def database_record(self) -> dict[str, Any]:
+        return {
+            "task_id": self.task_id,
+            "schema_version": self.schema_version,
+            "application_id": self.application_id,
+            "session_id": self.session_id,
+            "checkpoint_id": self.checkpoint_id,
+            "page_id": self.page_id,
+            "control_id": self.control_id,
+            "question_id": self.question_id,
+            "question": self.question,
+            "semantic_type": self.semantic_type,
+            "category": self.category,
+            "status": self.status,
+            "risk_level": self.risk_level,
+            "auto_resolvable": self.auto_resolvable,
+            "requires_user": self.requires_user,
+            "grouping_scope": self.grouping_scope,
+            "group_key": self.group_key,
+            "source_refs": list(self.source_refs),
+            "evidence_refs": list(self.evidence_refs),
+            "attempted_resolvers": list(self.attempted_resolvers),
+            "reason": self.reason,
+            "resolution": (
+                self.resolution.model_dump(mode="json", by_alias=True)
+                if self.resolution is not None
+                else None
+            ),
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
+        }
+
+    def wire_payload(self) -> dict[str, Any]:
+        payload = self.model_dump(mode="json", by_alias=True)
+        payload["createdAt"] = _wire_datetime(self.created_at)
+        payload["updatedAt"] = _wire_datetime(self.updated_at)
+        if self.resolution is not None:
+            resolution = dict(payload["resolution"])
+            resolution["resolvedAt"] = _wire_datetime(self.resolution.resolved_at)
+            payload["resolution"] = resolution
         return payload
 
 
