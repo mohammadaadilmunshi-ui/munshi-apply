@@ -81,3 +81,23 @@ def test_unsupported_provider_is_stored_as_needs_input_without_action(tmp_path: 
     assert result.accepted and not result.provider_supported and result.state == "HANDOFF_ACCEPTED"
     with database.connect() as connection:
         assert connection.execute("SELECT handoff_state FROM career_os_preparation_handoffs").fetchone()[0] == "NEEDS_INPUT"
+
+
+def test_accepts_exact_hunter_phase_9_envelope_over_fresh_signed_bridge(tmp_path: Path) -> None:
+    consumer, database = _consumer(tmp_path)
+    hunter_envelope = {
+        "version": "munshi-apply-preparation-handoff-v1", "handoff_id": "handoff-hunter-1",
+        "tenant_id": "tenant-a", "user_id": "member-a", "preparation_id": "prep-1",
+        "application_id": "application-1", "job": {"id": 41, "title": "HR Analyst"},
+        "provider": "GREENHOUSE", "state": "READY_TO_APPLY", "artifact_references": None,
+        "answers": [{"status": "UNRESOLVED"}], "provenance": {"preparation_version": 1},
+    }
+    body, headers = _signed(hunter_envelope)
+    result = consumer.accept(body, headers, now=1000)
+    assert result.accepted and result.state == "HANDOFF_ACCEPTED"
+    with database.connect() as connection:
+        row = connection.execute(
+            "SELECT tenant_id, user_id, preparation_id, job_id, handoff_state "
+            "FROM career_os_preparation_handoffs"
+        ).fetchone()
+        assert tuple(row) == ("tenant-a", "member-a", "prep-1", "41", "READY_TO_APPLY")

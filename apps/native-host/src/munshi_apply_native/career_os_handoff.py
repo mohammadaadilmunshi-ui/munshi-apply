@@ -69,6 +69,36 @@ class PreparationPackage(BaseModel):
         return value
 
 
+class HunterPreparationEnvelope(BaseModel):
+    """Exact Phase 9 Hunter envelope, normalized locally before persistence."""
+
+    model_config = ConfigDict(extra="forbid")
+    version: Literal["munshi-apply-preparation-handoff-v1"]
+    handoff_id: str = Field(min_length=1, max_length=128)
+    tenant_id: str = Field(min_length=1, max_length=128)
+    user_id: str = Field(min_length=1, max_length=128)
+    preparation_id: str = Field(min_length=1, max_length=128)
+    application_id: str = Field(min_length=1, max_length=128)
+    job: dict[str, Any]
+    provider: str = Field(min_length=1, max_length=64)
+    state: HandoffState
+    artifact_references: Any
+    answers: list[Any]
+    provenance: dict[str, Any]
+
+    def normalized(self) -> dict[str, Any]:
+        job_id = self.job.get("id")
+        if not isinstance(job_id, (str, int)) or not str(job_id).strip():
+            raise ValueError("Hunter job.id is required")
+        return {
+            "tenant_id": self.tenant_id.strip(), "user_id": self.user_id.strip(),
+            "package_id": self.handoff_id.strip(), "package_version": 1,
+            "job_id": str(job_id).strip(), "preparation_id": self.preparation_id.strip(),
+            "application_identity": self.application_id.strip(), "provider": self.provider.strip(),
+            "state": self.state, "idempotency_key": self.handoff_id.strip(),
+        }
+
+
 @dataclass(frozen=True)
 class HandoffResult:
     accepted: bool
@@ -102,13 +132,22 @@ class CareerOSHandoffConsumer:
             return HandoffResult(False, False, "REJECTED", False, error="invalid signature")
         try:
             raw = json.loads(body)
-            package = PreparationPackage.model_validate(raw)
-        except (json.JSONDecodeError, ValidationError):
+            if isinstance(raw, dict) and raw.get("version") == "munshi-apply-preparation-handoff-v1":
+                package_data = HunterPreparationEnvelope.model_validate(raw).normalized()
+            else:
+                package = PreparationPackage.model_validate(raw)
+                package_data = {
+                    "tenant_id": package.tenant_id, "user_id": "local-owner",
+                    "package_id": package.package_id, "package_version": package.package_version,
+                    "job_id": package.job_id, "preparation_id": None,
+                    "application_identity": package.application_identity, "provider": package.provider,
+                    "state": package.state, "idempotency_key": package.idempotency_key,
+                }
+        except (json.JSONDecodeError, ValidationError, ValueError):
             return HandoffResult(False, False, "REJECTED", False, error="malformed package")
-        package_json = canonical_json(package.model_dump(mode="json"))
         actual_digest = hashlib.sha256(body).hexdigest()
-        provider_supported = package.provider.lower() in SUPPORTED_PROVIDERS
-        accepted_state = package.state if provider_supported else "NEEDS_INPUT"
+        provider_supported = package_data["provider"].lower() in SUPPORTED_PROVIDERS
+        accepted_state = package_data["state"] if provider_supported else "NEEDS_INPUT"
         handoff_id = f"handoff-{uuid.uuid4()}"
         received_at = datetime.now(UTC).isoformat()
         try:
@@ -116,8 +155,8 @@ class CareerOSHandoffConsumer:
                 connection.execute("BEGIN IMMEDIATE")
                 existing = connection.execute(
                     "SELECT handoff_id, body_sha256, handoff_state FROM career_os_preparation_handoffs "
-                    "WHERE tenant_id = ? AND idempotency_key = ?",
-                    (package.tenant_id, package.idempotency_key),
+                    "WHERE tenant_id = ? AND user_id = ? AND idempotency_key = ?",
+                    (package_data["tenant_id"], package_data["user_id"], package_data["idempotency_key"]),
                 ).fetchone()
                 if existing is not None:
                     if existing["body_sha256"] != actual_digest:
@@ -127,13 +166,14 @@ class CareerOSHandoffConsumer:
                                          handoff_id=existing["handoff_id"])
                 connection.execute(
                     """INSERT INTO career_os_preparation_handoffs (
-                        handoff_id, tenant_id, package_id, package_version, job_id,
+                        handoff_id, tenant_id, user_id, package_id, package_version, job_id, preparation_id,
                         application_identity, provider, handoff_state, idempotency_key,
                         body_sha256, package_json, received_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (handoff_id, package.tenant_id, package.package_id, package.package_version,
-                     package.job_id, package.application_identity, package.provider, accepted_state,
-                     package.idempotency_key, actual_digest, package_json, received_at),
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (handoff_id, package_data["tenant_id"], package_data["user_id"], package_data["package_id"],
+                     package_data["package_version"], package_data["job_id"], package_data["preparation_id"],
+                     package_data["application_identity"], package_data["provider"], accepted_state,
+                     package_data["idempotency_key"], actual_digest, canonical_json(raw), received_at),
                 )
         except sqlite3.IntegrityError:
             return HandoffResult(False, False, "REJECTED", provider_supported,

@@ -3,9 +3,11 @@
 CREATE TABLE career_os_preparation_handoffs (
     handoff_id TEXT PRIMARY KEY,
     tenant_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
     package_id TEXT NOT NULL,
     package_version INTEGER NOT NULL CHECK (package_version > 0),
     job_id TEXT NOT NULL,
+    preparation_id TEXT,
     application_identity TEXT NOT NULL,
     provider TEXT NOT NULL,
     handoff_state TEXT NOT NULL CHECK (handoff_state IN ('PREPARED', 'NEEDS_INPUT', 'READY_TO_APPLY', 'HANDOFF_ACCEPTED')),
@@ -13,7 +15,7 @@ CREATE TABLE career_os_preparation_handoffs (
     body_sha256 TEXT NOT NULL CHECK (length(body_sha256) = 64),
     package_json TEXT NOT NULL,
     received_at TEXT NOT NULL,
-    UNIQUE (tenant_id, idempotency_key),
+    UNIQUE (tenant_id, user_id, idempotency_key),
     UNIQUE (tenant_id, package_id, package_version)
 );
 
