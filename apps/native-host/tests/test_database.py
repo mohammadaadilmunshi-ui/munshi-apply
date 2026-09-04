@@ -22,12 +22,13 @@ def test_migrations_are_idempotent(tmp_path: Path) -> None:
         "009_account_orchestration.sql",
         "010_job_signal_intelligence.sql",
         "011_job_signal_identity_and_analytics.sql",
+        "012_career_os_preparation_handoffs.sql",
     ]
     assert database.migrate() == []
     health = database.health()
     assert health["status"] == "healthy"
-    assert health["migration_count"] == 11
-    assert health["schema_version"] == "011_job_signal_identity_and_analytics.sql"
+    assert health["migration_count"] == 12
+    assert health["schema_version"] == "012_career_os_preparation_handoffs.sql"
 
 
 def test_architecture_tables_are_created_with_integrity_constraints(tmp_path: Path) -> None:
@@ -155,7 +156,10 @@ def test_job_signal_identity_migration_preserves_existing_reports(tmp_path: Path
         )
 
     upgraded = Database(database_path, migrations)
-    assert upgraded.migrate() == ["011_job_signal_identity_and_analytics.sql"]
+    assert upgraded.migrate() == [
+        "011_job_signal_identity_and_analytics.sql",
+        "012_career_os_preparation_handoffs.sql",
+    ]
     with upgraded.connect() as connection:
         report = connection.execute(
             "SELECT * FROM job_signal_reports WHERE report_id = 'report-legacy'"
