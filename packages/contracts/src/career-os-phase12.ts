@@ -7,6 +7,7 @@ export const EXECUTION_RECEIPT_VERSION =
   "munshi-apply-execution-receipt-v1" as const;
 export const PROFILE_AUTHORITY = "munshi-hr-hunter" as const;
 export const APPLY_EVENT_SOURCE = "munshi-apply" as const;
+export const PROFILE_REVISION_SCOPE = "SOURCE_EXTRACTION" as const;
 
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 const FactValueSchema = z.union([
@@ -38,16 +39,29 @@ export const HunterProfileFactSchema = z.discriminatedUnion("protected", [
 ]);
 export type HunterProfileFact = z.infer<typeof HunterProfileFactSchema>;
 
+export function compositeProfileRevision(
+  overrideRevision: number,
+  candidateDetailsRevision: number,
+): number {
+  const total = overrideRevision + candidateDetailsRevision;
+  return (total * (total + 1)) / 2 + candidateDetailsRevision + 1;
+}
+
 export const HunterProfileSnapshotSchema = z
   .object({
     contract_version: z.literal(PROFILE_SNAPSHOT_VERSION),
     authority: z.literal(PROFILE_AUTHORITY),
     projection_mode: z.literal("READ_ONLY"),
+    revision_scope: z.literal(PROFILE_REVISION_SCOPE),
     tenant_id: z.string().min(1).max(128),
     user_id: z.string().min(1).max(128),
     profile_id: z.string().min(1).max(128),
     profile_revision: z.number().int().positive(),
+    override_revision: z.number().int().nonnegative(),
+    candidate_details_revision: z.number().int().nonnegative(),
     source_extraction_id: z.string().min(1).max(128),
+    source_profile_sha256: Sha256Schema,
+    source_resume_sha256: Sha256Schema,
     generated_at: z.string().datetime({ offset: true }),
     facts: z.array(HunterProfileFactSchema),
     profile_digest: Sha256Schema,
@@ -55,6 +69,7 @@ export const HunterProfileSnapshotSchema = z
   .strict()
   .superRefine((snapshot, context) => {
     const factIds = new Set<string>();
+    const factKeys = new Set<string>();
     for (const fact of snapshot.facts) {
       if (factIds.has(fact.fact_id)) {
         context.addIssue({
@@ -63,10 +78,41 @@ export const HunterProfileSnapshotSchema = z
           path: ["facts"],
         });
       }
+      if (factKeys.has(fact.key)) {
+        context.addIssue({
+          code: "custom",
+          message: `Duplicate profile fact key: ${fact.key}`,
+          path: ["facts"],
+        });
+      }
       factIds.add(fact.fact_id);
+      factKeys.add(fact.key);
+    }
+
+    const expectedRevision = compositeProfileRevision(
+      snapshot.override_revision,
+      snapshot.candidate_details_revision,
+    );
+    if (snapshot.profile_revision !== expectedRevision) {
+      context.addIssue({
+        code: "custom",
+        message: "Profile revision does not match its encrypted revision components",
+        path: ["profile_revision"],
+      });
     }
   });
-export type HunterProfileSnapshot = z.infer<typeof HunterProfileSnapshotSchema>;
+export type HunterProfileSnapshot = z.infer<
+  typeof HunterProfileSnapshotSchema
+>;
+
+export function profileDigestPayload(snapshot: HunterProfileSnapshot) {
+  const {
+    generated_at: _generatedAt,
+    profile_digest: _profileDigest,
+    ...stableTruth
+  } = snapshot;
+  return stableTruth;
+}
 
 export const HunterResumeArtifactSchema = z
   .object({
@@ -76,7 +122,9 @@ export const HunterResumeArtifactSchema = z
     mime_type: z.string().min(1).max(128),
     size_bytes: z.number().int().nonnegative().optional(),
     source_preparation_id: z.string().min(1).max(128),
+    source_extraction_id: z.string().min(1).max(128),
     profile_revision: z.number().int().positive(),
+    profile_digest: Sha256Schema,
     job_id: z.string().min(1).max(128),
   })
   .strict();
@@ -106,6 +154,7 @@ export const ApplyExecutionReceiptSchema = z
     tenant_id: z.string().min(1).max(128),
     user_id: z.string().min(1).max(128),
     handoff_id: z.string().min(1).max(128),
+    handoff_body_sha256: Sha256Schema,
     preparation_id: z.string().min(1).max(128),
     application_id: z.string().min(1).max(128),
     runtime_application_id: z.string().min(1).max(256),
@@ -128,6 +177,12 @@ export const ApplyExecutionReceiptSchema = z
           path: ["payload"],
         });
       }
+    } else if (receipt.payload.submit_succeeded === true) {
+      context.addIssue({
+        code: "custom",
+        message: "Non-submission events cannot assert successful submission",
+        path: ["payload"],
+      });
     }
 
     if (
@@ -141,9 +196,51 @@ export const ApplyExecutionReceiptSchema = z
           path: ["payload"],
         });
       }
+    } else if (receipt.payload.confirmation_observed === true) {
+      context.addIssue({
+        code: "custom",
+        message: "Non-confirmation events cannot assert confirmation evidence",
+        path: ["payload"],
+      });
     }
   });
-export type ApplyExecutionReceipt = z.infer<typeof ApplyExecutionReceiptSchema>;
+export type ApplyExecutionReceipt = z.infer<
+  typeof ApplyExecutionReceiptSchema
+>;
+
+export const ReceiptCorrelationSchema = z.object({
+  tenant_id: z.string().min(1).max(128),
+  user_id: z.string().min(1).max(128),
+  handoff_id: z.string().min(1).max(128),
+  handoff_body_sha256: Sha256Schema,
+  preparation_id: z.string().min(1).max(128),
+  application_id: z.string().min(1).max(128),
+});
+export type ReceiptCorrelation = z.infer<typeof ReceiptCorrelationSchema>;
+
+export function validateReceiptCorrelation(
+  value: unknown,
+  expectedValue: unknown,
+): ApplyExecutionReceipt {
+  const receipt = ApplyExecutionReceiptSchema.parse(value);
+  const expected = ReceiptCorrelationSchema.parse(expectedValue);
+  const fields = [
+    "tenant_id",
+    "user_id",
+    "handoff_id",
+    "handoff_body_sha256",
+    "preparation_id",
+    "application_id",
+  ] as const;
+  for (const field of fields) {
+    if (receipt[field] !== expected[field]) {
+      throw new Error(
+        `Execution receipt ${field} does not match the Hunter handoff`,
+      );
+    }
+  }
+  return receipt;
+}
 
 export function eventCanAssertSubmission(
   value: unknown,
