@@ -23,7 +23,7 @@ Version `0.2.0` adds the first end-to-end encrypted, cross-device workflow to th
 - a secure desktop OpenAI configuration foundation with macOS Keychain storage, model discovery, and local budget controls;
 - shared TypeScript contracts validated with Zod;
 - a Python native companion with authoritative SQLite persistence, transactional outbox delivery, a health API, Native Messaging, and an optional signed n8n event bridge;
- - a signed, replay-protected Career OS preparation-package consumer that records local handoffs only; acceptance is never a provider submission or receipt;
+- a signed, replay-protected Career OS preparation-package consumer that records local handoffs only; acceptance is never a provider submission or receipt;
 - private-runtime installation, verification, backup, update, rollback, and release-packaging operations;
 - synthetic application fixtures, unit tests, CI, and security documentation.
 
