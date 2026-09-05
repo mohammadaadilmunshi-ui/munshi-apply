@@ -11,6 +11,30 @@ import {
   validateReceiptCorrelation,
 } from "./career-os-phase12";
 
+function plainFact() {
+  return {
+    fact_id: "fact-name",
+    key: "identity.full_name",
+    category: "IDENTITY" as const,
+    trust_level: "USER_CONFIRMED" as const,
+    protected: false as const,
+    source: "candidate-truth-profile",
+    value: "Example Candidate",
+  };
+}
+
+function protectedFact() {
+  return {
+    fact_id: "fact-auth",
+    key: "work_authorization.detail",
+    category: "WORK_AUTHORIZATION" as const,
+    trust_level: "USER_CONFIRMED" as const,
+    protected: true as const,
+    source: "candidate-override-vault",
+    value_reference: "vault://profile/profile-1/fact-auth",
+  };
+}
+
 function profileSnapshot() {
   const overrideRevision = 3;
   const candidateDetailsRevision = 2;
@@ -32,26 +56,7 @@ function profileSnapshot() {
     source_profile_sha256: "a".repeat(64),
     source_resume_sha256: "b".repeat(64),
     generated_at: "2026-09-05T20:30:00Z",
-    facts: [
-      {
-        fact_id: "fact-name",
-        key: "identity.full_name",
-        category: "IDENTITY" as const,
-        trust_level: "USER_CONFIRMED" as const,
-        protected: false as const,
-        source: "candidate-truth-profile",
-        value: "Example Candidate",
-      },
-      {
-        fact_id: "fact-auth",
-        key: "work_authorization.detail",
-        category: "WORK_AUTHORIZATION" as const,
-        trust_level: "USER_CONFIRMED" as const,
-        protected: true as const,
-        source: "candidate-override-vault",
-        value_reference: "vault://profile/profile-1/fact-auth",
-      },
-    ],
+    facts: [plainFact(), protectedFact()],
     profile_digest: "c".repeat(64),
   };
 }
@@ -127,26 +132,29 @@ describe("Career OS Phase 12 wire contracts", () => {
 
   it("rejects protected fact plaintext, duplicate ids, and duplicate keys", () => {
     const protectedWithPlaintext = profileSnapshot();
-    protectedWithPlaintext.facts[1] = {
-      ...protectedWithPlaintext.facts[1],
-      value: "must-not-cross-generic-contract",
-    } as never;
+    protectedWithPlaintext.facts = [
+      plainFact(),
+      {
+        ...protectedFact(),
+        value: "must-not-cross-generic-contract",
+      } as never,
+    ];
     expect(() =>
       HunterProfileSnapshotSchema.parse(protectedWithPlaintext),
     ).toThrow();
 
     const duplicateId = profileSnapshot();
-    duplicateId.facts = [duplicateId.facts[0], { ...duplicateId.facts[0] }];
+    duplicateId.facts = [plainFact(), { ...plainFact() }];
     expect(() => HunterProfileSnapshotSchema.parse(duplicateId)).toThrow(
       /Duplicate profile fact id/,
     );
 
     const duplicateKey = profileSnapshot();
     duplicateKey.facts = [
-      duplicateKey.facts[0],
+      plainFact(),
       {
-        ...duplicateKey.facts[1],
-        key: duplicateKey.facts[0].key,
+        ...protectedFact(),
+        key: plainFact().key,
       },
     ];
     expect(() => HunterProfileSnapshotSchema.parse(duplicateKey)).toThrow(
