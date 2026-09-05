@@ -23,13 +23,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Print exact Prettier diff for Phase 12 files
+      - name: Print exact inherited README Prettier diff
         shell: bash
         run: |
           set -euo pipefail
-          npx prettier --write \
-            packages/contracts/src/career-os-phase12.ts \
-            packages/contracts/src/career-os-phase12.test.ts
-          git diff --no-color -- \
-            packages/contracts/src/career-os-phase12.ts \
-            packages/contracts/src/career-os-phase12.test.ts
+          npx prettier --write README.md
+          git diff --no-color --stat -- README.md
+          git diff --no-color -- README.md
