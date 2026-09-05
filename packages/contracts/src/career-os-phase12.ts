@@ -66,9 +66,7 @@ export const HunterProfileSnapshotSchema = z
       factIds.add(fact.fact_id);
     }
   });
-export type HunterProfileSnapshot = z.infer<
-  typeof HunterProfileSnapshotSchema
->;
+export type HunterProfileSnapshot = z.infer<typeof HunterProfileSnapshotSchema>;
 
 export const HunterResumeArtifactSchema = z
   .object({
@@ -145,9 +143,7 @@ export const ApplyExecutionReceiptSchema = z
       }
     }
   });
-export type ApplyExecutionReceipt = z.infer<
-  typeof ApplyExecutionReceiptSchema
->;
+export type ApplyExecutionReceipt = z.infer<typeof ApplyExecutionReceiptSchema>;
 
 export function eventCanAssertSubmission(
   value: unknown,
