@@ -13,6 +13,10 @@
     "./profile-vault": {
       "types": "./src/profile-vault.ts",
       "import": "./src/profile-vault.ts"
+    },
+    "./career-os-phase12": {
+      "types": "./src/career-os-phase12.ts",
+      "import": "./src/career-os-phase12.ts"
     }
   },
   "scripts": {
