@@ -5,19 +5,32 @@ import {
   HunterProfileSnapshotSchema,
   HunterResumeArtifactSchema,
   PROFILE_SNAPSHOT_VERSION,
+  compositeProfileRevision,
   eventCanAssertSubmission,
+  profileDigestPayload,
+  validateReceiptCorrelation,
 } from "./career-os-phase12";
 
 function profileSnapshot() {
+  const overrideRevision = 3;
+  const candidateDetailsRevision = 2;
   return {
     contract_version: PROFILE_SNAPSHOT_VERSION,
     authority: "munshi-hr-hunter" as const,
     projection_mode: "READ_ONLY" as const,
+    revision_scope: "SOURCE_EXTRACTION" as const,
     tenant_id: "owner",
     user_id: "owner-user",
     profile_id: "profile-1",
-    profile_revision: 7,
+    profile_revision: compositeProfileRevision(
+      overrideRevision,
+      candidateDetailsRevision,
+    ),
+    override_revision: overrideRevision,
+    candidate_details_revision: candidateDetailsRevision,
     source_extraction_id: "extract-3",
+    source_profile_sha256: "a".repeat(64),
+    source_resume_sha256: "b".repeat(64),
     generated_at: "2026-09-05T20:30:00Z",
     facts: [
       {
@@ -39,7 +52,7 @@ function profileSnapshot() {
         value_reference: "vault://profile/profile-1/fact-auth",
       },
     ],
-    profile_digest: "a".repeat(64),
+    profile_digest: "c".repeat(64),
   };
 }
 
@@ -48,10 +61,11 @@ function receipt(eventType: string, payload: Record<string, unknown> = {}) {
     contract_version: EXECUTION_RECEIPT_VERSION,
     source: "munshi-apply",
     event_id: `event-${eventType.toLowerCase()}`,
-    correlation_id: "handoff-1",
+    correlation_id: "correlation-1",
     tenant_id: "owner",
     user_id: "owner-user",
     handoff_id: "handoff-1",
+    handoff_body_sha256: "d".repeat(64),
     preparation_id: "prep-1",
     application_id: "application-1",
     runtime_application_id: "runtime-application-1",
@@ -63,10 +77,13 @@ function receipt(eventType: string, payload: Record<string, unknown> = {}) {
 }
 
 describe("Career OS Phase 12 wire contracts", () => {
-  it("accepts only a read-only Hunter-owned profile projection", () => {
-    expect(HunterProfileSnapshotSchema.parse(profileSnapshot()).authority).toBe(
-      "munshi-hr-hunter",
-    );
+  it("accepts only a read-only Hunter-owned evidence-bound profile projection", () => {
+    const parsed = HunterProfileSnapshotSchema.parse(profileSnapshot());
+    expect(parsed.authority).toBe("munshi-hr-hunter");
+    expect(parsed.revision_scope).toBe("SOURCE_EXTRACTION");
+    expect(parsed.source_profile_sha256).toHaveLength(64);
+    expect(parsed.source_resume_sha256).toHaveLength(64);
+
     expect(() =>
       HunterProfileSnapshotSchema.parse({
         ...profileSnapshot(),
@@ -79,9 +96,36 @@ describe("Career OS Phase 12 wire contracts", () => {
         projection_mode: "READ_WRITE",
       }),
     ).toThrow();
+    expect(() =>
+      HunterProfileSnapshotSchema.parse({
+        ...profileSnapshot(),
+        revision_scope: "GLOBAL",
+      }),
+    ).toThrow();
   });
 
-  it("rejects protected fact plaintext and duplicate fact ids", () => {
+  it("requires profile revision to match the two encrypted Section 1 revisions", () => {
+    const snapshot = profileSnapshot();
+    expect(snapshot.profile_revision).toBe(compositeProfileRevision(3, 2));
+    expect(() =>
+      HunterProfileSnapshotSchema.parse({
+        ...snapshot,
+        profile_revision: snapshot.profile_revision + 1,
+      }),
+    ).toThrow(/revision components/);
+  });
+
+  it("defines stable profile digest state without export timestamp metadata", () => {
+    const snapshot = HunterProfileSnapshotSchema.parse(profileSnapshot());
+    const payload = profileDigestPayload(snapshot);
+    expect(payload).not.toHaveProperty("generated_at");
+    expect(payload).not.toHaveProperty("profile_digest");
+    expect(payload.source_extraction_id).toBe("extract-3");
+    expect(payload.override_revision).toBe(3);
+    expect(payload.candidate_details_revision).toBe(2);
+  });
+
+  it("rejects protected fact plaintext, duplicate ids, and duplicate keys", () => {
     const protectedWithPlaintext = profileSnapshot();
     protectedWithPlaintext.facts[1] = {
       ...protectedWithPlaintext.facts[1],
@@ -91,14 +135,26 @@ describe("Career OS Phase 12 wire contracts", () => {
       HunterProfileSnapshotSchema.parse(protectedWithPlaintext),
     ).toThrow();
 
-    const duplicate = profileSnapshot();
-    duplicate.facts = [duplicate.facts[0], { ...duplicate.facts[0] }];
-    expect(() => HunterProfileSnapshotSchema.parse(duplicate)).toThrow(
+    const duplicateId = profileSnapshot();
+    duplicateId.facts = [duplicateId.facts[0], { ...duplicateId.facts[0] }];
+    expect(() => HunterProfileSnapshotSchema.parse(duplicateId)).toThrow(
       /Duplicate profile fact id/,
+    );
+
+    const duplicateKey = profileSnapshot();
+    duplicateKey.facts = [
+      duplicateKey.facts[0],
+      {
+        ...duplicateKey.facts[1],
+        key: duplicateKey.facts[0].key,
+      },
+    ];
+    expect(() => HunterProfileSnapshotSchema.parse(duplicateKey)).toThrow(
+      /Duplicate profile fact key/,
     );
   });
 
-  it("requires an exact lowercase SHA-256 for Hunter resume artifacts", () => {
+  it("requires an exact resume hash plus exact profile snapshot binding", () => {
     const artifact = HunterResumeArtifactSchema.parse({
       artifact_id: "resume-1",
       kind: "resume_pdf",
@@ -106,12 +162,21 @@ describe("Career OS Phase 12 wire contracts", () => {
       mime_type: "application/pdf",
       size_bytes: 12345,
       source_preparation_id: "prep-1",
-      profile_revision: 7,
+      source_extraction_id: "extract-3",
+      profile_revision: compositeProfileRevision(3, 2),
+      profile_digest: "c".repeat(64),
       job_id: "job-1",
     });
     expect(artifact.sha256).toHaveLength(64);
+    expect(artifact.profile_digest).toHaveLength(64);
     expect(() =>
       HunterResumeArtifactSchema.parse({ ...artifact, sha256: "not-a-digest" }),
+    ).toThrow();
+    expect(() =>
+      HunterResumeArtifactSchema.parse({
+        ...artifact,
+        profile_digest: "not-a-digest",
+      }),
     ).toThrow();
   });
 
@@ -126,6 +191,19 @@ describe("Career OS Phase 12 wire contracts", () => {
       ApplyExecutionReceiptSchema.parse(receipt("HANDOFF_ACCEPTED")),
     ).toThrow();
     expect(eventCanAssertSubmission(receipt("APPLICATION_READY"))).toBe(false);
+  });
+
+  it("blocks submission or confirmation claims on the wrong event type", () => {
+    expect(() =>
+      ApplyExecutionReceiptSchema.parse(
+        receipt("APPLICATION_READY", { submit_succeeded: true }),
+      ),
+    ).toThrow(/Non-submission/);
+    expect(() =>
+      ApplyExecutionReceiptSchema.parse(
+        receipt("APPLICATION_READY", { confirmation_observed: true }),
+      ),
+    ).toThrow(/Non-confirmation/);
   });
 
   it("requires verified successful submit evidence", () => {
@@ -151,6 +229,31 @@ describe("Career OS Phase 12 wire contracts", () => {
         receipt("APPLICATION_CONFIRMED", { confirmation_observed: true }),
       ),
     ).toBe(true);
+  });
+
+  it("binds reverse receipts to the exact Hunter handoff context", () => {
+    const ready = receipt("APPLICATION_READY");
+    expect(
+      validateReceiptCorrelation(ready, {
+        tenant_id: "owner",
+        user_id: "owner-user",
+        handoff_id: "handoff-1",
+        handoff_body_sha256: "d".repeat(64),
+        preparation_id: "prep-1",
+        application_id: "application-1",
+      }).handoff_id,
+    ).toBe("handoff-1");
+
+    expect(() =>
+      validateReceiptCorrelation(ready, {
+        tenant_id: "owner",
+        user_id: "owner-user",
+        handoff_id: "handoff-1",
+        handoff_body_sha256: "e".repeat(64),
+        preparation_id: "prep-1",
+        application_id: "application-1",
+      }),
+    ).toThrow(/handoff_body_sha256/);
   });
 
   it("keeps checkpoints and failures non-submitted", () => {
