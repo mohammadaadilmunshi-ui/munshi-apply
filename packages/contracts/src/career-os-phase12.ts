@@ -105,12 +105,11 @@ export const HunterProfileSnapshotSchema = z
 export type HunterProfileSnapshot = z.infer<typeof HunterProfileSnapshotSchema>;
 
 export function profileDigestPayload(snapshot: HunterProfileSnapshot) {
-  const {
-    generated_at: _generatedAt,
-    profile_digest: _profileDigest,
-    ...stableTruth
-  } = snapshot;
-  return stableTruth;
+  return Object.fromEntries(
+    Object.entries(snapshot).filter(
+      ([key]) => key !== "generated_at" && key !== "profile_digest",
+    ),
+  );
 }
 
 export const HunterResumeArtifactSchema = z
