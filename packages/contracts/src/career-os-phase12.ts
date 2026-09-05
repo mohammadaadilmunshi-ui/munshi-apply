@@ -96,14 +96,13 @@ export const HunterProfileSnapshotSchema = z
     if (snapshot.profile_revision !== expectedRevision) {
       context.addIssue({
         code: "custom",
-        message: "Profile revision does not match its encrypted revision components",
+        message:
+          "Profile revision does not match its encrypted revision components",
         path: ["profile_revision"],
       });
     }
   });
-export type HunterProfileSnapshot = z.infer<
-  typeof HunterProfileSnapshotSchema
->;
+export type HunterProfileSnapshot = z.infer<typeof HunterProfileSnapshotSchema>;
 
 export function profileDigestPayload(snapshot: HunterProfileSnapshot) {
   const {
@@ -204,9 +203,7 @@ export const ApplyExecutionReceiptSchema = z
       });
     }
   });
-export type ApplyExecutionReceipt = z.infer<
-  typeof ApplyExecutionReceiptSchema
->;
+export type ApplyExecutionReceipt = z.infer<typeof ApplyExecutionReceiptSchema>;
 
 export const ReceiptCorrelationSchema = z.object({
   tenant_id: z.string().min(1).max(128),
