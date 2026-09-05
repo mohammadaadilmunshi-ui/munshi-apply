@@ -154,7 +154,9 @@ describe("Career OS Phase 12 wire contracts", () => {
   });
 
   it("keeps checkpoints and failures non-submitted", () => {
-    expect(eventCanAssertSubmission(receipt("SECURITY_CHECKPOINT"))).toBe(false);
+    expect(eventCanAssertSubmission(receipt("SECURITY_CHECKPOINT"))).toBe(
+      false,
+    );
     expect(eventCanAssertSubmission(receipt("INTERACTION_FAILED"))).toBe(false);
   });
 });
