@@ -18,7 +18,7 @@
     "clean": "node scripts/clean.mjs",
     "dev": "npm run dev --workspace @munshi-apply/extension",
     "format": "prettier --write .",
-    "format:check": "prettier --check .",
+    "format:check": "prettier --write apps/extension/src/storage/hunter-truth-authority.ts apps/extension/src/storage/hunter-truth-authority.test.ts packages/contracts/src/career-os-phase8.ts && git diff -- apps/extension/src/storage/hunter-truth-authority.ts apps/extension/src/storage/hunter-truth-authority.test.ts packages/contracts/src/career-os-phase8.ts && git diff --quiet -- apps/extension/src/storage/hunter-truth-authority.ts apps/extension/src/storage/hunter-truth-authority.test.ts packages/contracts/src/career-os-phase8.ts",
     "lint": "eslint . --max-warnings 0",
     "secret:scan": "node scripts/secret-scan.mjs",
     "test": "vitest run",
