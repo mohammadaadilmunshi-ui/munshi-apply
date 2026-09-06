@@ -17,6 +17,10 @@
     "./career-os-phase12": {
       "types": "./src/career-os-phase12.ts",
       "import": "./src/career-os-phase12.ts"
+    },
+    "./career-os-phase8": {
+      "types": "./src/career-os-phase8.ts",
+      "import": "./src/career-os-phase8.ts"
     }
   },
   "scripts": {
