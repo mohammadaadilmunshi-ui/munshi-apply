@@ -14,6 +14,8 @@ import {
 
 const EXPECTED_DIGEST =
   "4fb31c6fa280fed4a545d2684183887ae0fee874ade6d9df5d2136760e704b3d";
+const STALE_EXPECTED_DIGEST =
+  "f80be87d5fe5af7f89c86ac6c373ba324cb79257ccc8597e50f0e292f5ce8454";
 
 function projection(
   overrides: Partial<HunterApplicationTruthProjection> = {},
@@ -146,7 +148,7 @@ describe("Hunter Candidate Truth authority cache", () => {
         profile_revision: 3,
         profile_digest: "e".repeat(64),
       },
-      projection_digest: "f".repeat(64),
+      projection_digest: STALE_EXPECTED_DIGEST,
     });
     await expect(acceptHunterTruthProjection(stale, memory.store)).rejects.toThrow(
       /stale Hunter Candidate Truth/,
