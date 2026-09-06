@@ -105,6 +105,13 @@ describe("Hunter Candidate Truth authority cache", () => {
   });
 
   it("rejects a payload whose projected truth was modified without a new digest", async () => {
+    const base = projection();
+    const protectedFact = base.facts.find(
+      (fact) => fact.key === "application_defaults.sponsorship_required",
+    );
+    if (!protectedFact) {
+      throw new Error("test fixture missing protected sponsorship fact");
+    }
     const tampered = projection({
       facts: [
         {
@@ -116,7 +123,7 @@ describe("Hunter Candidate Truth authority cache", () => {
           source: "master-resume-extraction:extract-1",
           value: "attacker@example.com",
         },
-        projection().facts[1],
+        protectedFact,
       ],
     });
     await expect(
