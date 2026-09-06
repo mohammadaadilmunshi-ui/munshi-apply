@@ -8,10 +8,7 @@ import {
   type HunterTruthCache,
   type HunterTruthUpdateDisposition,
 } from "@munshi-apply/contracts/career-os-phase8";
-import {
-  ProfileFactSchema,
-  type ProfileFact,
-} from "@munshi-apply/contracts";
+import { ProfileFactSchema, type ProfileFact } from "@munshi-apply/contracts";
 
 const storageKey = "munshi.apply.hunter-candidate-truth.v1";
 
