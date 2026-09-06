@@ -119,9 +119,9 @@ describe("Hunter Candidate Truth authority cache", () => {
         projection().facts[1],
       ],
     });
-    await expect(verifyHunterTruthProjectionIntegrity(tampered)).rejects.toThrow(
-      /digest does not match/,
-    );
+    await expect(
+      verifyHunterTruthProjectionIntegrity(tampered),
+    ).rejects.toThrow(/digest does not match/);
   });
 
   it("persists an initial verified Hunter projection and reads it back", async () => {
@@ -133,9 +133,9 @@ describe("Hunter Candidate Truth authority cache", () => {
     );
     expect(result.disposition).toBe("INITIAL");
     expect(memory.read()?.source).toBe("munshi-hr-hunter");
-    expect((await loadHunterTruthCache(memory.store))?.projection.projection_digest).toBe(
-      EXPECTED_DIGEST,
-    );
+    expect(
+      (await loadHunterTruthCache(memory.store))?.projection.projection_digest,
+    ).toBe(EXPECTED_DIGEST);
   });
 
   it("refuses stale Candidate Truth for the same immutable extraction scope", async () => {
@@ -150,9 +150,9 @@ describe("Hunter Candidate Truth authority cache", () => {
       },
       projection_digest: STALE_EXPECTED_DIGEST,
     });
-    await expect(acceptHunterTruthProjection(stale, memory.store)).rejects.toThrow(
-      /stale Hunter Candidate Truth/,
-    );
+    await expect(
+      acceptHunterTruthProjection(stale, memory.store),
+    ).rejects.toThrow(/stale Hunter Candidate Truth/);
     expect(memory.read()?.projection.projection_digest).toBe(EXPECTED_DIGEST);
   });
 
