@@ -94,11 +94,7 @@ export const HunterTruthCacheSchema = z
 export type HunterTruthCache = z.infer<typeof HunterTruthCacheSchema>;
 
 export type HunterTruthUpdateDisposition =
-  | "INITIAL"
-  | "UNCHANGED"
-  | "REPLACE"
-  | "STALE_INCOMING"
-  | "CONFLICT";
+  "INITIAL" | "UNCHANGED" | "REPLACE" | "STALE_INCOMING" | "CONFLICT";
 
 export function classifyHunterTruthUpdate(
   currentValue: unknown,
@@ -166,9 +162,12 @@ export function resolveCanonicalHunterFact(
   projectionValue: unknown,
   key: string,
 ): CanonicalFactResolution {
-  const projection = HunterApplicationTruthProjectionSchema.parse(projectionValue);
+  const projection =
+    HunterApplicationTruthProjectionSchema.parse(projectionValue);
   const normalizedKey = key.trim();
-  const fact = projection.facts.find((candidate) => candidate.key === normalizedKey);
+  const fact = projection.facts.find(
+    (candidate) => candidate.key === normalizedKey,
+  );
   if (!fact) {
     return {
       status: "UNKNOWN",
@@ -203,7 +202,8 @@ export function projectionMatchesBinding(
   projectionValue: unknown,
   bindingValue: unknown,
 ): boolean {
-  const projection = HunterApplicationTruthProjectionSchema.parse(projectionValue);
+  const projection =
+    HunterApplicationTruthProjectionSchema.parse(projectionValue);
   const binding = CandidateProfileBindingSchema.parse(bindingValue);
   const current = projection.candidate_profile_binding;
   return (
@@ -223,7 +223,8 @@ export function projectionMatchesHunterSnapshot(
   projectionValue: unknown,
   snapshotValue: unknown,
 ): boolean {
-  const projection = HunterApplicationTruthProjectionSchema.parse(projectionValue);
+  const projection =
+    HunterApplicationTruthProjectionSchema.parse(projectionValue);
   const snapshot = HunterProfileSnapshotSchema.parse(snapshotValue);
   return (
     projection.tenant_id === snapshot.tenant_id &&
@@ -233,6 +234,7 @@ export function projectionMatchesHunterSnapshot(
       snapshot.source_extraction_id &&
     projection.candidate_profile_binding.profile_revision ===
       snapshot.profile_revision &&
-    projection.candidate_profile_binding.profile_digest === snapshot.profile_digest
+    projection.candidate_profile_binding.profile_digest ===
+      snapshot.profile_digest
   );
 }
