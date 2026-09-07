@@ -23,6 +23,12 @@ services:
     ports:
       - "127.0.0.1:19000:8000"
 
+    networks:
+      default:
+      hunter_staging:
+        aliases:
+          - apply
+
     volumes:
       - apply_data:/data
 
@@ -40,6 +46,11 @@ services:
       timeout: 5s
       retries: 12
       start_period: 10s
+
+networks:
+  hunter_staging:
+    external: true
+    name: munshi-netcup-staging_application
 
 volumes:
   apply_data:
