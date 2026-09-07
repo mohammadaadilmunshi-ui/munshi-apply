@@ -3,6 +3,7 @@
 Accepting a package is deliberately not an application submission.  This
 module has no HTTP client, browser-control, credential, or provider code.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -18,9 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from .database import Database, canonical_json
 from .n8n import verify_signature
 
-SUPPORTED_PROVIDERS = frozenset(
-    {"greenhouse", "lever", "ashby", "smartrecruiters", "workday"}
-)
+SUPPORTED_PROVIDERS = frozenset({"greenhouse", "lever", "ashby", "smartrecruiters", "workday"})
 HandoffState = Literal["PREPARED", "NEEDS_INPUT", "READY_TO_APPLY"]
 
 

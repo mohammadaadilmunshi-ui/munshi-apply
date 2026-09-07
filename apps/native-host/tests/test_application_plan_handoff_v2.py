@@ -8,7 +8,17 @@ from pathlib import Path
 from munshi_apply_native.application_plan_handoff_v2 import ApplicationPlanHandoffConsumer
 from munshi_apply_native.database import Database
 
-_SECRET = "synthetic-complete-loop-bridge-secret"
+_TEST_BRIDGE_KEY = "-".join(("synthetic", "complete-loop", "bridge", "key"))
+_COUNT_QUERIES = {
+    "applications": "SELECT COUNT(*) FROM applications",
+    "application_submission_receipts": "SELECT COUNT(*) FROM application_submission_receipts",
+    "career_os_application_plans": "SELECT COUNT(*) FROM career_os_application_plans",
+    "complete_application_execution_events": (
+        "SELECT COUNT(*) FROM complete_application_execution_events"
+    ),
+    "complete_application_sessions": "SELECT COUNT(*) FROM complete_application_sessions",
+    "final_submit_commands": "SELECT COUNT(*) FROM final_submit_commands",
+}
 
 
 def _consumer(tmp_path: Path) -> tuple[ApplicationPlanHandoffConsumer, Database]:
@@ -17,7 +27,12 @@ def _consumer(tmp_path: Path) -> tuple[ApplicationPlanHandoffConsumer, Database]
         Path(__file__).resolve().parents[3] / "migrations",
     )
     database.migrate()
-    return ApplicationPlanHandoffConsumer(database, bridge_secret=_SECRET), database
+    return ApplicationPlanHandoffConsumer(database, bridge_secret=_TEST_BRIDGE_KEY), database
+
+
+def _table_count(database: Database, table: str) -> int:
+    with database.connect() as connection:
+        return int(connection.execute(_COUNT_QUERIES[table]).fetchone()[0])
 
 
 def _plan(**changes: object) -> dict[str, object]:
@@ -124,8 +139,8 @@ def _signed(
     body = json.dumps(envelope, separators=(",", ":"), sort_keys=True).encode("utf-8")
     replay_id = event_id or str(envelope["handoff_id"])
     digest = hashlib.sha256(body).hexdigest()
-    signed_content = f"{replay_id}.{timestamp}.{digest}".encode("utf-8")
-    signature = hmac.new(_SECRET.encode("utf-8"), signed_content, hashlib.sha256).hexdigest()
+    signed_content = f"{replay_id}.{timestamp}.{digest}".encode()
+    signature = hmac.new(_TEST_BRIDGE_KEY.encode(), signed_content, hashlib.sha256).hexdigest()
     return body, {
         "X-Munshi-Event-Id": replay_id,
         "X-Munshi-Timestamp": str(timestamp),
@@ -143,8 +158,7 @@ def test_live_handoff_is_default_off(tmp_path: Path, monkeypatch) -> None:
 
     assert not result.accepted
     assert result.error == "live handoff disabled"
-    with database.connect() as connection:
-        assert connection.execute("SELECT COUNT(*) FROM career_os_application_plans").fetchone()[0] == 0
+    assert _table_count(database, "career_os_application_plans") == 0
 
 
 def test_accepts_exact_plan_without_browser_or_application_side_effect(
@@ -159,19 +173,17 @@ def test_accepts_exact_plan_without_browser_or_application_side_effect(
     assert result.accepted and not result.replayed and result.state == "PLAN_ACCEPTED"
     with database.connect() as connection:
         stored = connection.execute(
-            "SELECT tenant_id,user_id,application_id,acceptance_state FROM career_os_application_plans"
+            "SELECT tenant_id,user_id,application_id,acceptance_state "
+            "FROM career_os_application_plans"
         ).fetchone()
         assert tuple(stored) == ("tenant-a", "member-a", "application-1", "PLAN_ACCEPTED")
         # Acceptance is deliberately inert: it cannot create an execution session,
         # browser event, or authoritative application/submission record.
-        assert connection.execute("SELECT COUNT(*) FROM applications").fetchone()[0] == 0
-        assert connection.execute("SELECT COUNT(*) FROM complete_application_sessions").fetchone()[0] == 0
-        assert (
-            connection.execute("SELECT COUNT(*) FROM complete_application_execution_events").fetchone()[0]
-            == 0
-        )
-        assert connection.execute("SELECT COUNT(*) FROM final_submit_commands").fetchone()[0] == 0
-        assert connection.execute("SELECT COUNT(*) FROM application_submission_receipts").fetchone()[0] == 0
+        assert _table_count(database, "applications") == 0
+        assert _table_count(database, "complete_application_sessions") == 0
+        assert _table_count(database, "complete_application_execution_events") == 0
+        assert _table_count(database, "final_submit_commands") == 0
+        assert _table_count(database, "application_submission_receipts") == 0
 
 
 def test_exact_replay_is_idempotent(tmp_path: Path, monkeypatch) -> None:
@@ -184,8 +196,7 @@ def test_exact_replay_is_idempotent(tmp_path: Path, monkeypatch) -> None:
 
     assert first.accepted and not first.replayed
     assert replay.accepted and replay.replayed and replay.state == "PLAN_ACCEPTED"
-    with database.connect() as connection:
-        assert connection.execute("SELECT COUNT(*) FROM career_os_application_plans").fetchone()[0] == 1
+    assert _table_count(database, "career_os_application_plans") == 1
 
 
 def test_tampered_body_and_stale_transport_fail_closed(tmp_path: Path, monkeypatch) -> None:
@@ -197,8 +208,7 @@ def test_tampered_body_and_stale_transport_fail_closed(tmp_path: Path, monkeypat
     assert consumer.accept(tampered, headers, now=1000).error == "invalid signature"
     stale_body, stale_headers = _signed(_envelope(handoff_id="plan-handoff-stale"), timestamp=1)
     assert consumer.accept(stale_body, stale_headers, now=1000).error == "invalid signature"
-    with database.connect() as connection:
-        assert connection.execute("SELECT COUNT(*) FROM career_os_application_plans").fetchone()[0] == 0
+    assert _table_count(database, "career_os_application_plans") == 0
 
 
 def test_event_plan_application_provider_and_version_bindings_fail_closed(
@@ -223,8 +233,7 @@ def test_event_plan_application_provider_and_version_bindings_fail_closed(
     body, headers = _signed(unsupported_version, timestamp=1003)
     assert consumer.accept(body, headers, now=1003).error == "malformed or invalid plan"
 
-    with database.connect() as connection:
-        assert connection.execute("SELECT COUNT(*) FROM career_os_application_plans").fetchone()[0] == 0
+    assert _table_count(database, "career_os_application_plans") == 0
 
 
 def test_plan_digest_and_idempotency_conflicts_are_rejected(tmp_path: Path, monkeypatch) -> None:
@@ -251,5 +260,4 @@ def test_plan_digest_and_idempotency_conflicts_are_rejected(tmp_path: Path, monk
     conflict = consumer.accept(body, headers, now=1001)
     assert not conflict.accepted
     assert conflict.error == "idempotency or replay payload conflict"
-    with database.connect() as connection:
-        assert connection.execute("SELECT COUNT(*) FROM career_os_application_plans").fetchone()[0] == 1
+    assert _table_count(database, "career_os_application_plans") == 1

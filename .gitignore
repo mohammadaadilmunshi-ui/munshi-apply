@@ -17,6 +17,7 @@ coverage/
 __pycache__/
 *.py[cod]
 .venv/
+.tools/
 reports/generated/
 backups/*
 !backups/.gitkeep
@@ -27,3 +28,4 @@ real-resumes/
 application-data/
 diagnostics-private/
 apps/extension/.vite/
+apps/native-host/browser-dist/

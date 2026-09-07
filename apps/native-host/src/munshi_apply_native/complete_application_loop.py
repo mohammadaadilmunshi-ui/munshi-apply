@@ -6,6 +6,7 @@ application/checkpoint/resolution architecture. Browser mechanics remain behind
 High-risk external actions are default-off and final submit requires an explicit
 review-bound command plus independent success evidence.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -18,7 +19,11 @@ from uuid import uuid4
 
 from .checkpoint_store import ApplicationCheckpointStore
 from .database import Database, canonical_json
-from .execution_policy import safe_evidence, validate_submit_observation, verify_submission_observation
+from .execution_policy import (
+    safe_evidence,
+    validate_submit_observation,
+    verify_submission_observation,
+)
 from .models import ResolutionTaskPayload, ResolutionTaskResolutionPayload
 from .resolution_task_store import ResolutionTaskStore
 
@@ -100,16 +105,12 @@ def _now() -> str:
 
 def _sha(value: Any) -> str:
     return hashlib.sha256(
-        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
-            "utf-8"
-        )
+        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     ).hexdigest()
 
 
 def _event_id(replay_identity: str) -> str:
     return "loop-event-" + hashlib.sha256(replay_identity.encode("utf-8")).hexdigest()[:32]
-
-
 
 
 class CompleteApplicationLoopService:
@@ -134,6 +135,7 @@ class CompleteApplicationLoopService:
         result = dict(row)
         result["plan"] = json.loads(result.pop("plan_json"))
         from .application_plan_handoff_v2 import _plan_digest_payload, _sha256_json
+
         if _sha256_json(_plan_digest_payload(result["plan"])) != result["plan_digest"]:
             raise ValueError("Stored Application Plan integrity failure")
         return result
@@ -239,7 +241,8 @@ class CompleteApplicationLoopService:
                 }:
                     raise ValueError("Application already reached a submission outcome")
                 connection.execute(
-                    "UPDATE applications SET job_id=?,resume_id=?,updated_at=? WHERE application_id=?",
+                    "UPDATE applications SET job_id=?,resume_id=?,updated_at=? "
+                    "WHERE application_id=?",
                     (job_id, resume_id, now, application_id),
                 )
 
@@ -284,6 +287,16 @@ class CompleteApplicationLoopService:
                 (state, now, session["application_id"]),
             )
         return self._session(str(session["session_id"]))
+
+    @staticmethod
+    def _result(session: dict[str, Any], state: str) -> SessionResult:
+        return SessionResult(
+            str(session["session_id"]),
+            str(session["application_id"]),
+            str(session["plan_id"]),
+            state,
+            int(session["state_version"]),
+        )
 
     def _record_event(
         self,
@@ -425,16 +438,20 @@ class CompleteApplicationLoopService:
             or unresolved.get("question")
             or "unknown"
         ).strip()
-        task_id = "plan-resolution-" + hashlib.sha256(
-            f"{session['plan_id']}\0{session['session_id']}\0{question_key}".encode("utf-8")
-        ).hexdigest()[:32]
+        task_id = (
+            "plan-resolution-"
+            + hashlib.sha256(
+                f"{session['plan_id']}\0{session['session_id']}\0{question_key}".encode()
+            ).hexdigest()[:32]
+        )
         existing = self.resolutions.get(task_id)
         if existing is not None:
             return existing
         semantic = str(unresolved.get("semantic_type") or "unknown")
         sensitivity = str(unresolved.get("sensitivity") or "NORMAL").upper()
         category = "CAPTCHA" if semantic.casefold() == "captcha" else "MISSING_FACT"
-        risk = "HIGH" if sensitivity in {"PROTECTED", "SELF_ID", "CREDENTIAL", "POST_OFFER"} else "MEDIUM"
+        protected_levels = {"PROTECTED", "SELF_ID", "CREDENTIAL", "POST_OFFER"}
+        risk = "HIGH" if sensitivity in protected_levels else "MEDIUM"
         grouping = "NONE" if category == "CAPTCHA" else "EXACT_QUESTION"
         now = datetime.now(UTC)
         task = ResolutionTaskPayload.model_validate(
@@ -459,7 +476,9 @@ class CompleteApplicationLoopService:
                 "sourceRefs": [f"application-plan:{session['plan_id']}"],
                 "evidenceRefs": [],
                 "attemptedResolvers": ["CURRENT_SESSION", "APPROVED_ANSWER_MEMORY"],
-                "reason": str(unresolved.get("reason") or "Required field has no safe execution value"),
+                "reason": str(
+                    unresolved.get("reason") or "Required field has no safe execution value"
+                ),
                 "resolution": None,
                 "createdAt": now,
                 "updatedAt": now,
@@ -528,7 +547,9 @@ class CompleteApplicationLoopService:
                     "task_id": task.task_id,
                     "question_key": task.group_key,
                     "risk_level": task.risk_level,
-                    "value_persisted_as": "secure_reference" if task.risk_level == "HIGH" else "local_execution_value",
+                    "value_persisted_as": (
+                        "secure_reference" if task.risk_level == "HIGH" else "local_execution_value"
+                    ),
                     "canonical_truth_promoted": False,
                 },
             )
@@ -559,8 +580,7 @@ class CompleteApplicationLoopService:
         observation = adapter.inspect_job(plan=plan)
         if observation.get("security_checkpoint"):
             session = self._transition(session, "BLOCKED")
-            return SessionResult(session_id, session["application_id"], session["plan_id"],
-                                 "BLOCKED", int(session["state_version"]))
+            return self._result(session, "BLOCKED")
         provider = str(observation.get("provider") or "").upper()
         expected_provider = str(plan_record["provider"]).upper()
         expected_job = str(plan["job"]["id"])
@@ -585,7 +605,7 @@ class CompleteApplicationLoopService:
                     "observed_job_id": observed_job,
                 },
             )
-            return SessionResult(session_id, session["application_id"], session["plan_id"], "BLOCKED", int(session["state_version"]))
+            return self._result(session, "BLOCKED")
 
         if session["state"] == "SESSION_STARTING":
             session = self._transition(
@@ -608,7 +628,13 @@ class CompleteApplicationLoopService:
                 replay_identity=f"{session_id}:form-discovered:{observation.get('page_fingerprint')}",
                 evidence={"page_fingerprint": observation.get("page_fingerprint")},
             )
-        if session["state"] in {"FORM_DISCOVERED", "NEEDS_INPUT", "READY_FOR_REVIEW", "READY_TO_SUBMIT"}:
+        preparing_states = {
+            "FORM_DISCOVERED",
+            "NEEDS_INPUT",
+            "READY_FOR_REVIEW",
+            "READY_TO_SUBMIT",
+        }
+        if session["state"] in preparing_states:
             session = self._transition(session, "PREPARING")
 
         latest = self.checkpoints.latest(str(session["application_id"]))
@@ -625,7 +651,7 @@ class CompleteApplicationLoopService:
                 replay_identity=f"{session_id}:provider-changed:{prepared.get('provider')}",
                 evidence={"reason": "provider_changed_during_prepare"},
             )
-            return SessionResult(session_id, session["application_id"], session["plan_id"], "BLOCKED", int(session["state_version"]))
+            return self._result(session, "BLOCKED")
         if str(prepared.get("job_id") or "") != expected_job:
             session = self._transition(session, "BLOCKED")
             self._record_event(
@@ -634,10 +660,11 @@ class CompleteApplicationLoopService:
                 replay_identity=f"{session_id}:job-changed:{prepared.get('job_id')}",
                 evidence={"reason": "job_changed_during_prepare"},
             )
-            return SessionResult(session_id, session["application_id"], session["plan_id"], "BLOCKED", int(session["state_version"]))
+            return self._result(session, "BLOCKED")
 
         resume = dict(plan["resume"])
-        if prepared.get("resume_uploaded") is not True or str(prepared.get("resume_sha256") or "") != str(resume["artifact_sha256"]):
+        resume_matches = str(prepared.get("resume_sha256") or "") == str(resume["artifact_sha256"])
+        if prepared.get("resume_uploaded") is not True or not resume_matches:
             session = self._transition(session, "FAILED_SAFELY")
             self._record_event(
                 session=session,
@@ -645,15 +672,19 @@ class CompleteApplicationLoopService:
                 replay_identity=f"{session_id}:resume-verification-failed:{prepared.get('resume_sha256')}",
                 evidence={"reason": "resume_upload_not_verified"},
             )
-            return SessionResult(session_id, session["application_id"], session["plan_id"], "FAILED_SAFELY", int(session["state_version"]))
+            return self._result(session, "FAILED_SAFELY")
 
         completed = [str(value) for value in prepared.get("completed_control_ids") or []]
         pending = [str(value) for value in prepared.get("pending_control_ids") or []]
         checkpoint = self._next_checkpoint(
             session=session,
             state="QUESTIONS",
-            page_id=str(prepared.get("page_id") or observation.get("page_id") or "application-form"),
-            page_fingerprint=str(prepared.get("page_fingerprint") or observation.get("page_fingerprint") or "unknown"),
+            page_id=str(
+                prepared.get("page_id") or observation.get("page_id") or "application-form"
+            ),
+            page_fingerprint=str(
+                prepared.get("page_fingerprint") or observation.get("page_fingerprint") or "unknown"
+            ),
             completed=completed,
             pending=pending,
             resume_id=str(resume["artifact_id"]),
@@ -661,7 +692,9 @@ class CompleteApplicationLoopService:
         )
         form_digest = str(prepared.get("form_digest") or "")
         if len(form_digest) != 64:
-            session = self._transition(session, "FAILED_SAFELY", checkpoint_id=checkpoint["checkpoint_id"])
+            session = self._transition(
+                session, "FAILED_SAFELY", checkpoint_id=checkpoint["checkpoint_id"]
+            )
             self._record_event(
                 session=session,
                 event_type="FAILED_SAFELY",
@@ -669,7 +702,7 @@ class CompleteApplicationLoopService:
                 evidence={"reason": "browser_form_digest_missing_or_invalid"},
                 checkpoint=checkpoint,
             )
-            return SessionResult(session_id, session["application_id"], session["plan_id"], "FAILED_SAFELY", int(session["state_version"]))
+            return self._result(session, "FAILED_SAFELY")
 
         unresolved = list(prepared.get("unresolved") or [])
         validation_errors = [str(value) for value in prepared.get("validation_errors") or []]
@@ -709,7 +742,9 @@ class CompleteApplicationLoopService:
             session = self._transition(
                 session,
                 "NEEDS_INPUT",
-                current_url=str(prepared.get("current_url") or observation.get("current_url") or ""),
+                current_url=str(
+                    prepared.get("current_url") or observation.get("current_url") or ""
+                ),
                 browser_form_digest=form_digest,
                 checkpoint_id=checkpoint["checkpoint_id"],
             )
@@ -720,7 +755,9 @@ class CompleteApplicationLoopService:
                 evidence={"unresolved_count": len(unresolved)},
                 checkpoint=checkpoint,
             )
-        elif validation_errors or int(prepared.get("completed_required_fields") or 0) < int(prepared.get("required_fields") or 0):
+        elif validation_errors or int(prepared.get("completed_required_fields") or 0) < int(
+            prepared.get("required_fields") or 0
+        ):
             session = self._transition(
                 session,
                 "FAILED_SAFELY",
@@ -731,14 +768,19 @@ class CompleteApplicationLoopService:
                 session=session,
                 event_type="FAILED_SAFELY",
                 replay_identity=f"{session_id}:validation-errors:{form_digest}",
-                evidence={"validation_errors": validation_errors, "reason": "required_form_not_complete"},
+                evidence={
+                    "validation_errors": validation_errors,
+                    "reason": "required_form_not_complete",
+                },
                 checkpoint=checkpoint,
             )
         else:
             session = self._transition(
                 session,
                 "READY_FOR_REVIEW",
-                current_url=str(prepared.get("current_url") or observation.get("current_url") or ""),
+                current_url=str(
+                    prepared.get("current_url") or observation.get("current_url") or ""
+                ),
                 browser_form_digest=form_digest,
                 checkpoint_id=checkpoint["checkpoint_id"],
             )
@@ -908,7 +950,8 @@ class CompleteApplicationLoopService:
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             current = connection.execute(
-                "SELECT approved_at,invalidated_at FROM final_application_reviews WHERE review_id=?",
+                "SELECT approved_at,invalidated_at FROM final_application_reviews "
+                "WHERE review_id=?",
                 (review_id,),
             ).fetchone()
             if current["invalidated_at"] is not None:
@@ -941,7 +984,8 @@ class CompleteApplicationLoopService:
     def _event_chain_digest(self, session_id: str) -> str:
         with self.database.connect() as connection:
             rows = connection.execute(
-                """SELECT event_id,event_type,replay_identity,evidence_json,checkpoint_json,occurred_at
+                """SELECT event_id,event_type,replay_identity,evidence_json,
+                          checkpoint_json,occurred_at
                    FROM complete_application_execution_events
                    WHERE session_id=? ORDER BY occurred_at,event_id""",
                 (session_id,),
@@ -1034,7 +1078,8 @@ class CompleteApplicationLoopService:
                 receipt = self._receipt_for_command(str(existing["command_id"]))
                 return receipt or {"command": dict(existing), "replayed": True}
             prior_review = connection.execute(
-                "SELECT command_id FROM final_submit_commands WHERE application_id=? AND plan_id=? AND review_id=?",
+                "SELECT command_id FROM final_submit_commands "
+                "WHERE application_id=? AND plan_id=? AND review_id=?",
                 (review["application_id"], review["plan_id"], review_id),
             ).fetchone()
             if prior_review is not None:
@@ -1082,8 +1127,11 @@ class CompleteApplicationLoopService:
             result = adapter.submit(plan=plan, review=json.loads(str(review["review_json"])))
         except Exception:
             # The final action might already have reached the employer. Never retry.
-            result = {"action_executed": True,
-                      "verification_status": "SUBMISSION_UNVERIFIED", "success_evidence": {}}
+            result = {
+                "action_executed": True,
+                "verification_status": "SUBMISSION_UNVERIFIED",
+                "success_evidence": {},
+            }
 
         action_executed = result.get("action_executed") is True
         requested_status = str(result.get("verification_status") or "SUBMISSION_UNVERIFIED")
@@ -1103,15 +1151,18 @@ class CompleteApplicationLoopService:
         answers_snapshot = json.loads(str(review["review_json"]))["answers"]
         answers_digest = _sha(answers_snapshot)
         self._record_event(
-            session=session, event_type="SUBMISSION_OBSERVED",
+            session=session,
+            event_type="SUBMISSION_OBSERVED",
             replay_identity=f"{command_id}:observed",
             evidence={"verification_status": final_status, "success_evidence": success_evidence},
         )
         with self.database.connect() as connection:
             event_rows = connection.execute(
-                "SELECT event_id,event_type,replay_identity,evidence_json,checkpoint_json,occurred_at "
+                "SELECT event_id,event_type,replay_identity,evidence_json,"
+                "checkpoint_json,occurred_at "
                 "FROM complete_application_execution_events WHERE session_id=? "
-                "ORDER BY occurred_at,event_id", (session["session_id"],),
+                "ORDER BY occurred_at,event_id",
+                (session["session_id"],),
             ).fetchall()
         execution_events = [dict(row) for row in event_rows]
         chain_digest = self._event_chain_digest(str(session["session_id"]))

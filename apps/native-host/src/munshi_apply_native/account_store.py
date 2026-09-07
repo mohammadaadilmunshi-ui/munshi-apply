@@ -60,18 +60,13 @@ def portal_identity(raw_url: object) -> tuple[str, str, str]:
         )
     )
     shared = any(
-        domain == suffix or domain.endswith(f".{suffix}")
-        for suffix in _SHARED_TENANT_HOSTS
+        domain == suffix or domain.endswith(f".{suffix}") for suffix in _SHARED_TENANT_HOSTS
     )
     if not shared:
         return domain, domain, sanitized_url
 
     tenant = next(
-        (
-            segment.strip().lower()
-            for segment in parsed.path.split("/")
-            if segment.strip()
-        ),
+        (segment.strip().lower() for segment in parsed.path.split("/") if segment.strip()),
         None,
     )
     scope_key = f"{domain}/{tenant}" if tenant else domain
@@ -114,11 +109,7 @@ class AccountStore:
         _reject_secret_material(payload)
         _, scope_key, _ = portal_identity(payload.get("portalUrl"))
         email_value = payload.get("email")
-        email = (
-            _required_text(email_value, "email").lower()
-            if email_value is not None
-            else None
-        )
+        email = _required_text(email_value, "email").lower() if email_value is not None else None
 
         with self.database.connect() as connection:
             if email:

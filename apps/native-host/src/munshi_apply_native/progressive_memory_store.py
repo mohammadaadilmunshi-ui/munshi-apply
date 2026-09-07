@@ -225,8 +225,7 @@ class ProgressiveMemoryStore:
         if kind == "QUESTION" and not memory.get("question_fingerprint"):
             raise ValueError("Question memory requires question_fingerprint")
         if kind == "GLOBAL_PATTERN" and (
-            memory.get("site_origin") is not None
-            or memory.get("question_fingerprint") is not None
+            memory.get("site_origin") is not None or memory.get("question_fingerprint") is not None
         ):
             raise ValueError("Global pattern memory cannot be site/question bound")
         if kind == "USER_CORRECTION" and not (

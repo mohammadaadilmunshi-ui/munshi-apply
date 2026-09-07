@@ -115,9 +115,7 @@ def test_workday_tenant_scope_isolated(tmp_path: Path) -> None:
 def test_embedded_credentials_in_portal_url_are_rejected(tmp_path: Path) -> None:
     db = database(tmp_path)
     try:
-        AccountStore(db).lookup(
-            {"portalUrl": "https://user:password@example.com/candidate/login"}
-        )
+        AccountStore(db).lookup({"portalUrl": "https://user:password@example.com/candidate/login"})
     except ValueError as error:
         assert "embedded credentials" in str(error)
     else:

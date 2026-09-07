@@ -1,4 +1,5 @@
 """Fail-closed execution policy, separate from browser mechanics and persistence."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -7,9 +8,21 @@ from typing import Any
 def safe_evidence(value: Any) -> Any:
     """Reject secrets recursively and redact explicitly sensitive display values."""
     forbidden = {
-        "password", "passcode", "otp", "token", "oauth_token", "access_token",
-        "refresh_token", "api_key", "authorization", "authorization_header",
-        "hmac_secret", "cookie", "cookies", "secret", "execution_value",
+        "password",
+        "passcode",
+        "otp",
+        "token",
+        "oauth_token",
+        "access_token",
+        "refresh_token",
+        "api_key",
+        "authorization",
+        "authorization_header",
+        "hmac_secret",
+        "cookie",
+        "cookies",
+        "secret",
+        "execution_value",
     }
     if isinstance(value, list):
         return [safe_evidence(item) for item in value]
@@ -34,9 +47,10 @@ def verify_submission_observation(result: dict[str, Any], plan: dict[str, Any]) 
     if str(evidence.get("job_id", "")) != str(plan["job"]["id"]):
         return False
     # URL changes, clicks, and arbitrary DOM mutations do not prove completion.
-    return bool(evidence.get("completion_marker") and (
-        evidence.get("confirmation_message") or evidence.get("provider_application_id")
-    ))
+    return bool(
+        evidence.get("completion_marker")
+        and (evidence.get("confirmation_message") or evidence.get("provider_application_id"))
+    )
 
 
 def validate_submit_observation(

@@ -4,6 +4,7 @@ Acceptance authenticates, validates, and persists the exact Hunter execution
 intent. It deliberately performs no browser action, field fill, resume upload,
 credential use, or final submission. `PLAN_ACCEPTED` is an acknowledgement only.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -22,9 +23,7 @@ from .n8n import verify_signature
 TRANSPORT_VERSION = "munshi-application-plan-handoff-v2"
 PLAN_VERSION = "munshi-application-plan-v2"
 LIVE_HANDOFF_ENV = "MUNSHI_APPLY_LIVE_HANDOFF_ENABLED"
-SUPPORTED_PROVIDERS = frozenset(
-    {"GREENHOUSE", "LEVER", "ASHBY", "SMARTRECRUITERS", "WORKDAY"}
-)
+SUPPORTED_PROVIDERS = frozenset({"GREENHOUSE", "LEVER", "ASHBY", "SMARTRECRUITERS", "WORKDAY"})
 
 
 def live_handoff_enabled() -> bool:
@@ -38,9 +37,7 @@ def live_handoff_enabled() -> bool:
 
 def _sha256_json(value: Any) -> str:
     return hashlib.sha256(
-        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
-            "utf-8"
-        )
+        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     ).hexdigest()
 
 
@@ -75,9 +72,7 @@ class ApplicationPlanEnvelope(BaseModel):
     plan: dict[str, Any]
     submission_authority: Literal[False]
 
-    @field_validator(
-        "handoff_id", "tenant_id", "user_id", "application_id", "plan_id", "provider"
-    )
+    @field_validator("handoff_id", "tenant_id", "user_id", "application_id", "plan_id", "provider")
     @classmethod
     def strip_required_text(cls, value: str) -> str:
         normalized = value.strip()
@@ -86,7 +81,7 @@ class ApplicationPlanEnvelope(BaseModel):
         return normalized
 
     @model_validator(mode="after")
-    def validate_plan_contract(self) -> "ApplicationPlanEnvelope":
+    def validate_plan_contract(self) -> ApplicationPlanEnvelope:
         if self.provider.upper() not in SUPPORTED_PROVIDERS:
             raise ValueError("Application Plan provider is not supported by this contract")
         plan = self.plan
@@ -230,7 +225,8 @@ class ApplicationPlanHandoffConsumer:
                     )
 
                 replay = connection.execute(
-                    "SELECT body_sha256,plan_id FROM career_os_application_plans WHERE handoff_id=?",
+                    "SELECT body_sha256,plan_id FROM career_os_application_plans "
+                    "WHERE handoff_id=?",
                     (envelope.handoff_id,),
                 ).fetchone()
                 if replay is not None:

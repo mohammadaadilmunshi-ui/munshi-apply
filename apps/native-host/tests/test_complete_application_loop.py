@@ -4,9 +4,9 @@ import hashlib
 import json
 
 import pytest
+from test_application_plan_handoff_v2 import _consumer, _envelope, _signed
 
 from munshi_apply_native.complete_application_loop import CompleteApplicationLoopService
-from test_application_plan_handoff_v2 import _consumer, _envelope, _signed
 
 
 class FixtureBrowser:
@@ -22,36 +22,52 @@ class FixtureBrowser:
 
     def inspect_job(self, *, plan):
         return {
-            "provider": "GREENHOUSE", "job_id": str(plan["job"]["id"]),
-            "current_url": plan["job"]["apply_url"], "page_id": "fixture",
-            "page_fingerprint": "fixture-form", "security_checkpoint": self.blocker,
+            "provider": "GREENHOUSE",
+            "job_id": str(plan["job"]["id"]),
+            "current_url": plan["job"]["apply_url"],
+            "page_id": "fixture",
+            "page_fingerprint": "fixture-form",
+            "security_checkpoint": self.blocker,
         }
 
     def prepare_form(self, *, plan, checkpoint, resolved_values):
         value = resolved_values.get("portfolio")
-        fields = [{"question_key": "portfolio", "display_value": value,
-                   "sensitivity_class": "NORMAL"}]
+        fields = [
+            {"question_key": "portfolio", "display_value": value, "sensitivity_class": "NORMAL"}
+        ]
         self.last_form = {
-            **self.inspect_job(plan=plan), "resume_uploaded": True,
+            **self.inspect_job(plan=plan),
+            "resume_uploaded": True,
             "resume_sha256": plan["resume"]["artifact_sha256"],
             "completed_control_ids": ["resume"] + (["portfolio"] if value else []),
             "pending_control_ids": [] if value else ["portfolio"],
-            "required_fields": 1, "completed_required_fields": int(bool(value)),
+            "required_fields": 1,
+            "completed_required_fields": int(bool(value)),
             "form_digest": hashlib.sha256(json.dumps(fields).encode()).hexdigest(),
-            "review_fields": fields, "validation_errors": [],
-            "unresolved": [] if value else [{
-                "question_key": "portfolio", "control_id": "portfolio",
-                "question": "Portfolio URL", "semantic_type": "UNKNOWN",
-                "reason": "No confirmed answer", "sensitivity": "NORMAL",
-            }],
+            "review_fields": fields,
+            "validation_errors": [],
+            "unresolved": []
+            if value
+            else [
+                {
+                    "question_key": "portfolio",
+                    "control_id": "portfolio",
+                    "question": "Portfolio URL",
+                    "semantic_type": "UNKNOWN",
+                    "reason": "No confirmed answer",
+                    "sensitivity": "NORMAL",
+                }
+            ],
         }
         return self.last_form
 
     def inspect_submission(self, *, plan):
         return {
-            **self.last_form, **self.inspect_job(plan=plan),
+            **self.last_form,
+            **self.inspect_job(plan=plan),
             "form_digest": "0" * 64 if self.changed else self.last_form["form_digest"],
-            "supported": True, "plan_current": True,
+            "supported": True,
+            "plan_current": True,
         }
 
     def submit(self, *, plan, review):
@@ -59,25 +75,36 @@ class FixtureBrowser:
         if self.crash:
             raise TimeoutError("fixture response lost after action")
         return {
-            "action_executed": True, "verification_status": "VERIFIED",
+            "action_executed": True,
+            "verification_status": "VERIFIED",
             "submission_url": plan["job"]["apply_url"],
-            "success_evidence": ({"url_transition": "somewhere"} if self.ambiguous else {
-                "completion_marker": "application-submitted", "provider": "GREENHOUSE",
-                "job_id": str(plan["job"]["id"]), "provider_application_id": "fixture-001",
-            }),
+            "success_evidence": (
+                {"url_transition": "somewhere"}
+                if self.ambiguous
+                else {
+                    "completion_marker": "application-submitted",
+                    "provider": "GREENHOUSE",
+                    "job_id": str(plan["job"]["id"]),
+                    "provider_application_id": "fixture-001",
+                }
+            ),
         }
 
 
 @pytest.fixture
 def loop(tmp_path, monkeypatch):
-    for flag in ("MUNSHI_APPLY_LIVE_HANDOFF_ENABLED",
-                 "MUNSHI_APPLY_BACKGROUND_PREPARE_ENABLED", "MUNSHI_FINAL_REVIEW_ENABLED",
-                 "MUNSHI_FINAL_SUBMIT_ENABLED"):
+    for flag in (
+        "MUNSHI_APPLY_LIVE_HANDOFF_ENABLED",
+        "MUNSHI_APPLY_BACKGROUND_PREPARE_ENABLED",
+        "MUNSHI_FINAL_REVIEW_ENABLED",
+        "MUNSHI_FINAL_SUBMIT_ENABLED",
+    ):
         monkeypatch.setenv(flag, "true")
     consumer, db = _consumer(tmp_path)
     body, headers = _signed(_envelope())
     assert consumer.accept(body, headers, now=1000).accepted
-    return CompleteApplicationLoopService(db, tenant_id="tenant-a", user_id="member-a"), db, FixtureBrowser()
+    service = CompleteApplicationLoopService(db, tenant_id="tenant-a", user_id="member-a")
+    return service, db, FixtureBrowser()
 
 
 def ready(loop):
@@ -97,8 +124,12 @@ def ready(loop):
 
 def test_checkpoint_resolution_review_and_submit_once(loop):
     service, db, browser, session, review = ready(loop)
-    first = service.submit(review_id=review["review_id"], idempotency_key="submit-1", adapter=browser)
-    second = service.submit(review_id=review["review_id"], idempotency_key="submit-1", adapter=browser)
+    first = service.submit(
+        review_id=review["review_id"], idempotency_key="submit-1", adapter=browser
+    )
+    second = service.submit(
+        review_id=review["review_id"], idempotency_key="submit-1", adapter=browser
+    )
     assert first["verification_status"] == "VERIFIED"
     assert second["receipt_id"] == first["receipt_id"]
     assert browser.calls == 1
@@ -126,14 +157,18 @@ def test_security_checkpoint_after_approval_prevents_submit(loop):
 def test_url_transition_alone_is_not_verification(loop):
     service, _, browser, _, review = ready(loop)
     browser.ambiguous = True
-    receipt = service.submit(review_id=review["review_id"], idempotency_key="submit-1", adapter=browser)
+    receipt = service.submit(
+        review_id=review["review_id"], idempotency_key="submit-1", adapter=browser
+    )
     assert receipt["verification_status"] == "SUBMISSION_UNVERIFIED"
 
 
 def test_lost_response_is_durable_ambiguous_outcome(loop):
     service, _, browser, _, review = ready(loop)
     browser.crash = True
-    receipt = service.submit(review_id=review["review_id"], idempotency_key="submit-1", adapter=browser)
+    receipt = service.submit(
+        review_id=review["review_id"], idempotency_key="submit-1", adapter=browser
+    )
     assert receipt["verification_status"] == "SUBMISSION_UNVERIFIED"
     service.submit(review_id=review["review_id"], idempotency_key="submit-1", adapter=browser)
     assert browser.calls == 1
@@ -141,7 +176,9 @@ def test_lost_response_is_durable_ambiguous_outcome(loop):
 
 def test_receipt_binds_resolved_answer_and_final_event(loop):
     service, db, browser, _, review = ready(loop)
-    receipt = service.submit(review_id=review["review_id"], idempotency_key="submit-1", adapter=browser)
+    receipt = service.submit(
+        review_id=review["review_id"], idempotency_key="submit-1", adapter=browser
+    )
     snapshot = receipt["receipt"]
     assert snapshot["answers_snapshot"][0]["display_value"] == "https://example.test/portfolio"
     assert snapshot["resume_version_id"] == "resume-v5-1"

@@ -33,9 +33,7 @@ def _package(**changes: object) -> dict[str, object]:
         "provider": "greenhouse",
         "state": "READY_TO_APPLY",
         "idempotency_key": "a" * 24,
-        "artifact_references": [
-            {"artifact_id": "resume-1", "sha256": "a" * 64, "kind": "RESUME"}
-        ],
+        "artifact_references": [{"artifact_id": "resume-1", "sha256": "a" * 64, "kind": "RESUME"}],
         "required_answers": [{"field_id": "salary", "status": "UNRESOLVED"}],
         "evidence_references": ["evidence-1"],
     }
