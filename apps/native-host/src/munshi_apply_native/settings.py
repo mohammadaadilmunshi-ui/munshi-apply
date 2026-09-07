@@ -15,6 +15,7 @@ class Settings:
     n8n_webhook_secret: str | None
     outbox_poll_seconds: float
     log_level: str
+    command_secret: str | None = None
 
     @classmethod
     def from_environment(cls) -> Settings:
@@ -40,6 +41,7 @@ class Settings:
             n8n_webhook_secret=n8n_webhook_secret,
             outbox_poll_seconds=float(os.getenv("MUNSHI_OUTBOX_POLL_SECONDS", "5")),
             log_level=os.getenv("MUNSHI_LOG_LEVEL", "INFO").upper(),
+            command_secret=os.getenv("MUNSHI_APPLY_COMMAND_SECRET") or None,
         )
 
     @staticmethod

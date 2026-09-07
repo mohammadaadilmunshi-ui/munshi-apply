@@ -65,3 +65,43 @@ def test_health_and_event_round_trip(tmp_path: Path) -> None:
         outbox_count = connection.execute("SELECT COUNT(*) FROM outbox_events").fetchone()[0]
     assert ledger_count == 1
     assert outbox_count == 1
+
+
+def test_complete_loop_commands_are_default_off_and_require_owner_auth(tmp_path: Path) -> None:
+    migrations = Path(__file__).resolve().parents[3] / "migrations"
+    main.database = Database(tmp_path / "api-loop.sqlite", migrations)
+    main.settings = Settings(
+        runtime_root=tmp_path,
+        database_path=tmp_path / "api-loop.sqlite",
+        migrations_path=migrations,
+        n8n_webhook_url=None,
+        n8n_webhook_secret=None,
+        outbox_poll_seconds=0.01,
+        log_level="INFO",
+    )
+    with TestClient(main.app) as client:
+        disabled = client.post("/v1/complete-loop/sessions", json={"plan_id": "plan-1"})
+        assert disabled.status_code == 503
+
+        main.settings = Settings(
+            runtime_root=tmp_path,
+            database_path=tmp_path / "api-loop.sqlite",
+            migrations_path=migrations,
+            n8n_webhook_url=None,
+            n8n_webhook_secret=None,
+            outbox_poll_seconds=0.01,
+            log_level="INFO",
+            command_secret="fixture-command-secret",  # noqa: S106
+        )
+        rejected = client.post(
+            "/v1/complete-loop/sessions",
+            json={"plan_id": "plan-1"},
+            headers={"x-munshi-command-secret": "wrong"},
+        )
+        assert rejected.status_code == 401
+        missing_owner = client.post(
+            "/v1/complete-loop/sessions",
+            json={"plan_id": "plan-1"},
+            headers={"x-munshi-command-secret": "fixture-command-secret"},
+        )
+        assert missing_owner.status_code == 401

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import secrets
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Header, HTTPException, status
+from pydantic import BaseModel, Field
 
 from . import __version__
+from .complete_application_loop import CompleteApplicationLoopService
 from .database import Database
 from .models import EventEnvelope, HealthResponse
 from .outbox import OutboxWorker, run_outbox_worker
@@ -42,6 +45,42 @@ app = FastAPI(
 )
 
 
+class StartLoopSessionRequest(BaseModel):
+    plan_id: str = Field(min_length=1, max_length=240)
+
+
+class ResolveLoopTaskRequest(BaseModel):
+    value: Any
+    approved_by_user: bool = True
+
+
+def _loop_service(
+    x_munshi_command_secret: str | None = Header(default=None),
+    x_munshi_tenant_id: str | None = Header(default=None),
+    x_munshi_user_id: str | None = Header(default=None),
+) -> CompleteApplicationLoopService:
+    """Default-off local command boundary; the caller chooses no authority."""
+    configured = settings.command_secret
+    if not configured:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Loop commands are disabled"
+        )
+    if not x_munshi_command_secret or not secrets.compare_digest(
+        x_munshi_command_secret, configured
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid loop command secret"
+        )
+    tenant_id = str(x_munshi_tenant_id or "").strip()
+    user_id = str(x_munshi_user_id or "").strip()
+    if not tenant_id or not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Execution owner headers are required",
+        )
+    return CompleteApplicationLoopService(database, tenant_id=tenant_id, user_id=user_id)
+
+
 @app.get("/health", response_model=HealthResponse)
 def health() -> dict[str, Any]:
     state = database.health()
@@ -58,3 +97,40 @@ async def receive_event(event: EventEnvelope) -> dict[str, bool]:
     record = event.database_record()
     created = database.record_event(record, enqueue_external=True)
     return {"accepted": True, "duplicate": not created}
+
+
+@app.post("/v1/complete-loop/sessions")
+def start_complete_loop_session(
+    request: StartLoopSessionRequest,
+    service: CompleteApplicationLoopService = Depends(_loop_service),  # noqa: B008
+) -> dict[str, Any]:
+    try:
+        result = service.start_session(plan_id=request.plan_id)
+    except (LookupError, PermissionError, RuntimeError, ValueError) as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    return result.__dict__
+
+
+@app.post("/v1/complete-loop/reviews/{review_id}/approve")
+def approve_complete_loop_review(
+    review_id: str,
+    service: CompleteApplicationLoopService = Depends(_loop_service),  # noqa: B008
+) -> dict[str, Any]:
+    try:
+        return service.approve_review(review_id=review_id)
+    except (LookupError, PermissionError, RuntimeError, ValueError) as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
+
+@app.post("/v1/complete-loop/tasks/{task_id}/resolve")
+def resolve_complete_loop_task(
+    task_id: str,
+    request: ResolveLoopTaskRequest,
+    service: CompleteApplicationLoopService = Depends(_loop_service),  # noqa: B008
+) -> dict[str, Any]:
+    try:
+        return service.resolve_task(
+            task_id=task_id, value=request.value, approved_by_user=request.approved_by_user
+        )
+    except (LookupError, PermissionError, RuntimeError, ValueError) as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
