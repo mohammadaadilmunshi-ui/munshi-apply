@@ -17,6 +17,7 @@ class FixtureBrowser:
         self.changed = False
         self.blocker = None
         self.ambiguous = False
+        self.generic_confirmation = False
         self.crash = False
         self.last_form = None
 
@@ -81,12 +82,26 @@ class FixtureBrowser:
             "success_evidence": (
                 {"url_transition": "somewhere"}
                 if self.ambiguous
-                else {
-                    "completion_marker": "application-submitted",
-                    "provider": "GREENHOUSE",
-                    "job_id": str(plan["job"]["id"]),
-                    "provider_application_id": "fixture-001",
-                }
+                else (
+                    {
+                        "completion_marker": "application-submitted",
+                        "confirmation_message": "Thank you for applying",
+                        "provider": "GREENHOUSE",
+                        "job_id": str(plan["job"]["id"]),
+                    }
+                    if self.generic_confirmation
+                    else {
+                        "completion_marker": "application-submitted",
+                        "provider": "GREENHOUSE",
+                        "job_id": str(plan["job"]["id"]),
+                        "provider_application_id": "fixture-001",
+                        "response_status": 201,
+                        "response_url": plan["job"]["apply_url"],
+                        "submit_action": plan["job"]["apply_url"],
+                        "submit_method": "POST",
+                        "submission_response_marker": "provider-json-application-id",
+                    }
+                )
             ),
         }
 
@@ -157,6 +172,15 @@ def test_security_checkpoint_after_approval_prevents_submit(loop):
 def test_url_transition_alone_is_not_verification(loop):
     service, _, browser, _, review = ready(loop)
     browser.ambiguous = True
+    receipt = service.submit(
+        review_id=review["review_id"], idempotency_key="submit-1", adapter=browser
+    )
+    assert receipt["verification_status"] == "SUBMISSION_UNVERIFIED"
+
+
+def test_generic_confirmation_alone_is_not_verification(loop):
+    service, _, browser, _, review = ready(loop)
+    browser.generic_confirmation = True
     receipt = service.submit(
         review_id=review["review_id"], idempotency_key="submit-1", adapter=browser
     )

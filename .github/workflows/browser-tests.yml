@@ -18,7 +18,12 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
       - run: npm ci
+      - run: python -m pip install -e './apps/native-host[dev]'
       - name: Enforce isolated 300-field scanner performance budget
         run: MUNSHI_PERF_STRICT=1 ./node_modules/.bin/vitest run apps/extension/src/content/ats-endurance.test.ts
       - name: Run ATS, lifecycle, intelligence, and performance endurance suite
@@ -49,6 +54,14 @@ jobs:
             packages/application-model/src/application-analytics.test.ts \
             packages/application-model/src/job-signal-page.test.ts
       - run: npm run build
+      - name: Run real browser PlanBrowserAdapter fixture
+        env:
+          MUNSHI_RUN_BROWSER_TESTS: "1"
+        run: |
+          MUNSHI_BROWSER_EXECUTABLE="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
+          test -n "${MUNSHI_BROWSER_EXECUTABLE}"
+          export MUNSHI_BROWSER_EXECUTABLE
+          python -m pytest -q apps/native-host/tests/browser
       - run: npm run verify
       - uses: actions/upload-artifact@v7
         with:

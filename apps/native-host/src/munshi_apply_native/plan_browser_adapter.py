@@ -84,6 +84,35 @@ class PlanBrowserAdapter:
             raise ValueError("Observed control disappeared")
         return element
 
+    def _submit_binding(self) -> dict[str, str] | None:
+        candidates = [
+            item
+            for item in self._scan()["page"]["navigationCandidates"]
+            if item["action"] == "FINAL_SUBMIT" and not item["disabled"]
+        ]
+        if len(candidates) != 1:
+            return None
+        return self._element(candidates[0]["controlId"]).evaluate(
+            """element => {
+              const form = element.form || element.closest('form');
+              if (!form) return null;
+              const method = (
+                element.getAttribute('formmethod')
+                || form.getAttribute('method')
+                || 'get'
+              ).trim().toUpperCase();
+              const rawAction = (
+                element.getAttribute('formaction')
+                || form.getAttribute('action')
+                || document.URL
+              );
+              return {
+                action: new URL(rawAction, document.baseURI).href,
+                method,
+              };
+            }"""
+        )
+
     def _observe(self, plan: dict[str, Any]) -> dict[str, Any]:
         described = self._scan()
         page, fields = described["page"], described["fields"]
@@ -116,12 +145,19 @@ class PlanBrowserAdapter:
         ]
         # Only safe field summaries enter durable evidence; pageContext never does.
         review_fields = safe_evidence(fields)
+        submit_binding = self._submit_binding()
         form_digest = digest(
-            {"url": self.page.url, "fields": review_fields, "resume_sha256": resume_sha}
+            {
+                "url": self.page.url,
+                "fields": review_fields,
+                "resume_sha256": resume_sha,
+                "submit_binding": submit_binding,
+            }
         )
         return {
             **self.inspect_job(plan=plan),
             "form_digest": form_digest,
+            "submit_binding": submit_binding,
             "resume_uploaded": bool(resume_sha),
             "resume_sha256": resume_sha,
             "required_fields": len(required),
@@ -228,7 +264,8 @@ class PlanBrowserAdapter:
     def submit(self, *, plan: dict[str, Any], review: dict[str, Any]) -> dict[str, Any]:
         from .execution_policy import validate_submit_observation
 
-        validate_submit_observation(self.inspect_submission(plan=plan), plan, review)
+        observation = self.inspect_submission(plan=plan)
+        validate_submit_observation(observation, plan, review)
         buttons = [
             n
             for n in self._scan()["page"]["navigationCandidates"]
@@ -236,20 +273,83 @@ class PlanBrowserAdapter:
         ]
         if len(buttons) != 1:
             return {"action_executed": False, "verification_status": "BLOCKED"}
-        # Generic navigation retains its final-submit hard block. This dedicated
-        # path is reachable only through the durable explicit Submit command.
-        self._element(buttons[0]["controlId"]).click()
+
+        final_observation = self.inspect_submission(plan=plan)
+        validate_submit_observation(final_observation, plan, review)
+        final_buttons = [
+            n
+            for n in self._scan()["page"]["navigationCandidates"]
+            if n["action"] == "FINAL_SUBMIT" and not n["disabled"]
+        ]
+        if len(final_buttons) != 1 or final_buttons[0]["controlId"] != buttons[0]["controlId"]:
+            return {"action_executed": False, "verification_status": "BLOCKED"}
+
+        submit_binding = final_observation.get("submit_binding")
+        if not isinstance(submit_binding, dict):
+            return {"action_executed": False, "verification_status": "BLOCKED"}
+        expected_submit_url = str(submit_binding.get("action") or "")
+        expected_submit_method = str(submit_binding.get("method") or "").upper()
+        if not expected_submit_url or expected_submit_method != "POST":
+            return {"action_executed": False, "verification_status": "BLOCKED"}
+
+        observed_responses: list[Any] = []
+
+        def capture_response(response: Any) -> None:
+            try:
+                request_method = str(response.request.method).upper()
+                response_url = str(response.url)
+            except Exception:
+                return
+            if request_method == expected_submit_method and response_url == expected_submit_url:
+                observed_responses.append(response)
+
+        self.page.on("response", capture_response)
         try:
-            self.page.locator("#application_confirmation, .application-confirmation").wait_for(
-                state="visible", timeout=5000
+            clicked = self.page.evaluate(
+                """({ controlId, expected }) => {
+                  const element = MunshiPlanRuntime.element(controlId);
+                  if (!element) return false;
+                  const form = element.form || element.closest('form');
+                  if (!form) return false;
+                  const method = (
+                    element.getAttribute('formmethod')
+                    || form.getAttribute('method')
+                    || 'get'
+                  ).trim().toUpperCase();
+                  const rawAction = (
+                    element.getAttribute('formaction')
+                    || form.getAttribute('action')
+                    || document.URL
+                  );
+                  const action = new URL(rawAction, document.baseURI).href;
+                  if (method !== expected.method || action !== expected.action) return false;
+                  element.click();
+                  return true;
+                }""",
+                {
+                    "controlId": final_buttons[0]["controlId"],
+                    "expected": {
+                        "action": expected_submit_url,
+                        "method": expected_submit_method,
+                    },
+                },
             )
-        except Exception:
-            return {"action_executed": True, "verification_status": "SUBMISSION_UNVERIFIED"}
+            if clicked is not True:
+                return {"action_executed": False, "verification_status": "BLOCKED"}
+            try:
+                self.page.locator("#application_confirmation, .application-confirmation").wait_for(
+                    state="visible", timeout=5000
+                )
+            except Exception:
+                return {"action_executed": True, "verification_status": "SUBMISSION_UNVERIFIED"}
+        finally:
+            self.page.remove_listener("response", capture_response)
+
         marker = self.page.locator("#application_confirmation, .application-confirmation").first
         message = marker.inner_text().strip()
         if not any(
-            s in message.casefold()
-            for s in (
+            phrase in message.casefold()
+            for phrase in (
                 "application has been submitted",
                 "application has been received",
                 "thank you for applying",
@@ -257,14 +357,69 @@ class PlanBrowserAdapter:
             )
         ):
             return {"action_executed": True, "verification_status": "SUBMISSION_UNVERIFIED"}
+
+        expected_provider = str(plan["provider_policy"]["provider"])
+        expected_job_id = str(plan["job"]["id"])
+        correlated: dict[str, Any] | None = None
+        for response in reversed(observed_responses):
+            try:
+                response_status = int(response.status)
+                response_url = str(response.url)
+                payload = response.json()
+            except Exception:
+                response_status = 0
+                response_url = ""
+                payload = None
+            if not 200 <= response_status < 300:
+                continue
+            if response_url != expected_submit_url:
+                continue
+            if provider_for_url(response_url) != expected_provider:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            observed_job_id = str(payload.get("job_id") or payload.get("jobId") or "")
+            provider_application_id = str(
+                payload.get("application_id") or payload.get("applicationId") or ""
+            ).strip()
+            response_state = str(payload.get("status") or "").strip().casefold()
+            if observed_job_id != expected_job_id or not provider_application_id:
+                continue
+            if response_state not in {"submitted", "received"}:
+                continue
+            correlated = {
+                "provider_application_id": provider_application_id,
+                "response_status": response_status,
+                "response_url": response_url,
+                "submit_action": expected_submit_url,
+                "submit_method": expected_submit_method,
+                "submission_response_marker": "provider-json-application-id",
+            }
+            break
+
+        if correlated is None:
+            return {
+                "action_executed": True,
+                "verification_status": "SUBMISSION_UNVERIFIED",
+                "submission_url": self.page.url,
+                "success_evidence": {
+                    "completion_marker": "greenhouse-application-confirmation",
+                    "confirmation_message": message[:500],
+                    "provider": expected_provider,
+                    "job_id": expected_job_id,
+                },
+            }
+
         return {
             "action_executed": True,
             "verification_status": "VERIFIED",
             "submission_url": self.page.url,
+            "provider_application_id": correlated["provider_application_id"],
             "success_evidence": {
                 "completion_marker": "greenhouse-application-confirmation",
                 "confirmation_message": message[:500],
-                "provider": "GREENHOUSE",
-                "job_id": str(plan["job"]["id"]),
+                "provider": expected_provider,
+                "job_id": expected_job_id,
+                **correlated,
             },
         }

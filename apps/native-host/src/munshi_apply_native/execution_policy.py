@@ -46,10 +46,21 @@ def verify_submission_observation(result: dict[str, Any], plan: dict[str, Any]) 
         return False
     if str(evidence.get("job_id", "")) != str(plan["job"]["id"]):
         return False
-    # URL changes, clicks, and arbitrary DOM mutations do not prove completion.
+    # URL changes, clicks, HTTP success alone, and generic DOM success text do not prove completion.
+    provider_application_id = str(evidence.get("provider_application_id") or "").strip()
+    response_status = evidence.get("response_status")
+    response_url = str(evidence.get("response_url") or "").strip()
+    submit_action = str(evidence.get("submit_action") or "").strip()
+    submit_method = str(evidence.get("submit_method") or "").strip().upper()
+    if not provider_application_id:
+        return False
+    if not isinstance(response_status, int) or not 200 <= response_status < 300:
+        return False
+    if submit_method != "POST" or not submit_action or response_url != submit_action:
+        return False
     return bool(
         evidence.get("completion_marker")
-        and (evidence.get("confirmation_message") or evidence.get("provider_application_id"))
+        and evidence.get("submission_response_marker")
     )
 
 
