@@ -56,13 +56,4 @@ ENV MUNSHI_FINAL_SUBMIT_ENABLED=false
 
 EXPOSE 8000
 
-CMD [
-  "python",
-  "-m",
-  "uvicorn",
-  "munshi_apply_native.main:app",
-  "--host",
-  "0.0.0.0",
-  "--port",
-  "8000"
-]
+CMD ["python", "-m", "uvicorn", "munshi_apply_native.main:app", "--host", "0.0.0.0", "--port", "8000"]
