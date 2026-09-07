@@ -126,7 +126,9 @@ export function reconcileRequiredQuestionResolutionTask(
     return existing;
   }
   if (input.observation.state === "READY") {
-    throw new Error("READY required questions do not require task reconciliation");
+    throw new Error(
+      "READY required questions do not require task reconciliation",
+    );
   }
   const expectedTaskId = requiredQuestionResolutionTaskId(
     existing.applicationId,
@@ -157,13 +159,13 @@ export function reconcileRequiredQuestionResolutionTask(
     checkpointId: optionalString(input.checkpointId) ?? existing.checkpointId,
     pageId: optionalString(input.pageId) ?? existing.pageId,
     controlId:
-      optionalString(input.observation.question.controlId) ?? existing.controlId,
+      optionalString(input.observation.question.controlId) ??
+      existing.controlId,
     questionId: existing.questionId ?? input.observation.question.questionId,
     category,
     riskLevel: policy.riskLevel,
     autoResolvable: policy.allowAutomaticResolution,
-    requiresUser:
-      existing.status === "WAITING_FOR_USER" || policy.requiresUser,
+    requiresUser: existing.status === "WAITING_FOR_USER" || policy.requiresUser,
     reason: reasonFor(input.observation.state),
     updatedAt,
   };

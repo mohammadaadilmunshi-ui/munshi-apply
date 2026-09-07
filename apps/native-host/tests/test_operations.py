@@ -55,6 +55,7 @@ def test_runtime_migration_health_and_backup_round_trip(tmp_path: Path) -> None:
         "011_job_signal_identity_and_analytics.sql",
         "012_resolution_tasks.sql",
         "013_career_os_preparation_handoffs.sql",
+        "014_complete_application_loop_v1.sql",
     ]
     assert json.loads(second.stdout)["applied"] == []
     assert json.loads(health.stdout)["status"] == "healthy"

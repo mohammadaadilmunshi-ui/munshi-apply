@@ -45,10 +45,7 @@ describe("required question Resolution Task lifecycle", () => {
 
     expect(first?.taskId).toBe(second?.taskId);
     expect(first?.taskId).toBe(
-      requiredQuestionResolutionTaskId(
-        "application-a",
-        "question-relocation",
-      ),
+      requiredQuestionResolutionTaskId("application-a", "question-relocation"),
     );
     expect(first).toMatchObject({
       category: "MISSING_FACT",

@@ -18,6 +18,7 @@ from uuid import uuid4
 
 from .checkpoint_store import ApplicationCheckpointStore
 from .database import Database, canonical_json
+from .execution_policy import safe_evidence, validate_submit_observation, verify_submission_observation
 from .models import ResolutionTaskPayload, ResolutionTaskResolutionPayload
 from .resolution_task_store import ResolutionTaskStore
 
@@ -75,6 +76,8 @@ class BrowserExecutionAdapter(Protocol):
         resolved_values: dict[str, Any],
     ) -> dict[str, Any]: ...
 
+    def inspect_submission(self, *, plan: dict[str, Any]) -> dict[str, Any]: ...
+
     def submit(self, *, plan: dict[str, Any], review: dict[str, Any]) -> dict[str, Any]: ...
 
 
@@ -107,28 +110,14 @@ def _event_id(replay_identity: str) -> str:
     return "loop-event-" + hashlib.sha256(replay_identity.encode("utf-8")).hexdigest()[:32]
 
 
-def _safe_evidence(value: dict[str, Any]) -> dict[str, Any]:
-    """Reject common secret-bearing keys from durable event evidence."""
-    forbidden = {
-        "password",
-        "passcode",
-        "otp",
-        "token",
-        "oauth_token",
-        "api_key",
-        "authorization_header",
-        "hmac_secret",
-    }
-    result: dict[str, Any] = {}
-    for key, item in value.items():
-        if str(key).casefold() in forbidden:
-            raise ValueError(f"Execution evidence may not persist secret field {key}")
-        result[str(key)] = item
-    return result
 
 
 class CompleteApplicationLoopService:
-    def __init__(self, database: Database) -> None:
+    def __init__(self, database: Database, *, tenant_id: str, user_id: str) -> None:
+        if not tenant_id or not user_id:
+            raise ValueError("Execution owner is required")
+        self.tenant_id = tenant_id
+        self.user_id = user_id
         self.database = database
         self.checkpoints = ApplicationCheckpointStore(database)
         self.resolutions = ResolutionTaskStore(database)
@@ -136,13 +125,17 @@ class CompleteApplicationLoopService:
     def _plan(self, plan_id: str) -> dict[str, Any]:
         with self.database.connect() as connection:
             row = connection.execute(
-                "SELECT * FROM career_os_application_plans WHERE plan_id=?",
-                (plan_id,),
+                "SELECT * FROM career_os_application_plans "
+                "WHERE plan_id=? AND tenant_id=? AND user_id=?",
+                (plan_id, self.tenant_id, self.user_id),
             ).fetchone()
         if row is None:
             raise LookupError("Accepted Application Plan was not found")
         result = dict(row)
         result["plan"] = json.loads(result.pop("plan_json"))
+        from .application_plan_handoff_v2 import _plan_digest_payload, _sha256_json
+        if _sha256_json(_plan_digest_payload(result["plan"])) != result["plan_digest"]:
+            raise ValueError("Stored Application Plan integrity failure")
         return result
 
     def _session(self, session_id: str) -> dict[str, Any]:
@@ -153,6 +146,7 @@ class CompleteApplicationLoopService:
             ).fetchone()
         if row is None:
             raise LookupError("Execution session was not found")
+        self._plan(str(row["plan_id"]))
         return dict(row)
 
     def _ensure_local_application(self, plan_record: dict[str, Any]) -> None:
@@ -162,7 +156,7 @@ class CompleteApplicationLoopService:
         now = _now()
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            job_id = str(job["id"])
+            job_id = "hunter-job:" + _sha([self.tenant_id, self.user_id, job["id"]])
             existing_job = connection.execute(
                 "SELECT job_id FROM jobs WHERE job_id=?", (job_id,)
             ).fetchone()
@@ -208,6 +202,13 @@ class CompleteApplicationLoopService:
                 resume_id = str(resume_row["resume_id"])
 
             application_id = str(plan_record["application_id"])
+            conflicting = connection.execute(
+                "SELECT 1 FROM career_os_application_plans WHERE application_id=? "
+                "AND (tenant_id<>? OR user_id<>?)",
+                (application_id, self.tenant_id, self.user_id),
+            ).fetchone()
+            if conflicting:
+                raise PermissionError("Application identity belongs to a different owner")
             existing = connection.execute(
                 "SELECT * FROM applications WHERE application_id=?",
                 (application_id,),
@@ -293,7 +294,7 @@ class CompleteApplicationLoopService:
         evidence: dict[str, Any],
         checkpoint: dict[str, Any] | None = None,
     ) -> bool:
-        safe = _safe_evidence(evidence)
+        safe = safe_evidence(evidence)
         event_id = _event_id(replay_identity)
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -369,14 +370,13 @@ class CompleteApplicationLoopService:
             raise ValueError("Accepted Application Plan is not execution-ready")
         if plan.get("submission_authority") is not False:
             raise ValueError("Accepted Application Plan unexpectedly carries submission authority")
-        self._ensure_local_application(plan_record)
-
         with self.database.connect() as connection:
             existing = connection.execute(
                 "SELECT * FROM complete_application_sessions WHERE application_id=? AND plan_id=?",
                 (plan_record["application_id"], plan_id),
             ).fetchone()
             if existing is None:
+                self._ensure_local_application(plan_record)
                 session_id = f"apply-session-{uuid4()}"
                 now = _now()
                 connection.execute(
@@ -468,10 +468,10 @@ class CompleteApplicationLoopService:
         self.resolutions.upsert(task)
         return task
 
-    def _resolved_values(self, application_id: str) -> dict[str, Any]:
+    def _resolved_values(self, application_id: str, session_id: str) -> dict[str, Any]:
         result: dict[str, Any] = {}
         for task in self.resolutions.list(application_id=application_id, status="RESOLVED"):
-            if task.resolution is None:
+            if task.resolution is None or task.session_id != session_id:
                 continue
             key = task.group_key or task.control_id or task.task_id
             result[str(key)] = task.resolution.value
@@ -488,6 +488,13 @@ class CompleteApplicationLoopService:
         task = self.resolutions.get(task_id)
         if task is None:
             raise LookupError("Resolution task was not found")
+        if not task.session_id:
+            raise ValueError("Resolution has no execution session")
+        self._session(str(task.session_id))
+        if approved_by_user is not True:
+            raise ValueError("Resolution requires explicit user approval")
+        if value is None or (isinstance(value, str) and not value.strip()):
+            raise ValueError("Resolution requires a nonempty value")
         if task.status == "RESOLVED":
             assert task.resolution is not None
             if task.resolution.value != value:
@@ -550,6 +557,10 @@ class CompleteApplicationLoopService:
         plan = dict(plan_record["plan"])
 
         observation = adapter.inspect_job(plan=plan)
+        if observation.get("security_checkpoint"):
+            session = self._transition(session, "BLOCKED")
+            return SessionResult(session_id, session["application_id"], session["plan_id"],
+                                 "BLOCKED", int(session["state_version"]))
         provider = str(observation.get("provider") or "").upper()
         expected_provider = str(plan_record["provider"]).upper()
         expected_job = str(plan["job"]["id"])
@@ -604,7 +615,7 @@ class CompleteApplicationLoopService:
         prepared = adapter.prepare_form(
             plan=plan,
             checkpoint=latest,
-            resolved_values=self._resolved_values(str(session["application_id"])),
+            resolved_values=self._resolved_values(str(session["application_id"]), session_id),
         )
         if str(prepared.get("provider") or "").upper() != expected_provider:
             session = self._transition(session, "BLOCKED")
@@ -662,7 +673,7 @@ class CompleteApplicationLoopService:
 
         unresolved = list(prepared.get("unresolved") or [])
         validation_errors = [str(value) for value in prepared.get("validation_errors") or []]
-        review_fields = list(prepared.get("review_fields") or [])
+        review_fields = safe_evidence(list(prepared.get("review_fields") or []))
         event_evidence = {
             "required_fields": int(prepared.get("required_fields") or 0),
             "completed_required_fields": int(prepared.get("completed_required_fields") or 0),
@@ -817,7 +828,9 @@ class CompleteApplicationLoopService:
                 "unresolved": prepared.get("unresolved_count"),
                 "warnings": prepared.get("validation_errors") or [],
             },
-            "answers": answers,
+            "answers": prepared.get("review_fields") or answers,
+            "plan_digest": plan_record["plan_digest"],
+            "checkpoint_id": session["checkpoint_id"],
             "browser_verification": {
                 "form_digest": form_digest,
                 "resume_uploaded": prepared.get("resume_uploaded") is True,
@@ -948,20 +961,6 @@ class CompleteApplicationLoopService:
         result["success_evidence"] = json.loads(result.pop("success_evidence_json"))
         return result
 
-    @staticmethod
-    def _verified_success_evidence(result: dict[str, Any]) -> bool:
-        evidence = result.get("success_evidence")
-        if not isinstance(evidence, dict):
-            return False
-        recognized = {
-            "success_page",
-            "confirmation_message",
-            "provider_application_id",
-            "url_transition",
-            "completion_marker",
-        }
-        return any(key in evidence and evidence[key] not in (None, "", False) for key in recognized)
-
     def submit(
         self,
         *,
@@ -993,6 +992,8 @@ class CompleteApplicationLoopService:
                     (key,),
                 ).fetchone()
             if existing is not None:
+                if str(existing["review_id"]) != review_id:
+                    raise ValueError("Submit idempotency key belongs to another review")
                 receipt = self._receipt_for_command(str(existing["command_id"]))
                 return receipt or {"command": dict(existing), "replayed": True}
             raise ValueError("Browser session is not READY_TO_SUBMIT")
@@ -1005,6 +1006,21 @@ class CompleteApplicationLoopService:
             raise ValueError("Application Plan changed after final review approval")
         if str(plan["resume"]["artifact_sha256"]) != str(review["resume_digest"]):
             raise ValueError("Resume changed after final review approval")
+
+        current_observation = adapter.inspect_submission(plan=plan)
+        try:
+            validate_submit_observation(
+                current_observation, plan, json.loads(str(review["review_json"]))
+            )
+        except ValueError:
+            with self.database.connect() as connection:
+                connection.execute(
+                    "UPDATE final_application_reviews SET invalidated_at=?,"
+                    "invalidation_reason='pre_submit_observation_changed' WHERE review_id=?",
+                    (_now(), review_id),
+                )
+            self._transition(session, "PREPARING")
+            raise
 
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -1062,12 +1078,18 @@ class CompleteApplicationLoopService:
         # This is the only adapter call that may perform the final employer action.
         # It is reached only after the durable command row above exists, so retries
         # return that command/receipt instead of invoking the adapter again.
-        result = adapter.submit(plan=plan, review=json.loads(str(review["review_json"])))
+        try:
+            result = adapter.submit(plan=plan, review=json.loads(str(review["review_json"])))
+        except Exception:
+            # The final action might already have reached the employer. Never retry.
+            result = {"action_executed": True,
+                      "verification_status": "SUBMISSION_UNVERIFIED", "success_evidence": {}}
+
         action_executed = result.get("action_executed") is True
         requested_status = str(result.get("verification_status") or "SUBMISSION_UNVERIFIED")
         if not action_executed:
             final_status = "FAILED_SAFELY"
-        elif requested_status == "VERIFIED" and self._verified_success_evidence(result):
+        elif requested_status == "VERIFIED" and verify_submission_observation(result, plan):
             final_status = "VERIFIED"
         elif requested_status == "BLOCKED":
             final_status = "BLOCKED"
@@ -1077,8 +1099,21 @@ class CompleteApplicationLoopService:
             # A click, DOM mutation, or ambiguous navigation is never proof.
             final_status = "SUBMISSION_UNVERIFIED"
 
-        success_evidence = _safe_evidence(dict(result.get("success_evidence") or {}))
-        answers_digest = _sha(plan.get("answers") or [])
+        success_evidence = safe_evidence(dict(result.get("success_evidence") or {}))
+        answers_snapshot = json.loads(str(review["review_json"]))["answers"]
+        answers_digest = _sha(answers_snapshot)
+        self._record_event(
+            session=session, event_type="SUBMISSION_OBSERVED",
+            replay_identity=f"{command_id}:observed",
+            evidence={"verification_status": final_status, "success_evidence": success_evidence},
+        )
+        with self.database.connect() as connection:
+            event_rows = connection.execute(
+                "SELECT event_id,event_type,replay_identity,evidence_json,checkpoint_json,occurred_at "
+                "FROM complete_application_execution_events WHERE session_id=? "
+                "ORDER BY occurred_at,event_id", (session["session_id"],),
+            ).fetchall()
+        execution_events = [dict(row) for row in event_rows]
         chain_digest = self._event_chain_digest(str(session["session_id"]))
         receipt_snapshot = {
             "application_id": review["application_id"],
@@ -1093,6 +1128,11 @@ class CompleteApplicationLoopService:
             "resume_artifact_id": plan["resume"]["artifact_id"],
             "resume_sha256": plan["resume"]["artifact_sha256"],
             "answers_digest": answers_digest,
+            "answers_snapshot": answers_snapshot,
+            "resume_version_id": plan["resume"]["version_id"],
+            "plan_digest": plan_record["plan_digest"],
+            "review_digest": review["review_digest"],
+            "execution_events": execution_events,
             "execution_chain_digest": chain_digest,
             "verification_status": final_status,
             "success_evidence": success_evidence,
