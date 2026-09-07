@@ -1,0 +1,45 @@
+services:
+  apply:
+    build:
+      context: ../..
+      dockerfile: deploy/staging/Dockerfile
+      args:
+        MUNSHI_APPLY_COMMIT_SHA: ${MUNSHI_APPLY_DEPLOY_SHA:?MUNSHI_APPLY_DEPLOY_SHA is required}
+
+    image: munshi-apply-staging:${MUNSHI_APPLY_IMAGE_TAG:-local}
+
+    restart: unless-stopped
+
+    environment:
+      MUNSHI_RUNTIME_ROOT: /data
+      MUNSHI_DATABASE_PATH: /data/munshi-apply.sqlite
+      MUNSHI_MIGRATIONS_PATH: /app/migrations
+      MUNSHI_BROWSER_EXECUTABLE: /usr/bin/chromium
+
+      MUNSHI_APPLY_BACKGROUND_PREPARE_ENABLED: "false"
+      MUNSHI_FINAL_REVIEW_ENABLED: "false"
+      MUNSHI_FINAL_SUBMIT_ENABLED: "false"
+
+    ports:
+      - "127.0.0.1:19000:8000"
+
+    volumes:
+      - apply_data:/data
+
+    shm_size: "1gb"
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+volumes:
+  apply_data:

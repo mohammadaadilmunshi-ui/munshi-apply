@@ -1,0 +1,16 @@
+.git
+.github
+**/.git
+node_modules
+**/node_modules
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.pytest_cache
+**/.ruff_cache
+**/dist
+apps/native-host/browser-dist
+backups
+*.zip
+*.log
+.DS_Store
