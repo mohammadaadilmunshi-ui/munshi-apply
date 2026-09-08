@@ -25,12 +25,13 @@ def test_migrations_are_idempotent(tmp_path: Path) -> None:
         "012_resolution_tasks.sql",
         "013_career_os_preparation_handoffs.sql",
         "014_complete_application_loop_v1.sql",
+        "015_durable_background_preparation.sql",
     ]
     assert database.migrate() == []
     health = database.health()
     assert health["status"] == "healthy"
-    assert health["migration_count"] == 14
-    assert health["schema_version"] == "014_complete_application_loop_v1.sql"
+    assert health["migration_count"] == 15
+    assert health["schema_version"] == "015_durable_background_preparation.sql"
 
 
 def test_architecture_tables_are_created_with_integrity_constraints(tmp_path: Path) -> None:
@@ -79,6 +80,7 @@ def test_architecture_tables_are_created_with_integrity_constraints(tmp_path: Pa
             "final_submit_commands",
             "application_submission_receipts",
             "application_mail_events",
+            "complete_application_prepare_jobs",
         }.issubset(tables)
 
         now = datetime.now(UTC).isoformat()
@@ -172,6 +174,7 @@ def test_job_signal_identity_migration_preserves_existing_reports(tmp_path: Path
         "012_resolution_tasks.sql",
         "013_career_os_preparation_handoffs.sql",
         "014_complete_application_loop_v1.sql",
+        "015_durable_background_preparation.sql",
     ]
     with upgraded.connect() as connection:
         report = connection.execute(

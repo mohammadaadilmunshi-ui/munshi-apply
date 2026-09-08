@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from . import __version__
 from .application_plan_handoff_v2 import ApplicationPlanHandoffConsumer
+from .background_prepare_queue import DurablePreparationQueue
 from .complete_application_loop import CompleteApplicationLoopService
 from .database import Database
 from .models import EventEnvelope, HealthResponse
@@ -137,9 +138,14 @@ def start_complete_loop_session(
 ) -> dict[str, Any]:
     try:
         result = service.start_session(plan_id=request.plan_id)
+        preparation_job = DurablePreparationQueue(database).enqueue_session(
+            session_id=result.session_id,
+            tenant_id=service.tenant_id,
+            user_id=service.user_id,
+        )
     except (LookupError, PermissionError, RuntimeError, ValueError) as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
-    return result.__dict__
+    return {**result.__dict__, "preparation_job": preparation_job}
 
 
 @app.post("/v1/complete-loop/reviews/{review_id}/approve")
@@ -160,8 +166,48 @@ def resolve_complete_loop_task(
     service: CompleteApplicationLoopService = Depends(_loop_service),  # noqa: B008
 ) -> dict[str, Any]:
     try:
-        return service.resolve_task(
+        task = service.resolutions.get(task_id)
+        result = service.resolve_task(
             task_id=task_id, value=request.value, approved_by_user=request.approved_by_user
+        )
+        if task is not None and task.session_id:
+            DurablePreparationQueue(database).requeue_session(
+                session_id=str(task.session_id),
+                tenant_id=service.tenant_id,
+                user_id=service.user_id,
+            )
+        return result
+    except (LookupError, PermissionError, RuntimeError, ValueError) as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
+# Phase 1C-A durable preparation job API
+
+
+@app.get("/v1/complete-loop/preparation-jobs/{job_id}")
+def get_complete_loop_preparation_job(
+    job_id: str,
+    service: CompleteApplicationLoopService = Depends(_loop_service),  # noqa: B008
+) -> dict[str, Any]:
+    try:
+        return DurablePreparationQueue(database).get(
+            job_id=job_id,
+            tenant_id=service.tenant_id,
+            user_id=service.user_id,
+        )
+    except (LookupError, PermissionError, RuntimeError, ValueError) as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
+
+@app.post("/v1/complete-loop/preparation-jobs/{job_id}/cancel")
+def cancel_complete_loop_preparation_job(
+    job_id: str,
+    service: CompleteApplicationLoopService = Depends(_loop_service),  # noqa: B008
+) -> dict[str, Any]:
+    try:
+        return DurablePreparationQueue(database).request_cancel(
+            job_id=job_id,
+            tenant_id=service.tenant_id,
+            user_id=service.user_id,
         )
     except (LookupError, PermissionError, RuntimeError, ValueError) as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
