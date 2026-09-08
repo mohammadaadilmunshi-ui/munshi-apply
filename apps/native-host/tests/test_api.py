@@ -30,7 +30,7 @@ def test_health_and_event_round_trip(tmp_path: Path) -> None:
         health = client.get("/health")
         assert health.status_code == 200
         assert health.json()["status"] == "healthy"
-        assert health.json()["schema_version"] == "015_durable_background_preparation.sql"
+        assert health.json()["schema_version"] == "016_application_plan_supersession_requeue.sql"
         assert health.json()["outbox_worker"] == "disabled"
 
         accepted = client.post(
@@ -280,3 +280,31 @@ def test_application_plan_handoff_http_boundary_is_fail_closed_and_idempotent(
         assert connection.execute(
             "SELECT COUNT(*) FROM application_submission_receipts"
         ).fetchone()[0] == 0
+
+def test_direct_apply_task_resolution_is_closed_in_favor_of_hunter_supersession(
+    tmp_path: Path,
+) -> None:
+    migrations = Path(__file__).resolve().parents[3] / "migrations"
+    main.database = Database(tmp_path / "api-resolution.sqlite", migrations)
+    main.settings = Settings(
+        runtime_root=tmp_path,
+        database_path=tmp_path / "api-resolution.sqlite",
+        migrations_path=migrations,
+        n8n_webhook_url=None,
+        n8n_webhook_secret=None,
+        outbox_poll_seconds=0.01,
+        log_level="INFO",
+        command_secret="fixture-command-secret",  # noqa: S106
+    )
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/v1/complete-loop/tasks/task-1/resolve",
+            json={"value": "Aadil", "approved_by_user": True},
+            headers={
+                "x-munshi-command-secret": "fixture-command-secret",
+                "x-munshi-tenant-id": "tenant-a",
+                "x-munshi-user-id": "member-a",
+            },
+        )
+    assert response.status_code == 409
+    assert "Hunter-authorized replacement Application Plan" in response.json()["detail"]

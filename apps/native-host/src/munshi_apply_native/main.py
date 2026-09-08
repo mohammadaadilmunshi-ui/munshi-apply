@@ -118,7 +118,7 @@ async def accept_application_plan_handoff(request: Request) -> dict[str, Any]:
     )
     result = consumer.accept(body, dict(request.headers))
     if not result.accepted:
-        if result.error == "live handoff disabled":
+        if result.error in {"live handoff disabled", "plan supersession disabled"}:
             status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         elif result.error == "invalid signature":
             status_code = status.HTTP_401_UNAUTHORIZED
@@ -165,20 +165,14 @@ def resolve_complete_loop_task(
     request: ResolveLoopTaskRequest,
     service: CompleteApplicationLoopService = Depends(_loop_service),  # noqa: B008
 ) -> dict[str, Any]:
-    try:
-        task = service.resolutions.get(task_id)
-        result = service.resolve_task(
-            task_id=task_id, value=request.value, approved_by_user=request.approved_by_user
-        )
-        if task is not None and task.session_id:
-            DurablePreparationQueue(database).requeue_session(
-                session_id=str(task.session_id),
-                tenant_id=service.tenant_id,
-                user_id=service.user_id,
-            )
-        return result
-    except (LookupError, PermissionError, RuntimeError, ValueError) as error:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    _ = (task_id, request, service)
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=(
+            "Runtime NEEDS_INPUT resolution requires a Hunter-authorized "
+            "replacement Application Plan."
+        ),
+    )
 
 # Phase 1C-A durable preparation job API
 
