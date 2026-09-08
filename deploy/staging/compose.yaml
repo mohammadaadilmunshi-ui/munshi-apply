@@ -18,8 +18,10 @@ services:
 
       MUNSHI_APPLY_LIVE_HANDOFF_ENABLED: "${MUNSHI_APPLY_LIVE_HANDOFF_ENABLED:-false}"
       MUNSHI_APPLY_HANDOFF_HMAC_SECRET: "${MUNSHI_APPLY_HANDOFF_HMAC_SECRET:-}"
+      MUNSHI_HUNTER_EXECUTION_BRIDGE_BASE_URL: "${MUNSHI_HUNTER_EXECUTION_BRIDGE_BASE_URL:-}"
+      MUNSHI_APPLY_HOSTED_PREPARE_WORKER_ENABLED: "${MUNSHI_APPLY_HOSTED_PREPARE_WORKER_ENABLED:-false}"
 
-      MUNSHI_APPLY_BACKGROUND_PREPARE_ENABLED: "false"
+      MUNSHI_APPLY_BACKGROUND_PREPARE_ENABLED: "${MUNSHI_APPLY_BACKGROUND_PREPARE_ENABLED:-false}"
       MUNSHI_FINAL_REVIEW_ENABLED: "false"
       MUNSHI_FINAL_SUBMIT_ENABLED: "false"
 
@@ -49,6 +51,31 @@ services:
       timeout: 5s
       retries: 12
       start_period: 10s
+
+  prepare-worker:
+    profiles: ["hosted-prepare"]
+    image: munshi-apply-staging:${MUNSHI_APPLY_IMAGE_TAG:-local}
+    restart: unless-stopped
+    depends_on:
+      apply:
+        condition: service_healthy
+    command: ["python", "-m", "munshi_apply_native.hosted_prepare_worker"]
+    environment:
+      MUNSHI_RUNTIME_ROOT: /data
+      MUNSHI_DATABASE_PATH: /data/munshi-apply.sqlite
+      MUNSHI_MIGRATIONS_PATH: /app/migrations
+      MUNSHI_BROWSER_EXECUTABLE: /usr/bin/chromium
+      MUNSHI_APPLY_HANDOFF_HMAC_SECRET: "${MUNSHI_APPLY_HANDOFF_HMAC_SECRET:-}"
+      MUNSHI_HUNTER_EXECUTION_BRIDGE_BASE_URL: "${MUNSHI_HUNTER_EXECUTION_BRIDGE_BASE_URL:-}"
+      MUNSHI_APPLY_BACKGROUND_PREPARE_ENABLED: "${MUNSHI_APPLY_BACKGROUND_PREPARE_ENABLED:-false}"
+      MUNSHI_APPLY_HOSTED_PREPARE_WORKER_ENABLED: "${MUNSHI_APPLY_HOSTED_PREPARE_WORKER_ENABLED:-false}"
+      MUNSHI_FINAL_REVIEW_ENABLED: "false"
+      MUNSHI_FINAL_SUBMIT_ENABLED: "false"
+    networks:
+      hunter_staging:
+    volumes:
+      - apply_data:/data
+    shm_size: "1gb"
 
 networks:
   hunter_staging:
