@@ -4,10 +4,11 @@ import secrets
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from . import __version__
+from .application_plan_handoff_v2 import ApplicationPlanHandoffConsumer
 from .complete_application_loop import CompleteApplicationLoopService
 from .database import Database
 from .models import EventEnvelope, HealthResponse
@@ -97,6 +98,36 @@ async def receive_event(event: EventEnvelope) -> dict[str, bool]:
     record = event.database_record()
     created = database.record_event(record, enqueue_external=True)
     return {"accepted": True, "duplicate": not created}
+
+
+@app.post("/v1/application-plan-handoffs", status_code=202)
+async def accept_application_plan_handoff(request: Request) -> dict[str, Any]:
+    # Authenticate and persist one Hunter Application Plan V2; never execute it.
+    bridge_secret = settings.handoff_hmac_secret
+    if not bridge_secret:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Application Plan handoff is disabled",
+        )
+
+    body = await request.body()
+    consumer = ApplicationPlanHandoffConsumer(
+        database,
+        bridge_secret=bridge_secret,
+    )
+    result = consumer.accept(body, dict(request.headers))
+    if not result.accepted:
+        if result.error == "live handoff disabled":
+            status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        elif result.error == "invalid signature":
+            status_code = status.HTTP_401_UNAUTHORIZED
+        else:
+            status_code = status.HTTP_409_CONFLICT
+        raise HTTPException(
+            status_code=status_code,
+            detail=result.error or "Application Plan handoff rejected",
+        )
+    return result.__dict__
 
 
 @app.post("/v1/complete-loop/sessions")
