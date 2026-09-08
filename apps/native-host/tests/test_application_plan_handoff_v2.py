@@ -236,6 +236,16 @@ def test_event_plan_application_provider_and_version_bindings_fail_closed(
     assert _table_count(database, "career_os_application_plans") == 0
 
 
+def test_preparation_permissions_are_required_and_fail_closed(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("MUNSHI_APPLY_LIVE_HANDOFF_ENABLED", "true")
+    consumer, database = _consumer(tmp_path)
+    for name in ("background_prepare", "resume_upload"):
+        plan = _plan(permissions={**_plan()["permissions"], name: False})
+        body, headers = _signed(_envelope(plan=plan, handoff_id=f"plan-handoff-{name}"))
+        assert consumer.accept(body, headers, now=1000).error == "malformed or invalid plan"
+    assert _table_count(database, "career_os_application_plans") == 0
+
+
 def test_plan_digest_and_idempotency_conflicts_are_rejected(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("MUNSHI_APPLY_LIVE_HANDOFF_ENABLED", "true")
     consumer, database = _consumer(tmp_path)

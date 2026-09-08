@@ -39,7 +39,12 @@ def plan():
             "mime_type": "application/pdf",
             "submission_authority": False,
         },
-        "permissions": {"cover_letter_upload": True},
+        "permissions": {
+            "background_prepare": True,
+            "resume_upload": True,
+            "normal_answer_autofill": True,
+            "cover_letter_upload": True,
+        },
         "answers": [],
         "provider_policy": {"provider": "GREENHOUSE", "permitted": True},
         "expected_state": "READY_TO_APPLY",

@@ -72,6 +72,8 @@ def test_hosted_runner_uses_real_chromium_and_stops_at_needs_input(
 ) -> None:
     monkeypatch.setenv("MUNSHI_APPLY_LIVE_HANDOFF_ENABLED", "true")
     monkeypatch.setenv("MUNSHI_APPLY_BACKGROUND_PREPARE_ENABLED", "true")
+    monkeypatch.setenv("MUNSHI_APPLY_RESUME_UPLOAD_ENABLED", "true")
+    monkeypatch.setenv("MUNSHI_APPLY_NORMAL_ANSWER_AUTOFILL_ENABLED", "true")
 
     resume = {
         "engine": "NATIVE_V5",

@@ -27,6 +27,7 @@ class HunterExecutionBridgeClient:
         secret: str,
         tenant_id: str,
         user_id: str,
+        allow_staging_http: bool = False,
         timeout_seconds: float = 15.0,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
@@ -34,7 +35,12 @@ class HunterExecutionBridgeClient:
         if not base.startswith(("http://", "https://")):
             raise ValueError("Hunter execution bridge base URL is required")
         parsed = urlsplit(base)
-        if parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+        staging_http = allow_staging_http is True and base == "http://hunter:8000"
+        if (
+            parsed.scheme != "https"
+            and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}
+            and not staging_http
+        ):
             raise ValueError("Hunter execution bridge must use HTTPS outside loopback")
         if len(str(secret or "")) < 16:
             raise ValueError("Hunter execution bridge HMAC secret is required")

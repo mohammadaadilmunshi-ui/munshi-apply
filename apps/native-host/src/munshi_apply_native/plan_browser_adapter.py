@@ -9,12 +9,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from .execution_policy import safe_evidence
+from .execution_policy import prepare_permissions, safe_evidence
+
+RESUME_UPLOAD_ENV = "MUNSHI_APPLY_RESUME_UPLOAD_ENABLED"
+NORMAL_AUTOFILL_ENV = "MUNSHI_APPLY_NORMAL_ANSWER_AUTOFILL_ENABLED"
+
+
+def _enabled(name: str) -> bool:
+    return str(os.getenv(name) or "").strip().casefold() in {"1", "true", "yes", "on"}
 
 
 def digest(value: Any) -> str:
@@ -197,6 +205,10 @@ class PlanBrowserAdapter:
         checkpoint: dict[str, Any] | None,
         resolved_values: dict[str, Any],
     ) -> dict[str, Any]:
+        permissions = prepare_permissions(plan)
+        normal_fill_enabled = _enabled(NORMAL_AUTOFILL_ENV) and permissions[
+            "normal_answer_autofill"
+        ]
         if self.current_plan(plan) is not True:
             raise ValueError("Hunter plan is stale")
         for _step in range(10):
@@ -217,6 +229,8 @@ class PlanBrowserAdapter:
                         str(control.get("name") or "") + " " + str(control.get("label") or "")
                     ).casefold()
                     if "resume" in identity:
+                        if not _enabled(RESUME_UPLOAD_ENV):
+                            raise ValueError("Resume upload is disabled")
                         if self.current_plan(plan) is not True:
                             raise ValueError("Hunter plan is stale")
                         data = self.artifact_reader(plan)
@@ -257,6 +271,8 @@ class PlanBrowserAdapter:
                     continue
                 if question["sensitive"] or control.get("inputType") == "password":
                     continue  # Protected execution requires a scoped resolver, never plain memory.
+                if not normal_fill_enabled:
+                    continue
                 candidates = [
                     a
                     for a in plan["answers"]

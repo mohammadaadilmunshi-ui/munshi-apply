@@ -69,6 +69,9 @@ class _Queue:
             "attempt_count": 1,
         }
 
+    def get(self, **_kwargs):
+        return {"cancel_requested_at": None}
+
 
 class _Adapter:
     def __init__(self):
@@ -88,6 +91,9 @@ class _Service:
         if self.error:
             raise self.error
         return SimpleNamespace(state=self.state)
+
+    def preflight_prepare_session(self, _session_id):
+        return None
 
 
 def test_runner_heartbeats_finishes_and_closes_adapter():
@@ -125,3 +131,19 @@ def test_runner_requeues_transient_browser_failure_and_closes():
     assert result.retry_scheduled is True
     assert queue.failed["retryable"] is True
     assert adapter.closed is True
+
+
+def test_runner_does_not_construct_adapter_when_preflight_fails():
+    queue = _Queue()
+
+    class RejectingService(_Service):
+        def preflight_prepare_session(self, _session_id):
+            raise ValueError("stale session")
+
+    runner = HostedPreparationRunner(
+        queue,
+        service_factory=lambda _job: RejectingService(),
+        adapter_factory=lambda _job: (_ for _ in ()).throw(AssertionError("adapter constructed")),
+    )
+    result = runner.run_once(worker_id="worker-1")
+    assert result is not None and result.job_state == "FAILED_SAFELY"

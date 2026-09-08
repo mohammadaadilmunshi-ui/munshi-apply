@@ -53,6 +53,8 @@ class Bridge:
 def test_real_chromium_resume_and_cover_before_needs_input(tmp_path, monkeypatch):
     monkeypatch.setenv("MUNSHI_APPLY_LIVE_HANDOFF_ENABLED", "true")
     monkeypatch.setenv("MUNSHI_APPLY_BACKGROUND_PREPARE_ENABLED", "true")
+    monkeypatch.setenv("MUNSHI_APPLY_RESUME_UPLOAD_ENABLED", "true")
+    monkeypatch.setenv("MUNSHI_APPLY_NORMAL_ANSWER_AUTOFILL_ENABLED", "true")
     resume = {
         "engine": "NATIVE_V5",
         "version_id": "resume-cover-browser",

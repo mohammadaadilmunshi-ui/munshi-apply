@@ -5,6 +5,7 @@ import hmac
 import json
 
 import httpx
+import pytest
 
 from munshi_apply_native import artifact_fetch_v2 as module
 from munshi_apply_native.artifact_fetch_v2 import HunterExecutionBridgeClient
@@ -105,3 +106,30 @@ def test_tampered_response_fails_closed(monkeypatch):
     else:
         raise AssertionError("Tampered artifact response was accepted")
     client.close()
+
+
+def test_plain_http_is_limited_to_explicit_staging_bridge():
+    with pytest.raises(ValueError, match="HTTPS"):
+        HunterExecutionBridgeClient(
+            base_url="http://hunter:8000", secret=SECRET, tenant_id="tenant-a", user_id="member-a"
+        )
+    HunterExecutionBridgeClient(
+        base_url="http://hunter:8000",
+        secret=SECRET,
+        tenant_id="tenant-a",
+        user_id="member-a",
+        allow_staging_http=True,
+    ).close()
+    with pytest.raises(ValueError, match="HTTPS"):
+        HunterExecutionBridgeClient(
+            base_url="http://hunter:8001", secret=SECRET, tenant_id="tenant-a", user_id="member-a",
+            allow_staging_http=True,
+        )
+    with pytest.raises(ValueError, match="HTTPS"):
+        HunterExecutionBridgeClient(
+            base_url="http://hunter:8000/other",
+            secret=SECRET,
+            tenant_id="tenant-a",
+            user_id="member-a",
+            allow_staging_http=True,
+        )

@@ -5,6 +5,23 @@ from __future__ import annotations
 from typing import Any
 
 
+def prepare_permissions(plan: dict[str, Any]) -> dict[str, bool]:
+    """Return the explicit permissions required before hosted preparation."""
+    permissions = plan.get("permissions")
+    required = ("background_prepare", "resume_upload", "normal_answer_autofill")
+    if not isinstance(permissions, dict) or any(
+        not isinstance(permissions.get(name), bool) for name in required
+    ):
+        raise ValueError("Application Plan preparation permissions are invalid")
+    if permissions["background_prepare"] is not True or permissions["resume_upload"] is not True:
+        raise ValueError("Application Plan does not permit hosted preparation")
+    if isinstance(plan.get("cover_letter"), dict) and (
+        permissions.get("cover_letter_upload") is not True
+    ):
+        raise ValueError("Application Plan does not permit cover-letter upload")
+    return permissions
+
+
 def safe_evidence(value: Any) -> Any:
     """Reject secrets recursively and redact explicitly sensitive display values."""
     forbidden = {

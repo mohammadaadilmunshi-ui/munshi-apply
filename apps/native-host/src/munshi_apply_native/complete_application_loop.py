@@ -20,6 +20,7 @@ from uuid import uuid4
 from .checkpoint_store import ApplicationCheckpointStore
 from .database import Database, canonical_json
 from .execution_policy import (
+    prepare_permissions,
     safe_evidence,
     validate_submit_observation,
     verify_submission_observation,
@@ -379,6 +380,7 @@ class CompleteApplicationLoopService:
             raise RuntimeError("Apply background preparation is disabled")
         plan_record = self._plan(plan_id)
         plan = dict(plan_record["plan"])
+        prepare_permissions(plan)
         if plan.get("expected_state") != "READY_TO_APPLY" or plan.get("executable") is not True:
             raise ValueError("Accepted Application Plan is not execution-ready")
         if plan.get("submission_authority") is not False:
@@ -555,6 +557,16 @@ class CompleteApplicationLoopService:
             )
         return resolved.wire_payload()
 
+    def preflight_prepare_session(self, session_id: str) -> None:
+        """Reject invalid hosted work before artifact fetch or navigation."""
+        session = self._session(session_id)
+        if str(session["state"]) not in {
+            "SESSION_STARTING", "JOB_VERIFIED", "FORM_DISCOVERED", "PREPARING",
+            "NEEDS_INPUT", "READY_FOR_REVIEW", "READY_TO_SUBMIT",
+        }:
+            raise ValueError("Execution session cannot be prepared from its current state")
+        prepare_permissions(dict(self._plan(str(session["plan_id"]))["plan"]))
+
     def prepare_session(
         self,
         *,
@@ -576,6 +588,7 @@ class CompleteApplicationLoopService:
             raise ValueError("Execution session cannot be prepared from its current state")
         plan_record = self._plan(str(session["plan_id"]))
         plan = dict(plan_record["plan"])
+        prepare_permissions(plan)
 
         observation = adapter.inspect_job(plan=plan)
         if observation.get("security_checkpoint"):

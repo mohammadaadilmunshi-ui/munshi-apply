@@ -18,6 +18,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from .database import Database, canonical_json
+from .execution_policy import prepare_permissions
 from .n8n import verify_signature
 
 TRANSPORT_VERSION = "munshi-application-plan-handoff-v2"
@@ -96,6 +97,7 @@ class ApplicationPlanEnvelope(BaseModel):
             raise ValueError("Application Plan is not execution-ready")
         if plan.get("submission_authority") is not False:
             raise ValueError("Application Plan must not carry submission authority")
+        prepare_permissions(plan)
         provider_policy = plan.get("provider_policy")
         if not isinstance(provider_policy, dict):
             raise ValueError("Application Plan provider policy is missing")

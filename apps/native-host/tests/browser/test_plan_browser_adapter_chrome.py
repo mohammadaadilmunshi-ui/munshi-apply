@@ -27,6 +27,12 @@ RESUME_BYTES = (
 RESUME_SHA = hashlib.sha256(RESUME_BYTES).hexdigest()
 
 
+@pytest.fixture(autouse=True)
+def _enable_prepare_actions(monkeypatch):
+    monkeypatch.setenv("MUNSHI_APPLY_RESUME_UPLOAD_ENABLED", "true")
+    monkeypatch.setenv("MUNSHI_APPLY_NORMAL_ANSWER_AUTOFILL_ENABLED", "true")
+
+
 def _root() -> Path:
     return Path(__file__).resolve().parents[4]
 
@@ -65,6 +71,11 @@ def _plan() -> dict:
                 "execution_value": "Munshi",
             },
         ],
+        "permissions": {
+            "background_prepare": True,
+            "resume_upload": True,
+            "normal_answer_autofill": True,
+        },
     }
 
 

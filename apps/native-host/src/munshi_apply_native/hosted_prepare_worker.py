@@ -26,11 +26,15 @@ from .background_prepare_queue import DurablePreparationQueue, PreparationRunRes
 from .browser_runtime import resolve_browser_executable
 from .complete_application_loop import BACKGROUND_PREPARE_ENV, CompleteApplicationLoopService
 from .database import Database
+from .execution_policy import prepare_permissions
 from .plan_browser_adapter import PlanBrowserAdapter, provider_for_url
 from .settings import Settings
 
 HOSTED_WORKER_ENV = "MUNSHI_APPLY_HOSTED_PREPARE_WORKER_ENABLED"
 BRIDGE_URL_ENV = "MUNSHI_HUNTER_EXECUTION_BRIDGE_BASE_URL"
+STAGING_HTTP_ENV = "MUNSHI_HUNTER_EXECUTION_BRIDGE_STAGING_HTTP_ENABLED"
+RESUME_UPLOAD_ENV = "MUNSHI_APPLY_RESUME_UPLOAD_ENABLED"
+NORMAL_AUTOFILL_ENV = "MUNSHI_APPLY_NORMAL_ANSWER_AUTOFILL_ENABLED"
 
 
 def _truthy(name: str) -> bool:
@@ -108,6 +112,7 @@ class HostedAdapterFactory:
         *,
         bridge_base_url: str,
         bridge_secret: str,
+        allow_staging_http: bool = False,
         browser_executable: str | None = None,
         navigation_timeout_ms: int = 30000,
         bridge_factory: Any = HunterExecutionBridgeClient,
@@ -118,6 +123,7 @@ class HostedAdapterFactory:
         self.queue = queue
         self.bridge_base_url = bridge_base_url
         self.bridge_secret = bridge_secret
+        self.allow_staging_http = allow_staging_http
         self.browser_executable = resolve_browser_executable(browser_executable)
         self.navigation_timeout_ms = int(navigation_timeout_ms)
         self.bridge_factory = bridge_factory
@@ -142,19 +148,26 @@ class HostedAdapterFactory:
         ):
             raise PermissionError("Hosted preparation job owner binding is invalid")
         plan = json.loads(str(row["plan_json"]))
-        if str(plan["plan_digest"]) != str(row["plan_digest"]):
+        from .application_plan_handoff_v2 import _plan_digest_payload, _sha256_json
+
+        if _sha256_json(_plan_digest_payload(plan)) != str(row["plan_digest"]):
             raise ValueError("Hosted preparation plan digest binding is invalid")
         return plan
 
     def __call__(self, job: dict[str, Any]) -> HostedPlanBrowserAdapter:
         plan = self._plan(job)
+        prepare_permissions(plan)
         target = _target_url(plan)
         bridge = self.bridge_factory(
             base_url=self.bridge_base_url,
             secret=self.bridge_secret,
             tenant_id=str(job["tenant_id"]),
             user_id=str(job["user_id"]),
+            allow_staging_http=self.allow_staging_http,
         )
+        if bridge.plan_is_current(plan) is not True:
+            bridge.close()
+            raise ValueError("Hosted preparation plan is stale")
         artifact = bridge.artifact_bytes(plan)
         expected_sha = str(plan["resume"]["artifact_sha256"])
         if hashlib.sha256(artifact).hexdigest() != expected_sha:
@@ -282,6 +295,14 @@ class HostedPreparationRunner:
         adapter = None
         try:
             service = self.service_factory(job)
+            service.preflight_prepare_session(str(job["session_id"]))
+            queued = self.queue.get(
+                job_id=str(job["job_id"]),
+                tenant_id=str(job["tenant_id"]),
+                user_id=str(job["user_id"]),
+            )
+            if queued.get("cancel_requested_at") is not None:
+                raise ValueError("Hosted preparation job was cancelled")
             adapter = self.adapter_factory(job)
             result = service.prepare_session(session_id=str(job["session_id"]), adapter=adapter)
             if heartbeat_errors:
@@ -342,6 +363,11 @@ def run_forever() -> None:
     bridge_url = str(os.getenv(BRIDGE_URL_ENV) or "").strip()
     if not bridge_url:
         raise RuntimeError("Hunter execution bridge base URL is required")
+    allow_staging_http = _truthy(STAGING_HTTP_ENV)
+    if allow_staging_http and str(os.getenv("MUNSHI_ENVIRONMENT") or "").casefold() != "staging":
+        raise RuntimeError("Hunter bridge staging HTTP is restricted to staging")
+    if not _truthy(RESUME_UPLOAD_ENV) or not _truthy(NORMAL_AUTOFILL_ENV):
+        raise RuntimeError("Hosted resume upload and normal answer autofill are disabled")
     database = Database(settings.database_path, settings.migrations_path)
     database.migrate()
     queue = DurablePreparationQueue(database)
@@ -350,6 +376,7 @@ def run_forever() -> None:
         queue,
         bridge_base_url=bridge_url,
         bridge_secret=settings.handoff_hmac_secret,
+        allow_staging_http=allow_staging_http,
         browser_executable=os.getenv("MUNSHI_BROWSER_EXECUTABLE") or None,
         navigation_timeout_ms=int(os.getenv("MUNSHI_APPLY_BROWSER_TIMEOUT_MS", "30000")),
     )
