@@ -66,6 +66,7 @@ def _plan(**changes: object) -> dict[str, object]:
             "background_prepare": True,
             "resume_upload": True,
             "normal_answer_autofill": True,
+            "cover_letter_upload": True,
             "protected_fact_execution": False,
             "self_id_execution": False,
         },
