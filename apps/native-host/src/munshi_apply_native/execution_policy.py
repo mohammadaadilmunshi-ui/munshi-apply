@@ -58,10 +58,7 @@ def verify_submission_observation(result: dict[str, Any], plan: dict[str, Any]) 
         return False
     if submit_method != "POST" or not submit_action or response_url != submit_action:
         return False
-    return bool(
-        evidence.get("completion_marker")
-        and evidence.get("submission_response_marker")
-    )
+    return bool(evidence.get("completion_marker") and evidence.get("submission_response_marker"))
 
 
 def validate_submit_observation(
@@ -85,6 +82,12 @@ def validate_submit_observation(
         observation.get("resume_sha256") != plan["resume"]["artifact_sha256"]
     ):
         raise ValueError("Browser resume changed after review")
+    cover_letter = plan.get("cover_letter")
+    if isinstance(cover_letter, dict) and (
+        observation.get("cover_letter_uploaded") is not True
+        or observation.get("cover_letter_sha256") != cover_letter.get("artifact_sha256")
+    ):
+        raise ValueError("Browser cover letter changed after review")
     if observation.get("unresolved") or observation.get("validation_errors"):
         raise ValueError("Browser form has unresolved required inputs")
     if observation.get("completed_required_fields") != observation.get("required_fields"):

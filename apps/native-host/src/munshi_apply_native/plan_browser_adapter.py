@@ -45,9 +45,11 @@ class PlanBrowserAdapter:
         artifact_reader: Callable[[dict[str, Any]], bytes],
         current_plan: Callable[[dict[str, Any]], bool],
         runtime_path: Path,
+        cover_letter_reader: Callable[[dict[str, Any]], bytes] | None = None,
     ) -> None:
         self.page = page
         self.artifact_reader = artifact_reader
+        self.cover_letter_reader = cover_letter_reader
         self.current_plan = current_plan
         self.runtime_path = runtime_path
         self.on_event: Callable[[str, dict[str, Any]], None] = lambda _kind, _evidence: None
@@ -118,6 +120,10 @@ class PlanBrowserAdapter:
         page, fields = described["page"], described["fields"]
         files = [c for c in page["controls"] if c.get("inputType") == "file"]
         resume_sha = ""
+        cover_letter_sha = ""
+        expected_cover = (
+            dict(plan["cover_letter"]) if isinstance(plan.get("cover_letter"), dict) else None
+        )
         for control in files:
             # Independently hash the actual File bytes in the browser.
             data = self._element(control["controlId"]).evaluate("""async element => {
@@ -130,6 +136,12 @@ class PlanBrowserAdapter:
             }""")
             if data and data["sha"] == plan["resume"]["artifact_sha256"]:
                 resume_sha = data["sha"]
+            elif (
+                data
+                and expected_cover is not None
+                and data["sha"] == expected_cover["artifact_sha256"]
+            ):
+                cover_letter_sha = data["sha"]
         required = [f for f in fields if f["required"]]
         unresolved = [
             {
@@ -151,6 +163,7 @@ class PlanBrowserAdapter:
                 "url": self.page.url,
                 "fields": review_fields,
                 "resume_sha256": resume_sha,
+                **({"cover_letter_sha256": cover_letter_sha} if expected_cover is not None else {}),
                 "submit_binding": submit_binding,
             }
         )
@@ -160,6 +173,14 @@ class PlanBrowserAdapter:
             "submit_binding": submit_binding,
             "resume_uploaded": bool(resume_sha),
             "resume_sha256": resume_sha,
+            **(
+                {
+                    "cover_letter_uploaded": bool(cover_letter_sha),
+                    "cover_letter_sha256": cover_letter_sha,
+                }
+                if expected_cover is not None
+                else {}
+            ),
             "required_fields": len(required),
             "completed_required_fields": sum(bool(f["satisfied"]) for f in required),
             "completed_control_ids": [f["control_id"] for f in fields if f["satisfied"]],
@@ -179,6 +200,8 @@ class PlanBrowserAdapter:
         if self.current_plan(plan) is not True:
             raise ValueError("Hunter plan is stale")
         for _step in range(10):
+            if self.current_plan(plan) is not True:
+                raise ValueError("Hunter plan is stale")
             observed = self.inspect_job(plan=plan)
             if observed["security_checkpoint"] or not observed["job_id"]:
                 raise ValueError("Browser identity or security checkpoint blocks preparation")
@@ -190,19 +213,47 @@ class PlanBrowserAdapter:
                 if not control or not control["visible"] or control["disabled"]:
                     continue
                 if control.get("inputType") == "file":
-                    if "resume" not in (control["name"] + control["label"]).lower():
+                    identity = (
+                        str(control.get("name") or "") + " " + str(control.get("label") or "")
+                    ).casefold()
+                    if "resume" in identity:
+                        if self.current_plan(plan) is not True:
+                            raise ValueError("Hunter plan is stale")
+                        data = self.artifact_reader(plan)
+                        if hashlib.sha256(data).hexdigest() != plan["resume"]["artifact_sha256"]:
+                            raise ValueError("Resume artifact digest mismatch")
+                        self._element(control["controlId"]).set_input_files(
+                            {
+                                "name": plan["resume"]["filename"],
+                                "mimeType": plan["resume"]["mime_type"],
+                                "buffer": data,
+                            }
+                        )
+                        self.on_event(
+                            "RESUME_UPLOADED", {"sha256": plan["resume"]["artifact_sha256"]}
+                        )
                         continue
-                    data = self.artifact_reader(plan)
-                    if hashlib.sha256(data).hexdigest() != plan["resume"]["artifact_sha256"]:
-                        raise ValueError("Resume artifact digest mismatch")
-                    self._element(control["controlId"]).set_input_files(
-                        {
-                            "name": plan["resume"]["filename"],
-                            "mimeType": plan["resume"]["mime_type"],
-                            "buffer": data,
-                        }
-                    )
-                    self.on_event("RESUME_UPLOADED", {"sha256": plan["resume"]["artifact_sha256"]})
+                    if (
+                        "cover" in identity
+                        and "letter" in identity
+                        and isinstance(plan.get("cover_letter"), dict)
+                    ):
+                        if self.current_plan(plan) is not True:
+                            raise ValueError("Hunter plan is stale")
+                        if self.cover_letter_reader is None:
+                            raise ValueError("Cover-letter artifact reader is unavailable")
+                        cover = dict(plan["cover_letter"])
+                        data = self.cover_letter_reader(plan)
+                        if hashlib.sha256(data).hexdigest() != cover["artifact_sha256"]:
+                            raise ValueError("Cover-letter artifact digest mismatch")
+                        self._element(control["controlId"]).set_input_files(
+                            {
+                                "name": cover["filename"],
+                                "mimeType": cover["mime_type"],
+                                "buffer": data,
+                            }
+                        )
+                        self.on_event("COVER_LETTER_UPLOADED", {"sha256": cover["artifact_sha256"]})
                     continue
                 if question["sensitive"] or control.get("inputType") == "password":
                     continue  # Protected execution requires a scoped resolver, never plain memory.
@@ -242,6 +293,8 @@ class PlanBrowserAdapter:
             result = self._observe(plan)
             if result["resume_uploaded"]:
                 self.on_event("RESUME_VERIFIED", {"sha256": result["resume_sha256"]})
+            if isinstance(plan.get("cover_letter"), dict) and result.get("cover_letter_uploaded"):
+                self.on_event("COVER_LETTER_VERIFIED", {"sha256": result["cover_letter_sha256"]})
             navigation = self._scan()["page"]["navigationCandidates"]
             next_steps = [n for n in navigation if n["action"] == "NEXT" and not n["disabled"]]
             if result["unresolved"] or result["validation_errors"] or len(next_steps) != 1:

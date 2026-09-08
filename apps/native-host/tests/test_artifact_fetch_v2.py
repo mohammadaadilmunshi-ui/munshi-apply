@@ -72,7 +72,7 @@ def _signed_response(request: httpx.Request) -> httpx.Response:
 def test_current_plan_and_artifact_are_response_signed(monkeypatch):
     monkeypatch.setattr(module.time, "time", lambda: 1000)
     client = HunterExecutionBridgeClient(
-        base_url="http://hunter.internal",
+        base_url="https://hunter.internal",
         secret=SECRET,
         tenant_id="tenant-a",
         user_id="member-a",
@@ -91,7 +91,7 @@ def test_tampered_response_fails_closed(monkeypatch):
         return httpx.Response(200, content=response.content + b"x", headers=response.headers)
 
     client = HunterExecutionBridgeClient(
-        base_url="http://hunter.internal",
+        base_url="https://hunter.internal",
         secret=SECRET,
         tenant_id="tenant-a",
         user_id="member-a",

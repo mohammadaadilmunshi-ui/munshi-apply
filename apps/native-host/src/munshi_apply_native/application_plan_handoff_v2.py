@@ -118,6 +118,23 @@ class ApplicationPlanEnvelope(BaseModel):
             raise ValueError("Application Plan required bindings are missing")
         if not resume.get("artifact_id") or len(str(resume.get("artifact_sha256") or "")) != 64:
             raise ValueError("Application Plan resume artifact binding is incomplete")
+        cover_letter = plan.get("cover_letter")
+        if cover_letter is not None:
+            if not isinstance(cover_letter, dict):
+                raise ValueError("Application Plan cover-letter binding is invalid")
+            if (
+                not cover_letter.get("artifact_id")
+                or not cover_letter.get("artifact_reference")
+                or len(str(cover_letter.get("artifact_sha256") or "")) != 64
+                or cover_letter.get("submission_authority") is not False
+            ):
+                raise ValueError("Application Plan cover-letter artifact binding is incomplete")
+            permissions = plan.get("permissions")
+            if (
+                not isinstance(permissions, dict)
+                or permissions.get("cover_letter_upload") is not True
+            ):
+                raise ValueError("Application Plan cover-letter upload permission is required")
         if len(str(job.get("job_snapshot_digest") or "")) != 64:
             raise ValueError("Application Plan job snapshot binding is incomplete")
         if len(str(truth.get("profile_digest") or "")) != 64:

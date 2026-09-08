@@ -1,4 +1,4 @@
-"""Signed Apply client for Hunter's private execution/artifact bridge."""
+"""Signed Apply client for Hunter's private execution bridge."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import hmac
 import json
 import time
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 import httpx
@@ -15,6 +16,7 @@ REQUEST_VERSION = "munshi-application-execution-request-v1"
 RESPONSE_VERSION = "munshi-application-execution-response-v1"
 PURPOSE_PLAN_CURRENT = "PLAN_CURRENT"
 PURPOSE_ARTIFACT_BYTES = "ARTIFACT_BYTES"
+PURPOSE_COVER_LETTER_BYTES = "COVER_LETTER_BYTES"
 
 
 class HunterExecutionBridgeClient:
@@ -29,8 +31,11 @@ class HunterExecutionBridgeClient:
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         base = str(base_url or "").strip().rstrip("/")
-        if not base.startswith("http://") and not base.startswith("https://"):
+        if not base.startswith(("http://", "https://")):
             raise ValueError("Hunter execution bridge base URL is required")
+        parsed = urlsplit(base)
+        if parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+            raise ValueError("Hunter execution bridge must use HTTPS outside loopback")
         if len(str(secret or "")) < 16:
             raise ValueError("Hunter execution bridge HMAC secret is required")
         if not tenant_id or not user_id:
@@ -42,11 +47,20 @@ class HunterExecutionBridgeClient:
         self.client = httpx.Client(timeout=timeout_seconds, transport=transport)
 
     @staticmethod
-    def _canonical(value: dict[str, Any]) -> bytes:
-        return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    def _canonical(v: dict[str, Any]) -> bytes:
+        return json.dumps(v, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+
+    @staticmethod
+    def _binding(plan: dict[str, Any], purpose: str) -> dict[str, Any]:
+        if purpose == PURPOSE_COVER_LETTER_BYTES:
+            v = plan.get("cover_letter")
+            if not isinstance(v, dict):
+                raise ValueError("Application Plan has no cover-letter binding")
+            return v
+        return dict(plan["resume"])
 
     def _payload(self, plan: dict[str, Any], purpose: str) -> dict[str, Any]:
-        resume = dict(plan["resume"])
+        a = self._binding(plan, purpose)
         return {
             "version": REQUEST_VERSION,
             "request_id": f"execution-request-{uuid4()}",
@@ -56,96 +70,100 @@ class HunterExecutionBridgeClient:
             "application_id": str(plan["application_id"]),
             "plan_id": str(plan["plan_id"]),
             "plan_digest": str(plan["plan_digest"]),
-            "artifact_id": str(resume["artifact_id"]),
-            "artifact_reference": str(resume["artifact_reference"]),
-            "artifact_sha256": str(resume["artifact_sha256"]),
+            "artifact_id": str(a["artifact_id"]),
+            "artifact_reference": str(a["artifact_reference"]),
+            "artifact_sha256": str(a["artifact_sha256"]),
         }
 
-    def _headers(self, payload: dict[str, Any], body: bytes) -> dict[str, str]:
-        timestamp = str(int(time.time()))
-        digest = hashlib.sha256(body).hexdigest()
-        signature = hmac.new(
-            self.secret, f"{payload['request_id']}.{timestamp}.{digest}".encode(), hashlib.sha256
+    def _headers(self, p: dict[str, Any], body: bytes) -> dict[str, str]:
+        ts = str(int(time.time()))
+        d = hashlib.sha256(body).hexdigest()
+        sig = hmac.new(
+            self.secret, f"{p['request_id']}.{ts}.{d}".encode(), hashlib.sha256
         ).hexdigest()
         return {
             "Content-Type": "application/json",
-            "X-Munshi-Event-Id": str(payload["request_id"]),
-            "X-Munshi-Timestamp": timestamp,
-            "X-Munshi-Content-SHA256": digest,
-            "X-Munshi-Signature": f"sha256={signature}",
+            "X-Munshi-Event-Id": str(p["request_id"]),
+            "X-Munshi-Timestamp": ts,
+            "X-Munshi-Content-SHA256": d,
+            "X-Munshi-Signature": f"sha256={sig}",
         }
 
-    def _verify_response(
-        self, *, response: httpx.Response, payload: dict[str, Any], purpose: str
-    ) -> bytes:
+    def _verify(self, *, response: httpx.Response, payload: dict[str, Any], purpose: str) -> bytes:
         if response.status_code != 200:
             raise RuntimeError(
                 f"Hunter execution bridge rejected {purpose}: HTTP {response.status_code}"
             )
         body = response.content
-        digest = hashlib.sha256(body).hexdigest()
-        if response.headers.get("X-Munshi-Response-Event-Id") != payload["request_id"]:
-            raise RuntimeError("Hunter execution bridge response identity mismatch")
-        if response.headers.get("X-Munshi-Response-Purpose") != purpose:
-            raise RuntimeError("Hunter execution bridge response purpose mismatch")
-        if response.headers.get("X-Munshi-Response-SHA256") != digest:
-            raise RuntimeError("Hunter execution bridge response digest mismatch")
-        if response.headers.get("X-Munshi-Plan-Digest") != payload["plan_digest"]:
-            raise RuntimeError("Hunter execution bridge response plan digest mismatch")
-        expected = hmac.new(
+        d = hashlib.sha256(body).hexdigest()
+        if (
+            response.headers.get("X-Munshi-Response-Event-Id") != payload["request_id"]
+            or response.headers.get("X-Munshi-Response-Purpose") != purpose
+            or response.headers.get("X-Munshi-Response-SHA256") != d
+            or response.headers.get("X-Munshi-Plan-Digest") != payload["plan_digest"]
+        ):
+            raise RuntimeError("Hunter execution bridge response digest or binding mismatch")
+        exp = hmac.new(
             self.secret,
-            f"{payload['request_id']}.{purpose}.{digest}.{payload['plan_digest']}".encode(),
+            f"{payload['request_id']}.{purpose}.{d}.{payload['plan_digest']}".encode(),
             hashlib.sha256,
         ).hexdigest()
         if not hmac.compare_digest(
-            response.headers.get("X-Munshi-Response-Signature", ""), f"sha256={expected}"
+            response.headers.get("X-Munshi-Response-Signature", ""), f"sha256={exp}"
         ):
             raise RuntimeError("Hunter execution bridge response signature mismatch")
         return body
 
     def plan_is_current(self, plan: dict[str, Any]) -> bool:
         try:
-            payload = self._payload(plan, PURPOSE_PLAN_CURRENT)
-            body = self._canonical(payload)
-            response = self.client.post(
+            p = self._payload(plan, PURPOSE_PLAN_CURRENT)
+            body = self._canonical(p)
+            r = self.client.post(
                 f"{self.base_url}/api/application-execution/plan-current",
                 content=body,
-                headers=self._headers(payload, body),
+                headers=self._headers(p, body),
             )
-            verified = self._verify_response(
-                response=response, payload=payload, purpose=PURPOSE_PLAN_CURRENT
-            )
-            result = json.loads(verified)
+            out = json.loads(self._verify(response=r, payload=p, purpose=PURPOSE_PLAN_CURRENT))
             return (
-                result.get("version") == RESPONSE_VERSION
-                and result.get("request_id") == payload["request_id"]
-                and result.get("plan_id") == payload["plan_id"]
-                and result.get("plan_digest") == payload["plan_digest"]
-                and result.get("fresh") is True
-                and result.get("submission_authority") is False
+                out.get("version") == RESPONSE_VERSION
+                and out.get("request_id") == p["request_id"]
+                and out.get("plan_id") == p["plan_id"]
+                and out.get("plan_digest") == p["plan_digest"]
+                and out.get("fresh") is True
+                and out.get("submission_authority") is False
             )
         except Exception:
             return False
 
-    def artifact_bytes(self, plan: dict[str, Any]) -> bytes:
-        payload = self._payload(plan, PURPOSE_ARTIFACT_BYTES)
-        body = self._canonical(payload)
-        response = self.client.post(
-            f"{self.base_url}/api/application-execution/artifact",
-            content=body,
-            headers=self._headers(payload, body),
+    def _artifact(self, plan: dict[str, Any], *, purpose: str, endpoint: str) -> bytes:
+        p = self._payload(plan, purpose)
+        body = self._canonical(p)
+        r = self.client.post(
+            f"{self.base_url}{endpoint}", content=body, headers=self._headers(p, body)
         )
-        verified = self._verify_response(
-            response=response, payload=payload, purpose=PURPOSE_ARTIFACT_BYTES
-        )
-        expected_sha = str(plan["resume"]["artifact_sha256"])
-        if hashlib.sha256(verified).hexdigest() != expected_sha:
-            raise RuntimeError("Hunter artifact bytes do not match accepted plan digest")
-        if response.headers.get("X-Munshi-Artifact-SHA256") != expected_sha:
+        out = self._verify(response=r, payload=p, purpose=purpose)
+        a = self._binding(plan, purpose)
+        expected = str(a["artifact_sha256"])
+        if (
+            hashlib.sha256(out).hexdigest() != expected
+            or r.headers.get("X-Munshi-Artifact-SHA256") != expected
+        ):
             raise RuntimeError("Hunter artifact response digest binding mismatch")
-        if response.headers.get("X-Munshi-Submission-Authority") != "false":
+        if r.headers.get("X-Munshi-Submission-Authority") != "false":
             raise RuntimeError("Hunter artifact response carried unexpected submission authority")
-        return verified
+        return out
+
+    def artifact_bytes(self, plan: dict[str, Any]) -> bytes:
+        return self._artifact(
+            plan, purpose=PURPOSE_ARTIFACT_BYTES, endpoint="/api/application-execution/artifact"
+        )
+
+    def cover_letter_bytes(self, plan: dict[str, Any]) -> bytes:
+        return self._artifact(
+            plan,
+            purpose=PURPOSE_COVER_LETTER_BYTES,
+            endpoint="/api/application-execution/cover-letter",
+        )
 
     def close(self) -> None:
         self.client.close()

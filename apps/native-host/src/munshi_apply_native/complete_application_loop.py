@@ -674,6 +674,23 @@ class CompleteApplicationLoopService:
             )
             return self._result(session, "FAILED_SAFELY")
 
+        cover_letter = (
+            dict(plan["cover_letter"]) if isinstance(plan.get("cover_letter"), dict) else None
+        )
+        if cover_letter is not None:
+            cover_matches = str(prepared.get("cover_letter_sha256") or "") == str(
+                cover_letter["artifact_sha256"]
+            )
+            if prepared.get("cover_letter_uploaded") is not True or not cover_matches:
+                session = self._transition(session, "FAILED_SAFELY")
+                self._record_event(
+                    session=session,
+                    event_type="FAILED_SAFELY",
+                    replay_identity=f"{session_id}:cover-letter-verification-failed:{prepared.get('cover_letter_sha256')}",
+                    evidence={"reason": "cover_letter_upload_not_verified"},
+                )
+                return self._result(session, "FAILED_SAFELY")
+
         completed = [str(value) for value in prepared.get("completed_control_ids") or []]
         pending = [str(value) for value in prepared.get("pending_control_ids") or []]
         checkpoint = self._next_checkpoint(
@@ -717,6 +734,9 @@ class CompleteApplicationLoopService:
             "form_digest": form_digest,
             "review_fields": review_fields,
         }
+        if cover_letter is not None:
+            event_evidence["cover_letter_uploaded"] = True
+            event_evidence["cover_letter_sha256"] = cover_letter["artifact_sha256"]
         self._record_event(
             session=session,
             event_type="FORM_PREPARED",
@@ -822,6 +842,9 @@ class CompleteApplicationLoopService:
         prepared = self._latest_prepared_evidence(session_id)
         form_digest = str(session["browser_form_digest"] or "")
         resume = dict(plan["resume"])
+        cover_letter = (
+            dict(plan["cover_letter"]) if isinstance(plan.get("cover_letter"), dict) else None
+        )
 
         open_tasks = [
             task
@@ -864,6 +887,18 @@ class CompleteApplicationLoopService:
                 "truth_status": "BOUND",
                 "job_binding": resume.get("source_bindings", {}).get("job"),
             },
+            **(
+                {
+                    "cover_letter": {
+                        "artifact_id": cover_letter["artifact_id"],
+                        "filename": cover_letter["filename"],
+                        "sha256": cover_letter["artifact_sha256"],
+                        "uploaded": prepared.get("cover_letter_uploaded") is True,
+                    }
+                }
+                if cover_letter is not None
+                else {}
+            ),
             "application": {
                 "required_fields": prepared.get("required_fields"),
                 "completed": prepared.get("completed_required_fields"),
@@ -877,6 +912,14 @@ class CompleteApplicationLoopService:
                 "form_digest": form_digest,
                 "resume_uploaded": prepared.get("resume_uploaded") is True,
                 "resume_sha256": prepared.get("resume_sha256"),
+                **(
+                    {
+                        "cover_letter_uploaded": prepared.get("cover_letter_uploaded") is True,
+                        "cover_letter_sha256": prepared.get("cover_letter_sha256"),
+                    }
+                    if cover_letter is not None
+                    else {}
+                ),
                 "validation_errors": prepared.get("validation_errors") or [],
                 "review_fields": prepared.get("review_fields") or [],
             },
@@ -940,6 +983,18 @@ class CompleteApplicationLoopService:
             raise ValueError("Application Plan changed after review was created")
         if str(plan["resume"]["artifact_sha256"]) != str(review["resume_digest"]):
             raise ValueError("Resume changed after review was created")
+        review_snapshot = json.loads(str(review["review_json"]))
+        reviewed_cover = review_snapshot.get("cover_letter")
+        current_cover = plan.get("cover_letter")
+        if current_cover is None:
+            if reviewed_cover is not None:
+                raise ValueError("Cover letter changed after review was created")
+        elif not isinstance(reviewed_cover, dict) or (
+            reviewed_cover.get("artifact_id") != current_cover.get("artifact_id")
+            or reviewed_cover.get("sha256") != current_cover.get("artifact_sha256")
+            or reviewed_cover.get("uploaded") is not True
+        ):
+            raise ValueError("Cover letter changed after review was created")
         open_tasks = [
             task
             for task in self.resolutions.list(application_id=str(session["application_id"]))
@@ -1050,6 +1105,18 @@ class CompleteApplicationLoopService:
             raise ValueError("Application Plan changed after final review approval")
         if str(plan["resume"]["artifact_sha256"]) != str(review["resume_digest"]):
             raise ValueError("Resume changed after final review approval")
+        review_snapshot = json.loads(str(review["review_json"]))
+        reviewed_cover = review_snapshot.get("cover_letter")
+        current_cover = plan.get("cover_letter")
+        if current_cover is None:
+            if reviewed_cover is not None:
+                raise ValueError("Cover letter changed after final review approval")
+        elif not isinstance(reviewed_cover, dict) or (
+            reviewed_cover.get("artifact_id") != current_cover.get("artifact_id")
+            or reviewed_cover.get("sha256") != current_cover.get("artifact_sha256")
+            or reviewed_cover.get("uploaded") is not True
+        ):
+            raise ValueError("Cover letter changed after final review approval")
 
         current_observation = adapter.inspect_submission(plan=plan)
         try:

@@ -160,6 +160,15 @@ class HostedAdapterFactory:
         if hashlib.sha256(artifact).hexdigest() != expected_sha:
             bridge.close()
             raise RuntimeError("Hosted worker artifact digest verification failed")
+        cover_letter: bytes | None = None
+        cover_binding = (
+            dict(plan["cover_letter"]) if isinstance(plan.get("cover_letter"), dict) else None
+        )
+        if cover_binding is not None:
+            cover_letter = bridge.cover_letter_bytes(plan)
+            if hashlib.sha256(cover_letter).hexdigest() != str(cover_binding["artifact_sha256"]):
+                bridge.close()
+                raise RuntimeError("Hosted worker cover-letter artifact digest verification failed")
         pw = browser = context = None
         try:
             pw = self.playwright_factory().start()
@@ -178,6 +187,15 @@ class HostedAdapterFactory:
                     raise ValueError("Browser artifact request no longer matches accepted plan")
                 return artifact
 
+            def cover_letter_reader(current: dict[str, Any]) -> bytes:
+                if cover_letter is None or cover_binding is None:
+                    raise ValueError("Accepted plan has no cover-letter artifact")
+                if str(current.get("plan_id")) != str(plan["plan_id"]) or str(
+                    current.get("plan_digest")
+                ) != str(plan["plan_digest"]):
+                    raise ValueError("Browser cover-letter request no longer matches accepted plan")
+                return cover_letter
+
             def current_plan(current: dict[str, Any]) -> bool:
                 queued = self.queue.get(
                     job_id=str(job["job_id"]),
@@ -195,6 +213,7 @@ class HostedAdapterFactory:
             return HostedPlanBrowserAdapter(
                 page,
                 artifact_reader=artifact_reader,
+                cover_letter_reader=(cover_letter_reader if cover_binding is not None else None),
                 current_plan=current_plan,
                 runtime_path=_runtime_path(),
                 playwright_instance=pw,
