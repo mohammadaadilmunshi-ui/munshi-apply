@@ -225,6 +225,16 @@ class SubmitCommandClaimResult:
     error: str | None = None
 
 
+@dataclass(frozen=True)
+class SubmitCommandExecutionClaimResult:
+    claimed: bool
+    replayed: bool
+    command_id: str | None = None
+    envelope: dict[str, Any] | None = None
+    state: str | None = None
+    error: str | None = None
+
+
 class SyntheticSubmitCommandInbox:
     def __init__(self, database: Database, *, secret: str) -> None:
         if len(secret) < 32:
@@ -778,3 +788,207 @@ class SyntheticSubmitCommandInbox:
         except (UnicodeDecodeError, ValueError, sqlite3.IntegrityError) as error:
             return SubmitCommandClaimResult(False, False, error=str(error))
         return SubmitCommandClaimResult(True, False, resolved_command_id)
+
+    def claim_for_execution(
+        self,
+        command_id: str,
+        *,
+        now: int,
+    ) -> SubmitCommandExecutionClaimResult:
+        """Atomically claim Hunter authority and enter SUBMITTING.
+
+        No provider/browser action occurs here. The durable execution row and
+        application/session SUBMITTING transition commit before Phase H may
+        invoke its synthetic adapter.
+        """
+        if not _enabled():
+            return SubmitCommandExecutionClaimResult(
+                False,
+                False,
+                error="synthetic submit commands disabled",
+            )
+
+        try:
+            resolved_command_id = _text(command_id, "Synthetic submit command id")
+            with self.database.connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    "SELECT * FROM synthetic_submit_command_inbox WHERE command_id=?",
+                    (resolved_command_id,),
+                ).fetchone()
+                if row is None:
+                    return SubmitCommandExecutionClaimResult(
+                        False,
+                        False,
+                        error="synthetic submit command was not accepted",
+                    )
+
+                body = str(row["envelope_json"]).encode("utf-8")
+                envelope, digest, normalized_signature = self._parse_transport(
+                    body,
+                    body_sha256=str(row["body_sha256"]),
+                    signature=str(row["signature"]),
+                )
+                if envelope.command_id != resolved_command_id:
+                    raise ValueError("stored submit command identity is inconsistent")
+                if digest != str(row["body_sha256"]):
+                    raise ValueError("stored submit command body digest is inconsistent")
+                if not hmac.compare_digest(
+                    normalized_signature,
+                    str(row["signature"]),
+                ):
+                    raise ValueError("stored submit command signature is inconsistent")
+                self._assert_fresh(envelope, now=now)
+
+                existing_execution = connection.execute(
+                    """SELECT state FROM synthetic_submit_executions
+                       WHERE command_id=?""",
+                    (resolved_command_id,),
+                ).fetchone()
+                if existing_execution is not None:
+                    immutable_claim = connection.execute(
+                        """SELECT body_sha256 FROM synthetic_submit_command_claims
+                           WHERE command_id=?""",
+                        (resolved_command_id,),
+                    ).fetchone()
+                    if (
+                        immutable_claim is None
+                        or str(immutable_claim["body_sha256"]) != digest
+                    ):
+                        raise ValueError(
+                            "synthetic submit execution is missing its immutable claim"
+                        )
+                    return SubmitCommandExecutionClaimResult(
+                        False,
+                        True,
+                        resolved_command_id,
+                        envelope.model_dump(mode="json"),
+                        str(existing_execution["state"]),
+                        "synthetic submit execution already exists",
+                    )
+
+                prior_claim = connection.execute(
+                    """SELECT body_sha256 FROM synthetic_submit_command_claims
+                       WHERE command_id=?""",
+                    (resolved_command_id,),
+                ).fetchone()
+                if prior_claim is not None:
+                    if str(prior_claim["body_sha256"]) != digest:
+                        raise ValueError(
+                            "synthetic submit command claim conflicts with command body"
+                        )
+                    return SubmitCommandExecutionClaimResult(
+                        False,
+                        True,
+                        resolved_command_id,
+                        envelope.model_dump(mode="json"),
+                        None,
+                        "synthetic submit claim exists without execution record",
+                    )
+
+                self._validate_bindings_locked(connection, envelope)
+                started_at = datetime.now(UTC).isoformat()
+
+                connection.execute(
+                    """INSERT INTO synthetic_submit_command_claims(
+                           command_id,body_sha256,claimed_at
+                       ) VALUES (?,?,?)""",
+                    (resolved_command_id, digest, started_at),
+                )
+                connection.execute(
+                    """INSERT INTO synthetic_submit_executions(
+                           command_id,application_id,plan_id,session_id,provider,
+                           state,started_at
+                       ) VALUES (?,?,?,?,?,'SUBMITTING',?)""",
+                    (
+                        resolved_command_id,
+                        envelope.application_id,
+                        envelope.plan_id,
+                        envelope.session_id,
+                        envelope.provider,
+                        started_at,
+                    ),
+                )
+
+                session_updated = connection.execute(
+                    """UPDATE complete_application_sessions
+                       SET state='SUBMITTING',state_version=state_version+1,updated_at=?
+                       WHERE session_id=? AND application_id=? AND plan_id=?
+                         AND state='READY_TO_SUBMIT'""",
+                    (
+                        started_at,
+                        envelope.session_id,
+                        envelope.application_id,
+                        envelope.plan_id,
+                    ),
+                )
+                if session_updated.rowcount != 1:
+                    raise RuntimeError(
+                        "Execution session changed before synthetic submit claim committed"
+                    )
+
+                application_updated = connection.execute(
+                    """UPDATE applications
+                       SET status='SUBMITTING',updated_at=?
+                       WHERE application_id=? AND status='READY_TO_SUBMIT'""",
+                    (started_at, envelope.application_id),
+                )
+                if application_updated.rowcount != 1:
+                    raise RuntimeError(
+                        "Application changed before synthetic submit claim committed"
+                    )
+
+                replay_identity = f"{resolved_command_id}:synthetic-submit-start"
+                event_id = (
+                    "loop-event-"
+                    + hashlib.sha256(replay_identity.encode("utf-8")).hexdigest()[:32]
+                )
+                evidence = {
+                    "command_id": resolved_command_id,
+                    "review_id": envelope.review_id,
+                    "approval_id": envelope.approval_id,
+                    "synthetic": True,
+                    "submission_authority": True,
+                }
+                connection.execute(
+                    """INSERT INTO complete_application_execution_events(
+                           event_id,application_id,plan_id,session_id,provider,event_type,
+                           replay_identity,evidence_json,checkpoint_json,occurred_at
+                       ) VALUES (?,?,?,?,?,'SUBMITTING',?,?,NULL,?)""",
+                    (
+                        event_id,
+                        envelope.application_id,
+                        envelope.plan_id,
+                        envelope.session_id,
+                        envelope.provider,
+                        replay_identity,
+                        _canonical_json(evidence),
+                        started_at,
+                    ),
+                )
+        except PermissionError as error:
+            return SubmitCommandExecutionClaimResult(
+                False,
+                False,
+                error=str(error),
+            )
+        except (
+            UnicodeDecodeError,
+            ValueError,
+            RuntimeError,
+            sqlite3.IntegrityError,
+        ) as error:
+            return SubmitCommandExecutionClaimResult(
+                False,
+                False,
+                error=str(error),
+            )
+
+        return SubmitCommandExecutionClaimResult(
+            True,
+            False,
+            resolved_command_id,
+            envelope.model_dump(mode="json"),
+            "SUBMITTING",
+            None,
+        )
