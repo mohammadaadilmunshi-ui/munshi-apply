@@ -29,12 +29,13 @@ def test_migrations_are_idempotent(tmp_path: Path) -> None:
         "016_application_plan_supersession_requeue.sql",
         "017_synthetic_submit_command_inbox.sql",
         "018_synthetic_submit_execution.sql",
+        "019_independent_synthetic_verification_receipts.sql",
     ]
     assert database.migrate() == []
     health = database.health()
     assert health["status"] == "healthy"
-    assert health["migration_count"] == 18
-    assert health["schema_version"] == "018_synthetic_submit_execution.sql"
+    assert health["migration_count"] == 19
+    assert health["schema_version"] == "019_independent_synthetic_verification_receipts.sql"
 
 
 def test_architecture_tables_are_created_with_integrity_constraints(tmp_path: Path) -> None:
@@ -88,6 +89,8 @@ def test_architecture_tables_are_created_with_integrity_constraints(tmp_path: Pa
             "synthetic_submit_command_inbox",
             "synthetic_submit_command_claims",
             "synthetic_submit_executions",
+            "synthetic_submission_verification_attempts",
+            "synthetic_submission_receipts",
         }.issubset(tables)
 
         now = datetime.now(UTC).isoformat()
@@ -185,6 +188,7 @@ def test_job_signal_identity_migration_preserves_existing_reports(tmp_path: Path
         "016_application_plan_supersession_requeue.sql",
         "017_synthetic_submit_command_inbox.sql",
         "018_synthetic_submit_execution.sql",
+        "019_independent_synthetic_verification_receipts.sql",
     ]
     with upgraded.connect() as connection:
         report = connection.execute(
