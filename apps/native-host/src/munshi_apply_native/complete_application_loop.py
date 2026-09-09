@@ -475,7 +475,10 @@ class CompleteApplicationLoopService:
                 "requiresUser": True,
                 "groupingScope": grouping,
                 "groupKey": None if grouping == "NONE" else question_key,
-                "sourceRefs": [f"application-plan:{session['plan_id']}"],
+                "sourceRefs": [
+                    f"application-plan:{session['plan_id']}",
+                    f"sensitivity:{sensitivity}",
+                ],
                 "evidenceRefs": [],
                 "attemptedResolvers": ["CURRENT_SESSION", "APPROVED_ANSWER_MEMORY"],
                 "reason": str(

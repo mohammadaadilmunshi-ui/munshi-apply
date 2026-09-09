@@ -14,6 +14,7 @@ from .complete_application_loop import CompleteApplicationLoopService
 from .database import Database
 from .models import EventEnvelope, HealthResponse
 from .outbox import OutboxWorker, run_outbox_worker
+from .runtime_resolution_read_v1 import RuntimeResolutionReadModel
 from .settings import Settings
 
 settings = Settings.from_environment()
@@ -184,6 +185,22 @@ def get_complete_loop_preparation_job(
 ) -> dict[str, Any]:
     try:
         return DurablePreparationQueue(database).get(
+            job_id=job_id,
+            tenant_id=service.tenant_id,
+            user_id=service.user_id,
+        )
+    except (LookupError, PermissionError, RuntimeError, ValueError) as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
+
+@app.get("/v1/complete-loop/preparation-jobs/{job_id}/resolution-tasks")
+def get_complete_loop_resolution_tasks(
+    job_id: str,
+    service: CompleteApplicationLoopService = Depends(_loop_service),  # noqa: B008
+) -> dict[str, Any]:
+    """Read-only owner-scoped runtime question metadata for Hunter."""
+    try:
+        return RuntimeResolutionReadModel(database).for_prepare_job(
             job_id=job_id,
             tenant_id=service.tenant_id,
             user_id=service.user_id,
