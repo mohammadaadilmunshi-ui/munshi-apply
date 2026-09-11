@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS complete_application_trust_checkpoint_events (
         REFERENCES complete_application_trust_checkpoints(trust_checkpoint_id)
         ON DELETE RESTRICT,
     event_type TEXT NOT NULL CHECK(event_type IN (
-        'OBSERVED','SESSION_BLOCKED','CLEARED','INVALIDATED'
+        'OBSERVED','WAITING_RECORDED','CLEARED','INVALIDATED'
     )),
     evidence_json TEXT NOT NULL DEFAULT '{}',
     occurred_at TEXT NOT NULL
