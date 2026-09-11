@@ -12,7 +12,7 @@ from munshi_apply_native.hosted_trust_worker import (
 class _TrustStore:
     def __init__(self):
         self.observations = []
-        self.blocked = []
+        self.waiting = []
         self.active = None
 
     def observe(self, **kwargs):
@@ -27,8 +27,8 @@ class _TrustStore:
     def active_for_job(self, **_kwargs):
         return None if self.active is None else dict(self.active)
 
-    def block_session_for_user_auth(self, **kwargs):
-        self.blocked.append(kwargs)
+    def record_waiting_for_user_auth(self, **kwargs):
+        self.waiting.append(kwargs)
         return dict(self.active or {})
 
 
@@ -90,20 +90,24 @@ def _plan():
     return {"job": {"id": "42"}}
 
 
-def test_initial_security_checkpoint_is_persisted_without_solving_it():
+def test_initial_security_checkpoint_becomes_control_signal_before_core_block():
     trust = _TrustStore()
     wrapped = TrustAwareHostedPlanBrowserAdapter(
         _DelegateAdapter(initial_checkpoint="MFA"),
         trust_checkpoints=trust,
         job=_job(),
     )
-    observation = wrapped.inspect_job(plan=_plan())
-    assert observation["security_checkpoint"] == "MFA"
+    try:
+        wrapped.inspect_job(plan=_plan())
+    except UserAuthRequired as signal:
+        assert signal.checkpoint["checkpoint_kind"] == "MFA"
+    else:
+        raise AssertionError("Expected UserAuthRequired")
     assert len(trust.observations) == 1
     assert trust.observations[0]["checkpoint_kind"] == "MFA"
     assert "opaque=do-not-store" in trust.observations[0]["current_url"]
-    # The raw URL is handed only to TrustCheckpointStore, whose contract hashes/drops
-    # query and fragment before durable persistence.
+    # The raw URL exists only in process memory until TrustCheckpointStore hashes
+    # the path and drops query/fragment before durable persistence.
 
 
 def test_mid_form_security_checkpoint_becomes_control_signal():
@@ -141,7 +145,7 @@ def test_non_security_prepare_value_error_is_not_reclassified():
     assert trust.observations == []
 
 
-def test_service_proxy_maps_mid_form_user_auth_to_blocked_backing_state():
+def test_service_proxy_maps_user_auth_to_resumable_queue_signal():
     trust = _TrustStore()
     trust.active = {
         "trust_checkpoint_id": "trust-1",
@@ -153,8 +157,8 @@ def test_service_proxy_maps_mid_form_user_auth_to_blocked_backing_state():
         delegate, trust_checkpoints=trust, job=_job()
     )
     result = proxy.prepare_session(session_id="session-1", adapter=object())
-    assert result.state == "BLOCKED"
-    assert trust.blocked == [
+    assert result.state == "NEEDS_INPUT"
+    assert trust.waiting == [
         {
             "trust_checkpoint_id": "trust-1",
             "tenant_id": "tenant-a",
@@ -163,22 +167,12 @@ def test_service_proxy_maps_mid_form_user_auth_to_blocked_backing_state():
     ]
 
 
-def test_service_proxy_recognizes_initial_blocked_security_checkpoint():
+def test_normal_delegate_outcome_is_preserved():
     trust = _TrustStore()
-    trust.active = {
-        "trust_checkpoint_id": "trust-1",
-        "checkpoint_kind": "AUTHENTICATION",
-        "status": "WAITING_FOR_USER_AUTH",
-    }
-    delegate = _DelegateService(outcome=SimpleNamespace(state="BLOCKED"))
-
-    class Adapter:
-        def active_trust_checkpoint(self):
-            return dict(trust.active)
-
+    delegate = _DelegateService(outcome=SimpleNamespace(state="READY_FOR_REVIEW"))
     proxy = TrustAwareCompleteApplicationLoopService(
         delegate, trust_checkpoints=trust, job=_job()
     )
-    result = proxy.prepare_session(session_id="session-1", adapter=Adapter())
-    assert result.state == "BLOCKED"
-    assert len(trust.blocked) == 1
+    result = proxy.prepare_session(session_id="session-1", adapter=object())
+    assert result.state == "READY_FOR_REVIEW"
+    assert trust.waiting == []
