@@ -1,8 +1,10 @@
 """Durable, non-secret trust checkpoints for browser security boundaries.
 
-This store never persists credentials, cookies, OTP/MFA values, browser storage,
-query strings, URL fragments, or page text. It records only enough metadata to
-pause cloud execution safely and hand the job to an owner-controlled browser.
+The core execution/session lifecycle remains authoritative. This sidecar stores
+only the minimum non-secret metadata needed to release a hosted worker while a
+user completes a legitimate authentication/security step in a user-visible
+browser. Raw URLs, query strings, fragments, credentials, cookies, OTP/MFA
+values, browser storage, and page text are never persisted here.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ WAITING_FOR_USER_AUTH = "WAITING_FOR_USER_AUTH"
 TRUST_CHECKPOINT_KINDS = frozenset(
     {"AUTHENTICATION", "CAPTCHA", "MFA", "OTP", "IDENTITY_VERIFICATION"}
 )
-_BLOCKABLE_SESSION_STATES = frozenset(
+_PAUSABLE_SESSION_STATES = frozenset(
     {
         "SESSION_STARTING",
         "JOB_VERIFIED",
@@ -31,6 +33,7 @@ _BLOCKABLE_SESSION_STATES = frozenset(
         "READY_TO_SUBMIT",
     }
 )
+_WAITABLE_JOB_STATES = frozenset({"QUEUED", "RUNNING", "WAITING_INPUT"})
 
 
 def _now() -> str:
@@ -42,7 +45,7 @@ def _sha_text(value: str) -> str:
 
 
 def _safe_location(url: str) -> tuple[str, str]:
-    """Return origin + path digest; deliberately discard query and fragment."""
+    """Return origin + path digest while discarding query and fragment."""
     parsed = urlsplit(str(url or "").strip())
     if parsed.scheme.casefold() != "https" or not parsed.hostname:
         raise ValueError("Trust checkpoint URL must be HTTPS")
@@ -53,8 +56,7 @@ def _safe_location(url: str) -> tuple[str, str]:
     origin = f"https://{host}"
     if port is not None and port != 443:
         origin += f":{port}"
-    path = parsed.path or "/"
-    return origin, _sha_text(path)
+    return origin, _sha_text(parsed.path or "/")
 
 
 def _event_id() -> str:
@@ -84,9 +86,11 @@ class TrustCheckpointStore:
             "provider": str(row["provider"]),
             "checkpoint_kind": str(row["checkpoint_kind"]),
             "status": str(row["status"]),
-            "effective_state": WAITING_FOR_USER_AUTH
-            if str(row["status"]) == WAITING_FOR_USER_AUTH
-            else str(row["status"]),
+            "effective_state": (
+                WAITING_FOR_USER_AUTH
+                if str(row["status"]) == WAITING_FOR_USER_AUTH
+                else str(row["status"])
+            ),
             "origin": str(row["origin"]),
             "path_sha256": str(row["path_sha256"]),
             "page_fingerprint_sha256": str(row["page_fingerprint_sha256"]),
@@ -105,7 +109,7 @@ class TrustCheckpointStore:
         row = connection.execute(
             """SELECT
                    j.job_id,j.session_id,j.tenant_id,j.user_id,j.application_id,
-                   j.plan_id,j.provider,j.state AS job_state,
+                   j.plan_id,j.provider,j.state AS job_state,j.cancel_requested_at,
                    s.state AS session_state,s.state_version,
                    p.tenant_id AS plan_tenant_id,p.user_id AS plan_user_id
                FROM complete_application_prepare_jobs AS j
@@ -125,6 +129,27 @@ class TrustCheckpointStore:
         ):
             raise PermissionError("Preparation job owner binding is invalid")
         return result
+
+    @staticmethod
+    def _checkpoint_locked(
+        connection: Any,
+        *,
+        trust_checkpoint_id: str,
+        tenant_id: str,
+        user_id: str,
+    ) -> dict[str, Any]:
+        row = connection.execute(
+            """SELECT c.*
+               FROM complete_application_trust_checkpoints AS c
+               JOIN career_os_application_plans AS p ON p.plan_id=c.plan_id
+               WHERE c.trust_checkpoint_id=?
+                 AND c.tenant_id=? AND c.user_id=?
+                 AND p.tenant_id=c.tenant_id AND p.user_id=c.user_id""",
+            (trust_checkpoint_id, tenant_id, user_id),
+        ).fetchone()
+        if row is None:
+            raise LookupError("Trust checkpoint was not found for this owner")
+        return dict(row)
 
     @staticmethod
     def _append_event_locked(
@@ -301,11 +326,13 @@ class TrustCheckpointStore:
             tenant_id=tenant_id,
             user_id=user_id,
         )
-        result["effective_state"] = WAITING_FOR_USER_AUTH if active is not None else result["state"]
+        result["effective_state"] = (
+            WAITING_FOR_USER_AUTH if active is not None else result["state"]
+        )
         result["trust_checkpoint"] = active
         return result
 
-    def block_session_for_user_auth(
+    def record_waiting_for_user_auth(
         self,
         *,
         trust_checkpoint_id: str,
@@ -313,68 +340,139 @@ class TrustCheckpointStore:
         user_id: str,
         now: str | None = None,
     ) -> dict[str, Any]:
-        """Fail closed into BLOCKED while exposing WAITING_FOR_USER_AUTH via sidecar state."""
+        """Record a wait without mutating the authoritative session/application state.
+
+        The hosted runner will subsequently translate its local service result to
+        the existing non-claimable WAITING_INPUT queue backing state. The sidecar
+        effective state remains WAITING_FOR_USER_AUTH.
+        """
         timestamp = now or _now()
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            row = connection.execute(
-                """SELECT
-                       c.*,s.state AS session_state,s.state_version,
-                       p.tenant_id AS plan_tenant_id,p.user_id AS plan_user_id
-                   FROM complete_application_trust_checkpoints AS c
-                   JOIN complete_application_sessions AS s
-                     ON s.session_id=c.session_id
-                   JOIN career_os_application_plans AS p
-                     ON p.plan_id=c.plan_id
-                   WHERE c.trust_checkpoint_id=?
-                     AND c.tenant_id=? AND c.user_id=?
-                     AND c.status='WAITING_FOR_USER_AUTH'""",
-                (trust_checkpoint_id, tenant_id, user_id),
-            ).fetchone()
-            if row is None:
-                raise LookupError("Active trust checkpoint was not found for this owner")
-            checkpoint = dict(row)
-            if (
-                str(checkpoint["tenant_id"]) != str(checkpoint["plan_tenant_id"])
-                or str(checkpoint["user_id"]) != str(checkpoint["plan_user_id"])
-            ):
-                raise PermissionError("Trust checkpoint owner binding is invalid")
+            checkpoint = self._checkpoint_locked(
+                connection,
+                trust_checkpoint_id=trust_checkpoint_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
+            if str(checkpoint["status"]) != WAITING_FOR_USER_AUTH:
+                raise ValueError("Trust checkpoint is not active")
+            job = self._job_locked(
+                connection,
+                job_id=str(checkpoint["prepare_job_id"]),
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
+            if str(job["session_state"]) not in _PAUSABLE_SESSION_STATES:
+                raise ValueError("Execution session cannot enter user-auth wait")
+            if str(job["job_state"]) not in _WAITABLE_JOB_STATES:
+                raise ValueError("Preparation job cannot enter user-auth wait")
+            if job["cancel_requested_at"] is not None:
+                raise ValueError("Cancelled preparation cannot enter user-auth wait")
 
-            state = str(checkpoint["session_state"])
-            if state != "BLOCKED":
-                if state not in _BLOCKABLE_SESSION_STATES:
-                    raise ValueError(
-                        "Execution session cannot enter user-auth wait from this state"
-                    )
-                updated = connection.execute(
-                    """UPDATE complete_application_sessions
-                       SET state='BLOCKED',state_version=state_version+1,updated_at=?
-                       WHERE session_id=? AND state=?""",
-                    (timestamp, checkpoint["session_id"], state),
-                )
-                if updated.rowcount != 1:
-                    raise RuntimeError("Execution session changed while entering user-auth wait")
-                application_updated = connection.execute(
-                    """UPDATE applications
-                       SET status='BLOCKED',updated_at=?
-                       WHERE application_id=?""",
-                    (timestamp, checkpoint["application_id"]),
-                )
-                if application_updated.rowcount != 1:
-                    raise RuntimeError("Apply application changed while entering user-auth wait")
+            prior = connection.execute(
+                """SELECT 1 FROM complete_application_trust_checkpoint_events
+                   WHERE trust_checkpoint_id=? AND event_type='WAITING_RECORDED'
+                   LIMIT 1""",
+                (trust_checkpoint_id,),
+            ).fetchone()
+            if prior is None:
                 self._append_event_locked(
                     connection,
                     checkpoint_id=trust_checkpoint_id,
-                    event_type="SESSION_BLOCKED",
+                    event_type="WAITING_RECORDED",
                     evidence={
                         "effective_state": WAITING_FOR_USER_AUTH,
-                        "checkpoint_kind": checkpoint["checkpoint_kind"],
+                        "queue_backing_state": "WAITING_INPUT",
+                        "session_state_preserved": str(job["session_state"]),
                         "raw_url_persisted": False,
                         "browser_secrets_persisted": False,
                     },
                     occurred_at=timestamp,
                 )
+            return checkpoint
 
+    def clear_after_verified_user_auth(
+        self,
+        *,
+        trust_checkpoint_id: str,
+        tenant_id: str,
+        user_id: str,
+        current_url: str,
+        page_fingerprint: str,
+        security_checkpoint_absent: bool,
+        now: str | None = None,
+    ) -> dict[str, Any]:
+        """Clear one verified trust wait and requeue exactly its preparation job.
+
+        Callers must first re-observe the owner-controlled browser and prove the
+        security checkpoint is absent. This method persists only safe location
+        hashes and never the raw browser state or authentication material.
+        """
+        if security_checkpoint_absent is not True:
+            raise ValueError("User-auth checkpoint cannot clear while security remains active")
+        cleared_origin, cleared_path_sha256 = _safe_location(current_url)
+        cleared_fingerprint_sha256 = _sha_text(str(page_fingerprint or "unknown"))
+        timestamp = now or _now()
+
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            checkpoint = self._checkpoint_locked(
+                connection,
+                trust_checkpoint_id=trust_checkpoint_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
+            if str(checkpoint["status"]) == "CLEARED":
+                return dict(checkpoint)
+            if str(checkpoint["status"]) != WAITING_FOR_USER_AUTH:
+                raise ValueError("Only an active trust checkpoint can be cleared")
+            job = self._job_locked(
+                connection,
+                job_id=str(checkpoint["prepare_job_id"]),
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
+            if str(job["job_state"]) != "WAITING_INPUT":
+                raise ValueError("Preparation job is not parked for user authentication")
+            if job["cancel_requested_at"] is not None:
+                raise ValueError("Cancelled preparation cannot be resumed")
+            if str(job["session_state"]) not in _PAUSABLE_SESSION_STATES:
+                raise ValueError("Execution session is no longer safely resumable")
+
+            updated = connection.execute(
+                """UPDATE complete_application_trust_checkpoints
+                   SET status='CLEARED',cleared_at=?,updated_at=?
+                   WHERE trust_checkpoint_id=? AND status='WAITING_FOR_USER_AUTH'""",
+                (timestamp, timestamp, trust_checkpoint_id),
+            )
+            if updated.rowcount != 1:
+                raise RuntimeError("Trust checkpoint changed while clearing")
+            requeued = connection.execute(
+                """UPDATE complete_application_prepare_jobs
+                   SET state='QUEUED',available_at=?,last_error=NULL,
+                       finished_at=NULL,updated_at=?
+                   WHERE job_id=? AND state='WAITING_INPUT'
+                     AND cancel_requested_at IS NULL""",
+                (timestamp, timestamp, checkpoint["prepare_job_id"]),
+            )
+            if requeued.rowcount != 1:
+                raise RuntimeError("Preparation job changed while resuming user-auth wait")
+            self._append_event_locked(
+                connection,
+                checkpoint_id=trust_checkpoint_id,
+                event_type="CLEARED",
+                evidence={
+                    "security_checkpoint_absent": True,
+                    "cleared_origin": cleared_origin,
+                    "cleared_path_sha256": cleared_path_sha256,
+                    "cleared_page_fingerprint_sha256": cleared_fingerprint_sha256,
+                    "job_requeued": True,
+                    "raw_url_persisted": False,
+                    "browser_secrets_persisted": False,
+                },
+                occurred_at=timestamp,
+            )
             refreshed = connection.execute(
                 """SELECT * FROM complete_application_trust_checkpoints
                    WHERE trust_checkpoint_id=?""",
