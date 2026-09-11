@@ -3,8 +3,8 @@
 This module layers durable user-auth checkpoints over the proven hosted worker
 without changing its heartbeat, lease, retry, artifact-integrity, or browser
 lifecycle implementation. Security challenges are never solved or bypassed.
-They fail closed into the existing BLOCKED backing state while exposing the
-sidecar effective state WAITING_FOR_USER_AUTH for owner-controlled handoff.
+They release the worker into the existing non-claimable WAITING_INPUT queue
+backing state while the sidecar exposes WAITING_FOR_USER_AUTH.
 """
 
 from __future__ import annotations
@@ -76,7 +76,11 @@ class TrustAwareHostedPlanBrowserAdapter:
 
     def inspect_job(self, *, plan: dict[str, Any]) -> dict[str, Any]:
         observation = self._delegate.inspect_job(plan=plan)
-        self._observe_security(observation)
+        trust = self._observe_security(observation)
+        if trust is not None:
+            # Stop before CompleteApplicationLoopService can convert this legitimate
+            # security boundary into its generic terminal BLOCKED state.
+            raise UserAuthRequired(trust)
         return observation
 
     def prepare_form(
@@ -130,7 +134,7 @@ class TrustAwareAdapterFactory:
 
 
 class TrustAwareCompleteApplicationLoopService:
-    """Service proxy that maps mid-flow browser trust challenges to safe waiting."""
+    """Service proxy that maps browser trust challenges to a resumable queue wait."""
 
     def __init__(
         self,
@@ -148,27 +152,17 @@ class TrustAwareCompleteApplicationLoopService:
 
     def prepare_session(self, *, session_id: str, adapter: Any) -> Any:
         try:
-            result = self._delegate.prepare_session(session_id=session_id, adapter=adapter)
+            return self._delegate.prepare_session(session_id=session_id, adapter=adapter)
         except UserAuthRequired as signal:
-            self._trust_checkpoints.block_session_for_user_auth(
+            self._trust_checkpoints.record_waiting_for_user_auth(
                 trust_checkpoint_id=str(signal.checkpoint["trust_checkpoint_id"]),
                 tenant_id=str(self._job["tenant_id"]),
                 user_id=str(self._job["user_id"]),
             )
-            return SimpleNamespace(state="BLOCKED")
-
-        if str(result.state) == "BLOCKED":
-            active = adapter.active_trust_checkpoint()
-            if active is not None:
-                # Initial-page security checkpoints are transitioned to BLOCKED by
-                # the existing CompleteApplicationLoopService. This call validates
-                # owner binding and makes the sidecar/backing-state relationship explicit.
-                self._trust_checkpoints.block_session_for_user_auth(
-                    trust_checkpoint_id=str(active["trust_checkpoint_id"]),
-                    tenant_id=str(self._job["tenant_id"]),
-                    user_id=str(self._job["user_id"]),
-                )
-        return result
+            # HostedPreparationRunner already maps NEEDS_INPUT to WAITING_INPUT,
+            # releases its lease, closes the browser, and continues other jobs.
+            # The authoritative session/application state is intentionally preserved.
+            return SimpleNamespace(state="NEEDS_INPUT")
 
 
 def build_runner(database: Database, settings: Settings) -> HostedPreparationRunner:
