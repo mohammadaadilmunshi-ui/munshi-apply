@@ -34,7 +34,7 @@ packages = ["src/munshi_apply_native"]
 pythonpath = ["src"]
 testpaths = ["tests"]
 
-[tol.rufff]
+[tool.ruff]
 line-length = 100
 target-version = "py312"
 
