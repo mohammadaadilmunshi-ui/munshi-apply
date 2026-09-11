@@ -178,7 +178,7 @@ def test_wait_preserves_authoritative_session_and_application_state(trust_contex
     assert decorated["effective_state"] == WAITING_FOR_USER_AUTH
 
 
-def test_verified_clear_requeues_exact_waiting_job_without_auth_secrets(trust_context):
+def test_verified_clear_does_not_requeue_without_same_browser_proof(trust_context):
     db, _, job, queue, store = trust_context
     assert queue.claim_next(
         worker_id="worker-a",
@@ -206,36 +206,40 @@ def test_verified_clear_requeues_exact_waiting_job_without_auth_secrets(trust_co
         now="2026-09-10T20:00:04+00:00",
     )["state"] == "WAITING_INPUT"
 
-    cleared = store.clear_after_verified_user_auth(
-        trust_checkpoint_id=checkpoint["trust_checkpoint_id"],
-        tenant_id="tenant-a",
-        user_id="member-a",
-        current_url="https://boards.greenhouse.io/acme/jobs/42?session=do-not-store",
-        page_fingerprint="post-auth-page",
-        security_checkpoint_absent=True,
-        now="2026-09-10T20:00:05+00:00",
-    )
-    assert cleared["status"] == "CLEARED"
+    with pytest.raises(RuntimeError, match="same browser execution context"):
+        store.clear_after_verified_user_auth(
+            trust_checkpoint_id=checkpoint["trust_checkpoint_id"],
+            tenant_id="tenant-a",
+            user_id="member-a",
+            current_url="https://boards.greenhouse.io/acme/jobs/42?session=do-not-store",
+            page_fingerprint="post-auth-page",
+            security_checkpoint_absent=True,
+            now="2026-09-10T20:00:05+00:00",
+        )
+
     stored = queue.get(
         job_id=job["job_id"],
         tenant_id="tenant-a",
         user_id="member-a",
     )
-    assert stored["state"] == "QUEUED"
-    assert store.active_wire_for_job(
+    assert stored["state"] == "WAITING_INPUT"
+    active = store.active_wire_for_job(
         job_id=job["job_id"],
         tenant_id="tenant-a",
         user_id="member-a",
-    ) is None
+    )
+    assert active is not None
+    assert active["status"] == WAITING_FOR_USER_AUTH
 
     with db.connect() as connection:
-        payload = connection.execute(
-            """SELECT evidence_json FROM complete_application_trust_checkpoint_events
+        cleared_events = connection.execute(
+            """SELECT COUNT(*) AS count
+               FROM complete_application_trust_checkpoint_events
                WHERE trust_checkpoint_id=? AND event_type='CLEARED'""",
             (checkpoint["trust_checkpoint_id"],),
         ).fetchone()
-    assert payload is not None
-    assert "do-not-store" not in str(payload["evidence_json"])
+    assert cleared_events is not None
+    assert int(cleared_events["count"]) == 0
 
 
 def test_clear_refuses_while_security_checkpoint_is_still_present(trust_context):
