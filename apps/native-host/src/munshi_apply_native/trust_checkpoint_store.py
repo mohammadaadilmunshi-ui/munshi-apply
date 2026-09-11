@@ -403,17 +403,25 @@ class TrustCheckpointStore:
         security_checkpoint_absent: bool,
         now: str | None = None,
     ) -> dict[str, Any]:
-        """Clear one verified trust wait and requeue exactly its preparation job.
+        """Fail closed until the same browser execution context can be proven.
 
-        Callers must first re-observe the owner-controlled browser and prove the
-        security checkpoint is absent. This method persists only safe location
-        hashes and never the raw browser state or authentication material.
+        Observing that a challenge disappeared in another browser is not evidence
+        that the hosted browser which encountered the challenge is authenticated.
+        The current hosted worker destroys its browser context when it parks the
+        job, so this method must never turn WAITING_INPUT back into QUEUED.
+
+        A future browser-session service may replace this guard only when it can
+        bind clearance to the same surviving browser instance/generation and
+        revalidate the exact application before automation resumes.
         """
         if security_checkpoint_absent is not True:
             raise ValueError("User-auth checkpoint cannot clear while security remains active")
-        cleared_origin, cleared_path_sha256 = _safe_location(current_url)
-        cleared_fingerprint_sha256 = _sha_text(str(page_fingerprint or "unknown"))
-        timestamp = now or _now()
+
+        # Validate the caller supplied a safe HTTPS observation without persisting
+        # any raw URL/query/fragment or authentication material.
+        _safe_location(current_url)
+        _sha_text(str(page_fingerprint or "unknown"))
+        _ = now
 
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -423,10 +431,8 @@ class TrustCheckpointStore:
                 tenant_id=tenant_id,
                 user_id=user_id,
             )
-            if str(checkpoint["status"]) == "CLEARED":
-                return dict(checkpoint)
             if str(checkpoint["status"]) != WAITING_FOR_USER_AUTH:
-                raise ValueError("Only an active trust checkpoint can be cleared")
+                raise ValueError("Only an active trust checkpoint can be considered for resume")
             job = self._job_locked(
                 connection,
                 job_id=str(checkpoint["prepare_job_id"]),
@@ -440,43 +446,6 @@ class TrustCheckpointStore:
             if str(job["session_state"]) not in _PAUSABLE_SESSION_STATES:
                 raise ValueError("Execution session is no longer safely resumable")
 
-            updated = connection.execute(
-                """UPDATE complete_application_trust_checkpoints
-                   SET status='CLEARED',cleared_at=?,updated_at=?
-                   WHERE trust_checkpoint_id=? AND status='WAITING_FOR_USER_AUTH'""",
-                (timestamp, timestamp, trust_checkpoint_id),
+            raise RuntimeError(
+                "Trust checkpoint cannot resume without proof of the same browser execution context"
             )
-            if updated.rowcount != 1:
-                raise RuntimeError("Trust checkpoint changed while clearing")
-            requeued = connection.execute(
-                """UPDATE complete_application_prepare_jobs
-                   SET state='QUEUED',available_at=?,last_error=NULL,
-                       finished_at=NULL,updated_at=?
-                   WHERE job_id=? AND state='WAITING_INPUT'
-                     AND cancel_requested_at IS NULL""",
-                (timestamp, timestamp, checkpoint["prepare_job_id"]),
-            )
-            if requeued.rowcount != 1:
-                raise RuntimeError("Preparation job changed while resuming user-auth wait")
-            self._append_event_locked(
-                connection,
-                checkpoint_id=trust_checkpoint_id,
-                event_type="CLEARED",
-                evidence={
-                    "security_checkpoint_absent": True,
-                    "cleared_origin": cleared_origin,
-                    "cleared_path_sha256": cleared_path_sha256,
-                    "cleared_page_fingerprint_sha256": cleared_fingerprint_sha256,
-                    "job_requeued": True,
-                    "raw_url_persisted": False,
-                    "browser_secrets_persisted": False,
-                },
-                occurred_at=timestamp,
-            )
-            refreshed = connection.execute(
-                """SELECT * FROM complete_application_trust_checkpoints
-                   WHERE trust_checkpoint_id=?""",
-                (trust_checkpoint_id,),
-            ).fetchone()
-            assert refreshed is not None
-            return dict(refreshed)
