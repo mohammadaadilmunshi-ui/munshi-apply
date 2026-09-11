@@ -55,6 +55,11 @@ class _DelegateAdapter:
 
     def prepare_form(self, **_kwargs):
         if self.mid_checkpoint is not None:
+            # Model the real PlanBrowserAdapter, which has already inspected the
+            # page during preparation before it raises the security-boundary
+            # ValueError. The wrapper's follow-up inspect must therefore observe
+            # the next page state where the challenge is visible.
+            self.inspections += 1
             raise ValueError("Browser identity or security checkpoint blocks preparation")
         return {"ok": True}
 
