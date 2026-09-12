@@ -24,14 +24,80 @@ type OverlayState =
   | "RECOVERY_REQUIRED"
   | "ERROR";
 
+type ChromiumHandoffResponse = {
+  type?: string;
+  requestId?: string;
+  ok?: boolean;
+  action?: string;
+  status?: "FOCUSED" | "STILL_BLOCKED" | "RESUMED";
+  error?: string;
+};
+
 const POLL_MS = 2_000;
 const CLEARED_DISPLAY_MS = 2_500;
+const HANDOFF_TIMEOUT_MS = 6_000;
+const REQUEST_TYPE = "MUNSHI_SECURITY_HANDOFF_REQUEST";
+const RESPONSE_TYPE = "MUNSHI_SECURITY_HANDOFF_RESPONSE";
 
 function formatTime(value: string): string {
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime())
     ? "recently"
     : parsed.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+function requestChromiumHandoff(
+  action: "FOCUS" | "RECHECK",
+  challenge: SecurityChallengeCheckpoint,
+): Promise<ChromiumHandoffResponse> {
+  if (challenge.tabId === null) {
+    return Promise.reject(new Error("This checkpoint is missing its Chromium tab binding"));
+  }
+  const requestId = crypto.randomUUID();
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      window.clearTimeout(timeout);
+      window.removeEventListener("message", onMessage);
+    };
+    const onMessage = (event: MessageEvent<unknown>) => {
+      if (
+        event.source !== window ||
+        event.origin !== window.location.origin ||
+        !event.data ||
+        typeof event.data !== "object"
+      ) {
+        return;
+      }
+      const response = event.data as ChromiumHandoffResponse;
+      if (response.type !== RESPONSE_TYPE || response.requestId !== requestId) return;
+      cleanup();
+      if (!response.ok) {
+        reject(new Error(response.error || "Chromium handoff failed"));
+        return;
+      }
+      resolve(response);
+    };
+    const timeout = window.setTimeout(() => {
+      window.removeEventListener("message", onMessage);
+      reject(
+        new Error(
+          "MUNSHI Apply did not answer. Open this workspace in the Chromium profile where the MUNSHI Apply extension is installed.",
+        ),
+      );
+    }, HANDOFF_TIMEOUT_MS);
+    window.addEventListener("message", onMessage);
+    window.postMessage(
+      {
+        type: REQUEST_TYPE,
+        requestId,
+        action,
+        tabId: challenge.tabId,
+        pageId: challenge.pageId,
+        expectedOrigin: challenge.origin,
+      },
+      window.location.origin,
+    );
+  });
 }
 
 export function SecurityChallengeOverlay() {
@@ -43,6 +109,19 @@ export function SecurityChallengeOverlay() {
   const previousChallengeRef = useRef<SecurityChallengeCheckpoint | null>(null);
   const loadingRef = useRef(false);
   const clearTimerRef = useRef<number | null>(null);
+
+  const showCleared = useCallback((text: string) => {
+    setState("CLEARED");
+    setMessage(text);
+    if (clearTimerRef.current !== null) window.clearTimeout(clearTimerRef.current);
+    clearTimerRef.current = window.setTimeout(() => {
+      setChallenge(null);
+      previousChallengeRef.current = null;
+      setState("IDLE");
+      setMessage("");
+      clearTimerRef.current = null;
+    }, CLEARED_DISPLAY_MS);
+  }, []);
 
   const refresh = useCallback(async (manual = false) => {
     if (loadingRef.current) return;
@@ -75,16 +154,7 @@ export function SecurityChallengeOverlay() {
 
       if (!next) {
         if (previous) {
-          setState("CLEARED");
-          setMessage("Chromium reported that the security checkpoint is cleared. MUNSHI can continue safely.");
-          if (clearTimerRef.current !== null) {
-            window.clearTimeout(clearTimerRef.current);
-          }
-          clearTimerRef.current = window.setTimeout(() => {
-            setState("IDLE");
-            setMessage("");
-            clearTimerRef.current = null;
-          }, CLEARED_DISPLAY_MS);
+          showCleared("Chromium reported that the security checkpoint is cleared. MUNSHI can continue safely.");
         } else {
           setState("IDLE");
           setMessage("");
@@ -110,7 +180,7 @@ export function SecurityChallengeOverlay() {
         setMessage("Chromium still reports the security checkpoint. Complete it in the application tab, then check again.");
       } else if (!sameCheckpoint) {
         setState("DETECTED");
-        setMessage("MUNSHI paused before the protected step and saved the application checkpoint.");
+        setMessage("MUNSHI paused before the protected step and saved the exact Chromium application checkpoint.");
       }
     } catch (error) {
       if (previousChallengeRef.current) {
@@ -120,7 +190,7 @@ export function SecurityChallengeOverlay() {
     } finally {
       loadingRef.current = false;
     }
-  }, []);
+  }, [showCleared]);
 
   useEffect(() => {
     const kickoff = window.setTimeout(() => void refresh(false), 0);
@@ -128,24 +198,44 @@ export function SecurityChallengeOverlay() {
     return () => {
       window.clearTimeout(kickoff);
       window.clearInterval(timer);
-      if (clearTimerRef.current !== null) {
-        window.clearTimeout(clearTimerRef.current);
-      }
+      if (clearTimerRef.current !== null) window.clearTimeout(clearTimerRef.current);
     };
   }, [refresh]);
 
   if (!challenge && state !== "CLEARED") return null;
 
-  const openChromium = () => {
+  const openChromium = async () => {
     if (!challenge) return;
-    const opened = window.open(challenge.url, "_blank", "noopener,noreferrer");
-    if (!opened) {
+    setState("CHECKING");
+    try {
+      await requestChromiumHandoff("FOCUS", challenge);
+      setState("OPENED");
+      setMessage("MUNSHI focused the exact paused Chromium application tab. Complete only the verification there, then return here. Your application state stays in the original tab.");
+    } catch (error) {
       setState("RECOVERY_REQUIRED");
-      setMessage("Your browser blocked the verification tab. Allow pop-ups for MUNSHI and try again, or open the application from the Chromium device running MUNSHI Apply.");
-      return;
+      setMessage(error instanceof Error ? error.message : "The exact Chromium application tab could not be focused.");
     }
-    setState("OPENED");
-    setMessage("Verification page opened. Complete only the security check there. MUNSHI is watching for an independently verified clearance.");
+  };
+
+  const recheckChromium = async () => {
+    if (!challenge) return;
+    setState("CHECKING");
+    setMessage("Re-scanning the exact Chromium application session…");
+    try {
+      const response = await requestChromiumHandoff("RECHECK", challenge);
+      if (response.status === "STILL_BLOCKED") {
+        setState("STILL_BLOCKED");
+        setMessage("Chromium still detects the security checkpoint. Complete it in the focused application tab, then check again.");
+        return;
+      }
+      if (response.status !== "RESUMED") {
+        throw new Error("Chromium returned an unexpected verification state");
+      }
+      showCleared("Chromium independently re-scanned the application, confirmed the security checkpoint is gone, and resumed the existing MUNSHI AutoPilot session.");
+    } catch (error) {
+      setState("RECOVERY_REQUIRED");
+      setMessage(error instanceof Error ? error.message : "Chromium could not safely resume this application.");
+    }
   };
 
   const isCleared = state === "CLEARED";
@@ -165,7 +255,7 @@ export function SecurityChallengeOverlay() {
               {isCleared ? "Verification cleared" : "Action required"}
             </p>
             <h2 id="security-checkpoint-title" className="text-2xl font-semibold tracking-tight">
-              {isCleared ? "MUNSHI can continue" : "Security verification required"}
+              {isCleared ? "Application resumed" : "Security verification required"}
             </h2>
           </div>
           <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-neutral-300">
@@ -194,25 +284,26 @@ export function SecurityChallengeOverlay() {
           <div className="mt-6 grid gap-3 sm:grid-cols-2">
             <button
               type="button"
-              onClick={openChromium}
-              className="min-h-12 rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-black transition hover:bg-neutral-200"
+              onClick={() => void openChromium()}
+              disabled={state === "CHECKING"}
+              className="min-h-12 rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-black transition hover:bg-neutral-200 disabled:cursor-wait disabled:opacity-50"
             >
               Continue in Chromium
             </button>
             <button
               type="button"
-              onClick={() => void refresh(true)}
+              onClick={() => void recheckChromium()}
               disabled={state === "CHECKING"}
               className="min-h-12 rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/10 disabled:cursor-wait disabled:opacity-50"
             >
-              {state === "CHECKING" ? "Checking Chromium…" : "I completed verification · Check again"}
+              {state === "CHECKING" ? "Checking Chromium…" : "I completed verification · Resume"}
             </button>
           </div>
         ) : null}
 
         {!isCleared ? (
           <p className="mt-5 text-xs leading-5 text-neutral-500">
-            This button never marks a challenge solved by itself. MUNSHI continues only after the application runtime reports that the same security checkpoint is no longer present. Passwords, verification codes, cookies, and challenge answers are not copied into this popup.
+            MUNSHI never treats this button as proof by itself. The extension re-scans the exact saved Chromium tab, verifies that the checkpoint is gone, and only then resumes the paused AutoPilot session. Passwords, verification codes, cookies, and challenge answers are never copied into this popup.
           </p>
         ) : null}
       </section>
