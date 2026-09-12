@@ -14,7 +14,7 @@ const shared = {
 await Promise.all([
   build({
     ...shared,
-    entryPoints: ["src/background/service-worker.ts"],
+    entryPoints: ["src/background/entry.ts"],
     format: "esm",
     outfile: "dist/background/service-worker.js",
   }),
