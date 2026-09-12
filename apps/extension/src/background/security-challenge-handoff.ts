@@ -53,31 +53,45 @@ async function validatedRuntime(request: HandoffRequest): Promise<{
   const tab = await chrome.tabs.get(request.tabId);
   const tabOrigin = safeOrigin(tab.url);
   if (!tab.url || tabOrigin !== request.expectedOrigin) {
-    throw new Error("The saved Chromium tab no longer matches this application site");
+    throw new Error(
+      "The saved Chromium tab no longer matches this application site",
+    );
   }
 
   const stored = await chrome.storage.session.get(AUTO_PILOT_RUNTIME_STORAGE_KEY);
-  const runtime = stored[AUTO_PILOT_RUNTIME_STORAGE_KEY] as RuntimeShape | undefined;
+  const runtime = stored[AUTO_PILOT_RUNTIME_STORAGE_KEY] as
+    | RuntimeShape
+    | undefined;
   if (!runtime || runtime.tabId !== request.tabId) {
-    throw new Error("The saved AutoPilot session no longer owns this Chromium tab");
+    throw new Error(
+      "The saved AutoPilot session no longer owns this Chromium tab",
+    );
   }
   if (runtime.session?.status !== "PAUSED_SECURITY") {
-    throw new Error("The AutoPilot session is not paused at a security checkpoint");
+    throw new Error(
+      "The AutoPilot session is not paused at a security checkpoint",
+    );
   }
   if (
     typeof runtime.session.lastPageId === "string" &&
     runtime.session.lastPageId !== request.pageId
   ) {
-    throw new Error("The application page changed after the security checkpoint was created");
+    throw new Error(
+      "The application page changed after the security checkpoint was created",
+    );
   }
   if (!runtime.preflight || !Array.isArray(runtime.fillInstructions)) {
-    throw new Error("The paused AutoPilot session is missing its guarded resume plan");
+    throw new Error(
+      "The paused AutoPilot session is missing its guarded resume plan",
+    );
   }
   return { runtime, tab };
 }
 
 async function focusTab(tab: chrome.tabs.Tab): Promise<void> {
-  if (tab.id === undefined) throw new Error("Chromium application tab is unavailable");
+  if (tab.id === undefined) {
+    throw new Error("Chromium application tab is unavailable");
+  }
   if (tab.windowId !== undefined) {
     await chrome.windows.update(tab.windowId, { focused: true });
   }
