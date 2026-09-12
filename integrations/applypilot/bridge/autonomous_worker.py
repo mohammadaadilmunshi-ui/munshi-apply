@@ -25,13 +25,32 @@ import subprocess  # noqa: S404
 import sys
 import tempfile
 import time
+import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 RESULT_PREFIX = "MUNSHI_RESULT_JSON:"
 DEFAULT_CDP_PORT = 9322
+ALLOWED_AGENT_STATUSES = {
+    "COMPLETED",
+    "NEEDS_INPUT",
+    "BLOCKED",
+    "FAILED_SAFELY",
+}
+ALLOWED_NEEDS_INPUT = {
+    "ANSWER_REQUIRED",
+    "SENSITIVE_ANSWER_REQUIRED",
+    "CAPTCHA",
+    "MFA",
+    "OTP",
+    "IDENTITY_VERIFICATION",
+    "AUTHENTICATION",
+    "UNSUPPORTED_CONTROL",
+    "POLICY_BLOCK",
+}
 
 
 class WorkerError(RuntimeError):
@@ -55,6 +74,10 @@ class BrowserProcess:
     port: int
 
 
+def _utc_now() -> str:
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
 def _load_json(path: Path) -> dict[str, Any]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -73,7 +96,10 @@ def _runtime_root() -> Path:
         return Path.home() / "Library" / "Application Support" / "MUNSHI Apply"
     if platform.system() == "Windows":
         return Path(os.getenv("LOCALAPPDATA", Path.home())) / "MUNSHI Apply"
-    return Path(os.getenv("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "munshi-apply"
+    return (
+        Path(os.getenv("XDG_STATE_HOME", Path.home() / ".local" / "state"))
+        / "munshi-apply"
+    )
 
 
 def _load_settings() -> WorkerSettings:
@@ -85,7 +111,9 @@ def _load_settings() -> WorkerSettings:
         model=str(payload.get("model", "sonnet")).strip() or "sonnet",
         headless=bool(payload.get("headless", False)),
         max_turns=max(1, min(200, int(payload.get("maxTurns", 40)))),
-        max_cost_usd=max(0.0, float(payload.get("maxCostPerApplicationUsd", 1.0))),
+        max_cost_usd=max(
+            0.0, float(payload.get("maxCostPerApplicationUsd", 1.0))
+        ),
         allow_final_submit=bool(payload.get("allowFinalSubmit", False)),
         auth_mode=str(payload.get("authMode", "subscription")),
     )
@@ -122,7 +150,9 @@ def _worker_environment(settings: WorkerSettings) -> dict[str, str]:
             "ANTHROPIC_API_KEY", "systems.munshi.apply.autonomous.anthropic"
         ) or env.get("ANTHROPIC_API_KEY")
         if not key:
-            raise WorkerError("Anthropic API authentication is selected but no API key is configured")
+            raise WorkerError(
+                "Anthropic API authentication is selected but no API key is configured"
+            )
         env["ANTHROPIC_API_KEY"] = key
     return env
 
@@ -155,7 +185,10 @@ def _validate_request(request: dict[str, Any]) -> None:
     context = request.get("execution_context")
     if not isinstance(context, dict):
         raise WorkerError("Execution context is missing")
-    if context.get("environment") == "production" and os.getenv("MUNSHI_ALLOW_PRODUCTION_AUTONOMOUS") != "1":
+    if (
+        context.get("environment") == "production"
+        and os.getenv("MUNSHI_ALLOW_PRODUCTION_AUTONOMOUS") != "1"
+    ):
         raise WorkerError("Production autonomous execution is not enabled on this host")
 
     if context.get("synthetic") is not True:
@@ -165,10 +198,14 @@ def _validate_request(request: dict[str, Any]) -> None:
         resume = artifacts.get("resume")
         if not isinstance(resume, dict):
             raise WorkerError("Execution request is missing resume artifact")
-        _validate_sha256(Path(str(resume.get("path", ""))), str(resume.get("sha256", "")))
+        _validate_sha256(
+            Path(str(resume.get("path", ""))), str(resume.get("sha256", ""))
+        )
         cover = artifacts.get("cover_letter")
         if isinstance(cover, dict):
-            _validate_sha256(Path(str(cover.get("path", ""))), str(cover.get("sha256", "")))
+            _validate_sha256(
+                Path(str(cover.get("path", ""))), str(cover.get("sha256", ""))
+            )
 
 
 def _chrome_path() -> str:
@@ -331,15 +368,14 @@ Fill forms using the supplied approved facts, upload the supplied resume and cov
 
 <result_format>
 At the end, output exactly one line beginning with {RESULT_PREFIX} followed by a compact JSON object containing:
-status: one of READY_FOR_REVIEW, SUBMIT_ATTEMPTED, NEEDS_INPUT, BLOCKED, FAILED_SAFELY;
+status: one of COMPLETED, NEEDS_INPUT, BLOCKED, FAILED_SAFELY;
+claimed_submission: boolean;
 reason: short string or null;
-checkpoint_type: string or null;
+needs_input_kind: one of ANSWER_REQUIRED, SENSITIVE_ANSWER_REQUIRED, CAPTCHA, MFA, OTP, IDENTITY_VERIFICATION, AUTHENTICATION, UNSUPPORTED_CONTROL, POLICY_BLOCK, or null;
 final_url: current browser URL or null;
 provider_application_id: string or null if visibly available;
-submission_observations: an array of short factual observations;
-filled_fields: integer;
-uploaded_resume: boolean;
-uploaded_cover_letter: boolean.
+submission_observation: object or null with method, target, http_status, provider_application_id, completion_marker, response_marker;
+observations: array of short factual observations.
 Do not put secrets, cookies, tokens, passwords, or full sensitive answers in that JSON.
 </result_format>
 """
@@ -399,56 +435,155 @@ def _parse_agent_output(lines: list[str]) -> tuple[dict[str, Any], dict[str, Any
     return result, usage
 
 
+def _safe_submission_observation(value: object) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    allowed = {
+        "method",
+        "target",
+        "http_status",
+        "provider_application_id",
+        "completion_marker",
+        "response_marker",
+    }
+    return {key: value.get(key) for key in allowed}
+
+
+def _execution_events(
+    *,
+    run_id: str,
+    result: dict[str, Any],
+    claimed_submission: bool,
+) -> list[dict[str, Any]]:
+    status = str(result.get("status", "FAILED_SAFELY"))
+    reason = result.get("reason")
+    return [
+        {
+            "sequence": 1,
+            "kind": "WORKER_REQUEST_ACCEPTED",
+            "timestamp": _utc_now(),
+            "verified": True,
+            "control_id": None,
+            "question_key": None,
+            "artifact_sha256": None,
+            "detail": f"Autonomous worker {run_id} accepted the governed MUNSHI request.",
+        },
+        {
+            "sequence": 2,
+            "kind": "AGENT_EXECUTION_COMPLETE",
+            "timestamp": _utc_now(),
+            "verified": not claimed_submission,
+            "control_id": None,
+            "question_key": None,
+            "artifact_sha256": None,
+            "detail": str(reason or status),
+        },
+    ]
+
+
 def _envelope(
     request: dict[str, Any],
     result: dict[str, Any],
     usage: dict[str, Any],
     started: float,
 ) -> dict[str, Any]:
+    run_id = f"autonomous-{uuid.uuid4()}"
     status = str(result.get("status", "FAILED_SAFELY"))
-    allowed = {
-        "READY_FOR_REVIEW",
-        "SUBMIT_ATTEMPTED",
-        "NEEDS_INPUT",
-        "BLOCKED",
-        "FAILED_SAFELY",
-    }
-    if status not in allowed:
+    if status not in ALLOWED_AGENT_STATUSES:
         status = "FAILED_SAFELY"
+    claimed_submission = result.get("claimed_submission") is True
+    needs_input: list[dict[str, Any]] = []
+    if status == "NEEDS_INPUT":
+        kind = str(result.get("needs_input_kind") or "ANSWER_REQUIRED")
+        if kind not in ALLOWED_NEEDS_INPUT:
+            kind = "ANSWER_REQUIRED"
+        needs_input.append(
+            {
+                "kind": kind,
+                "message": str(result.get("reason") or "Owner input is required"),
+                "question_key": None,
+            }
+        )
+    observation = _safe_submission_observation(result.get("submission_observation"))
+    provider_application_id = result.get("provider_application_id")
+    if provider_application_id is None and observation is not None:
+        provider_application_id = observation.get("provider_application_id")
+    wall_seconds = max(0.0, time.time() - started)
     return {
         "schema_version": "1.0",
-        "plan_id": request.get("plan_id"),
-        "plan_digest": request.get("plan_digest"),
+        "worker_run_id": run_id,
+        "plan_id": request["plan_id"],
+        "plan_digest": request["plan_digest"],
         "status": status,
-        "reason": result.get("reason"),
-        "needs_input": (
-            {
-                "type": result.get("checkpoint_type") or "UNKNOWN",
-                "message": result.get("reason") or "Owner input is required",
-            }
-            if status == "NEEDS_INPUT"
-            else None
+        "final_url": result.get("final_url") or request["job"]["url"],
+        "provider": request["job"].get("provider"),
+        "provider_application_id": provider_application_id,
+        "claimed_submission": claimed_submission,
+        "needs_input": needs_input,
+        "events": _execution_events(
+            run_id=run_id,
+            result=result,
+            claimed_submission=claimed_submission,
         ),
-        "claimed_submission": status == "SUBMIT_ATTEMPTED",
-        "provider_application_id": result.get("provider_application_id"),
-        "final_url": result.get("final_url"),
-        "observations": result.get("submission_observations", []),
-        "execution": {
-            "filled_fields": int(result.get("filled_fields", 0) or 0),
-            "uploaded_resume": result.get("uploaded_resume") is True,
-            "uploaded_cover_letter": result.get("uploaded_cover_letter") is True,
-            "duration_ms": int((time.time() - started) * 1000),
-        },
+        "submission_observation": observation,
         "cost": {
-            "agent_usd": usage.get("cost_usd", 0.0),
-            "estimated_total_usd": usage.get("cost_usd", 0.0),
-            "agent_steps": usage.get("turns", 0),
-            "input_tokens": usage.get("input_tokens", 0),
-            "output_tokens": usage.get("output_tokens", 0),
-            "cache_read_tokens": usage.get("cache_read_tokens", 0),
-            "cache_create_tokens": usage.get("cache_create_tokens", 0),
+            "estimated_total_usd": float(usage.get("cost_usd", 0.0) or 0.0),
+            "agent_usd": float(usage.get("cost_usd", 0.0) or 0.0),
+            "captcha_usd": 0.0,
+            "input_tokens": int(usage.get("input_tokens", 0) or 0),
+            "output_tokens": int(usage.get("output_tokens", 0) or 0),
+            "agent_steps": int(usage.get("turns", 0) or 0),
+            "wall_seconds": wall_seconds,
         },
-        "verification_required": status == "SUBMIT_ATTEMPTED",
+    }
+
+
+def _synthetic_result(request: dict[str, Any], started: float) -> dict[str, Any]:
+    run_id = f"autonomous-{uuid.uuid4()}"
+    elapsed = max(0.0, time.time() - started)
+    return {
+        "schema_version": "1.0",
+        "worker_run_id": run_id,
+        "plan_id": request["plan_id"],
+        "plan_digest": request["plan_digest"],
+        "status": "COMPLETED",
+        "final_url": request["job"]["url"],
+        "provider": request["job"].get("provider"),
+        "provider_application_id": None,
+        "claimed_submission": False,
+        "needs_input": [],
+        "events": [
+            {
+                "sequence": 1,
+                "kind": "WORKER_REQUEST_ACCEPTED",
+                "timestamp": _utc_now(),
+                "verified": True,
+                "control_id": None,
+                "question_key": None,
+                "artifact_sha256": None,
+                "detail": "Synthetic request validated by apply-only autonomous worker.",
+            },
+            {
+                "sequence": 2,
+                "kind": "SYNTHETIC_EXECUTION_COMPLETE",
+                "timestamp": _utc_now(),
+                "verified": True,
+                "control_id": None,
+                "question_key": None,
+                "artifact_sha256": None,
+                "detail": "Browser execution intentionally skipped; no external side effect occurred.",
+            },
+        ],
+        "submission_observation": None,
+        "cost": {
+            "estimated_total_usd": 0.0,
+            "agent_usd": 0.0,
+            "captcha_usd": 0.0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "agent_steps": 0,
+            "wall_seconds": elapsed,
+        },
     }
 
 
@@ -490,42 +625,21 @@ def execute(request_path: Path, *, dry_run: bool, port: int) -> dict[str, Any]:
     )
     budget = request.get("budget") if isinstance(request.get("budget"), dict) else {}
     requested_cost = float(budget.get("max_ai_cost_usd", settings.max_cost_usd))
-    max_cost = min(settings.max_cost_usd, requested_cost) if requested_cost >= 0 else settings.max_cost_usd
+    max_cost = (
+        min(settings.max_cost_usd, requested_cost)
+        if requested_cost >= 0
+        else settings.max_cost_usd
+    )
     max_turns = min(
         settings.max_turns,
         int(budget.get("max_agent_steps", settings.max_turns)),
     )
     max_wall_seconds = int(budget.get("max_wall_seconds", 300))
 
-    if context.get("synthetic") is True and not os.getenv("MUNSHI_RUN_SYNTHETIC_BROWSER"):
-        return {
-            "schema_version": "1.0",
-            "plan_id": request.get("plan_id"),
-            "plan_digest": request.get("plan_digest"),
-            "status": "READY_FOR_REVIEW",
-            "reason": "synthetic request validated; browser execution intentionally skipped",
-            "needs_input": None,
-            "claimed_submission": False,
-            "provider_application_id": None,
-            "final_url": request["job"]["url"],
-            "observations": [],
-            "execution": {
-                "filled_fields": 0,
-                "uploaded_resume": False,
-                "uploaded_cover_letter": False,
-                "duration_ms": int((time.time() - started) * 1000),
-            },
-            "cost": {
-                "agent_usd": 0.0,
-                "estimated_total_usd": 0.0,
-                "agent_steps": 0,
-                "input_tokens": 0,
-                "output_tokens": 0,
-                "cache_read_tokens": 0,
-                "cache_create_tokens": 0,
-            },
-            "verification_required": False,
-        }
+    if context.get("synthetic") is True and not os.getenv(
+        "MUNSHI_RUN_SYNTHETIC_BROWSER"
+    ):
+        return _synthetic_result(request, started)
 
     if not shutil.which("claude"):
         raise WorkerError("Claude Code CLI is not installed")
@@ -577,12 +691,14 @@ def execute(request_path: Path, *, dry_run: bool, port: int) -> dict[str, Any]:
                 stdout, _ = process.communicate(prompt, timeout=max_wall_seconds)
             except subprocess.TimeoutExpired as error:
                 _kill_process_tree(process)
-                raise WorkerError("Autonomous browser execution exceeded wall-time budget") from error
+                raise WorkerError(
+                    "Autonomous browser execution exceeded wall-time budget"
+                ) from error
             lines = stdout.splitlines()
             result, usage = _parse_agent_output(lines)
             if usage.get("cost_usd", 0.0) > max_cost + 1e-9:
                 raise WorkerError("Autonomous browser execution exceeded AI cost budget")
-            if result.get("status") == "SUBMIT_ATTEMPTED" and not allow_submit:
+            if result.get("claimed_submission") is True and not allow_submit:
                 raise WorkerError("Agent reported final submission without submit authority")
             return _envelope(request, result, usage, started)
     finally:
@@ -590,7 +706,9 @@ def execute(request_path: Path, *, dry_run: bool, port: int) -> dict[str, Any]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="MUNSHI apply-only autonomous browser worker")
+    parser = argparse.ArgumentParser(
+        description="MUNSHI apply-only autonomous browser worker"
+    )
     parser.add_argument("request", nargs="?", type=Path)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--diagnose", action="store_true")
