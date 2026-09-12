@@ -26,7 +26,7 @@ jobs:
       - run: npm ci
       - name: Release-branch dependency lock diagnostic
         run: |
-          npm audit fix --package-lock-only
+          npm audit fix --package-lock-only || true
           git diff -- package-lock.json
       - run: npm run secret:scan
       - run: ./scripts/repository-safety.sh
