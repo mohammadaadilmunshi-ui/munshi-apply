@@ -12,6 +12,10 @@ from .ai_governance import AIGovernanceService
 from .ai_settings import AIConfiguration, AISettingsStore
 from .application_analytics_store import ApplicationAnalyticsStore
 from .application_store import ApplicationStore
+from .autonomous_apply_credentials import (
+    AutonomousApplyConfiguration,
+    AutonomousApplyCredentialStore,
+)
 from .checkpoint_store import ApplicationCheckpointStore
 from .database import Database
 from .document_ingestion import DocumentIngestionService
@@ -44,6 +48,7 @@ NATIVE_CAPABILITIES: dict[str, bool] = {
     "job_signal_identity_binding": True,
     "application_analytics": True,
     "resolution_tasks": True,
+    "autonomous_apply_credentials": True,
 }
 
 
@@ -270,6 +275,43 @@ def handle(
         if message_type == "FINISH_DOCUMENT_INGESTION":
             return {"ok": True, "data": ingestion.finish(message.get("payload"))}
         return {"ok": True, "data": ingestion.cancel(message.get("payload"))}
+
+    if message_type in {
+        "GET_AUTONOMOUS_APPLY_SETTINGS",
+        "SAVE_AUTONOMOUS_APPLY_SETTINGS",
+        "SET_ANTHROPIC_API_KEY",
+        "DELETE_ANTHROPIC_API_KEY",
+        "SET_CAPSOLVER_API_KEY",
+        "DELETE_CAPSOLVER_API_KEY",
+        "GET_AUTONOMOUS_APPLY_RUNTIME",
+    }:
+        if ai_store is None:
+            return {"ok": False, "error": "AI settings store is unavailable"}
+        autonomous_store = AutonomousApplyCredentialStore(ai_store.runtime_root)
+        if message_type == "GET_AUTONOMOUS_APPLY_SETTINGS":
+            return {"ok": True, "data": autonomous_store.status()}
+        if message_type == "SAVE_AUTONOMOUS_APPLY_SETTINGS":
+            config = AutonomousApplyConfiguration.from_payload(message.get("payload"))
+            autonomous_store.save(config)
+            return {"ok": True, "data": autonomous_store.status()}
+        if message_type in {"SET_ANTHROPIC_API_KEY", "SET_CAPSOLVER_API_KEY"}:
+            payload = message.get("payload")
+            if not isinstance(payload, dict):
+                raise ValueError("Credential payload must be an object")
+            secret_name = (
+                "anthropic"
+                if message_type == "SET_ANTHROPIC_API_KEY"
+                else "capsolver"
+            )
+            autonomous_store.set_secret(secret_name, payload.get("apiKey"))
+            return {"ok": True, "data": autonomous_store.status()}
+        if message_type == "DELETE_ANTHROPIC_API_KEY":
+            autonomous_store.delete_secret("anthropic")
+            return {"ok": True, "data": autonomous_store.status()}
+        if message_type == "DELETE_CAPSOLVER_API_KEY":
+            autonomous_store.delete_secret("capsolver")
+            return {"ok": True, "data": autonomous_store.status()}
+        return {"ok": True, "data": autonomous_store.runtime_status()}
 
     if message_type in {
         "GET_AI_SETTINGS",
