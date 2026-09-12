@@ -33,7 +33,7 @@ ApplyPilot's autonomous apply stage uses Claude Code as the reasoning agent and 
 
 ## Credentials
 
-The MUNSHI Apply **AI & Credentials Control Center** now has a separate Apply-only credential section.
+The MUNSHI Apply **Diagnostics → AI & Credentials Control Center** now has a separate Apply-only credential section.
 
 Required for autonomous apply:
 
@@ -57,57 +57,25 @@ Playwright and the browser do not require API keys.
 
 ## Authority and truth boundary
 
-MUNSHI remains authoritative for:
-
-- candidate facts and protected facts;
-- work authorization and sponsorship answers;
-- approved Answer Vault values;
-- selected résumé/cover-letter artifacts and their SHA-256 digests;
-- the exact job identity and URL;
-- navigation/fill/upload/final-submit permissions;
-- AI cost and turn budgets;
-- lifecycle state;
-- final submission verification;
-- receipt and CRM state.
+MUNSHI remains authoritative for candidate facts, work-authorization and sponsorship answers, approved Answer Vault values, selected artifacts and their SHA-256 digests, job identity, execution permissions, AI cost/turn budgets, lifecycle state, final verification, and receipt/CRM state.
 
 The browser agent receives only the application package MUNSHI authorizes. It may not invent candidate facts or silently change protected answers.
 
-Final submission requires **both**:
-
-1. `permissions.final_submit=true` in the immutable MUNSHI execution request; and
-2. `allowFinalSubmit=true` in the local Autonomous Apply settings.
-
-If either authority is absent, the agent must stop before the irreversible submit action.
+Final submission requires **both** `permissions.final_submit=true` in the immutable MUNSHI execution request and `allowFinalSubmit=true` in local Autonomous Apply settings. If either authority is absent, the agent must stop before the irreversible submit action.
 
 ## Security checkpoints
 
-The first implementation does not bypass security controls. It stops with `NEEDS_INPUT` for:
-
-- CAPTCHA / reCAPTCHA / hCaptcha / Turnstile / FunCaptcha;
-- MFA;
-- OTP;
-- SSO approval;
-- identity verification;
-- bot/security challenge pages;
-- new consequential questions without an approved MUNSHI answer.
-
-This keeps the new hands-free browser layer separate from authentication/security policy while we validate reliability.
+The first implementation does not bypass security controls. It stops with `NEEDS_INPUT` for CAPTCHA/reCAPTCHA/hCaptcha/Turnstile/FunCaptcha, MFA, OTP, SSO approval, identity verification, bot/security challenge pages, or new consequential questions without an approved MUNSHI answer.
 
 ## Local bootstrap
 
-The upstream checkout is optional and is used only for source comparison/diagnostics:
+The upstream checkout is optional and used only for source comparison/diagnostics:
 
 ```bash
 bash integrations/applypilot/bootstrap-upstream.sh
 ```
 
-It creates:
-
-```text
-integrations/applypilot/upstream/
-```
-
-That directory is ignored by Git.
+It creates the ignored path `integrations/applypilot/upstream/`.
 
 ## Apply-only worker
 
@@ -124,18 +92,11 @@ python3 integrations/applypilot/bridge/autonomous_worker.py \
   integrations/applypilot/fixtures/synthetic-request.json
 ```
 
-A real browser run remains gated while this branch is experimental. The worker is designed to consume the same MUNSHI application-execution request rather than an ApplyPilot SQLite job row.
+A real browser run remains gated while this branch is experimental. The worker consumes the MUNSHI application-execution request rather than an ApplyPilot SQLite job row.
 
 ## Cost controls
 
-The worker uses both a turn ceiling and a per-application dollar ceiling. The dashboard exposes:
-
-- browser-agent model;
-- max turns per application;
-- max AI cost per application;
-- headless mode;
-- final-submit authority;
-- Claude authentication mode.
+The worker uses a turn ceiling and a per-application dollar ceiling. The settings surface exposes browser-agent model, max turns, max AI cost, headless mode, final-submit authority, and Claude authentication mode.
 
 The target architecture keeps deterministic MUNSHI controls and learned recipes first, using the paid autonomous agent for long-tail sites/widgets rather than paying for every field on every application.
 
