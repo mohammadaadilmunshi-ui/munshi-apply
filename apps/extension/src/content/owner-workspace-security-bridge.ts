@@ -1,3 +1,5 @@
+export {};
+
 const REQUEST_TYPE = "MUNSHI_SECURITY_HANDOFF_REQUEST";
 const RESPONSE_TYPE = "MUNSHI_SECURITY_HANDOFF_RESPONSE";
 const PORT_NAME = "munshi-security-handoff";
@@ -120,7 +122,8 @@ async function finishRecheck(
   }
   const status =
     resumeResponse.data && typeof resumeResponse.data === "object"
-      ? (resumeResponse.data as { session?: { status?: unknown } }).session?.status
+      ? (resumeResponse.data as { session?: { status?: unknown } }).session
+          ?.status
       : undefined;
   postSafeResponse(request.requestId, {
     ok: true,
