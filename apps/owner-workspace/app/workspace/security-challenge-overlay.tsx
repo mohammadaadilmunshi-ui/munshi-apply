@@ -42,6 +42,7 @@ export function SecurityChallengeOverlay() {
   const entitiesRef = useRef(new Map<string, DecryptedEntity>());
   const previousChallengeRef = useRef<SecurityChallengeCheckpoint | null>(null);
   const loadingRef = useRef(false);
+  const clearTimerRef = useRef<number | null>(null);
 
   const refresh = useCallback(async (manual = false) => {
     if (loadingRef.current) return;
@@ -76,15 +77,24 @@ export function SecurityChallengeOverlay() {
         if (previous) {
           setState("CLEARED");
           setMessage("Chromium reported that the security checkpoint is cleared. MUNSHI can continue safely.");
-          window.setTimeout(() => {
+          if (clearTimerRef.current !== null) {
+            window.clearTimeout(clearTimerRef.current);
+          }
+          clearTimerRef.current = window.setTimeout(() => {
             setState("IDLE");
             setMessage("");
+            clearTimerRef.current = null;
           }, CLEARED_DISPLAY_MS);
         } else {
           setState("IDLE");
           setMessage("");
         }
         return;
+      }
+
+      if (clearTimerRef.current !== null) {
+        window.clearTimeout(clearTimerRef.current);
+        clearTimerRef.current = null;
       }
 
       if (Date.parse(next.expiresAt) <= Date.now()) {
@@ -98,25 +108,32 @@ export function SecurityChallengeOverlay() {
       if (manual && sameCheckpoint) {
         setState("STILL_BLOCKED");
         setMessage("Chromium still reports the security checkpoint. Complete it in the application tab, then check again.");
-      } else if (!sameCheckpoint || state === "IDLE" || state === "CLEARED") {
+      } else if (!sameCheckpoint) {
         setState("DETECTED");
         setMessage("MUNSHI paused before the protected step and saved the application checkpoint.");
       }
     } catch (error) {
-      setState("ERROR");
-      setMessage(error instanceof Error ? error.message : "Security checkpoint status could not be refreshed.");
+      if (previousChallengeRef.current) {
+        setState("ERROR");
+        setMessage(error instanceof Error ? error.message : "Security checkpoint status could not be refreshed.");
+      }
     } finally {
       loadingRef.current = false;
     }
-  }, [state]);
+  }, []);
 
   useEffect(() => {
     void refresh(false);
     const timer = window.setInterval(() => void refresh(false), POLL_MS);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearInterval(timer);
+      if (clearTimerRef.current !== null) {
+        window.clearTimeout(clearTimerRef.current);
+      }
+    };
   }, [refresh]);
 
-  if (!challenge && state !== "CLEARED" && state !== "ERROR") return null;
+  if (!challenge && state !== "CLEARED") return null;
 
   const openChromium = () => {
     if (!challenge) return;
