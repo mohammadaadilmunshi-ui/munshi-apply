@@ -66,9 +66,12 @@ function checkpointFromEntity(
 ): SecurityChallengeCheckpoint | null {
   if (entity.event.entityType !== "APPLICATION.V1") return null;
   const payload = record(entity.value);
-  const page = record(payload?.page);
-  if (!payload || !page) return null;
+  if (!payload) return null;
 
+  // APPLICATION.V1 stores the canonical ApplicationPage directly. Accept a
+  // nested `page` only for older/experimental payloads so the UI can recover
+  // safely across rolling upgrades.
+  const page = record(payload.page) ?? payload;
   const kind = challengeKind(page.securityCheckpoint);
   const url = safeChallengeUrl(page.url ?? payload.url);
   const pageId = text(page.pageId ?? payload.pageId);
@@ -84,15 +87,7 @@ function checkpointFromEntity(
   if (detectedMs > nowMs + 60_000) return null;
   if (nowMs - detectedMs > CHECKPOINT_TTL_MS) return null;
 
-  const origin = (() => {
-    try {
-      return new URL(url).origin;
-    } catch {
-      return "";
-    }
-  })();
-  if (!origin) return null;
-
+  const origin = new URL(url).origin;
   return {
     entityId: entity.event.entityId,
     sequence: entity.event.sequence,
@@ -109,10 +104,10 @@ function checkpointFromEntity(
 }
 
 /**
- * Selects the newest *current* encrypted APPLICATION.V1 snapshot that reports a
- * security checkpoint. decryptLatestEntities() has already collapsed history by
- * entity id, so a newer snapshot that cleared a checkpoint supersedes an older
- * blocked snapshot for that page/application.
+ * Selects the newest current encrypted APPLICATION.V1 snapshot that reports a
+ * security checkpoint. decryptLatestEntities() already collapses history by
+ * entity id. A newer revision of the same page with securityCheckpoint=null
+ * therefore clears that checkpoint instead of leaving a stale popup behind.
  */
 export function deriveSecurityChallenge(
   entities: Map<string, DecryptedEntity>,
