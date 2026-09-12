@@ -29,7 +29,7 @@ class AutonomousApplyConfiguration:
     challenge_service_enabled: bool = False
 
     @classmethod
-    def from_payload(cls, payload: object) -> "AutonomousApplyConfiguration":
+    def from_payload(cls, payload: object) -> AutonomousApplyConfiguration:
         if not isinstance(payload, dict):
             raise ValueError("Autonomous apply settings payload must be an object")
         auth_mode = str(payload.get("authMode", "subscription")).strip().lower()
