@@ -17,7 +17,7 @@ All required source/predeploy workflows passed on that head:
 - Owner workspace ✅
 - Staging candidate ✅
 
-The first frozen staging-candidate artifact was produced from source SHA `959693f7c29f79d7e3dea203263b8a689b03e2de`; the only subsequent source change before `d3264bd6c1e1f76d8904dd533b36facc7e3e8eda` was this release-status documentation. That artifact is therefore behaviorally identical to the validated implementation code.
+The first frozen staging-candidate artifact was produced from source SHA `959693f7c29f79d7e3dea203263b8a689b03e2de`; the only subsequent source changes before the documented release checkpoint were release-status documentation. That artifact is therefore behaviorally identical to the validated implementation code.
 
 The Staging candidate workflow additionally proves, without mutating staging or production:
 
@@ -52,12 +52,12 @@ MUNSHI Apply is currently in **build-only mode**. Source changes are committed a
 - **Hybrid evidence retrieval — Implemented in 0.2.5.** Retrieval combines semantic intent, query overlap, trust, evidence kind, job/candidate evidence needs, source diversity, duplicate suppression, and contradiction avoidance. Job-response planning expands retrieval beyond literal question words.
 - **Deterministic pre-flight — Advanced.** Central `READY` / `REVIEW` / `UNRESOLVED` / `BLOCKED` resolution, contradiction checks, explicit employer-rule extraction, current-page knockout checks, salary review, and current-page review scoping are implemented.
 - **Account orchestration — Implemented foundation.** Generic login/create/recovery/verification classification, portal-scoped account metadata, duplicate-account detection, Workday tenant separation, application linkage, native lookup/upsert, and AutoPilot owner handoff are implemented. Authentication secrets remain outside the account registry.
-- **Phase 13 Job Signal Intelligence — Source complete.** All twelve Architecture 2.0 dimensions are deterministic and preserve missing information as unknown. Every scored dimension carries exact evidence, a posting/observed-flow source, direction, and a nontechnical explanation. Reports are bound to durable application, stable job, canonical source, and source-fingerprint identities; mismatched job/application identities fail closed, while same-job reports survive navigation and native restart. An overall concern score is withheld until at least three dimensions are evidenced. Work-authorization risk requires explicit employer policy wording; a generic sponsorship question is not treated as a no-sponsorship rule. Final submission remains a separate owner boundary, not an opportunity concern. Saved reports emit private `JOB_SIGNALS_ANALYZED` ledger context with an explicit association-not-causation warning.
+- **Phase 13 Job Signal Intelligence — Source complete.** All twelve Architecture 2.0 dimensions are deterministic and preserve missing information as unknown. Every scored dimension carries exact evidence, a posting/observed-flow source, direction, and a nontechnical explanation. Reports are bound to durable application, stable job, canonical source, and source-fingerprint identities; mismatched job/application identities fail closed, while same-job reports survive navigation and native restart. An overall concern score is withheld until at least three dimensions are evidenced. Work-authorization risk requires explicit employer policy wording; a generic sponsorship question is not treated as a no-sponsorship rule. Final submission remains a separate execution authority decision, not an opportunity concern. Saved reports emit private `JOB_SIGNALS_ANALYZED` ledger context with an explicit association-not-causation warning.
 - **Universal Autofill — Advanced.** Text, textarea, contenteditable, native/custom select, radio, checkbox, switch, date/month/time/date-like controls, native/ARIA multi-selects, popup components, all-frame scanning, stale-control rebinding, verification, rollback, and learned-recipe fallback exist.
 - **Employer file controls — Owner-controlled verified handoff.** The browser/OS file-selection boundary is not bypassed.
-- **Multi-Page AutoPilot — Advanced.** Persistent Observe → Plan → Act → Verify → Rescan runtime, checkpoint-first navigation, durable pause/resume, optional-review progress, recoverable fill/navigation failures, timeout recovery, final-review boundary, account/security boundaries, explicit current-page knockout blocking, and interruption-safe state are implemented. Broad real-site crash/recovery validation remains a release activity.
+- **Multi-Page AutoPilot — Advanced.** Persistent Observe → Plan → Act → Verify → Rescan runtime, checkpoint-first navigation, durable pause/resume, optional-review progress, recoverable fill/navigation failures, timeout recovery, final-review/permission boundary, account/security boundaries, explicit current-page knockout blocking, and interruption-safe state are implemented. Broad real-site crash/recovery validation remains a release activity.
 - **Teach-MUNSHI — Strengthened in 0.2.5.** User demonstration, value-free action recipes, SHADOW testing, verified promotion, versioning, fallback, and rollback are live. Capture records scoped event classes/timing plus redacted before/after state and quality evidence. Unrelated page clicks cannot create a reusable recipe, and demonstrated answer text is not persisted in the capture.
-- **Interaction escalation — Advanced foundation.** Promoted recipe, native control, ARIA, keyboard, structural popup, state-transition, SHADOW recipe, and controlled visual-assisted fallback are ordered behind reversible-action, sensitivity, security, reachability, and final-submit gates.
+- **Interaction escalation — Advanced foundation.** Promoted recipe, native control, ARIA, keyboard, structural popup, state-transition, SHADOW recipe, and controlled visual-assisted fallback are ordered behind reversible-action, sensitivity, security, reachability, and submit-authority gates.
 - **Progressive learning — Advanced foundation.** Site, Question, Failure, Success, User Correction, and Global Pattern memories; verified-outcome confidence; aging; versioning; conflict review; sensitive/global reuse restrictions; and durable memory observations are implemented.
 - **Provider-agnostic intelligence — Implemented foundation expanded in 0.2.5.** OpenAI Responses and local Ollama adapters share structured claim/evidence output. AI settings support `auto`, `openai`, and `ollama`, cheap/strong model lanes, local fallback, owner evidence permissions, and paid-provider budget policy.
 - **AI budget/pricing — Implemented.** Paid-provider generation requires explicit pricing and budget permission. Reservations account for concurrent requests; ambiguous provider failures consume a conservative estimated reservation rather than silently undercounting possible spend. Local Ollama usage records zero provider API cost.
@@ -71,13 +71,13 @@ MUNSHI Apply is currently in **build-only mode**. Source changes are committed a
 - **Analytics/experiments — Foundation implemented.** Application outcomes, attribution tokens, deterministic assignments, variants, and minimum-sample statistical-honesty gates exist. Production exports/UI and portfolio-event ingestion remain future work.
 - **Native companion — Advanced.** SQLite, migrations, Native Messaging protocol v3, transactional outbox, backups, Keychain operations, profile/evidence/checkpoint/usage persistence, chunked document ingestion, provider routing, AI draft lifecycle, writing-style learning, interaction/progressive learning, account metadata, and analytics persistence are covered by native/migration CI.
 - **n8n — Signed bridge foundation only.** Production orchestration workflows remain future work.
-- **Final submission and security checkpoints — Manual boundaries.** MUNSHI does not automatically submit an employer application and does not solve/bypass CAPTCHA, MFA, OTP, identity verification, authentication, password entry, credential storage, or operating-system security controls.
+- **Submission authority and security checkpoints — Guarded.** Final submission is permitted only when the Application Plan and configured local execution authority allow it and MUNSHI's verification/preflight gates pass. CAPTCHA, MFA, OTP, identity verification, authentication, password entry, credential actions, and operating-system security controls remain owner-assisted checkpoints; MUNSHI saves and verifies the browser checkpoint before resuming.
 
 ## Completed coupled tranche — Interaction Escalation + Progressive Learning
 
 - Deterministic escalation ladder from promoted interaction recipes through native/ARIA/keyboard/structural/state-transition techniques to guarded visual-assisted fallback.
 - Visual-assisted fallback remains reversible, non-sensitive, and post-action verified.
-- Authentication, security checkpoints, unreachable frames, and final employer submission remain hard boundaries.
+- Authentication/security checkpoints remain pause boundaries; final submission remains governed by explicit execution authority and verification gates.
 - Component fingerprint v2 includes Shadow DOM/frame depth, portals, virtualization, popup ownership, framework hints, multi-select/contenteditable behavior, with legacy fallback.
 - Site, Question, Failure, Success, User Correction, and Global Pattern memory.
 - Confidence changes from verified outcomes; owner corrections supersede prior interpretations.
@@ -96,7 +96,7 @@ MUNSHI Apply is currently in **build-only mode**. Source changes are committed a
 - The extension AutoPilot Control Center reads known account metadata and shows the current account boundary, portal scope, duplicate risk, and required owner action.
 - After the owner completes a login/create/verification step, the extension can record account metadata and the application link for future reuse.
 - Passwords, credentials, secrets, tokens, passcodes, and OTPs are not columns in the account registry, are rejected if sent to the account store, and are not autonomous AutoPilot actions. Embedded URL credentials are rejected.
-- MFA, OTP, identity verification, account recovery, password entry, authentication, and final submission remain explicit owner boundaries.
+- MFA, OTP, identity verification, account recovery, password entry, and authentication remain explicit owner-assisted security boundaries.
 
 ### Employer-specific pre-flight intelligence
 
@@ -142,7 +142,7 @@ The canonical source is intentionally ahead of the owner-installed Edge/native/h
 
 Do not treat source/CI completion as physical release acceptance. Real ATS/provider smoke testing, broad endurance testing, account-flow physical testing, owner recovery, accessibility/performance/privacy review, backup/restore drills, and consolidated physical release testing remain later gates.
 
-Final employer submission, CAPTCHA/MFA/OTP/identity/authentication/security checkpoints, password/credential actions, and operating-system file selection remain owner actions.
+CAPTCHA/MFA/OTP/identity/authentication/security checkpoints, password/credential actions, and operating-system security controls remain owner-assisted boundaries. Final submission remains independently governed by Application Plan authority, local permission, and MUNSHI verification gates.
 
 ## iPhone boundary
 
