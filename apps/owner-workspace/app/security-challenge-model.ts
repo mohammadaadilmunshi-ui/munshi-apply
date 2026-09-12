@@ -12,6 +12,7 @@ export type SecurityChallengeCheckpoint = {
   entityId: string;
   sequence: number;
   pageId: string;
+  tabId: number | null;
   applicationId: string | null;
   jobId: string | null;
   title: string;
@@ -23,6 +24,7 @@ export type SecurityChallengeCheckpoint = {
 };
 
 const CHECKPOINT_TTL_MS = 30 * 60 * 1000;
+const SECURITY_ENTITY_TYPE = "SECURITY.CHALLENGE.V1";
 
 function record(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -32,6 +34,12 @@ function record(value: unknown): Record<string, unknown> | null {
 
 function text(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function integer(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : null;
 }
 
 function challengeKind(value: unknown): SecurityChallengeKind | null {
@@ -64,13 +72,17 @@ function checkpointFromEntity(
   entity: DecryptedEntity,
   nowMs: number,
 ): SecurityChallengeCheckpoint | null {
-  if (entity.event.entityType !== "APPLICATION.V1") return null;
+  if (
+    entity.event.entityType !== SECURITY_ENTITY_TYPE &&
+    entity.event.entityType !== "APPLICATION.V1"
+  ) {
+    return null;
+  }
   const payload = record(entity.value);
   if (!payload) return null;
 
-  // APPLICATION.V1 stores the canonical ApplicationPage directly. Accept a
-  // nested `page` only for older/experimental payloads so the UI can recover
-  // safely across rolling upgrades.
+  // SECURITY.CHALLENGE.V1 stores a deliberately minimal transition record.
+  // APPLICATION.V1 is accepted as a rolling-upgrade fallback only.
   const page = record(payload.page) ?? payload;
   const kind = challengeKind(page.securityCheckpoint);
   const url = safeChallengeUrl(page.url ?? payload.url);
@@ -87,16 +99,16 @@ function checkpointFromEntity(
   if (detectedMs > nowMs + 60_000) return null;
   if (nowMs - detectedMs > CHECKPOINT_TTL_MS) return null;
 
-  const origin = new URL(url).origin;
   return {
     entityId: entity.event.entityId,
     sequence: entity.event.sequence,
     pageId,
+    tabId: integer(page.tabId ?? payload.tabId),
     applicationId: text(payload.applicationId),
     jobId: text(payload.jobId),
     title: text(page.title ?? payload.title) ?? "Job application",
     url,
-    origin,
+    origin: new URL(url).origin,
     kind,
     detectedAt: new Date(detectedMs).toISOString(),
     expiresAt: new Date(detectedMs + CHECKPOINT_TTL_MS).toISOString(),
@@ -104,25 +116,37 @@ function checkpointFromEntity(
 }
 
 /**
- * Selects the newest current encrypted APPLICATION.V1 snapshot that reports a
- * security checkpoint. decryptLatestEntities() already collapses history by
- * entity id. A newer revision of the same page with securityCheckpoint=null
- * therefore clears that checkpoint instead of leaving a stale popup behind.
+ * SECURITY.CHALLENGE.V1 is transition based: the extension publishes both the
+ * blocked state and the later null/cleared state under the same page entity id.
+ * decryptLatestEntities() collapses those revisions, preventing an old CAPTCHA
+ * snapshot from keeping the website blocked after Chromium has cleared it.
  */
 export function deriveSecurityChallenge(
   entities: Map<string, DecryptedEntity>,
   now = new Date(),
 ): SecurityChallengeCheckpoint | null {
   const nowMs = now.getTime();
-  const candidates = Array.from(entities.values())
-    .map((entity) => checkpointFromEntity(entity, nowMs))
-    .filter((value): value is SecurityChallengeCheckpoint => value !== null)
-    .sort(
-      (left, right) =>
-        right.sequence - left.sequence ||
-        right.detectedAt.localeCompare(left.detectedAt),
-    );
-  return candidates[0] ?? null;
+  const securityEntities = Array.from(entities.values()).filter(
+    (entity) => entity.event.entityType === SECURITY_ENTITY_TYPE,
+  );
+  const securityPageIds = new Set(
+    securityEntities.map((entity) => entity.event.entityId),
+  );
+  const fallbackApplications = Array.from(entities.values()).filter(
+    (entity) =>
+      entity.event.entityType === "APPLICATION.V1" &&
+      !securityPageIds.has(entity.event.entityId),
+  );
+  return (
+    [...securityEntities, ...fallbackApplications]
+      .map((entity) => checkpointFromEntity(entity, nowMs))
+      .filter((value): value is SecurityChallengeCheckpoint => value !== null)
+      .sort(
+        (left, right) =>
+          right.sequence - left.sequence ||
+          right.detectedAt.localeCompare(left.detectedAt),
+      )[0] ?? null
+  );
 }
 
 export function challengeLabel(kind: SecurityChallengeKind): string {
