@@ -44,7 +44,10 @@ function isWorkspaceRequest(value: unknown): value is WorkspaceRequest {
   );
 }
 
-function postSafeResponse(requestId: string, payload: Record<string, unknown>): void {
+function postSafeResponse(
+  requestId: string,
+  payload: Record<string, unknown>,
+): void {
   window.postMessage(
     {
       type: RESPONSE_TYPE,
@@ -66,8 +69,14 @@ async function finishRecheck(
   const pageResponse = (await chrome.runtime.sendMessage({
     type: "GET_ACTIVE_PAGE",
   })) as { ok?: boolean; data?: unknown; error?: string } | undefined;
-  if (!pageResponse?.ok || !pageResponse.data || typeof pageResponse.data !== "object") {
-    throw new Error(pageResponse?.error || "Chromium could not re-scan the application");
+  if (
+    !pageResponse?.ok ||
+    !pageResponse.data ||
+    typeof pageResponse.data !== "object"
+  ) {
+    throw new Error(
+      pageResponse?.error || "Chromium could not re-scan the application",
+    );
   }
   const page = pageResponse.data as {
     pageId?: unknown;
@@ -76,7 +85,9 @@ async function finishRecheck(
     securityCheckpoint?: unknown;
   };
   if (page.pageId !== request.pageId || page.tabId !== request.tabId) {
-    throw new Error("The active Chromium application changed during verification");
+    throw new Error(
+      "The active Chromium application changed during verification",
+    );
   }
   let activeOrigin = "";
   try {
@@ -85,7 +96,9 @@ async function finishRecheck(
     throw new Error("The active Chromium application URL is invalid");
   }
   if (activeOrigin !== request.expectedOrigin) {
-    throw new Error("The active Chromium application no longer matches the saved checkpoint");
+    throw new Error(
+      "The active Chromium application no longer matches the saved checkpoint",
+    );
   }
   if (page.securityCheckpoint) {
     postSafeResponse(request.requestId, {
@@ -101,7 +114,9 @@ async function finishRecheck(
     payload: response.resumePayload,
   })) as { ok?: boolean; data?: unknown; error?: string } | undefined;
   if (!resumeResponse?.ok) {
-    throw new Error(resumeResponse?.error || "MUNSHI could not resume the application");
+    throw new Error(
+      resumeResponse?.error || "MUNSHI could not resume the application",
+    );
   }
   const status =
     resumeResponse.data && typeof resumeResponse.data === "object"
@@ -161,7 +176,8 @@ function handleWorkspaceRequest(request: WorkspaceRequest): void {
       .catch((error) => {
         postSafeResponse(request.requestId, {
           ok: false,
-          error: error instanceof Error ? error.message : "Chromium re-check failed",
+          error:
+            error instanceof Error ? error.message : "Chromium re-check failed",
         });
       })
       .finally(finish);
@@ -172,7 +188,9 @@ function handleWorkspaceRequest(request: WorkspaceRequest): void {
     window.clearTimeout(timeout);
     postSafeResponse(request.requestId, {
       ok: false,
-      error: chrome.runtime.lastError?.message || "Chromium verification bridge disconnected",
+      error:
+        chrome.runtime.lastError?.message ||
+        "Chromium verification bridge disconnected",
     });
     settled = true;
   });
