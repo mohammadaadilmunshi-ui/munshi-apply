@@ -18,16 +18,6 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: Release-branch Prettier diagnostic
-        run: |
-          npx prettier --write \
-            apps/extension/src/background/security-challenge-handoff.ts \
-            apps/extension/src/content/owner-workspace-security-bridge.ts \
-            apps/extension/src/sidepanel/AutonomousApplyCredentials.tsx
-          git diff -- \
-            apps/extension/src/background/security-challenge-handoff.ts \
-            apps/extension/src/content/owner-workspace-security-bridge.ts \
-            apps/extension/src/sidepanel/AutonomousApplyCredentials.tsx
       - run: npm run check
       - uses: actions/upload-artifact@v7
         with:
