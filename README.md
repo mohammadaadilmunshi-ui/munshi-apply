@@ -29,6 +29,8 @@ Version `0.2.0` adds the first end-to-end encrypted, cross-device workflow to th
 
 This milestone fills only explicitly approved, supported controls. File-picker selection, CAPTCHA, MFA, OTP, identity verification, and final submission remain deliberate manual checkpoints. Unsupported custom widgets remain manual.
 
+An experimental apply-only autonomous browser executor is being developed on an isolated feature branch under `integrations/applypilot/`. It consumes MUNSHI-prepared application plans and uses Claude Code plus Playwright MCP for long-tail browser execution. It does not replace Hunter discovery, opportunity scoring, Candidate Truth, résumé generation, cover-letter generation, or MUNSHI's independent submission verification. The experimental executor is not enabled in staging or production from this branch.
+
 Connecting an AI provider does not enable generated application answers in this release. Evidence retrieval, contradiction checks, usage metering, budget enforcement, and generated-response validation remain M6 gates.
 
 ## Repository map
@@ -84,13 +86,13 @@ To connect the local companion, copy the unpacked extension ID shown on `edge://
 
 The macOS runtime defaults to `~/Library/Application Support/MUNSHI Apply/`; no private database, résumé, evidence, backup, diagnostic, or secret belongs in this repository.
 
-The owner-only mobile workspace source is tracked in `apps/owner-workspace` and has an independent lint/build/test workflow. Its deployment provenance and release procedure are documented in `docs/OWNER_WORKSPACE.md`.
+The owner-only mobile workspace source is tracked in `apps/owner-workspace` and has an independent lint/build/test workflow. Its deployment provenance and release procedure are documented in [Hidden Edge Add-ons release](docs/EDGE_ADDONS_HIDDEN_RELEASE.md).
 
 ## Configuration
 
 No API key is required for the deterministic profile, review, sync, scanner, or guarded-fill workflow. OpenAI remains optional.
 
-When the updated native companion is installed on macOS, **Diagnostics → AI & API control center** can store an OpenAI API key in macOS Keychain, remove it, test the connection, discover models visible to that key, and save local model/budget controls. The key is not stored in GitHub, browser storage, synchronized profile data, or cloud workspace records.
+When the updated native companion is installed on macOS, **Diagnostics → AI & Credentials Control Center** can store the existing OpenAI credential plus separate apply-only autonomous-executor credentials in macOS Keychain. The apply-only executor supports Claude Code subscription authentication without storing an Anthropic API key, or an Anthropic API key when API billing is preferred. An optional challenge-service credential can be stored separately, but automatic challenge handling remains disabled by default in the experimental worker. Secrets are not stored in GitHub, browser storage, synchronized profile data, or cloud workspace records.
 
 See [Configuration](docs/CONFIGURATION.md) before adding any secret.
 
