@@ -26,8 +26,10 @@ const defaults: AutonomousApplySettings = {
 };
 
 export function AutonomousApplyCredentials() {
-  const [settings, setSettings] = useState<AutonomousApplySettings>(defaults);
-  const [runtime, setRuntime] = useState<AutonomousApplyRuntimeStatus | null>(null);
+  const [settings, setSettings] =
+    useState<AutonomousApplySettings>(defaults);
+  const [runtime, setRuntime] =
+    useState<AutonomousApplyRuntimeStatus | null>(null);
   const [anthropicKey, setAnthropicKey] = useState("");
   const [capSolverKey, setCapSolverKey] = useState("");
   const [busy, setBusy] = useState(false);
@@ -103,7 +105,9 @@ export function AutonomousApplyCredentials() {
       setSettings(saved);
       setCapSolverKey("");
       await refresh();
-      setMessage("Optional challenge-service credential stored in macOS Keychain.");
+      setMessage(
+        "Optional challenge-service credential stored in macOS Keychain.",
+      );
     });
   }
 
@@ -116,6 +120,17 @@ export function AutonomousApplyCredentials() {
     });
   }
 
+  const anthropicStatus =
+    settings.authMode === "subscription"
+      ? "Not required in subscription mode. Authenticate Claude Code on this Mac once."
+      : settings.anthropicKeyConfigured
+        ? `Saved: •••••••• · ${settings.anthropicKeySource}`
+        : "No Anthropic API key configured.";
+
+  const capSolverStatus = settings.capSolverKeyConfigured
+    ? `•••••••• · ${settings.capSolverKeySource}`
+    : "none";
+
   return (
     <div className="repeatable-profile">
       <div className="repeatable-intro">
@@ -124,7 +139,7 @@ export function AutonomousApplyCredentials() {
         <p>
           These credentials are only for the browser application executor. Job
           discovery, scoring, résumé generation, and cover letters continue to
-          use MUNSHI's existing pipeline.
+          use MUNSHI&apos;s existing pipeline.
         </p>
       </div>
 
@@ -142,6 +157,7 @@ export function AutonomousApplyCredentials() {
           />
           Enable autonomous browser executor
         </label>
+
         <label>
           <span>Claude Code authentication</span>
           <select
@@ -160,6 +176,7 @@ export function AutonomousApplyCredentials() {
             <option value="api">Anthropic API key · usage billed by API</option>
           </select>
         </label>
+
         <label>
           <span>Browser-agent model</span>
           <input
@@ -174,6 +191,7 @@ export function AutonomousApplyCredentials() {
             }
           />
         </label>
+
         <label>
           <span>Maximum agent turns per application</span>
           <input
@@ -190,6 +208,7 @@ export function AutonomousApplyCredentials() {
             }
           />
         </label>
+
         <label>
           <span>Maximum AI cost per application (USD)</span>
           <input
@@ -206,6 +225,7 @@ export function AutonomousApplyCredentials() {
             }
           />
         </label>
+
         <label className="answer-approval">
           <input
             type="checkbox"
@@ -219,6 +239,7 @@ export function AutonomousApplyCredentials() {
           />
           Run browser headless when supported
         </label>
+
         <label className="answer-approval">
           <input
             type="checkbox"
@@ -236,13 +257,7 @@ export function AutonomousApplyCredentials() {
 
       <h3>Anthropic API credential</h3>
       <div className="cloud-pairing">
-        <p>
-          {settings.authMode === "subscription"
-            ? "Not required in subscription mode. Authenticate Claude Code on this Mac once."
-            : settings.anthropicKeyConfigured
-              ? `Saved: •••••••• · ${settings.anthropicKeySource}`
-              : "No Anthropic API key configured."}
-        </p>
+        <p>{anthropicStatus}</p>
         <label>
           <span>
             {settings.anthropicKeyConfigured
@@ -286,12 +301,7 @@ export function AutonomousApplyCredentials() {
           disabled by default and security checkpoints remain visible to the
           owner.
         </p>
-        <p>
-          Saved credential:{" "}
-          {settings.capSolverKeyConfigured
-            ? `•••••••• · ${settings.capSolverKeySource}`
-            : "none"}
-        </p>
+        <p>Saved credential: {capSolverStatus}</p>
         <label>
           <span>CapSolver API key · optional</span>
           <input
@@ -335,10 +345,12 @@ export function AutonomousApplyCredentials() {
           {runtime?.claudeCliPath ? ` · ${runtime.claudeCliPath}` : ""}
         </span>
         <span>
-          Playwright launcher: {runtime?.playwrightLauncherInstalled ? "available" : "missing"}
+          Playwright launcher:{" "}
+          {runtime?.playwrightLauncherInstalled ? "available" : "missing"}
         </span>
         <span>
-          Authentication: {runtime?.credentialReady ? "configured" : "needs setup"}
+          Authentication:{" "}
+          {runtime?.credentialReady ? "configured" : "needs setup"}
         </span>
       </div>
 
