@@ -1,0 +1,57 @@
+name: Hunter Plan Semantic Bridge
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hunter-plan-semantic-bridge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install native host
+        run: python -m pip install -e './apps/native-host[dev]'
+
+      - name: Compile bridge and adapter
+        run: |
+          python -m py_compile \
+            apps/native-host/src/munshi_apply_native/hunter_plan_semantic_bridge.py \
+            apps/native-host/src/munshi_apply_native/plan_browser_adapter.py
+
+      - name: Lint bridge-owned files
+        run: |
+          python -m ruff check \
+            apps/native-host/src/munshi_apply_native/hunter_plan_semantic_bridge.py \
+            apps/native-host/src/munshi_apply_native/plan_browser_adapter.py \
+            apps/native-host/tests/test_hunter_plan_semantic_bridge.py
+
+      - name: Run semantic bridge tests
+        run: |
+          python -m pytest -q \
+            apps/native-host/tests/test_hunter_plan_semantic_bridge.py
+
+      - name: Guard authority boundaries
+        run: |
+          set -euo pipefail
+          grep -F 'answer_matches_question(a, question, control)' \
+            apps/native-host/src/munshi_apply_native/plan_browser_adapter.py
+          grep -F 'PROTECTED_SEMANTIC_TYPES' \
+            apps/native-host/src/munshi_apply_native/hunter_plan_semantic_bridge.py
+          grep -F 'Hunter plan is stale' \
+            apps/native-host/src/munshi_apply_native/plan_browser_adapter.py
+          grep -F 'question["sensitive"]' \
+            apps/native-host/src/munshi_apply_native/plan_browser_adapter.py
+          grep -F 'validate_submit_observation' \
+            apps/native-host/src/munshi_apply_native/plan_browser_adapter.py
