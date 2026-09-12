@@ -2,6 +2,35 @@
 
 Baseline date: 2026-08-17. Current build candidate: `0.2.5`.
 
+## AutoApply staging-candidate checkpoint — 2026-09-12
+
+The apply-only autonomous execution tranche has reached **source/predeploy release-candidate** status. This is not yet a claim of physical staging or production acceptance.
+
+Validated release-candidate SHA before this documentation-only commit: `959693f7c29f79d7e3dea203263b8a689b03e2de`.
+
+All required source/predeploy workflows passed on that SHA:
+
+- CI ✅
+- Browser tests ✅
+- Security ✅
+- Migration tests ✅
+- Owner workspace ✅
+- Staging candidate ✅
+
+The Staging candidate workflow additionally proves, without mutating staging or production:
+
+- complete application-loop and guarded-submission invariants
+- Application Plan V2 handoff behavior
+- synthetic submission verification, execution, and command-inbox behavior
+- extension build and artifact verification
+- reproducible release packaging and SHA-256 checksums
+- install dry-run
+- rollback dry-run
+
+Release-candidate artifact: `staging-candidate-959693f7c29f79d7e3dea203263b8a689b03e2de`.
+
+Remaining release gates are physical acceptance gates: deploy one frozen candidate to staging, run the deployed end-to-end application loop including security-challenge pause/resume and restart/recovery, verify rollback against the staging runtime, then perform a controlled production canary before broader production rollout.
+
 ## Operating mode
 
 MUNSHI Apply is currently in **build-only mode**. Source changes are committed and verified in CI, but the owner-side Edge extension, native companion, and hosted workspace are not redeployed after every tranche. A consolidated deployment and physical acceptance cycle will happen after the planned architecture build is complete.
