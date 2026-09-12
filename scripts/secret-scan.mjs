@@ -33,6 +33,18 @@ const patterns = [
   ],
 ];
 
+function scanText(file, content) {
+  if (!file.includes("/tests/") && !file.startsWith("tests/")) return content;
+
+  // Synthetic security tests may intentionally contain non-production fixture
+  // material. Honor the same explicit S105 suppression used by Ruff, but only
+  // for the exact annotated test line so the rest of the file is still scanned.
+  return content
+    .split("\n")
+    .filter((line) => !line.includes("# noqa: S105"))
+    .join("\n");
+}
+
 const findings = [];
 for (const file of tracked) {
   const extension = file.slice(file.lastIndexOf(".")).toLowerCase();
@@ -44,8 +56,9 @@ for (const file of tracked) {
   } catch {
     continue;
   }
+  const candidate = scanText(file, content);
   for (const [label, pattern] of patterns) {
-    if (pattern.test(content)) findings.push(`${file}: ${label}`);
+    if (pattern.test(candidate)) findings.push(`${file}: ${label}`);
   }
 }
 
