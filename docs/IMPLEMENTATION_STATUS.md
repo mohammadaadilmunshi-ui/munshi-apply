@@ -6,9 +6,9 @@ Baseline date: 2026-08-17. Current build candidate: `0.2.5`.
 
 The apply-only autonomous execution tranche has reached **source/predeploy release-candidate** status. This is not yet a claim of physical staging or production acceptance.
 
-Validated release-candidate SHA before this documentation-only commit: `959693f7c29f79d7e3dea203263b8a689b03e2de`.
+Validated release-candidate source head: `d3264bd6c1e1f76d8904dd533b36facc7e3e8eda`.
 
-All required source/predeploy workflows passed on that SHA:
+All required source/predeploy workflows passed on that head:
 
 - CI ✅
 - Browser tests ✅
@@ -16,6 +16,8 @@ All required source/predeploy workflows passed on that SHA:
 - Migration tests ✅
 - Owner workspace ✅
 - Staging candidate ✅
+
+The first frozen staging-candidate artifact was produced from source SHA `959693f7c29f79d7e3dea203263b8a689b03e2de`; the only subsequent source change before `d3264bd6c1e1f76d8904dd533b36facc7e3e8eda` was this release-status documentation. That artifact is therefore behaviorally identical to the validated implementation code.
 
 The Staging candidate workflow additionally proves, without mutating staging or production:
 
@@ -27,7 +29,7 @@ The Staging candidate workflow additionally proves, without mutating staging or 
 - install dry-run
 - rollback dry-run
 
-Release-candidate artifact: `staging-candidate-959693f7c29f79d7e3dea203263b8a689b03e2de`.
+Frozen artifact: `staging-candidate-959693f7c29f79d7e3dea203263b8a689b03e2de`.
 
 Remaining release gates are physical acceptance gates: deploy one frozen candidate to staging, run the deployed end-to-end application loop including security-challenge pause/resume and restart/recovery, verify rollback against the staging runtime, then perform a controlled production canary before broader production rollout.
 
@@ -107,25 +109,18 @@ MUNSHI Apply is currently in **build-only mode**. Source changes are committed a
 - Salary compatibility remains review intelligence rather than an automatic rejection.
 - Start-date, travel, relocation, work-mode, clearance, and citizenship requirements use confirmed facts where available and fail closed to review/unresolved when evidence is insufficient.
 
-## Current verification
+### Current release verification
 
-The account-orchestration + employer-pre-flight code head `50370fc8d29142ee20331bbff472dc668163933d` passed all five standard PR workflows:
+The AutoApply release-candidate source head `d3264bd6c1e1f76d8904dd533b36facc7e3e8eda` passed all six source/predeploy workflows:
 
 - CI ✅
 - Browser tests ✅
 - Security ✅
 - Migration tests ✅
 - Owner workspace ✅
+- Staging candidate ✅
 
-Verified results at that code head:
-
-- **54 TypeScript/JavaScript test files / 326 tests passed.**
-- **113 native Python tests passed; Ruff passed.**
-- Prettier, ESLint, TypeScript, production builds, repository-safety checks, and artifact verification passed.
-- **3 desktop + 3 mobile extension entry points** verified.
-- CI dependency install reported **0 npm vulnerabilities**.
-- Secret scan passed for **334 tracked files**.
-- Fresh unpacked Edge artifact: ID `9298225349`, SHA-256 `0629030f96e7580fdfde8703aa8532315a45be53e9258223d0cf58f17a27d9a3`.
+The source/predeploy candidate is ready for a controlled physical staging deployment and acceptance campaign. It is not yet a claim that physical staging or production canary validation has passed.
 
 ## Intelligence boundary during build-only mode
 
