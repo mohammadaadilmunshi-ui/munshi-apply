@@ -13,6 +13,7 @@ import {
   type AISettings,
   type WritingStyleStatus,
 } from "../messaging/native";
+import { AutonomousApplyCredentials } from "./AutonomousApplyCredentials";
 
 const defaultSettings: AISettings = {
   provider: "auto",
@@ -182,15 +183,15 @@ export function AIControlCenter({
       <div className="section-heading">
         <div>
           <p className="eyebrow">Owner-controlled intelligence</p>
-          <h2>AI Control Center</h2>
+          <h2>AI & Credentials Control Center</h2>
         </div>
         <span className="badge">{settings.provider.toUpperCase()}</span>
       </div>
 
       <p>
-        Choose automatic routing, OpenAI, or local Ollama. MUNSHI retrieves only
-        relevant evidence, routes routine questions cheaply, escalates harder
-        narrative questions, and always returns a reviewable draft.
+        Configure MUNSHI's existing answer intelligence and the separate
+        apply-only Claude browser executor. Discovery, job scoring, and résumé
+        generation remain owned by the existing MUNSHI pipeline.
       </p>
 
       <h3>Provider routing</h3>
@@ -340,6 +341,8 @@ export function AIControlCenter({
           </button>
         </div>
       </div>
+
+      <AutonomousApplyCredentials />
 
       <h3>Draft permissions</h3>
       <div className="form-grid">

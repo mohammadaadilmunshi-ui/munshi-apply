@@ -1,0 +1,10 @@
+{
+  "name": "ApplyPilot",
+  "repository": "https://github.com/Pickle-Pixel/ApplyPilot.git",
+  "commit": "4a8d521f67f5139811c0a910ef37410f8e6d836a",
+  "observed_version": "0.3.0",
+  "license": "AGPL-3.0",
+  "integration_mode": "isolated-local-checkout",
+  "source_committed_to_munshi": false,
+  "recorded_date": "2026-09-12"
+}

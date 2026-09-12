@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://munshi.systems/schemas/applypilot/application-execution-result.schema.json",
+  "title": "MUNSHI Autonomous Application Execution Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "worker_run_id",
+    "plan_id",
+    "plan_digest",
+    "status",
+    "events",
+    "cost"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "worker_run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "plan_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "plan_digest": {
+      "type": "string",
+      "minLength": 16
+    },
+    "status": {
+      "enum": [
+        "COMPLETED",
+        "NEEDS_INPUT",
+        "BLOCKED",
+        "FAILED_SAFELY",
+        "BUDGET_EXHAUSTED"
+      ]
+    },
+    "final_url": {
+      "type": ["string", "null"],
+      "format": "uri"
+    },
+    "provider": {
+      "type": ["string", "null"]
+    },
+    "provider_application_id": {
+      "type": ["string", "null"]
+    },
+    "claimed_submission": {
+      "type": "boolean",
+      "default": false
+    },
+    "needs_input": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "message"],
+        "properties": {
+          "kind": {
+            "enum": [
+              "ANSWER_REQUIRED",
+              "SENSITIVE_ANSWER_REQUIRED",
+              "CAPTCHA",
+              "MFA",
+              "OTP",
+              "IDENTITY_VERIFICATION",
+              "AUTHENTICATION",
+              "UNSUPPORTED_CONTROL",
+              "POLICY_BLOCK"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1
+          },
+          "question_key": {
+            "type": ["string", "null"]
+          }
+        }
+      },
+      "default": []
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sequence", "kind", "timestamp", "verified"],
+        "properties": {
+          "sequence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "kind": {
+            "type": "string",
+            "minLength": 1
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "control_id": {
+            "type": ["string", "null"]
+          },
+          "question_key": {
+            "type": ["string", "null"]
+          },
+          "artifact_sha256": {
+            "type": ["string", "null"],
+            "pattern": "^[A-Fa-f0-9]{64}$"
+          },
+          "detail": {
+            "type": ["string", "null"]
+          }
+        }
+      }
+    },
+    "submission_observation": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "type": ["string", "null"]
+        },
+        "target": {
+          "type": ["string", "null"]
+        },
+        "http_status": {
+          "type": ["integer", "null"]
+        },
+        "provider_application_id": {
+          "type": ["string", "null"]
+        },
+        "completion_marker": {
+          "type": ["string", "null"]
+        },
+        "response_marker": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "cost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["estimated_total_usd"],
+      "properties": {
+        "estimated_total_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "agent_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "captcha_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "output_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "agent_steps": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "wall_seconds": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

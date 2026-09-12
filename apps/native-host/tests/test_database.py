@@ -30,12 +30,13 @@ def test_migrations_are_idempotent(tmp_path: Path) -> None:
         "017_synthetic_submit_command_inbox.sql",
         "018_synthetic_submit_execution.sql",
         "019_independent_synthetic_verification_receipts.sql",
+        "020_durable_user_auth_trust_checkpoints.sql",
     ]
     assert database.migrate() == []
     health = database.health()
     assert health["status"] == "healthy"
-    assert health["migration_count"] == 19
-    assert health["schema_version"] == "019_independent_synthetic_verification_receipts.sql"
+    assert health["migration_count"] == 20
+    assert health["schema_version"] == "020_durable_user_auth_trust_checkpoints.sql"
 
 
 def test_architecture_tables_are_created_with_integrity_constraints(tmp_path: Path) -> None:
@@ -189,6 +190,7 @@ def test_job_signal_identity_migration_preserves_existing_reports(tmp_path: Path
         "017_synthetic_submit_command_inbox.sql",
         "018_synthetic_submit_execution.sql",
         "019_independent_synthetic_verification_receipts.sql",
+        "020_durable_user_auth_trust_checkpoints.sql",
     ]
     with upgraded.connect() as connection:
         report = connection.execute(

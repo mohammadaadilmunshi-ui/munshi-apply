@@ -1,0 +1,14 @@
+# Upstream AGPL checkout is local-only and intentionally not committed.
+upstream/
+
+# Local runtime state / secrets / generated artifacts.
+.env
+.env.*
+.venv/
+__pycache__/
+*.pyc
+state/
+logs/
+downloads/
+artifacts/
+chrome-profile/

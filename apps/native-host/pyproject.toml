@@ -41,3 +41,6 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "S"]
 ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/munshi_apply_native/synthetic_submit_command_inbox.py" = ["UP037"]

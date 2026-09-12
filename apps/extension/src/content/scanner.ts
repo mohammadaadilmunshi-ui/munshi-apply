@@ -31,11 +31,19 @@ import { createBoundedHintStore } from "./bounded-hint-store";
 let sectionHeadingCache = new WeakMap<Document | ShadowRoot, Element[]>();
 let computedStyleCache = new WeakMap<HTMLElement, CSSStyleDeclaration>();
 let hiddenStateCache = new WeakMap<HTMLElement, boolean>();
+let labelTextByIdCache = new WeakMap<
+  Document | ShadowRoot,
+  Map<string, string>
+>();
 
 function resetScanCaches(): void {
   sectionHeadingCache = new WeakMap<Document | ShadowRoot, Element[]>();
   computedStyleCache = new WeakMap<HTMLElement, CSSStyleDeclaration>();
   hiddenStateCache = new WeakMap<HTMLElement, boolean>();
+  labelTextByIdCache = new WeakMap<
+    Document | ShadowRoot,
+    Map<string, string>
+  >();
 }
 
 function computedStyleFor(element: HTMLElement): CSSStyleDeclaration {
@@ -138,11 +146,36 @@ function hash(value: string): string {
   return (result >>> 0).toString(36);
 }
 
+function labelTextById(root: Document | ShadowRoot, id: string): string {
+  let labels = labelTextByIdCache.get(root);
+  if (!labels) {
+    labels = new Map<string, string>();
+    for (const candidate of Array.from(root.querySelectorAll("label[for]"))) {
+      if (!(candidate instanceof HTMLLabelElement) || !candidate.htmlFor)
+        continue;
+      const value = compactText(candidate.textContent);
+      if (!value) continue;
+      const existing = labels.get(candidate.htmlFor);
+      labels.set(candidate.htmlFor, existing ? `${existing} ${value}` : value);
+    }
+    labelTextByIdCache.set(root, labels);
+  }
+  return labels.get(id) ?? "";
+}
+
+function associatedLabelText(
+  element: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
+): string {
+  const root = element.getRootNode();
+  if (element.id && (root instanceof Document || root instanceof ShadowRoot)) {
+    const indexed = labelTextById(root, element.id);
+    if (indexed) return indexed;
+  }
+  return compactText(element.closest("label")?.textContent);
+}
+
 function inputLabel(element: HTMLInputElement): string {
-  return Array.from(element.labels ?? [])
-    .map((label) => compactText(label.textContent))
-    .filter(Boolean)
-    .join(" ");
+  return associatedLabelText(element);
 }
 
 function radioGroup(element: HTMLInputElement): HTMLInputElement[] {
@@ -228,17 +261,10 @@ function usablePromptText(value: string): string {
 function nearbyPromptText(element: Element): string {
   if (element.id) {
     const root = element.getRootNode();
-    const labels =
-      root instanceof Document || root instanceof ShadowRoot
-        ? Array.from(root.querySelectorAll("label[for]")).filter(
-            (label) =>
-              label instanceof HTMLLabelElement && label.htmlFor === element.id,
-          )
-        : [];
-    const direct = labels
-      .map((item) => usablePromptText(item.textContent ?? ""))
-      .find(Boolean);
-    if (direct) return direct;
+    if (root instanceof Document || root instanceof ShadowRoot) {
+      const direct = usablePromptText(labelTextById(root, element.id));
+      if (direct) return direct;
+    }
   }
 
   const group = element.closest(
@@ -314,10 +340,7 @@ function labelFor(element: Element): string {
     element instanceof HTMLSelectElement ||
     element instanceof HTMLTextAreaElement
   ) {
-    const labels = Array.from(element.labels)
-      .map((label) => usablePromptText(label.textContent ?? ""))
-      .filter(Boolean)
-      .join(" ");
+    const labels = usablePromptText(associatedLabelText(element));
     if (labels) return labels;
     const prompt = nearbyPromptText(element);
     if (prompt) return prompt;
@@ -897,16 +920,32 @@ function hasVisibleCaptchaPrompt(body: string): boolean {
 }
 
 function detectSecurityCheckpoint(): SecurityCheckpointKind | null {
-  const body = visibleSecurityText();
+  if (hasActiveCaptchaFrame()) return "CAPTCHA";
   if (
-    hasActiveCaptchaFrame() ||
     hasVisibleSecurityElement(
       "[role='dialog'][class*='captcha' i], [role='dialog'][id*='captcha' i]",
-    ) ||
-    hasVisibleCaptchaPrompt(body)
+    )
   ) {
     return "CAPTCHA";
   }
+  if (hasVisibleSecurityElement("input[type='password']")) {
+    return "AUTHENTICATION";
+  }
+
+  const securityHint = normalized(document.body?.textContent ?? "").slice(
+    0,
+    120_000,
+  );
+  if (
+    !/\b(captcha|recaptcha|hcaptcha|verify you are human|human verification|identity verification|verify your identity|proof of identity|multi[- ]factor|two[- ]factor|2fa|authenticator app|one[- ]time (?:passcode|password|code)|verification code|security code|enter the code we sent|otp)\b/.test(
+      securityHint,
+    )
+  ) {
+    return null;
+  }
+
+  const body = visibleSecurityText();
+  if (hasVisibleCaptchaPrompt(body)) return "CAPTCHA";
   if (
     /\b(identity verification|verify your identity|proof of identity)\b/.test(
       body,
@@ -923,9 +962,6 @@ function detectSecurityCheckpoint(): SecurityCheckpointKind | null {
     )
   ) {
     return "OTP";
-  }
-  if (hasVisibleSecurityElement("input[type='password']")) {
-    return "AUTHENTICATION";
   }
   return null;
 }

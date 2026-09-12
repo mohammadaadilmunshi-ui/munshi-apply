@@ -3,10 +3,10 @@ from __future__ import annotations
 import sqlite3
 
 import pytest
+from test_synthetic_submit_command_inbox import SECRET, TARGET, _command, _ready
 
 from munshi_apply_native.synthetic_submit_command_inbox import SyntheticSubmitCommandInbox
 from munshi_apply_native.synthetic_submit_execution_v1 import SyntheticSubmitExecutor
-from test_synthetic_submit_command_inbox import SECRET, TARGET, _command, _ready
 
 
 class FixtureSyntheticSubmitAdapter:
