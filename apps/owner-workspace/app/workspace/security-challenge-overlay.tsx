@@ -123,9 +123,10 @@ export function SecurityChallengeOverlay() {
   }, []);
 
   useEffect(() => {
-    void refresh(false);
+    const kickoff = window.setTimeout(() => void refresh(false), 0);
     const timer = window.setInterval(() => void refresh(false), POLL_MS);
     return () => {
+      window.clearTimeout(kickoff);
       window.clearInterval(timer);
       if (clearTimerRef.current !== null) {
         window.clearTimeout(clearTimerRef.current);
