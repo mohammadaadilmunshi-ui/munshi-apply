@@ -77,7 +77,7 @@ Final submission requires **both**:
 1. `permissions.final_submit=true` in the immutable MUNSHI execution request; and
 2. `allowFinalSubmit=true` in the local Autonomous Apply settings.
 
-If either authority is absent, the agent must stop at `READY_FOR_REVIEW` before the irreversible submit action.
+If either authority is absent, the agent must stop before the irreversible submit action.
 
 ## Security checkpoints
 
