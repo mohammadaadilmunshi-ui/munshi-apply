@@ -4,13 +4,13 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from test_synthetic_submit_command_inbox import SECRET, TARGET
+from test_synthetic_submit_execution_v1 import FixtureSyntheticSubmitAdapter, _accepted
 
 from munshi_apply_native.synthetic_submission_verification_v1 import (
     SyntheticSubmissionVerificationService,
 )
 from munshi_apply_native.synthetic_submit_execution_v1 import SyntheticSubmitExecutor
-from test_synthetic_submit_command_inbox import SECRET, TARGET
-from test_synthetic_submit_execution_v1 import FixtureSyntheticSubmitAdapter, _accepted
 
 
 class FixtureIndependentVerifier:
