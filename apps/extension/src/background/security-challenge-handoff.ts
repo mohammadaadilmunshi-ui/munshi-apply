@@ -1,3 +1,5 @@
+export {};
+
 const PORT_NAME = "munshi-security-handoff";
 const AUTO_PILOT_RUNTIME_STORAGE_KEY = "autopilot-runtime-v1";
 
@@ -58,10 +60,11 @@ async function validatedRuntime(request: HandoffRequest): Promise<{
     );
   }
 
-  const stored = await chrome.storage.session.get(AUTO_PILOT_RUNTIME_STORAGE_KEY);
+  const stored = await chrome.storage.session.get(
+    AUTO_PILOT_RUNTIME_STORAGE_KEY,
+  );
   const runtime = stored[AUTO_PILOT_RUNTIME_STORAGE_KEY] as
-    | RuntimeShape
-    | undefined;
+    RuntimeShape | undefined;
   if (!runtime || runtime.tabId !== request.tabId) {
     throw new Error(
       "The saved AutoPilot session no longer owns this Chromium tab",
@@ -137,11 +140,14 @@ chrome.runtime.onConnect.addListener((port) => {
       try {
         port.postMessage({
           requestId:
-            candidate && typeof candidate === "object" && "requestId" in candidate
+            candidate &&
+            typeof candidate === "object" &&
+            "requestId" in candidate
               ? String(candidate.requestId)
               : "unknown",
           ok: false,
-          error: error instanceof Error ? error.message : "Chromium handoff failed",
+          error:
+            error instanceof Error ? error.message : "Chromium handoff failed",
         });
       } catch {
         // The owner workspace may have navigated away during the handoff.
