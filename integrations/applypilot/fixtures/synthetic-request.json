@@ -1,0 +1,49 @@
+{
+  "schema_version": "1.0",
+  "plan_id": "plan_synthetic_applypilot_001",
+  "plan_digest": "0123456789abcdef0123456789abcdef",
+  "idempotency_key": "synthetic-applypilot-001",
+  "job": {
+    "job_id": "job_synthetic_001",
+    "provider": "synthetic",
+    "url": "https://example.invalid/jobs/001",
+    "canonical_url": "https://example.invalid/jobs/001",
+    "title": "Synthetic Test Role",
+    "company": "Synthetic Employer"
+  },
+  "artifacts": {
+    "resume": {
+      "artifact_id": "resume_synthetic_001",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "path": "/tmp/munshi-synthetic-resume.pdf",
+      "media_type": "application/pdf"
+    },
+    "cover_letter": null
+  },
+  "answers": [
+    {
+      "answer_id": "answer_synthetic_001",
+      "question_key": "FIRST_NAME",
+      "value": "Synthetic",
+      "approved": true,
+      "sensitive": false,
+      "provenance": "synthetic-fixture"
+    }
+  ],
+  "permissions": {
+    "navigate": true,
+    "fill": true,
+    "upload_documents": true,
+    "final_submit": false,
+    "security_checkpoint_bypass": false
+  },
+  "budget": {
+    "max_ai_cost_usd": 0,
+    "max_agent_steps": 1,
+    "max_wall_seconds": 30
+  },
+  "execution_context": {
+    "synthetic": true,
+    "environment": "local-test"
+  }
+}
