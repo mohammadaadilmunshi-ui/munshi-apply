@@ -1,0 +1,34 @@
+name: Temporary release lock repair
+
+on:
+  push:
+    branches:
+      - feat/security-challenge-chromium-handoff-20260912
+
+permissions:
+  contents: write
+
+jobs:
+  repair-lock:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/security-challenge-chromium-handoff-20260912
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Materialize nonbreaking audit repair
+        run: |
+          npm audit fix --package-lock-only || true
+          if git diff --quiet -- package-lock.json; then
+            echo "No lock repair required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          git commit -m "chore: refresh audited transitive dependency lock"
+          git push origin HEAD:feat/security-challenge-chromium-handoff-20260912
