@@ -306,13 +306,13 @@ describe("ATS-shaped browser endurance matrix", () => {
   });
 
   it("scans a very large application form while preserving unique stable identifiers", () => {
-    const startedAt = performance.now();
     const fields = Array.from(
       { length: 300 },
       (_, index) =>
         `<label for="field-${index}">Application field ${index}</label><input id="field-${index}">`,
     ).join("");
     document.body.innerHTML = `<main>${fields}<button type="button">Continue</button></main>`;
+    const startedAt = performance.now();
 
     const first = scanDocument();
     const second = scanDocument();
