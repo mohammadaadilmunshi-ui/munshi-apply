@@ -30,7 +30,7 @@ def test_health_and_event_round_trip(tmp_path: Path) -> None:
         health = client.get("/health")
         assert health.status_code == 200
         assert health.json()["status"] == "healthy"
-        assert health.json()["schema_version"] == "019_independent_synthetic_verification_receipts.sql"
+        assert health.json()["schema_version"] == "020_durable_user_auth_trust_checkpoints.sql"
         assert health.json()["outbox_worker"] == "disabled"
 
         accepted = client.post(
@@ -109,6 +109,7 @@ def test_complete_loop_commands_are_default_off_and_require_owner_auth(tmp_path:
             headers={"x-munshi-command-secret": "fixture-command-secret"},
         )
         assert missing_owner.status_code == 401
+
 
 def test_application_plan_handoff_http_boundary_is_fail_closed_and_idempotent(
     tmp_path: Path, monkeypatch
@@ -280,6 +281,7 @@ def test_application_plan_handoff_http_boundary_is_fail_closed_and_idempotent(
         assert connection.execute(
             "SELECT COUNT(*) FROM application_submission_receipts"
         ).fetchone()[0] == 0
+
 
 def test_direct_apply_task_resolution_is_closed_in_favor_of_hunter_supersession(
     tmp_path: Path,
