@@ -14,11 +14,19 @@ _RESOLUTION_LANES = {
     "STRUCTURAL_POPUP",
     "STATE_TRANSITION",
     "LOCAL_SEMANTIC_HINT",
+    "MODEL_RECIPE_PROPOSAL",
+    # Kept for compatibility with pre-generalization telemetry.
     "CLAUDE_RECIPE_PROPOSAL",
     "VISUAL_ASSISTED_CONTROL",
 }
-_AI_LANES = {"LOCAL_SEMANTIC_HINT", "CLAUDE_RECIPE_PROPOSAL", "VISUAL_ASSISTED_CONTROL"}
 _RECIPE_LANES = {"PROMOTED_RECIPE", "SHADOW_RECIPE"}
+_MODEL_LANES = {"MODEL_RECIPE_PROPOSAL", "CLAUDE_RECIPE_PROPOSAL"}
+_AI_LANES = {
+    "LOCAL_SEMANTIC_HINT",
+    "MODEL_RECIPE_PROPOSAL",
+    "CLAUDE_RECIPE_PROPOSAL",
+    "VISUAL_ASSISTED_CONTROL",
+}
 _CONTEXT_FIELDS = (
     ("ats_family", "atsFamily", 80),
     ("tenant_key", "tenantKey", 240),
@@ -31,7 +39,9 @@ def _optional_text(value: object, *, limit: int) -> str | None:
     if value is None:
         return None
     if not isinstance(value, str) or not value.strip():
-        raise ValueError("Interaction context values must be non-empty strings when supplied")
+        raise ValueError(
+            "Interaction context values must be non-empty strings when supplied"
+        )
     clean = value.strip()
     if len(clean) > limit:
         raise ValueError("Interaction context value is too long")
@@ -92,11 +102,15 @@ class InteractionKnowledgeStore:
                 connection.execute(
                     """
                     INSERT INTO interaction_recipe_context(
-                        recipe_id,ats_family,tenant_key,ui_fingerprint,question_fingerprint,
-                        confidence,verified_successes,verified_failures,consecutive_failures,
-                        lifecycle_state,last_used_at,last_verified_at,quarantined_at,
-                        quarantine_reason,created_at,updated_at
-                    ) VALUES(?,?,?,?,?,0.50,0,0,0,'ACTIVE',NULL,NULL,NULL,NULL,?,?)
+                        recipe_id, ats_family, tenant_key, ui_fingerprint,
+                        question_fingerprint, confidence, verified_successes,
+                        verified_failures, consecutive_failures, lifecycle_state,
+                        last_used_at, last_verified_at, quarantined_at,
+                        quarantine_reason, created_at, updated_at
+                    ) VALUES(
+                        ?, ?, ?, ?, ?, 0.50, 0, 0, 0, 'ACTIVE',
+                        NULL, NULL, NULL, NULL, ?, ?
+                    )
                     """,
                     (
                         recipe_id,
@@ -109,22 +123,30 @@ class InteractionKnowledgeStore:
                     ),
                 )
             else:
-                updates: dict[str, str] = {}
                 for column, _, _ in _CONTEXT_FIELDS:
                     requested = context[column]
                     current = existing[column]
-                    if requested is None:
-                        continue
-                    if current is not None and current != requested:
+                    if requested is not None and current not in {None, requested}:
                         raise ValueError("Interaction recipe context cannot be rebound")
-                    if current is None:
-                        updates[column] = requested
-                if updates:
-                    assignments = ",".join(f"{column}=?" for column in updates)
-                    connection.execute(
-                        f"UPDATE interaction_recipe_context SET {assignments},updated_at=? WHERE recipe_id=?",
-                        (*updates.values(), now, recipe_id),
-                    )
+                connection.execute(
+                    """
+                    UPDATE interaction_recipe_context
+                    SET ats_family=COALESCE(ats_family, ?),
+                        tenant_key=COALESCE(tenant_key, ?),
+                        ui_fingerprint=COALESCE(ui_fingerprint, ?),
+                        question_fingerprint=COALESCE(question_fingerprint, ?),
+                        updated_at=?
+                    WHERE recipe_id=?
+                    """,
+                    (
+                        context["ats_family"],
+                        context["tenant_key"],
+                        context["ui_fingerprint"],
+                        context["question_fingerprint"],
+                        now,
+                        recipe_id,
+                    ),
+                )
             row = connection.execute(
                 "SELECT * FROM interaction_recipe_context WHERE recipe_id = ?",
                 (recipe_id,),
@@ -167,7 +189,11 @@ class InteractionKnowledgeStore:
         if not verified:
             with self.database.connect() as connection:
                 connection.execute(
-                    "UPDATE interaction_recipe_context SET last_used_at=?,updated_at=? WHERE recipe_id=?",
+                    """
+                    UPDATE interaction_recipe_context
+                    SET last_used_at=?, updated_at=?
+                    WHERE recipe_id=?
+                    """,
                     (now, now, recipe_id),
                 )
             refreshed = self.context(recipe_id)
@@ -191,9 +217,10 @@ class InteractionKnowledgeStore:
             connection.execute(
                 """
                 UPDATE interaction_recipe_context
-                SET confidence=?,verified_successes=?,verified_failures=?,
-                    consecutive_failures=?,lifecycle_state=?,last_used_at=?,
-                    last_verified_at=?,quarantined_at=?,quarantine_reason=?,updated_at=?
+                SET confidence=?, verified_successes=?, verified_failures=?,
+                    consecutive_failures=?, lifecycle_state=?, last_used_at=?,
+                    last_verified_at=?, quarantined_at=?, quarantine_reason=?,
+                    updated_at=?
                 WHERE recipe_id=?
                 """,
                 (
@@ -237,10 +264,10 @@ class InteractionKnowledgeStore:
             result = connection.execute(
                 """
                 INSERT OR IGNORE INTO interaction_resolution_events(
-                    event_id,application_id,site_origin,component_fingerprint,
-                    semantic_type,recipe_id,resolution_lane,success,verified,
-                    ai_provider,ai_model,input_tokens,output_tokens,ai_cost_usd,
-                    fallback_reason,occurred_at
+                    event_id, application_id, site_origin, component_fingerprint,
+                    semantic_type, recipe_id, resolution_lane, success, verified,
+                    ai_provider, ai_model, input_tokens, output_tokens, ai_cost_usd,
+                    fallback_reason, occurred_at
                 ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
@@ -264,59 +291,122 @@ class InteractionKnowledgeStore:
             )
         return result.rowcount == 1
 
+    @staticmethod
+    def _totals_sql(*, filtered: bool) -> str:
+        base = """
+            SELECT COUNT(*) AS total,
+                   COUNT(DISTINCT application_id) AS applications,
+                   COALESCE(SUM(ai_cost_usd),0) AS cost,
+                   COALESCE(SUM(input_tokens),0) AS input_tokens,
+                   COALESCE(SUM(output_tokens),0) AS output_tokens,
+                   COALESCE(SUM(
+                       CASE WHEN resolution_lane IN (
+                           'MODEL_RECIPE_PROPOSAL','CLAUDE_RECIPE_PROPOSAL'
+                       ) THEN 1 ELSE 0 END
+                   ),0) AS model_fallbacks,
+                   COALESCE(SUM(
+                       CASE WHEN resolution_lane='CLAUDE_RECIPE_PROPOSAL'
+                       THEN 1 ELSE 0 END
+                   ),0) AS legacy_claude,
+                   COALESCE(SUM(
+                       CASE WHEN resolution_lane IN (
+                           'PROMOTED_RECIPE','SHADOW_RECIPE'
+                       ) THEN 1 ELSE 0 END
+                   ),0) AS recipes,
+                   COALESCE(SUM(
+                       CASE WHEN resolution_lane NOT IN (
+                           'LOCAL_SEMANTIC_HINT','MODEL_RECIPE_PROPOSAL',
+                           'CLAUDE_RECIPE_PROPOSAL','VISUAL_ASSISTED_CONTROL'
+                       ) THEN 1 ELSE 0 END
+                   ),0) AS deterministic
+            FROM interaction_resolution_events
+        """
+        return base + (" WHERE occurred_at >= ?" if filtered else "")
+
+    @staticmethod
+    def _lanes_sql(*, filtered: bool) -> str:
+        base = """
+            SELECT resolution_lane, COUNT(*) AS count,
+                   COALESCE(SUM(ai_cost_usd),0) AS cost
+            FROM interaction_resolution_events
+        """
+        suffix = " WHERE occurred_at >= ?" if filtered else ""
+        return base + suffix + " GROUP BY resolution_lane ORDER BY count DESC, resolution_lane"
+
+    @staticmethod
+    def _providers_sql(*, filtered: bool) -> str:
+        base = """
+            SELECT COALESCE(ai_provider,'none') AS provider,
+                   COUNT(*) AS count,
+                   COALESCE(SUM(ai_cost_usd),0) AS cost,
+                   COALESCE(SUM(input_tokens),0) AS input_tokens,
+                   COALESCE(SUM(output_tokens),0) AS output_tokens
+            FROM interaction_resolution_events
+            WHERE ai_provider IS NOT NULL
+        """
+        suffix = " AND occurred_at >= ?" if filtered else ""
+        return base + suffix + " GROUP BY ai_provider ORDER BY count DESC, ai_provider"
+
     def cost_summary(self, *, since: str | None = None) -> dict[str, object]:
-        where = ""
-        parameters: tuple[object, ...] = ()
-        if since:
-            where = "WHERE occurred_at >= ?"
-            parameters = (since,)
+        filtered = bool(since)
+        parameters: tuple[object, ...] = (since,) if since else ()
         with self.database.connect() as connection:
             totals = connection.execute(
-                f"""
-                SELECT COUNT(*) AS total,
-                       COUNT(DISTINCT application_id) AS applications,
-                       COALESCE(SUM(ai_cost_usd),0) AS cost,
-                       COALESCE(SUM(input_tokens),0) AS input_tokens,
-                       COALESCE(SUM(output_tokens),0) AS output_tokens,
-                       COALESCE(SUM(CASE WHEN resolution_lane='CLAUDE_RECIPE_PROPOSAL' THEN 1 ELSE 0 END),0) AS claude,
-                       COALESCE(SUM(CASE WHEN resolution_lane IN ('PROMOTED_RECIPE','SHADOW_RECIPE') THEN 1 ELSE 0 END),0) AS recipes,
-                       COALESCE(SUM(CASE WHEN resolution_lane NOT IN ('LOCAL_SEMANTIC_HINT','CLAUDE_RECIPE_PROPOSAL','VISUAL_ASSISTED_CONTROL') THEN 1 ELSE 0 END),0) AS deterministic
-                FROM interaction_resolution_events
-                {where}
-                """,
+                self._totals_sql(filtered=filtered),
                 parameters,
             ).fetchone()
             lanes = connection.execute(
-                f"""
-                SELECT resolution_lane,COUNT(*) AS count,
-                       COALESCE(SUM(ai_cost_usd),0) AS cost
-                FROM interaction_resolution_events
-                {where}
-                GROUP BY resolution_lane
-                ORDER BY count DESC,resolution_lane
-                """,
+                self._lanes_sql(filtered=filtered),
+                parameters,
+            ).fetchall()
+            providers = connection.execute(
+                self._providers_sql(filtered=filtered),
                 parameters,
             ).fetchall()
         total = int(totals["total"])
         applications = int(totals["applications"])
         cost = round(float(totals["cost"]), 8)
+        model_fallbacks = int(totals["model_fallbacks"])
         return {
             "totalResolutions": total,
             "applications": applications,
-            "deterministicResolutionRate": round(int(totals["deterministic"]) / total, 6) if total else 0.0,
-            "recipeHitRate": round(int(totals["recipes"]) / total, 6) if total else 0.0,
-            "claudeFallbackRate": round(int(totals["claude"]) / total, 6) if total else 0.0,
+            "deterministicResolutionRate": (
+                round(int(totals["deterministic"]) / total, 6) if total else 0.0
+            ),
+            "recipeHitRate": (
+                round(int(totals["recipes"]) / total, 6) if total else 0.0
+            ),
+            "modelFallbackRate": (
+                round(model_fallbacks / total, 6) if total else 0.0
+            ),
+            "claudeFallbackRate": (
+                round(int(totals["legacy_claude"]) / total, 6) if total else 0.0
+            ),
             "aiCostUsd": cost,
-            "aiCostPerApplicationUsd": round(cost / applications, 8) if applications else 0.0,
+            "aiCostPerApplicationUsd": (
+                round(cost / applications, 8) if applications else 0.0
+            ),
             "inputTokens": int(totals["input_tokens"]),
             "outputTokens": int(totals["output_tokens"]),
             "lanes": [dict(row) for row in lanes],
+            "providers": [dict(row) for row in providers],
         }
 
-    def prune_resolution_events(self, *, retention_days: int = 90, at: str | None = None) -> int:
+    def prune_resolution_events(
+        self,
+        *,
+        retention_days: int = 90,
+        at: str | None = None,
+    ) -> int:
         if not 30 <= retention_days <= 3650:
-            raise ValueError("Resolution telemetry retention must be between 30 and 3650 days")
-        now = datetime.fromisoformat(at.replace("Z", "+00:00")) if at else datetime.now(UTC)
+            raise ValueError(
+                "Resolution telemetry retention must be between 30 and 3650 days"
+            )
+        now = (
+            datetime.fromisoformat(at.replace("Z", "+00:00"))
+            if at
+            else datetime.now(UTC)
+        )
         if now.tzinfo is None:
             now = now.replace(tzinfo=UTC)
         cutoff = (now.astimezone(UTC) - timedelta(days=retention_days)).isoformat()
@@ -326,3 +416,15 @@ class InteractionKnowledgeStore:
                 (cutoff,),
             )
         return result.rowcount
+
+
+def is_ai_lane(lane: str) -> bool:
+    return lane.upper() in _AI_LANES
+
+
+def is_recipe_lane(lane: str) -> bool:
+    return lane.upper() in _RECIPE_LANES
+
+
+def is_model_lane(lane: str) -> bool:
+    return lane.upper() in _MODEL_LANES
