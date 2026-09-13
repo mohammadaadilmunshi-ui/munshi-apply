@@ -30,14 +30,15 @@ def test_n8n_url_requires_secret(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_teach_telegram_reuses_complete_legacy_hunter_pair(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    legacy_bot_fixture = "existing-hunter-bot"  # noqa: S105 - synthetic test fixture
     monkeypatch.delenv("MUNSHI_TEACH_TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("MUNSHI_TEACH_TELEGRAM_CHAT_ID", raising=False)
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "existing-hunter-bot")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", legacy_bot_fixture)
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "123456")
 
     settings = Settings.from_environment()
 
-    assert settings.teach_telegram_bot_token == "existing-hunter-bot"
+    assert settings.teach_telegram_bot_token == legacy_bot_fixture
     assert settings.teach_telegram_chat_id == "123456"
 
 
