@@ -4,197 +4,51 @@
   "title": "MUNSHI Autonomous Application Execution Request",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "schema_version",
-    "plan_id",
-    "plan_digest",
-    "job",
-    "artifacts",
-    "answers",
-    "permissions",
-    "execution_context"
-  ],
+  "required": ["schema_version","plan_id","plan_digest","job","artifacts","answers","permissions","execution_context"],
   "properties": {
-    "schema_version": {
-      "const": "1.0"
-    },
-    "plan_id": {
-      "type": "string",
-      "minLength": 1
-    },
-    "plan_digest": {
-      "type": "string",
-      "minLength": 16
-    },
-    "idempotency_key": {
-      "type": "string",
-      "minLength": 8
-    },
+    "schema_version": {"const":"1.0"},
+    "plan_id": {"type":"string","minLength":1},
+    "plan_digest": {"type":"string","pattern":"^[a-f0-9]{64}$"},
+    "idempotency_key": {"type":"string","minLength":8},
     "job": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["job_id", "url"],
+      "type":"object","additionalProperties":false,"required":["job_id","url"],
       "properties": {
-        "job_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "provider": {
-          "type": ["string", "null"]
-        },
-        "url": {
-          "type": "string",
-          "format": "uri"
-        },
-        "canonical_url": {
-          "type": ["string", "null"],
-          "format": "uri"
-        },
-        "title": {
-          "type": ["string", "null"]
-        },
-        "company": {
-          "type": ["string", "null"]
-        }
+        "job_id":{"type":"string","minLength":1},"provider":{"type":["string","null"]},
+        "url":{"type":"string","format":"uri"},"canonical_url":{"type":["string","null"],"format":"uri"},
+        "title":{"type":["string","null"]},"company":{"type":["string","null"]}
       }
     },
     "artifacts": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["resume"],
-      "properties": {
-        "resume": {
-          "$ref": "#/$defs/artifact"
-        },
-        "cover_letter": {
-          "oneOf": [
-            {
-              "$ref": "#/$defs/artifact"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      }
+      "type":"object","additionalProperties":false,"required":["resume"],
+      "properties":{"resume":{"$ref":"#/$defs/artifact"},"cover_letter":{"oneOf":[{"$ref":"#/$defs/artifact"},{"type":"null"}]}}
     },
     "answers": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "answer_id",
-          "question_key",
-          "value",
-          "approved",
-          "provenance"
-        ],
-        "properties": {
-          "answer_id": {
-            "type": "string",
-            "minLength": 1
-          },
-          "question_key": {
-            "type": "string",
-            "minLength": 1
-          },
-          "value": {},
-          "approved": {
-            "const": true
-          },
-          "sensitive": {
-            "type": "boolean",
-            "default": false
-          },
-          "provenance": {
-            "type": "string",
-            "minLength": 1
-          }
-        }
+      "type":"array","items":{"type":"object","additionalProperties":false,
+        "required":["answer_id","question_key","value","approved","provenance"],
+        "properties":{"answer_id":{"type":"string","minLength":1},"question_key":{"type":"string","minLength":1},"value":{},"approved":{"const":true},"sensitive":{"type":"boolean","default":false},"provenance":{"type":"string","minLength":1}}
       }
     },
     "permissions": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "navigate",
-        "fill",
-        "upload_documents",
-        "final_submit",
-        "security_checkpoint_bypass"
-      ],
-      "properties": {
-        "navigate": {
-          "type": "boolean"
-        },
-        "fill": {
-          "type": "boolean"
-        },
-        "upload_documents": {
-          "type": "boolean"
-        },
-        "final_submit": {
-          "type": "boolean"
-        },
-        "security_checkpoint_bypass": {
-          "const": false
-        }
-      }
+      "type":"object","additionalProperties":false,
+      "required":["navigate","fill","upload_documents","final_submit","security_checkpoint_bypass"],
+      "properties":{"navigate":{"type":"boolean"},"fill":{"type":"boolean"},"upload_documents":{"type":"boolean"},"final_submit":{"type":"boolean"},"security_checkpoint_bypass":{"const":false}}
     },
-    "budget": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "max_ai_cost_usd": {
-          "type": "number",
-          "minimum": 0
-        },
-        "max_agent_steps": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "max_wall_seconds": {
-          "type": "integer",
-          "minimum": 1
-        }
-      }
-    },
-    "execution_context": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["synthetic", "environment"],
-      "properties": {
-        "synthetic": {
-          "type": "boolean"
-        },
-        "environment": {
-          "enum": ["local-test", "ci", "staging", "production"]
-        }
-      }
-    }
+    "budget": {"type":"object","additionalProperties":false,"properties":{"max_ai_cost_usd":{"type":"number","minimum":0},"max_agent_steps":{"type":"integer","minimum":1},"max_wall_seconds":{"type":"integer","minimum":1}}},
+    "execution_context": {"type":"object","additionalProperties":false,"required":["synthetic","environment"],"properties":{"synthetic":{"type":"boolean"},"environment":{"enum":["local-test","ci","staging","production"]}}},
+    "submit_authorization": {"$ref":"#/$defs/submit_authorization"}
   },
+  "allOf": [{
+    "if": {"properties":{"permissions":{"properties":{"final_submit":{"const":true}}},"execution_context":{"properties":{"synthetic":{"const":false}}}},"required":["permissions","execution_context"]},
+    "then": {"required":["submit_authorization"]}
+  }],
   "$defs": {
-    "artifact": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["artifact_id", "sha256", "path"],
+    "artifact": {"type":"object","additionalProperties":false,"required":["artifact_id","sha256","path"],"properties":{"artifact_id":{"type":"string","minLength":1},"sha256":{"type":"string","pattern":"^[A-Fa-f0-9]{64}$"},"path":{"type":"string","minLength":1},"media_type":{"type":["string","null"]}}},
+    "submit_authorization": {
+      "type":"object","additionalProperties":false,
+      "required":["version","authorization_id","tenant_id","user_id","application_id","plan_id","session_id","review_id","approval_id","provider","target_url","checkpoint_id","generation","plan_digest","review_digest","approval_digest","prepared_package_digest","browser_form_digest","resume_sha256","cover_letter_sha256","issued_at","expires_at","synthetic","submission_authority","authority_digest","signature"],
       "properties": {
-        "artifact_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "sha256": {
-          "type": "string",
-          "pattern": "^[A-Fa-f0-9]{64}$"
-        },
-        "path": {
-          "type": "string",
-          "minLength": 1
-        },
-        "media_type": {
-          "type": ["string", "null"]
-        }
+        "version":{"const":"munshi-submit-authorization-v1"},"authorization_id":{"type":"string","minLength":1},"tenant_id":{"type":"string","minLength":1},"user_id":{"type":"string","minLength":1},"application_id":{"type":"string","minLength":1},"plan_id":{"type":"string","minLength":1},"session_id":{"type":"string","minLength":1},"review_id":{"type":"string","minLength":1},"approval_id":{"type":"string","minLength":1},"provider":{"type":"string","minLength":1},"target_url":{"type":"string","format":"uri"},"checkpoint_id":{"type":"string","minLength":1},"generation":{"type":"integer","minimum":1},
+        "plan_digest":{"type":"string","pattern":"^[a-f0-9]{64}$"},"review_digest":{"type":"string","pattern":"^[a-f0-9]{64}$"},"approval_digest":{"type":"string","pattern":"^[a-f0-9]{64}$"},"prepared_package_digest":{"type":"string","pattern":"^[a-f0-9]{64}$"},"browser_form_digest":{"type":"string","pattern":"^[a-f0-9]{64}$"},"resume_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"cover_letter_sha256":{"type":["string","null"],"pattern":"^[a-f0-9]{64}$"},"issued_at":{"type":"string","format":"date-time"},"expires_at":{"type":"string","format":"date-time"},"synthetic":{"const":false},"submission_authority":{"const":true},"authority_digest":{"type":"string","pattern":"^[a-f0-9]{64}$"},"signature":{"type":"string","pattern":"^sha256=[a-f0-9]{64}$"}
       }
     }
   }
