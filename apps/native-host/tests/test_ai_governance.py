@@ -16,7 +16,7 @@ from munshi_apply_native.providers import (
     ProviderUsage,
 )
 
-FIXED_NOW = datetime(2026, 8, 14, 18, 0, tzinfo=UTC)
+FIXED_NOW = datetime(2026, 9, 13, 18, 0, tzinfo=UTC)
 
 
 def create_database(tmp_path: Path) -> Database:
@@ -260,6 +260,7 @@ def test_second_reservation_sees_first_active_reservation(
     add_evidence(database)
     first = service(database, store).preview(request())
     planned = float(first["plannedCostUsd"])
+    reservation_budget = planned * 1.5
     budget = service(database, store).budget
     one = budget.reserve(
         reservation_id="reservation-one",
@@ -267,7 +268,7 @@ def test_second_reservation_sees_first_active_reservation(
         model="gpt-5.6-luna",
         correlation_id="one",
         planned_cost_usd=planned,
-        monthly_budget_usd=0.005,
+        monthly_budget_usd=reservation_budget,
         warning_budget_usd=0,
         hard_stop=True,
         at=FIXED_NOW.isoformat(),
@@ -278,7 +279,7 @@ def test_second_reservation_sees_first_active_reservation(
         model="gpt-5.6-luna",
         correlation_id="two",
         planned_cost_usd=planned,
-        monthly_budget_usd=0.005,
+        monthly_budget_usd=reservation_budget,
         warning_budget_usd=0,
         hard_stop=True,
         at=FIXED_NOW.isoformat(),

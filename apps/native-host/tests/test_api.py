@@ -30,8 +30,10 @@ def test_health_and_event_round_trip(tmp_path: Path) -> None:
         health = client.get("/health")
         assert health.status_code == 200
         assert health.json()["status"] == "healthy"
-        assert health.json()["schema_version"] == "020_durable_user_auth_trust_checkpoints.sql"
+        assert health.json()["schema_version"] == "022_teach_munshi_async_learning.sql"
         assert health.json()["outbox_worker"] == "disabled"
+        assert health.json()["teach_telegram_worker"] == "disabled"
+        assert health.json()["teach_telegram_configured"] is False
 
         accepted = client.post(
             "/v1/events",

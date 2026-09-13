@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 dependencies = [
   "defusedxml>=0.7,<1",
   "fastapi>=0.116,<1",
+  "httpx>=0.28,<1",
   "pydantic>=2.11,<3",
   "pypdf>=6,<7",
   "uvicorn[standard]>=0.35,<1",
@@ -17,7 +18,6 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-  "httpx>=0.28,<1",
   "pytest>=8.4,<9",
   "ruff>=0.12,<1",
   "playwright>=1.55,<2",
@@ -44,5 +44,6 @@ ignore = ["S101", "UP037"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/browser/test_real_hunter_bridge_cover_prepare_chrome.py" = ["E501", "F401", "I001", "S608"]
+"tests/test_database.py" = ["I001"]
 "tests/test_synthetic_submission_verification_v1.py" = ["I001"]
 "tests/test_synthetic_submit_execution_v1.py" = ["I001"]
