@@ -17,6 +17,9 @@ class Settings:
     log_level: str
     command_secret: str | None = None
     handoff_hmac_secret: str | None = None
+    teach_telegram_bot_token: str | None = None
+    teach_telegram_chat_id: str | None = None
+    teach_telegram_poll_seconds: float = 15.0
 
     @classmethod
     def from_environment(cls) -> Settings:
@@ -34,6 +37,25 @@ class Settings:
         n8n_webhook_secret = os.getenv("MUNSHI_N8N_WEBHOOK_SECRET") or None
         if n8n_webhook_url and not n8n_webhook_secret:
             raise ValueError("MUNSHI_N8N_WEBHOOK_SECRET is required when n8n is configured")
+
+        # The dedicated names let Apply receive the same existing Hunter bot/chat
+        # through deployment secrets. TELEGRAM_* remains a compatibility fallback
+        # when both services intentionally share one runtime secret source.
+        teach_telegram_bot_token = (
+            os.getenv("MUNSHI_TEACH_TELEGRAM_BOT_TOKEN")
+            or os.getenv("TELEGRAM_BOT_TOKEN")
+            or None
+        )
+        teach_telegram_chat_id = (
+            os.getenv("MUNSHI_TEACH_TELEGRAM_CHAT_ID")
+            or os.getenv("TELEGRAM_CHAT_ID")
+            or None
+        )
+        if bool(teach_telegram_bot_token) != bool(teach_telegram_chat_id):
+            raise ValueError(
+                "Teach MUNSHI Telegram requires both bot token and chat id"
+            )
+
         return cls(
             runtime_root=runtime_root,
             database_path=database_path,
@@ -44,6 +66,11 @@ class Settings:
             log_level=os.getenv("MUNSHI_LOG_LEVEL", "INFO").upper(),
             command_secret=os.getenv("MUNSHI_APPLY_COMMAND_SECRET") or None,
             handoff_hmac_secret=os.getenv("MUNSHI_APPLY_HANDOFF_HMAC_SECRET") or None,
+            teach_telegram_bot_token=teach_telegram_bot_token,
+            teach_telegram_chat_id=teach_telegram_chat_id,
+            teach_telegram_poll_seconds=float(
+                os.getenv("MUNSHI_TEACH_TELEGRAM_POLL_SECONDS", "15")
+            ),
         )
 
     @staticmethod
