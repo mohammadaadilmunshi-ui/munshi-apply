@@ -19,6 +19,7 @@ _ALLOWED_EVENT_TYPES = {
     "LEARNING_FAILED",
 }
 _ACTIVATION_KEY = "teach_munshi_telegram_activated_at"
+_SCAN_CURSOR_KEY = "teach_munshi_telegram_scan_cursor_at"
 
 
 @dataclass(frozen=True)
@@ -157,6 +158,8 @@ class TeachMunshiTelegramWorker:
     def ensure_schema(self, *, activation_at: str | None = None) -> None:
         activated = activation_at or _utc_now()
         with self.database.connect() as connection:
+            # Compatibility guard for older local runtimes. Migration 023 is the
+            # versioned schema authority for current installs.
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS teach_munshi_telegram_meta (
@@ -186,24 +189,43 @@ class TeachMunshiTelegramWorker:
                 );
                 """
             )
-            connection.execute(
-                """
-                INSERT OR IGNORE INTO teach_munshi_telegram_meta(
-                    key, value, created_at, updated_at
-                ) VALUES(?,?,?,?)
-                """,
-                (_ACTIVATION_KEY, activated, activated, activated),
-            )
+            for key in (_ACTIVATION_KEY, _SCAN_CURSOR_KEY):
+                connection.execute(
+                    """
+                    INSERT OR IGNORE INTO teach_munshi_telegram_meta(
+                        key, value, created_at, updated_at
+                    ) VALUES(?,?,?,?)
+                    """,
+                    (key, activated, activated, activated),
+                )
 
-    def _activation_at(self) -> str:
+    def _meta_value(self, key: str) -> str:
         with self.database.connect() as connection:
             row = connection.execute(
                 "SELECT value FROM teach_munshi_telegram_meta WHERE key=?",
-                (_ACTIVATION_KEY,),
+                (key,),
             ).fetchone()
         if row is None:
-            raise RuntimeError("Teach MUNSHI Telegram activation watermark is missing")
+            raise RuntimeError(f"Teach MUNSHI Telegram metadata is missing: {key}")
         return str(row["value"])
+
+    def _activation_at(self) -> str:
+        return self._meta_value(_ACTIVATION_KEY)
+
+    def _scan_cursor_at(self) -> str:
+        return self._meta_value(_SCAN_CURSOR_KEY)
+
+    def _advance_scan_cursor(self, value: str) -> None:
+        now = _utc_now()
+        with self.database.connect() as connection:
+            connection.execute(
+                """
+                UPDATE teach_munshi_telegram_meta
+                SET value=?, updated_at=?
+                WHERE key=? AND value <= ?
+                """,
+                (value, now, _SCAN_CURSOR_KEY, value),
+            )
 
     def _enqueue(self, event: dict[str, Any], identity: str) -> bool:
         event_type = str(event.get("eventType") or "")
@@ -251,6 +273,8 @@ class TeachMunshiTelegramWorker:
     def discover_events(self) -> int:
         discovered = 0
         activated_at = self._activation_at()
+        cursor_at = max(activated_at, self._scan_cursor_at())
+        observed_times: list[str] = [cursor_at]
         with self.database.connect() as connection:
             recipes = connection.execute(
                 """
@@ -267,41 +291,34 @@ class TeachMunshiTelegramWorker:
                   AND r.updated_at >= ?
                 GROUP BY r.recipe_id, r.state, r.version, r.updated_at, c.ats_family
                 """,
-                (activated_at,),
+                (cursor_at,),
             ).fetchall()
-            lesson_table = connection.execute(
+            failed_lessons = connection.execute(
                 """
-                SELECT 1 FROM sqlite_master
-                WHERE type='table' AND name='teach_munshi_lessons'
-                """
-            ).fetchone()
-            failed_lessons = (
-                connection.execute(
-                    """
-                    SELECT lesson_id, ats_family, teacher_kind, teacher_provider,
-                           source_lane, updated_at
-                    FROM teach_munshi_lessons
-                    WHERE state='FAILED' AND updated_at >= ?
-                    """,
-                    (activated_at,),
-                ).fetchall()
-                if lesson_table is not None
-                else []
-            )
+                SELECT lesson_id, ats_family, teacher_kind, teacher_provider,
+                       source_lane, updated_at
+                FROM teach_munshi_lessons
+                WHERE state='FAILED' AND updated_at >= ?
+                """,
+                (cursor_at,),
+            ).fetchall()
 
         for row in recipes:
             state = str(row["state"])
+            updated_at = str(row["updated_at"])
+            observed_times.append(updated_at)
             event_type = (
                 "RECIPE_PROMOTED" if state == "PROMOTED" else "RECIPE_ROLLED_BACK"
             )
-            identity = (
-                f"{row['recipe_id']}|{state}|{row['version']}|{row['updated_at']}"
-            )
+            # Transition identity deliberately excludes updated_at. Routine health
+            # updates to an already-promoted/rolled-back recipe must never generate
+            # another notification for the same recipe version/state transition.
+            identity = f"{row['recipe_id']}|{state}|{row['version']}"
             discovered += int(
                 self._enqueue(
                     {
                         "eventType": event_type,
-                        "occurredAt": row["updated_at"],
+                        "occurredAt": updated_at,
                         "recipeId": row["recipe_id"],
                         "version": row["version"],
                         "state": state,
@@ -314,12 +331,16 @@ class TeachMunshiTelegramWorker:
             )
 
         for row in failed_lessons:
-            identity = f"lesson|{row['lesson_id']}|FAILED|{row['updated_at']}"
+            updated_at = str(row["updated_at"])
+            observed_times.append(updated_at)
+            # A lesson can enter FAILED only once in the durable learning lifecycle.
+            # Its timestamp may still change during maintenance/retry bookkeeping.
+            identity = f"lesson|{row['lesson_id']}|FAILED"
             discovered += int(
                 self._enqueue(
                     {
                         "eventType": "LEARNING_FAILED",
-                        "occurredAt": row["updated_at"],
+                        "occurredAt": updated_at,
                         "lessonId": row["lesson_id"],
                         "atsFamily": row["ats_family"],
                         "teacherKind": row["teacher_kind"],
@@ -329,6 +350,11 @@ class TeachMunshiTelegramWorker:
                     identity,
                 )
             )
+
+        # Querying >= cursor intentionally rechecks the newest timestamp on the next
+        # pass so equal-timestamp inserts cannot be missed; stable event IDs make the
+        # overlap idempotent while avoiding rescanning all history since activation.
+        self._advance_scan_cursor(max(observed_times))
         return discovered
 
     def _recover_stale(self, clock: datetime) -> None:
