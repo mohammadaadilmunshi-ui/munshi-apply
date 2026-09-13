@@ -38,23 +38,33 @@ class Settings:
         if n8n_webhook_url and not n8n_webhook_secret:
             raise ValueError("MUNSHI_N8N_WEBHOOK_SECRET is required when n8n is configured")
 
-        # The dedicated names let Apply receive the same existing Hunter bot/chat
-        # through deployment secrets. TELEGRAM_* remains a compatibility fallback
-        # when both services intentionally share one runtime secret source.
-        teach_telegram_bot_token = (
-            os.getenv("MUNSHI_TEACH_TELEGRAM_BOT_TOKEN")
-            or os.getenv("TELEGRAM_BOT_TOKEN")
-            or None
-        )
-        teach_telegram_chat_id = (
-            os.getenv("MUNSHI_TEACH_TELEGRAM_CHAT_ID")
-            or os.getenv("TELEGRAM_CHAT_ID")
-            or None
-        )
-        if bool(teach_telegram_bot_token) != bool(teach_telegram_chat_id):
+        # Dedicated names are authoritative when configured. Legacy TELEGRAM_*
+        # values are adopted only when the complete existing Hunter pair is
+        # present, so an unrelated partial legacy environment cannot break Apply.
+        dedicated_token = os.getenv("MUNSHI_TEACH_TELEGRAM_BOT_TOKEN") or None
+        dedicated_chat = os.getenv("MUNSHI_TEACH_TELEGRAM_CHAT_ID") or None
+        if bool(dedicated_token) != bool(dedicated_chat):
             raise ValueError(
-                "Teach MUNSHI Telegram requires both bot token and chat id"
+                "Teach MUNSHI Telegram requires both dedicated bot token and chat id"
             )
+        if dedicated_token and dedicated_chat:
+            teach_telegram_bot_token = dedicated_token
+            teach_telegram_chat_id = dedicated_chat
+        else:
+            legacy_token = os.getenv("TELEGRAM_BOT_TOKEN") or None
+            legacy_chat = os.getenv("TELEGRAM_CHAT_ID") or None
+            if legacy_token and legacy_chat:
+                teach_telegram_bot_token = legacy_token
+                teach_telegram_chat_id = legacy_chat
+            else:
+                teach_telegram_bot_token = None
+                teach_telegram_chat_id = None
+
+        teach_telegram_poll_seconds = float(
+            os.getenv("MUNSHI_TEACH_TELEGRAM_POLL_SECONDS", "15")
+        )
+        if teach_telegram_poll_seconds <= 0:
+            raise ValueError("MUNSHI_TEACH_TELEGRAM_POLL_SECONDS must be positive")
 
         return cls(
             runtime_root=runtime_root,
@@ -68,9 +78,7 @@ class Settings:
             handoff_hmac_secret=os.getenv("MUNSHI_APPLY_HANDOFF_HMAC_SECRET") or None,
             teach_telegram_bot_token=teach_telegram_bot_token,
             teach_telegram_chat_id=teach_telegram_chat_id,
-            teach_telegram_poll_seconds=float(
-                os.getenv("MUNSHI_TEACH_TELEGRAM_POLL_SECONDS", "15")
-            ),
+            teach_telegram_poll_seconds=teach_telegram_poll_seconds,
         )
 
     @staticmethod
