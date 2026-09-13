@@ -61,6 +61,7 @@ def test_runtime_migration_health_and_backup_round_trip(tmp_path: Path) -> None:
         "017_synthetic_submit_command_inbox.sql",
         "018_synthetic_submit_execution.sql",
         "019_independent_synthetic_verification_receipts.sql",
+        "020_durable_user_auth_trust_checkpoints.sql",
     ]
     assert json.loads(second.stdout)["applied"] == []
     assert json.loads(health.stdout)["status"] == "healthy"
