@@ -8,6 +8,8 @@ export type InteractionEscalationStrategy =
   | "STRUCTURAL_POPUP"
   | "STATE_TRANSITION"
   | "SHADOW_RECIPE"
+  | "LOCAL_SEMANTIC_HINT"
+  | "MODEL_RECIPE_PROPOSAL"
   | "VISUAL_ASSISTED_CONTROL";
 
 export type InteractionEscalationContext = {
@@ -24,6 +26,10 @@ export type InteractionEscalationContext = {
   popupOwned: boolean;
   keyboardOperable: boolean;
   visualFallbackEnabled: boolean;
+  /** Cheap/local classification may suggest mechanics, never candidate facts. */
+  localSemanticHintEnabled?: boolean;
+  /** Any approved model may propose value-free mechanics after deterministic failure. */
+  modelRecipeProposalEnabled?: boolean;
 };
 
 export type InteractionEscalationStep = {
@@ -83,20 +89,21 @@ function hardBoundaryReason(
 }
 
 /**
- * Produces a deterministic escalation ladder for reversible employer-form work.
- * The plan never grants authority to cross authentication/security boundaries,
- * final-submit boundaries, or an unreachable frame.
+ * Deterministic-first escalation for reversible employer-form interaction.
+ *
+ * Paid/browser AI is a teacher of mechanics, not the default executor. Promoted
+ * recipes and deterministic DOM/ARIA strategies run first. A local semantic hint
+ * may classify a novel component. Only after those fail may an approved model
+ * (Anthropic, OpenAI, Gemini, local, or another configured provider) propose a
+ * bounded value-free recipe. Any learned recipe still requires verified SHADOW
+ * successes before promotion.
  */
 export function buildInteractionEscalationPlan(
   context: InteractionEscalationContext,
 ): InteractionEscalationPlan {
   const blockReason = hardBoundaryReason(context);
   if (blockReason) {
-    return {
-      blocked: true,
-      blockReason,
-      steps: [],
-    };
+    return { blocked: true, blockReason, steps: [] };
   }
 
   const steps: InteractionEscalationStep[] = [];
@@ -119,7 +126,6 @@ export function buildInteractionEscalationPlan(
       `Try the ordinary ${context.kind.toLowerCase()} interaction path first`,
     ),
   );
-
   steps.push(
     allowed(
       "ARIA_PATTERN",
@@ -172,13 +178,53 @@ export function buildInteractionEscalationPlan(
       : denied("SHADOW_RECIPE", "No compatible SHADOW recipe is available"),
   );
 
+  const localHintAllowed =
+    Boolean(context.localSemanticHintEnabled) &&
+    context.reversible &&
+    !context.sensitive;
+  steps.push(
+    localHintAllowed
+      ? allowed(
+          "LOCAL_SEMANTIC_HINT",
+          "Use a local/cheap classifier only to identify component mechanics; Candidate Truth remains authoritative for values",
+        )
+      : denied(
+          "LOCAL_SEMANTIC_HINT",
+          context.sensitive
+            ? "Local semantic hint is disabled for sensitive questions"
+            : !context.reversible
+              ? "Local semantic hint is disabled for irreversible actions"
+              : "Local semantic hint is not enabled",
+        ),
+  );
+
+  const modelTeachingAllowed =
+    Boolean(context.modelRecipeProposalEnabled) &&
+    context.reversible &&
+    !context.sensitive;
+  steps.push(
+    modelTeachingAllowed
+      ? allowed(
+          "MODEL_RECIPE_PROPOSAL",
+          "Send compressed semantic control state to the configured model for a value-free mechanics proposal; verify in SHADOW before promotion",
+        )
+      : denied(
+          "MODEL_RECIPE_PROPOSAL",
+          context.sensitive
+            ? "Model recipe teaching is disabled for sensitive questions"
+            : !context.reversible
+              ? "Model recipe teaching is disabled for irreversible actions"
+              : "Model recipe teaching is not enabled",
+        ),
+  );
+
   const visualAllowed =
     context.visualFallbackEnabled && context.reversible && !context.sensitive;
   steps.push(
     visualAllowed
       ? allowed(
           "VISUAL_ASSISTED_CONTROL",
-          "Use controlled visual localization only for reversible, non-sensitive form interaction and verify the resulting DOM/application state",
+          "Use controlled cropped-component visual localization only for reversible, non-sensitive form interaction and verify the resulting DOM/application state",
         )
       : denied(
           "VISUAL_ASSISTED_CONTROL",

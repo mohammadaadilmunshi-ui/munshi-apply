@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .database import Database
+from .interaction_knowledge_store import InteractionKnowledgeStore, normalized_context
 from .learning_analytics_store import LearningAnalyticsStore
 
 _ALLOWED_STRATEGIES = {
@@ -121,10 +122,29 @@ def _validate_actions(value: object) -> list[dict[str, object]]:
     return result
 
 
-def _recipe_id(origin: str, fingerprint: str, semantic_type: str, strategy: str) -> str:
-    digest = hashlib.sha256(
-        f"{origin}\n{fingerprint}\n{semantic_type}\n{strategy}".encode()
-    ).hexdigest()[:32]
+def _context_identity(payload: dict[str, Any]) -> str:
+    context = normalized_context(payload)
+    keys = (
+        "ats_family",
+        "tenant_key",
+        "ui_fingerprint",
+        "question_fingerprint",
+    )
+    values = [context[key] or "" for key in keys]
+    return "\n".join(values) if any(values) else ""
+
+
+def _recipe_id(
+    origin: str,
+    fingerprint: str,
+    semantic_type: str,
+    strategy: str,
+    context_identity: str = "",
+) -> str:
+    base = f"{origin}\n{fingerprint}\n{semantic_type}\n{strategy}"
+    if context_identity:
+        base = f"{base}\ncontext\n{context_identity}"
+    digest = hashlib.sha256(base.encode()).hexdigest()[:32]
     return f"recipe-{digest}"
 
 
@@ -134,11 +154,13 @@ def _taught_recipe_id(
     semantic_type: str,
     version: int,
     actions: list[dict[str, object]],
+    context_identity: str = "",
 ) -> str:
     canonical = json.dumps(actions, sort_keys=True, separators=(",", ":"))
-    digest = hashlib.sha256(
-        f"{origin}\n{fingerprint}\n{semantic_type}\n{version}\n{canonical}".encode()
-    ).hexdigest()[:32]
+    base = f"{origin}\n{fingerprint}\n{semantic_type}\n{version}\n{canonical}"
+    if context_identity:
+        base = f"{base}\ncontext\n{context_identity}"
+    digest = hashlib.sha256(base.encode()).hexdigest()[:32]
     return f"recipe-{digest}"
 
 
@@ -155,8 +177,12 @@ def _strategy_for_actions(actions: object) -> str | None:
     return "TAUGHT_RECIPE"
 
 
-def _wire_recipe(row: dict[str, Any], strategy: str) -> dict[str, object]:
-    return {
+def _wire_recipe(
+    row: dict[str, Any],
+    strategy: str,
+    context: dict[str, Any] | None = None,
+) -> dict[str, object]:
+    result: dict[str, object] = {
         "recipeId": row["recipe_id"],
         "componentFingerprint": row["component_fingerprint"],
         "semanticType": row["semantic_type"],
@@ -166,6 +192,18 @@ def _wire_recipe(row: dict[str, Any], strategy: str) -> dict[str, object]:
         "version": row["version"],
         "actions": row["actions"],
     }
+    if context is not None:
+        result.update(
+            {
+                "atsFamily": context.get("ats_family"),
+                "tenantKey": context.get("tenant_key"),
+                "uiFingerprint": context.get("ui_fingerprint"),
+                "questionFingerprint": context.get("question_fingerprint"),
+                "confidence": context.get("confidence"),
+                "knowledgeState": context.get("lifecycle_state"),
+            }
+        )
+    return result
 
 
 class InteractionRecipeService:
@@ -174,11 +212,13 @@ class InteractionRecipeService:
     def __init__(self, database: Database) -> None:
         self.database = database
         self.store = LearningAnalyticsStore(database)
+        self.knowledge = InteractionKnowledgeStore(database)
 
     def lookup(self, payload: object) -> dict[str, object] | None:
         if not isinstance(payload, dict):
             raise ValueError("Recipe lookup payload must be an object")
         origin, fingerprint, semantic_type = _binding(payload)
+        normalized_context(payload)
         with self.database.connect() as connection:
             rows = connection.execute(
                 """
@@ -192,12 +232,15 @@ class InteractionRecipeService:
                 (origin, fingerprint, semantic_type),
             ).fetchall()
         for row in rows:
-            recipe = self.store.recipe(str(row["recipe_id"]))
+            recipe_id = str(row["recipe_id"])
+            if not self.knowledge.compatible(recipe_id, payload):
+                continue
+            recipe = self.store.recipe(recipe_id)
             if recipe is None:
                 continue
             strategy = _strategy_for_actions(recipe["actions"])
             if strategy is not None:
-                return _wire_recipe(recipe, strategy)
+                return _wire_recipe(recipe, strategy, self.knowledge.context(recipe_id))
         return None
 
     def _finalize_state(self, recipe_id: str) -> dict[str, object]:
@@ -210,13 +253,22 @@ class InteractionRecipeService:
         attempts = self.store.recipe_attempts(recipe_id)
         verified_attempts = [item for item in attempts if item["verified"]]
         state = str(recipe["state"])
-        promotion_threshold = 2 if strategy == "TAUGHT_RECIPE" else 3
-        if state == "SHADOW" and len(verified_attempts) >= promotion_threshold:
-            if all(bool(item["success"]) for item in verified_attempts[-promotion_threshold:]):
+        knowledge = self.knowledge.context(recipe_id)
+
+        # Every learned mechanic, regardless of the teacher provider, needs three
+        # independently verified successes before deterministic promotion.
+        promotion_threshold = 3
+        if knowledge is not None and knowledge["lifecycle_state"] == "QUARANTINED":
+            if state in {"SHADOW", "PROMOTED"}:
+                state = "ROLLED_BACK"
+        elif state == "SHADOW" and len(verified_attempts) >= promotion_threshold:
+            recent = verified_attempts[-promotion_threshold:]
+            if all(bool(item["success"]) for item in recent):
                 state = "PROMOTED"
         elif state == "PROMOTED" and len(verified_attempts) >= 2:
             if all(not bool(item["success"]) for item in verified_attempts[-2:]):
                 state = "ROLLED_BACK"
+
         if state != recipe["state"]:
             now = datetime.now(UTC).isoformat()
             self.store.save_recipe(
@@ -235,10 +287,14 @@ class InteractionRecipeService:
             recipe = self.store.recipe(recipe_id)
             if recipe is None:
                 raise RuntimeError("Interaction recipe disappeared after state update")
+        knowledge = self.knowledge.context(recipe_id)
         return {
-            **_wire_recipe(recipe, strategy),
+            **_wire_recipe(recipe, strategy, knowledge),
             "verifiedAttempts": len(verified_attempts),
             "verifiedSuccesses": sum(bool(item["success"]) for item in verified_attempts),
+            "verifiedFailures": sum(
+                not bool(item["success"]) for item in verified_attempts
+            ),
         }
 
     def _record_outcome(
@@ -265,6 +321,14 @@ class InteractionRecipeService:
                 "failure_reason": failure_reason,
             }
         )
+        if inserted:
+            self.knowledge.record_recipe_health(
+                recipe_id,
+                success=success,
+                verified=verified,
+                failure_reason=failure_reason,
+                at=now,
+            )
         return {**self._finalize_state(recipe_id), "attemptInserted": inserted}
 
     def teach(self, payload: object) -> dict[str, object]:
@@ -272,6 +336,7 @@ class InteractionRecipeService:
             raise ValueError("Teach MUNSHI payload must be an object")
         origin, fingerprint, semantic_type = _binding(payload)
         actions = _validate_actions(payload.get("actions"))
+        context_identity = _context_identity(payload)
         attempt_id = _required(payload, "attemptId")
         application_id = payload.get("applicationId")
         if application_id is not None and (
@@ -289,7 +354,14 @@ class InteractionRecipeService:
             ).fetchone()
         version = int(row["version"] if row is not None else 0) + 1
         now = datetime.now(UTC).isoformat()
-        recipe_id = _taught_recipe_id(origin, fingerprint, semantic_type, version, actions)
+        recipe_id = _taught_recipe_id(
+            origin,
+            fingerprint,
+            semantic_type,
+            version,
+            actions,
+            context_identity,
+        )
         self.store.save_recipe(
             {
                 "recipe_id": recipe_id,
@@ -303,10 +375,13 @@ class InteractionRecipeService:
                 "updated_at": now,
             }
         )
+        self.knowledge.upsert_context(recipe_id, payload, at=now)
         return self._record_outcome(
             recipe_id,
             attempt_id=attempt_id,
-            application_id=application_id.strip() if isinstance(application_id, str) else None,
+            application_id=(
+                application_id.strip() if isinstance(application_id, str) else None
+            ),
             success=True,
             verified=True,
             failure_reason=None,
@@ -332,12 +407,16 @@ class InteractionRecipeService:
         return self._record_outcome(
             recipe_id,
             attempt_id=attempt_id,
-            application_id=application_id.strip() if isinstance(application_id, str) else None,
+            application_id=(
+                application_id.strip() if isinstance(application_id, str) else None
+            ),
             success=success,
             verified=verified,
-            failure_reason=failure_reason.strip()
-            if isinstance(failure_reason, str) and failure_reason.strip()
-            else None,
+            failure_reason=(
+                failure_reason.strip()
+                if isinstance(failure_reason, str) and failure_reason.strip()
+                else None
+            ),
         )
 
     def record(self, payload: object) -> dict[str, object]:
@@ -345,6 +424,7 @@ class InteractionRecipeService:
             raise ValueError("Recipe attempt payload must be an object")
         origin, fingerprint, semantic_type = _binding(payload)
         strategy = _strategy(payload)
+        context_identity = _context_identity(payload)
         attempt_id = _required(payload, "attemptId")
         application_id = payload.get("applicationId")
         if application_id is not None and (
@@ -358,7 +438,13 @@ class InteractionRecipeService:
         failure_reason = payload.get("failureReason")
         if failure_reason is not None and not isinstance(failure_reason, str):
             raise ValueError("failureReason must be a string or null")
-        recipe_id = _recipe_id(origin, fingerprint, semantic_type, strategy)
+        recipe_id = _recipe_id(
+            origin,
+            fingerprint,
+            semantic_type,
+            strategy,
+            context_identity,
+        )
         now = datetime.now(UTC).isoformat()
         existing = self.store.recipe(recipe_id)
         if existing is None:
@@ -375,13 +461,26 @@ class InteractionRecipeService:
                     "updated_at": now,
                 }
             )
+        self.knowledge.upsert_context(recipe_id, payload, at=now)
         return self._record_outcome(
             recipe_id,
             attempt_id=attempt_id,
-            application_id=application_id.strip() if isinstance(application_id, str) else None,
+            application_id=(
+                application_id.strip() if isinstance(application_id, str) else None
+            ),
             success=success,
             verified=verified,
-            failure_reason=failure_reason.strip()
-            if isinstance(failure_reason, str) and failure_reason.strip()
-            else None,
+            failure_reason=(
+                failure_reason.strip()
+                if isinstance(failure_reason, str) and failure_reason.strip()
+                else None
+            ),
         )
+
+    def record_resolution(self, payload: object) -> bool:
+        if not isinstance(payload, dict):
+            raise ValueError("Resolution telemetry payload must be an object")
+        return self.knowledge.record_resolution(payload)
+
+    def cost_summary(self, *, since: str | None = None) -> dict[str, object]:
+        return self.knowledge.cost_summary(since=since)

@@ -45,6 +45,33 @@ describe("interaction escalation", () => {
     expect(steps.every((step) => step.requiresVerification)).toBe(true);
   });
 
+  it("uses local hints before provider-agnostic recipe teaching", () => {
+    const steps = executableEscalationSteps(
+      buildInteractionEscalationPlan(
+        context({
+          promotedRecipeAvailable: false,
+          shadowRecipeAvailable: false,
+          localSemanticHintEnabled: true,
+          modelRecipeProposalEnabled: true,
+        }),
+      ),
+    );
+
+    expect(steps.map((step) => step.strategy)).toEqual([
+      "NATIVE_CONTROL",
+      "ARIA_PATTERN",
+      "KEYBOARD_PATTERN",
+      "STRUCTURAL_POPUP",
+      "STATE_TRANSITION",
+      "LOCAL_SEMANTIC_HINT",
+      "MODEL_RECIPE_PROPOSAL",
+      "VISUAL_ASSISTED_CONTROL",
+    ]);
+    expect(
+      steps.find((step) => step.strategy === "MODEL_RECIPE_PROPOSAL")?.reason,
+    ).toMatch(/configured model/);
+  });
+
   it("keeps controlled visual fallback away from sensitive questions", () => {
     const plan = buildInteractionEscalationPlan(context({ sensitive: true }));
     const visual = plan.steps.find(
@@ -52,6 +79,25 @@ describe("interaction escalation", () => {
     );
 
     expect(visual).toMatchObject({ allowed: false, maxAttempts: 0 });
+  });
+
+  it("keeps local and model teaching away from sensitive questions", () => {
+    const plan = buildInteractionEscalationPlan(
+      context({
+        sensitive: true,
+        localSemanticHintEnabled: true,
+        modelRecipeProposalEnabled: true,
+      }),
+    );
+    const local = plan.steps.find(
+      (step) => step.strategy === "LOCAL_SEMANTIC_HINT",
+    );
+    const model = plan.steps.find(
+      (step) => step.strategy === "MODEL_RECIPE_PROPOSAL",
+    );
+
+    expect(local).toMatchObject({ allowed: false, maxAttempts: 0 });
+    expect(model).toMatchObject({ allowed: false, maxAttempts: 0 });
   });
 
   it("keeps visual fallback away from irreversible actions", () => {
@@ -65,7 +111,11 @@ describe("interaction escalation", () => {
 
   it("blocks the entire ladder at authentication boundaries", () => {
     const plan = buildInteractionEscalationPlan(
-      context({ authenticationBoundary: true }),
+      context({
+        authenticationBoundary: true,
+        localSemanticHintEnabled: true,
+        modelRecipeProposalEnabled: true,
+      }),
     );
 
     expect(plan.blocked).toBe(true);

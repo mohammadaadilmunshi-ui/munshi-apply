@@ -4,13 +4,22 @@ from typing import Any
 
 from .application_store import ApplicationStore
 from .database import Database
+from .interaction_knowledge_store import InteractionKnowledgeStore
 from .models import ResolutionTaskPayload, ResolutionTaskStatus
 from .resolution_task_store import ResolutionTaskStore
+from .teach_munshi_service import TeachMunshiService
 
 _RESOLUTION_MESSAGE_TYPES = {
     "UPSERT_RESOLUTION_TASK",
     "GET_RESOLUTION_TASK",
     "LIST_RESOLUTION_TASKS",
+}
+_TEACH_MESSAGE_TYPES = {
+    "CAPTURE_TEACH_MUNSHI_LESSON",
+    "DRAIN_TEACH_MUNSHI_LESSONS",
+    "GET_TEACH_MUNSHI_METRICS",
+    "RECORD_INTERACTION_RESOLUTION",
+    "GET_INTERACTION_COST_SUMMARY",
 }
 _RESOLUTION_STATUSES = {
     "PENDING",
@@ -65,10 +74,63 @@ def _list_filters(
     return application_id, status, group_key, limit_value
 
 
+def _handle_teach_message(
+    message: dict[str, object],
+    database: Database,
+) -> dict[str, object] | None:
+    message_type = message.get("type")
+    if message_type not in _TEACH_MESSAGE_TYPES:
+        return None
+
+    if message_type == "CAPTURE_TEACH_MUNSHI_LESSON":
+        return {
+            "ok": True,
+            "data": TeachMunshiService(database).capture(message.get("payload")),
+        }
+    if message_type == "DRAIN_TEACH_MUNSHI_LESSONS":
+        payload = message.get("payload")
+        limit = 20
+        if payload is not None:
+            if not isinstance(payload, dict):
+                raise ValueError("Teach MUNSHI drain payload must be an object")
+            raw_limit = payload.get("limit", 20)
+            if isinstance(raw_limit, bool) or not isinstance(raw_limit, int):
+                raise ValueError("Teach MUNSHI drain limit must be an integer")
+            limit = raw_limit
+        return {
+            "ok": True,
+            "data": TeachMunshiService(database).drain(limit=limit),
+        }
+    if message_type == "GET_TEACH_MUNSHI_METRICS":
+        return {"ok": True, "data": TeachMunshiService(database).metrics()}
+    if message_type == "RECORD_INTERACTION_RESOLUTION":
+        payload = _payload(message, "Interaction resolution")
+        created = InteractionKnowledgeStore(database).record_resolution(payload)
+        return {"ok": True, "data": {"created": created}}
+
+    payload = message.get("payload")
+    since: str | None = None
+    if payload is not None:
+        if not isinstance(payload, dict):
+            raise ValueError("Interaction cost summary payload must be an object")
+        since = _optional_text(payload, "since", "Interaction cost summary")
+    return {
+        "ok": True,
+        "data": InteractionKnowledgeStore(database).cost_summary(since=since),
+    }
+
+
 def handle_resolution_task_message(
     message: dict[str, object],
     database: Database,
 ) -> dict[str, object] | None:
+    # This dispatcher is invoked before the legacy native-message switch. Teach
+    # MUNSHI uses it so capture stays a tiny local SQLite operation and does not
+    # add another blocking provider call to the browser interaction path.
+    teach_response = _handle_teach_message(message, database)
+    if teach_response is not None:
+        return teach_response
+
     message_type = message.get("type")
     if message_type not in _RESOLUTION_MESSAGE_TYPES:
         return None
