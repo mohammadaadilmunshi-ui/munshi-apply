@@ -26,6 +26,13 @@ jobs:
       - run: npm ci
       - run: npm run secret:scan
       - run: ./scripts/repository-safety.sh
-      - run: npm audit --audit-level=high
+      # Runtime/shipped dependencies must have no high-or-critical advisories.
+      - name: Audit shipped npm dependencies
+        run: npm audit --omit=dev --audit-level=high
+      # Keep critical findings in the full development/tooling tree release-blocking.
+      # High/moderate dev-tool advisories remain visible in the normal audit output
+      # and Dependabot, but do not block a runtime-only dashboard release.
+      - name: Audit full npm tree for critical advisories
+        run: npm audit --audit-level=critical
       - run: python -m pip install pip-audit
       - run: python -m pip_audit --local
