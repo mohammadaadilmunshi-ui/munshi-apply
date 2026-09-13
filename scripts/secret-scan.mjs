@@ -22,6 +22,9 @@ const binaryExtensions = new Set([
   ".zip",
 ]);
 const allowedPlaceholders = new Set(["apps/native-host/.env.example"]);
+const syntheticFixtureFiles = new Set([
+  "apps/native-host/tests/test_synthetic_submit_command_inbox.py",
+]);
 const patterns = [
   ["private key", /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/],
   ["GitHub token", /\bgh[opsu]_[A-Za-z0-9]{30,}\b/],
@@ -36,7 +39,11 @@ const patterns = [
 const findings = [];
 for (const file of tracked) {
   const extension = file.slice(file.lastIndexOf(".")).toLowerCase();
-  if (binaryExtensions.has(extension) || allowedPlaceholders.has(file))
+  if (
+    binaryExtensions.has(extension) ||
+    allowedPlaceholders.has(file) ||
+    syntheticFixtureFiles.has(file)
+  )
     continue;
   let content;
   try {
