@@ -18,6 +18,7 @@ _ALLOWED_EVENT_TYPES = {
     "RECIPE_ROLLED_BACK",
     "LEARNING_FAILED",
 }
+_ACTIVATION_KEY = "teach_munshi_telegram_activated_at"
 
 
 @dataclass(frozen=True)
@@ -142,6 +143,7 @@ class TeachMunshiTelegramWorker:
         *,
         sender: Callable[[str, str, str, float], None] = _telegram_send,
         max_attempts: int = len(_BACKOFF_SECONDS) + 1,
+        activation_at: str | None = None,
     ) -> None:
         if not bot_token.strip() or not chat_id.strip():
             raise ValueError("Teach MUNSHI Telegram requires bot token and chat id")
@@ -150,12 +152,19 @@ class TeachMunshiTelegramWorker:
         self.chat_id = chat_id.strip()
         self.sender = sender
         self.max_attempts = max_attempts
-        self.ensure_schema()
+        self.ensure_schema(activation_at=activation_at)
 
-    def ensure_schema(self) -> None:
+    def ensure_schema(self, *, activation_at: str | None = None) -> None:
+        activated = activation_at or _utc_now()
         with self.database.connect() as connection:
             connection.executescript(
                 """
+                CREATE TABLE IF NOT EXISTS teach_munshi_telegram_meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS teach_munshi_telegram_outbox (
                     event_id TEXT PRIMARY KEY,
                     event_type TEXT NOT NULL,
@@ -177,6 +186,24 @@ class TeachMunshiTelegramWorker:
                 );
                 """
             )
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO teach_munshi_telegram_meta(
+                    key, value, created_at, updated_at
+                ) VALUES(?,?,?,?)
+                """,
+                (_ACTIVATION_KEY, activated, activated, activated),
+            )
+
+    def _activation_at(self) -> str:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT value FROM teach_munshi_telegram_meta WHERE key=?",
+                (_ACTIVATION_KEY,),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("Teach MUNSHI Telegram activation watermark is missing")
+        return str(row["value"])
 
     def _enqueue(self, event: dict[str, Any], identity: str) -> bool:
         event_type = str(event.get("eventType") or "")
@@ -224,6 +251,7 @@ class TeachMunshiTelegramWorker:
 
     def discover_events(self) -> int:
         discovered = 0
+        activated_at = self._activation_at()
         with self.database.connect() as connection:
             recipes = connection.execute(
                 """
@@ -237,8 +265,10 @@ class TeachMunshiTelegramWorker:
                 LEFT JOIN interaction_recipe_context c ON c.recipe_id=r.recipe_id
                 LEFT JOIN recipe_attempts a ON a.recipe_id=r.recipe_id
                 WHERE r.state IN ('PROMOTED','ROLLED_BACK')
+                  AND r.updated_at >= ?
                 GROUP BY r.recipe_id, r.state, r.version, r.updated_at, c.ats_family
-                """
+                """,
+                (activated_at,),
             ).fetchall()
             lesson_table = connection.execute(
                 """
@@ -252,8 +282,9 @@ class TeachMunshiTelegramWorker:
                     SELECT lesson_id, ats_family, teacher_kind, teacher_provider,
                            source_lane, updated_at
                     FROM teach_munshi_lessons
-                    WHERE state='FAILED'
-                    """
+                    WHERE state='FAILED' AND updated_at >= ?
+                    """,
+                    (activated_at,),
                 ).fetchall()
                 if lesson_table is not None
                 else []
