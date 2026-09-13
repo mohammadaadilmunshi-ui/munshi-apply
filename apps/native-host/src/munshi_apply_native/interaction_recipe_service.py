@@ -240,7 +240,22 @@ class InteractionRecipeService:
                 continue
             strategy = _strategy_for_actions(recipe["actions"])
             if strategy is not None:
-                return _wire_recipe(recipe, strategy, self.knowledge.context(recipe_id))
+                attempts = self.store.recipe_attempts(recipe_id)
+                verified_attempts = [item for item in attempts if item["verified"]]
+                return {
+                    **_wire_recipe(
+                        recipe,
+                        strategy,
+                        self.knowledge.context(recipe_id),
+                    ),
+                    "verifiedAttempts": len(verified_attempts),
+                    "verifiedSuccesses": sum(
+                        bool(item["success"]) for item in verified_attempts
+                    ),
+                    "verifiedFailures": sum(
+                        not bool(item["success"]) for item in verified_attempts
+                    ),
+                }
         return None
 
     def _finalize_state(self, recipe_id: str) -> dict[str, object]:
