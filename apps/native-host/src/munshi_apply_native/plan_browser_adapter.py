@@ -16,6 +16,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from .execution_policy import prepare_permissions, safe_evidence
+from .hunter_plan_semantic_bridge import answer_matches_question
 
 RESUME_UPLOAD_ENV = "MUNSHI_APPLY_RESUME_UPLOAD_ENABLED"
 NORMAL_AUTOFILL_ENV = "MUNSHI_APPLY_NORMAL_ANSWER_AUTOFILL_ENABLED"
@@ -279,11 +280,7 @@ class PlanBrowserAdapter:
                     if a.get("autofill_allowed") is True
                     and a.get("sensitivity_class") == "NORMAL"
                     and a.get("execution_value") is not None
-                    and (
-                        a["question_key"] == control["name"]
-                        or a["normalized_question"].strip().casefold()
-                        == question["rawText"].strip().casefold()
-                    )
+                    and answer_matches_question(a, question, control)
                 ]
                 value = resolved_values.get(control["name"])
                 if value is None and len(candidates) == 1:

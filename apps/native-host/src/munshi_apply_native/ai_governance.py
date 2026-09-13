@@ -54,8 +54,8 @@ _MAX_CONTEXT_ITEMS = 7
 _MAX_CONTEXT_CHARACTERS = 8_000
 _MAX_OUTPUT_TOKENS = 1_024
 _PRICING_MAX_AGE_DAYS = 30
-_PRICING_VERIFIED_AT = datetime(2026, 8, 14, tzinfo=UTC)
-_PRICING_SOURCE = "OpenAI API pricing and model pages, verified 2026-08-14"
+_PRICING_VERIFIED_AT = datetime(2026, 9, 13, tzinfo=UTC)
+_PRICING_SOURCE = "OpenAI API model pages, verified 2026-09-13"
 
 
 @dataclass(frozen=True)
@@ -67,10 +67,10 @@ class PricingSnapshot:
 
 
 _PRICING = {
-    "gpt-5.6": PricingSnapshot("openai", "gpt-5.6", 5.0, 30.0),
-    "gpt-5.6-sol": PricingSnapshot("openai", "gpt-5.6-sol", 5.0, 30.0),
-    "gpt-5.6-terra": PricingSnapshot("openai", "gpt-5.6-terra", 2.5, 15.0),
-    "gpt-5.6-luna": PricingSnapshot("openai", "gpt-5.6-luna", 1.0, 6.0),
+    "gpt-5.6": PricingSnapshot("openai", "gpt-5.6", 4.0, 20.0),
+    "gpt-5.6-sol": PricingSnapshot("openai", "gpt-5.6-sol", 4.0, 20.0),
+    "gpt-5.6-terra": PricingSnapshot("openai", "gpt-5.6-terra", 2.0, 12.0),
+    "gpt-5.6-luna": PricingSnapshot("openai", "gpt-5.6-luna", 0.2, 1.2),
 }
 
 ProviderFactory = Callable[[str], OpenAIResponsesProvider]
@@ -112,13 +112,13 @@ class AIGovernanceService:
         *,
         provider_factory: ProviderFactory = _default_provider_factory,
         ollama_provider_factory: OllamaProviderFactory = _default_ollama_provider_factory,
-        clock: Clock = _default_clock,
+        clock: Clock | None = None,
     ) -> None:
         self.database = database
         self.ai_store = ai_store
         self.provider_factory = provider_factory
         self.ollama_provider_factory = ollama_provider_factory
-        self.clock = clock
+        self.clock = clock or _default_clock
         self.architecture = ArchitectureStore(database)
         self.applications = ApplicationStore(database)
         self.budget = AIBudgetStore(database)
@@ -737,7 +737,11 @@ class AIGovernanceService:
             max_words=plan.default_max_words,
         )
         claims = [
-            {"claimId": claim.claim_id, "text": claim.text, "evidenceIds": list(claim.evidence_ids)}
+            {
+                "claimId": claim.claim_id,
+                "text": claim.text,
+                "evidenceIds": list(claim.evidence_ids),
+            }
             for claim in result.claims
         ]
         usage = {
