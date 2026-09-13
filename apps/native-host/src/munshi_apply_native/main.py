@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import secrets
 from contextlib import asynccontextmanager
 from typing import Any
@@ -16,6 +17,10 @@ from .models import EventEnvelope, HealthResponse
 from .outbox import OutboxWorker, run_outbox_worker
 from .runtime_resolution_read_v1 import RuntimeResolutionReadModel
 from .settings import Settings
+from .teach_munshi_telegram import (
+    TeachMunshiTelegramWorker,
+    run_teach_munshi_telegram_worker,
+)
 
 settings = Settings.from_environment()
 database = Database(settings.database_path, settings.migrations_path)
@@ -24,20 +29,46 @@ database = Database(settings.database_path, settings.migrations_path)
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     database.migrate()
-    stop_event = None
-    worker_task = None
-    if settings.n8n_webhook_url and settings.n8n_webhook_secret:
-        import asyncio
+    stop_event = asyncio.Event()
+    worker_tasks: list[asyncio.Task[None]] = []
 
-        stop_event = asyncio.Event()
-        worker = OutboxWorker(database, settings.n8n_webhook_url, settings.n8n_webhook_secret)
-        worker_task = asyncio.create_task(
-            run_outbox_worker(worker, stop_event, poll_seconds=settings.outbox_poll_seconds)
+    if settings.n8n_webhook_url and settings.n8n_webhook_secret:
+        worker = OutboxWorker(
+            database,
+            settings.n8n_webhook_url,
+            settings.n8n_webhook_secret,
         )
+        worker_tasks.append(
+            asyncio.create_task(
+                run_outbox_worker(
+                    worker,
+                    stop_event,
+                    poll_seconds=settings.outbox_poll_seconds,
+                )
+            )
+        )
+
+    if settings.teach_telegram_bot_token and settings.teach_telegram_chat_id:
+        teach_worker = TeachMunshiTelegramWorker(
+            database,
+            settings.teach_telegram_bot_token,
+            settings.teach_telegram_chat_id,
+        )
+        worker_tasks.append(
+            asyncio.create_task(
+                run_teach_munshi_telegram_worker(
+                    teach_worker,
+                    stop_event,
+                    poll_seconds=settings.teach_telegram_poll_seconds,
+                )
+            )
+        )
+
     yield
-    if stop_event and worker_task:
+
+    if worker_tasks:
         stop_event.set()
-        await worker_task
+        await asyncio.gather(*worker_tasks)
 
 
 app = FastAPI(
@@ -87,10 +118,15 @@ def _loop_service(
 @app.get("/health", response_model=HealthResponse)
 def health() -> dict[str, Any]:
     state = database.health()
+    teach_telegram_configured = bool(
+        settings.teach_telegram_bot_token and settings.teach_telegram_chat_id
+    )
     return {
         **state,
         "outbox_worker": "active" if settings.n8n_webhook_url else "disabled",
         "n8n_configured": settings.n8n_webhook_url is not None,
+        "teach_telegram_worker": "active" if teach_telegram_configured else "disabled",
+        "teach_telegram_configured": teach_telegram_configured,
         "version": __version__,
     }
 
@@ -174,6 +210,7 @@ def resolve_complete_loop_task(
             "replacement Application Plan."
         ),
     )
+
 
 # Phase 1C-A durable preparation job API
 
