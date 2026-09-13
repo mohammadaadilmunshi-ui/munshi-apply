@@ -6,6 +6,8 @@ from munshi_apply_native.database import Database
 from munshi_apply_native.interaction_recipe_service import InteractionRecipeService
 from munshi_apply_native.teach_munshi_telegram import TeachMunshiTelegramWorker
 
+_TEST_ACTIVATION = "2000-01-01T00:00:00+00:00"
+
 
 def _database(tmp_path: Path) -> Database:
     migrations = Path(__file__).resolve().parents[3] / "migrations"
@@ -49,6 +51,7 @@ def test_promoted_and_rolled_back_recipes_notify_once(tmp_path: Path) -> None:
         "existing-hunter-bot-token",
         "123456",
         sender=lambda _token, _chat, text, _timeout: deliveries.append(text),
+        activation_at=_TEST_ACTIVATION,
     )
 
     first = worker.deliver_due()
@@ -85,6 +88,23 @@ def test_promoted_and_rolled_back_recipes_notify_once(tmp_path: Path) -> None:
     assert "Candidate answer values are not included" in deliveries[1]
 
 
+def test_first_activation_does_not_replay_historical_lessons(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    _promote_recipe(database)
+    deliveries: list[str] = []
+    worker = TeachMunshiTelegramWorker(
+        database,
+        "existing-hunter-bot-token",
+        "123456",
+        sender=lambda _token, _chat, text, _timeout: deliveries.append(text),
+    )
+
+    result = worker.deliver_due()
+    assert result.discovered == 0
+    assert result.delivered == 0
+    assert deliveries == []
+
+
 def test_outbox_persists_only_allowlisted_metadata(tmp_path: Path) -> None:
     database = _database(tmp_path)
     _promote_recipe(database)
@@ -93,6 +113,7 @@ def test_outbox_persists_only_allowlisted_metadata(tmp_path: Path) -> None:
         "existing-hunter-bot-token",
         "123456",
         sender=lambda *_args: None,
+        activation_at=_TEST_ACTIVATION,
     )
 
     assert worker.discover_events() == 1
@@ -121,6 +142,7 @@ def test_delivery_failure_is_non_blocking_and_retryable(tmp_path: Path) -> None:
         "secret-token-must-never-be-stored-in-error",
         "123456",
         sender=failing_sender,
+        activation_at=_TEST_ACTIVATION,
     )
     result = worker.deliver_due()
     assert result.delivered == 0
