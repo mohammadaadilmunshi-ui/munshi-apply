@@ -236,13 +236,12 @@ class TeachMunshiTelegramWorker:
                 INSERT OR IGNORE INTO teach_munshi_telegram_outbox(
                     event_id, event_type, payload_json, delivery_state,
                     attempt_count, next_attempt_at, created_at, updated_at
-                ) VALUES(?,?,?,'PENDING',0,?,?,?)
+                ) VALUES(?,?,?,'PENDING',0,NULL,?,?)
                 """,
                 (
                     event_id,
                     event_type,
                     json.dumps(safe_event, sort_keys=True, separators=(",", ":")),
-                    now,
                     now,
                     now,
                 ),
