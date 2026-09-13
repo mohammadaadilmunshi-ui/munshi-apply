@@ -44,7 +44,11 @@ def payload(attempt_id: str, *, success: bool = True) -> dict[str, object]:
     }
 
 
-def contextual_payload(attempt_id: str, *, tenant: str = "tenant-a") -> dict[str, object]:
+def contextual_payload(
+    attempt_id: str,
+    *,
+    tenant: str = "tenant-a",
+) -> dict[str, object]:
     return {
         **payload(attempt_id),
         "atsFamily": "workday",
@@ -73,7 +77,9 @@ def taught_actions() -> list[dict[str, object]]:
     ]
 
 
-def test_recipe_stays_shadow_then_promotes_after_three_verified_successes(tmp_path: Path) -> None:
+def test_recipe_stays_shadow_then_promotes_after_three_successes(
+    tmp_path: Path,
+) -> None:
     database, service = create_service(tmp_path)
     insert_application(database)
     first = service.record(payload("attempt-1"))
@@ -89,7 +95,9 @@ def test_recipe_stays_shadow_then_promotes_after_three_verified_successes(tmp_pa
     assert all("value" not in action for action in promoted["actions"])
 
 
-def test_promoted_recipe_rolls_back_and_quarantines_after_two_verified_failures(tmp_path: Path) -> None:
+def test_promoted_recipe_rolls_back_and_quarantines_after_failures(
+    tmp_path: Path,
+) -> None:
     database, service = create_service(tmp_path)
     insert_application(database)
     for index in range(3):
@@ -133,7 +141,9 @@ def test_duplicate_attempt_is_idempotent(tmp_path: Path) -> None:
     assert duplicate["verifiedSuccesses"] == 1
 
 
-def test_taught_recipe_requires_three_verified_successes_before_promotion(tmp_path: Path) -> None:
+def test_taught_recipe_requires_three_successes_before_promotion(
+    tmp_path: Path,
+) -> None:
     database, service = create_service(tmp_path)
     insert_application(database)
     taught = service.teach(
@@ -176,7 +186,7 @@ def test_taught_recipe_requires_three_verified_successes_before_promotion(tmp_pa
     assert promoted["verifiedSuccesses"] == 3
 
 
-def test_recipe_context_prevents_cross_tenant_or_ui_drift_reuse(tmp_path: Path) -> None:
+def test_recipe_context_prevents_tenant_or_ui_drift_reuse(tmp_path: Path) -> None:
     database, service = create_service(tmp_path)
     insert_application(database)
     for index in range(3):
@@ -221,7 +231,7 @@ def test_recipe_context_prevents_cross_tenant_or_ui_drift_reuse(tmp_path: Path) 
     assert changed_ui is None
 
 
-def test_resolution_cost_summary_tracks_deterministic_and_claude_fallback(tmp_path: Path) -> None:
+def test_resolution_cost_summary_tracks_model_provider_mix(tmp_path: Path) -> None:
     database, service = create_service(tmp_path)
     insert_application(database)
     now = datetime.now(UTC).isoformat()
@@ -245,7 +255,7 @@ def test_resolution_cost_summary_tracks_deterministic_and_claude_fallback(tmp_pa
             "site_origin": "https://jobs.example.test",
             "component_fingerprint": "cfp-weird456",
             "semantic_type": "CUSTOM_QUESTION",
-            "resolution_lane": "CLAUDE_RECIPE_PROPOSAL",
+            "resolution_lane": "MODEL_RECIPE_PROPOSAL",
             "success": True,
             "verified": True,
             "ai_provider": "anthropic",
@@ -261,12 +271,23 @@ def test_resolution_cost_summary_tracks_deterministic_and_claude_fallback(tmp_pa
     assert summary["totalResolutions"] == 2
     assert summary["applications"] == 1
     assert summary["deterministicResolutionRate"] == 0.5
-    assert summary["claudeFallbackRate"] == 0.5
+    assert summary["modelFallbackRate"] == 0.5
     assert summary["aiCostUsd"] == 0.012
     assert summary["aiCostPerApplicationUsd"] == 0.012
+    assert summary["providers"] == [
+        {
+            "provider": "anthropic",
+            "count": 1,
+            "cost": 0.012,
+            "input_tokens": 4000,
+            "output_tokens": 400,
+        }
+    ]
 
 
-def test_consequential_widgets_learn_but_security_controls_do_not(tmp_path: Path) -> None:
+def test_consequential_widgets_learn_but_security_controls_do_not(
+    tmp_path: Path,
+) -> None:
     database, service = create_service(tmp_path)
     insert_application(database)
     sponsorship = payload("sponsorship-widget")
@@ -284,7 +305,9 @@ def test_consequential_widgets_learn_but_security_controls_do_not(tmp_path: Path
         service.record(unsupported)
 
 
-def test_teach_rejects_value_bearing_or_unsupported_recipe_steps(tmp_path: Path) -> None:
+def test_teach_rejects_value_bearing_or_unsupported_recipe_steps(
+    tmp_path: Path,
+) -> None:
     database, service = create_service(tmp_path)
     insert_application(database)
     with pytest.raises(ValueError, match="unsupported or value-bearing"):
