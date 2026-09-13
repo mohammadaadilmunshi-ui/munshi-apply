@@ -21,7 +21,6 @@ def _promote_recipe(database: Database) -> dict[str, object]:
         learned = service.record(
             {
                 "attemptId": f"attempt-{index}",
-                "applicationId": "application-test",
                 "siteOrigin": "https://jobs.example.test",
                 "componentFingerprint": "cfp-example-control",
                 "semanticType": "WORK_AUTH_US",
@@ -71,7 +70,6 @@ def test_promoted_and_rolled_back_recipes_notify_once(tmp_path: Path) -> None:
             {
                 "recipeId": recipe["recipeId"],
                 "attemptId": f"failure-{index}",
-                "applicationId": "application-test",
                 "success": False,
                 "verified": True,
                 "failureReason": "verification_failed",
