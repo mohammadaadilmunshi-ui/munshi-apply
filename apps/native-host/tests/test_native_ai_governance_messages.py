@@ -19,7 +19,7 @@ def create_runtime(
     migrations = Path(__file__).resolve().parents[3] / "migrations"
     database = Database(tmp_path / "test.sqlite", migrations)
     database.migrate()
-    now = datetime(2026, 8, 14, 18, 0, tzinfo=UTC).isoformat()
+    now = datetime(2026, 9, 13, 18, 0, tzinfo=UTC).isoformat()
     ApplicationStore(database).ensure("app-1", now)
     ArchitectureStore(database).upsert_evidence_node(
         {
@@ -53,7 +53,7 @@ def create_runtime(
     monkeypatch.setattr(store, "key_source", lambda: "keychain")
     monkeypatch.setattr(store, "_keychain_read", lambda: "test-key-" + ("x" * 40))
     monkeypatch.setattr(
-        ai_governance, "_default_clock", lambda: datetime(2026, 8, 14, 18, 0, tzinfo=UTC)
+        ai_governance, "_default_clock", lambda: datetime(2026, 9, 13, 18, 0, tzinfo=UTC)
     )
     return database, store
 
