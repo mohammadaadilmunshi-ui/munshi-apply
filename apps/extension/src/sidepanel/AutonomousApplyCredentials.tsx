@@ -26,10 +26,8 @@ const defaults: AutonomousApplySettings = {
 };
 
 export function AutonomousApplyCredentials() {
-  const [settings, setSettings] =
-    useState<AutonomousApplySettings>(defaults);
-  const [runtime, setRuntime] =
-    useState<AutonomousApplyRuntimeStatus | null>(null);
+  const [settings, setSettings] = useState<AutonomousApplySettings>(defaults);
+  const [runtime, setRuntime] = useState<AutonomousApplyRuntimeStatus | null>(null);
   const [anthropicKey, setAnthropicKey] = useState("");
   const [capSolverKey, setCapSolverKey] = useState("");
   const [busy, setBusy] = useState(false);
