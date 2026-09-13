@@ -88,6 +88,11 @@ class ResolveLoopTaskRequest(BaseModel):
     approved_by_user: bool = True
 
 
+class HealthResponseWithTeach(HealthResponse):
+    teach_telegram_worker: str
+    teach_telegram_configured: bool
+
+
 def _loop_service(
     x_munshi_command_secret: str | None = Header(default=None),
     x_munshi_tenant_id: str | None = Header(default=None),
@@ -115,7 +120,7 @@ def _loop_service(
     return CompleteApplicationLoopService(database, tenant_id=tenant_id, user_id=user_id)
 
 
-@app.get("/health", response_model=HealthResponse)
+@app.get("/health", response_model=HealthResponseWithTeach)
 def health() -> dict[str, Any]:
     state = database.health()
     teach_telegram_configured = bool(
