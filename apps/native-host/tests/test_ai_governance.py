@@ -16,7 +16,7 @@ from munshi_apply_native.providers import (
     ProviderUsage,
 )
 
-FIXED_NOW = datetime(2026, 8, 14, 18, 0, tzinfo=UTC)
+FIXED_NOW = datetime(2026, 9, 13, 18, 0, tzinfo=UTC)
 
 
 def create_database(tmp_path: Path) -> Database:
