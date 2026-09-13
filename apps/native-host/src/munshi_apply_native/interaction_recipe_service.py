@@ -124,7 +124,13 @@ def _validate_actions(value: object) -> list[dict[str, object]]:
 
 def _context_identity(payload: dict[str, Any]) -> str:
     context = normalized_context(payload)
-    values = [context[key] or "" for key in ("ats_family", "tenant_key", "ui_fingerprint", "question_fingerprint")]
+    keys = (
+        "ats_family",
+        "tenant_key",
+        "ui_fingerprint",
+        "question_fingerprint",
+    )
+    values = [context[key] or "" for key in keys]
     return "\n".join(values) if any(values) else ""
 
 
@@ -212,7 +218,6 @@ class InteractionRecipeService:
         if not isinstance(payload, dict):
             raise ValueError("Recipe lookup payload must be an object")
         origin, fingerprint, semantic_type = _binding(payload)
-        # Validate optional context even if no matching recipe exists.
         normalized_context(payload)
         with self.database.connect() as connection:
             rows = connection.execute(
@@ -250,14 +255,15 @@ class InteractionRecipeService:
         state = str(recipe["state"])
         knowledge = self.knowledge.context(recipe_id)
 
-        # All learned mechanics, including Claude/owner-taught recipes, need three
+        # Every learned mechanic, regardless of the teacher provider, needs three
         # independently verified successes before deterministic promotion.
         promotion_threshold = 3
         if knowledge is not None and knowledge["lifecycle_state"] == "QUARANTINED":
             if state in {"SHADOW", "PROMOTED"}:
                 state = "ROLLED_BACK"
         elif state == "SHADOW" and len(verified_attempts) >= promotion_threshold:
-            if all(bool(item["success"]) for item in verified_attempts[-promotion_threshold:]):
+            recent = verified_attempts[-promotion_threshold:]
+            if all(bool(item["success"]) for item in recent):
                 state = "PROMOTED"
         elif state == "PROMOTED" and len(verified_attempts) >= 2:
             if all(not bool(item["success"]) for item in verified_attempts[-2:]):
@@ -286,7 +292,9 @@ class InteractionRecipeService:
             **_wire_recipe(recipe, strategy, knowledge),
             "verifiedAttempts": len(verified_attempts),
             "verifiedSuccesses": sum(bool(item["success"]) for item in verified_attempts),
-            "verifiedFailures": sum(not bool(item["success"]) for item in verified_attempts),
+            "verifiedFailures": sum(
+                not bool(item["success"]) for item in verified_attempts
+            ),
         }
 
     def _record_outcome(
@@ -371,7 +379,9 @@ class InteractionRecipeService:
         return self._record_outcome(
             recipe_id,
             attempt_id=attempt_id,
-            application_id=application_id.strip() if isinstance(application_id, str) else None,
+            application_id=(
+                application_id.strip() if isinstance(application_id, str) else None
+            ),
             success=True,
             verified=True,
             failure_reason=None,
@@ -397,12 +407,16 @@ class InteractionRecipeService:
         return self._record_outcome(
             recipe_id,
             attempt_id=attempt_id,
-            application_id=application_id.strip() if isinstance(application_id, str) else None,
+            application_id=(
+                application_id.strip() if isinstance(application_id, str) else None
+            ),
             success=success,
             verified=verified,
-            failure_reason=failure_reason.strip()
-            if isinstance(failure_reason, str) and failure_reason.strip()
-            else None,
+            failure_reason=(
+                failure_reason.strip()
+                if isinstance(failure_reason, str) and failure_reason.strip()
+                else None
+            ),
         )
 
     def record(self, payload: object) -> dict[str, object]:
@@ -424,7 +438,13 @@ class InteractionRecipeService:
         failure_reason = payload.get("failureReason")
         if failure_reason is not None and not isinstance(failure_reason, str):
             raise ValueError("failureReason must be a string or null")
-        recipe_id = _recipe_id(origin, fingerprint, semantic_type, strategy, context_identity)
+        recipe_id = _recipe_id(
+            origin,
+            fingerprint,
+            semantic_type,
+            strategy,
+            context_identity,
+        )
         now = datetime.now(UTC).isoformat()
         existing = self.store.recipe(recipe_id)
         if existing is None:
@@ -445,12 +465,16 @@ class InteractionRecipeService:
         return self._record_outcome(
             recipe_id,
             attempt_id=attempt_id,
-            application_id=application_id.strip() if isinstance(application_id, str) else None,
+            application_id=(
+                application_id.strip() if isinstance(application_id, str) else None
+            ),
             success=success,
             verified=verified,
-            failure_reason=failure_reason.strip()
-            if isinstance(failure_reason, str) and failure_reason.strip()
-            else None,
+            failure_reason=(
+                failure_reason.strip()
+                if isinstance(failure_reason, str) and failure_reason.strip()
+                else None
+            ),
         )
 
     def record_resolution(self, payload: object) -> bool:
