@@ -8,6 +8,8 @@ export type InteractionEscalationStrategy =
   | "STRUCTURAL_POPUP"
   | "STATE_TRANSITION"
   | "SHADOW_RECIPE"
+  | "LOCAL_SEMANTIC_HINT"
+  | "CLAUDE_RECIPE_PROPOSAL"
   | "VISUAL_ASSISTED_CONTROL";
 
 export type InteractionEscalationContext = {
@@ -24,6 +26,10 @@ export type InteractionEscalationContext = {
   popupOwned: boolean;
   keyboardOperable: boolean;
   visualFallbackEnabled: boolean;
+  /** Cheap/local classification may suggest mechanics, never candidate facts. */
+  localSemanticHintEnabled?: boolean;
+  /** Claude may propose a bounded recipe after deterministic lanes fail. */
+  claudeRecipeProposalEnabled?: boolean;
 };
 
 export type InteractionEscalationStep = {
@@ -83,9 +89,13 @@ function hardBoundaryReason(
 }
 
 /**
- * Produces a deterministic escalation ladder for reversible employer-form work.
- * The plan never grants authority to cross authentication/security boundaries,
- * final-submit boundaries, or an unreachable frame.
+ * Produces a deterministic-first escalation ladder for reversible employer-form work.
+ *
+ * Paid/browser AI is deliberately last-mile teaching, not the default executor:
+ * promoted recipes and deterministic DOM/ARIA mechanics run first; an optional local
+ * semantic hint may classify an unfamiliar component; only then may Claude propose a
+ * bounded value-free interaction recipe. The proposal still requires normal recipe
+ * verification/promotion before it becomes deterministic knowledge.
  */
 export function buildInteractionEscalationPlan(
   context: InteractionEscalationContext,
@@ -172,13 +182,53 @@ export function buildInteractionEscalationPlan(
       : denied("SHADOW_RECIPE", "No compatible SHADOW recipe is available"),
   );
 
+  const localHintAllowed =
+    Boolean(context.localSemanticHintEnabled) &&
+    context.reversible &&
+    !context.sensitive;
+  steps.push(
+    localHintAllowed
+      ? allowed(
+          "LOCAL_SEMANTIC_HINT",
+          "Use a local/cheap classifier only to identify component mechanics; Candidate Truth remains authoritative for values",
+        )
+      : denied(
+          "LOCAL_SEMANTIC_HINT",
+          context.sensitive
+            ? "Local semantic hint is disabled for sensitive questions"
+            : !context.reversible
+              ? "Local semantic hint is disabled for irreversible actions"
+              : "Local semantic hint is not enabled",
+        ),
+  );
+
+  const claudeTeachingAllowed =
+    Boolean(context.claudeRecipeProposalEnabled) &&
+    context.reversible &&
+    !context.sensitive;
+  steps.push(
+    claudeTeachingAllowed
+      ? allowed(
+          "CLAUDE_RECIPE_PROPOSAL",
+          "Send compressed semantic control state to Claude for a value-free recipe proposal; verify in SHADOW before promotion",
+        )
+      : denied(
+          "CLAUDE_RECIPE_PROPOSAL",
+          context.sensitive
+            ? "Claude recipe teaching is disabled for sensitive questions"
+            : !context.reversible
+              ? "Claude recipe teaching is disabled for irreversible actions"
+              : "Claude recipe teaching is not enabled",
+        ),
+  );
+
   const visualAllowed =
     context.visualFallbackEnabled && context.reversible && !context.sensitive;
   steps.push(
     visualAllowed
       ? allowed(
           "VISUAL_ASSISTED_CONTROL",
-          "Use controlled visual localization only for reversible, non-sensitive form interaction and verify the resulting DOM/application state",
+          "Use controlled cropped-component visual localization only for reversible, non-sensitive form interaction and verify the resulting DOM/application state",
         )
       : denied(
           "VISUAL_ASSISTED_CONTROL",
