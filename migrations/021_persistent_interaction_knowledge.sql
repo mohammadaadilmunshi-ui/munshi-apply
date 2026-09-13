@@ -34,7 +34,11 @@ ON interaction_recipe_context(
 );
 
 CREATE INDEX IF NOT EXISTS idx_interaction_recipe_context_health
-ON interaction_recipe_context(lifecycle_state, consecutive_failures, last_verified_at DESC);
+ON interaction_recipe_context(
+    lifecycle_state,
+    consecutive_failures,
+    last_verified_at DESC
+);
 
 CREATE TABLE IF NOT EXISTS interaction_resolution_events (
     event_id TEXT PRIMARY KEY,
@@ -53,6 +57,7 @@ CREATE TABLE IF NOT EXISTS interaction_resolution_events (
             'STRUCTURAL_POPUP',
             'STATE_TRANSITION',
             'LOCAL_SEMANTIC_HINT',
+            'MODEL_RECIPE_PROPOSAL',
             'CLAUDE_RECIPE_PROPOSAL',
             'VISUAL_ASSISTED_CONTROL'
         )
