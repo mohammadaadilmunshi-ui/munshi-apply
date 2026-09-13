@@ -30,6 +30,7 @@ EXPECTED_MIGRATIONS = [
     "020_durable_user_auth_trust_checkpoints.sql",
     "021_persistent_interaction_knowledge.sql",
     "022_teach_munshi_async_learning.sql",
+    "023_teach_munshi_telegram_outbox.sql",
 ]
 
 
@@ -40,8 +41,8 @@ def test_migrations_are_idempotent(tmp_path: Path) -> None:
     assert database.migrate() == []
     health = database.health()
     assert health["status"] == "healthy"
-    assert health["migration_count"] == 22
-    assert health["schema_version"] == "022_teach_munshi_async_learning.sql"
+    assert health["migration_count"] == 23
+    assert health["schema_version"] == "023_teach_munshi_telegram_outbox.sql"
 
 
 def test_architecture_tables_are_created_with_integrity_constraints(tmp_path: Path) -> None:
@@ -71,6 +72,8 @@ def test_architecture_tables_are_created_with_integrity_constraints(tmp_path: Pa
             "interaction_recipe_context",
             "interaction_resolution_events",
             "teach_munshi_lessons",
+            "teach_munshi_telegram_meta",
+            "teach_munshi_telegram_outbox",
             "application_outcomes",
             "attribution_tokens",
             "experiments",

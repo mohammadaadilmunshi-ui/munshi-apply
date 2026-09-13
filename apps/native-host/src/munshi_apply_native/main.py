@@ -21,6 +21,10 @@ from .teach_munshi_telegram import (
     TeachMunshiTelegramWorker,
     run_teach_munshi_telegram_worker,
 )
+from .teach_munshi_worker import (
+    TeachMunshiLearningWorker,
+    run_teach_munshi_learning_worker,
+)
 
 settings = Settings.from_environment()
 database = Database(settings.database_path, settings.migrations_path)
@@ -31,6 +35,20 @@ async def lifespan(_: FastAPI):
     database.migrate()
     stop_event = asyncio.Event()
     worker_tasks: list[asyncio.Task[None]] = []
+
+    # Teach MUNSHI learning is always local/deterministic at this stage. The
+    # browser only inserts a verified, value-free lesson; this background worker
+    # turns that lesson into SHADOW/promoted recipe evidence without delaying the
+    # application path or making any AI provider call.
+    teach_learning_worker = TeachMunshiLearningWorker(database)
+    worker_tasks.append(
+        asyncio.create_task(
+            run_teach_munshi_learning_worker(
+                teach_learning_worker,
+                stop_event,
+            )
+        )
+    )
 
     if settings.n8n_webhook_url and settings.n8n_webhook_secret:
         worker = OutboxWorker(
@@ -89,6 +107,7 @@ class ResolveLoopTaskRequest(BaseModel):
 
 
 class HealthResponseWithTeach(HealthResponse):
+    teach_learning_worker: str
     teach_telegram_worker: str
     teach_telegram_configured: bool
 
@@ -130,6 +149,7 @@ def health() -> dict[str, Any]:
         **state,
         "outbox_worker": "active" if settings.n8n_webhook_url else "disabled",
         "n8n_configured": settings.n8n_webhook_url is not None,
+        "teach_learning_worker": "active",
         "teach_telegram_worker": "active" if teach_telegram_configured else "disabled",
         "teach_telegram_configured": teach_telegram_configured,
         "version": __version__,
