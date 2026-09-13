@@ -7,36 +7,41 @@ from shutil import copy2
 from munshi_apply_native.database import Database
 
 
+EXPECTED_MIGRATIONS = [
+    "001_initial.sql",
+    "002_transactional_outbox.sql",
+    "003_profile_evidence_checkpoints.sql",
+    "004_learning_analytics.sql",
+    "005_profile_snapshot_ordering.sql",
+    "006_ai_budget_reservations.sql",
+    "007_ai_draft_reviews.sql",
+    "008_progressive_memory.sql",
+    "009_account_orchestration.sql",
+    "010_job_signal_intelligence.sql",
+    "011_job_signal_identity_and_analytics.sql",
+    "012_resolution_tasks.sql",
+    "013_career_os_preparation_handoffs.sql",
+    "014_complete_application_loop_v1.sql",
+    "015_durable_background_preparation.sql",
+    "016_application_plan_supersession_requeue.sql",
+    "017_synthetic_submit_command_inbox.sql",
+    "018_synthetic_submit_execution.sql",
+    "019_independent_synthetic_verification_receipts.sql",
+    "020_durable_user_auth_trust_checkpoints.sql",
+    "021_persistent_interaction_knowledge.sql",
+    "022_teach_munshi_async_learning.sql",
+]
+
+
 def test_migrations_are_idempotent(tmp_path: Path) -> None:
     migrations = Path(__file__).resolve().parents[3] / "migrations"
     database = Database(tmp_path / "test.sqlite", migrations)
-    assert database.migrate() == [
-        "001_initial.sql",
-        "002_transactional_outbox.sql",
-        "003_profile_evidence_checkpoints.sql",
-        "004_learning_analytics.sql",
-        "005_profile_snapshot_ordering.sql",
-        "006_ai_budget_reservations.sql",
-        "007_ai_draft_reviews.sql",
-        "008_progressive_memory.sql",
-        "009_account_orchestration.sql",
-        "010_job_signal_intelligence.sql",
-        "011_job_signal_identity_and_analytics.sql",
-        "012_resolution_tasks.sql",
-        "013_career_os_preparation_handoffs.sql",
-        "014_complete_application_loop_v1.sql",
-        "015_durable_background_preparation.sql",
-        "016_application_plan_supersession_requeue.sql",
-        "017_synthetic_submit_command_inbox.sql",
-        "018_synthetic_submit_execution.sql",
-        "019_independent_synthetic_verification_receipts.sql",
-        "020_durable_user_auth_trust_checkpoints.sql",
-    ]
+    assert database.migrate() == EXPECTED_MIGRATIONS
     assert database.migrate() == []
     health = database.health()
     assert health["status"] == "healthy"
-    assert health["migration_count"] == 20
-    assert health["schema_version"] == "020_durable_user_auth_trust_checkpoints.sql"
+    assert health["migration_count"] == 22
+    assert health["schema_version"] == "022_teach_munshi_async_learning.sql"
 
 
 def test_architecture_tables_are_created_with_integrity_constraints(tmp_path: Path) -> None:
@@ -63,6 +68,9 @@ def test_architecture_tables_are_created_with_integrity_constraints(tmp_path: Pa
             "ai_drafts",
             "interaction_recipes",
             "recipe_attempts",
+            "interaction_recipe_context",
+            "interaction_resolution_events",
+            "teach_munshi_lessons",
             "application_outcomes",
             "attribution_tokens",
             "experiments",
@@ -180,18 +188,7 @@ def test_job_signal_identity_migration_preserves_existing_reports(tmp_path: Path
         )
 
     upgraded = Database(database_path, migrations)
-    assert upgraded.migrate() == [
-        "011_job_signal_identity_and_analytics.sql",
-        "012_resolution_tasks.sql",
-        "013_career_os_preparation_handoffs.sql",
-        "014_complete_application_loop_v1.sql",
-        "015_durable_background_preparation.sql",
-        "016_application_plan_supersession_requeue.sql",
-        "017_synthetic_submit_command_inbox.sql",
-        "018_synthetic_submit_execution.sql",
-        "019_independent_synthetic_verification_receipts.sql",
-        "020_durable_user_auth_trust_checkpoints.sql",
-    ]
+    assert upgraded.migrate() == EXPECTED_MIGRATIONS[10:]
     with upgraded.connect() as connection:
         report = connection.execute(
             "SELECT * FROM job_signal_reports WHERE report_id = 'report-legacy'"
