@@ -30,7 +30,7 @@ def test_health_and_event_round_trip(tmp_path: Path) -> None:
         health = client.get("/health")
         assert health.status_code == 200
         assert health.json()["status"] == "healthy"
-        assert health.json()["schema_version"] == "023_teach_munshi_telegram_outbox.sql"
+        assert health.json()["schema_version"] == "024_confirmation_evidence.sql"
         assert health.json()["outbox_worker"] == "disabled"
         assert health.json()["teach_learning_worker"] == "active"
         assert health.json()["teach_telegram_worker"] == "disabled"
@@ -272,18 +272,19 @@ def test_application_plan_handoff_http_boundary_is_fail_closed_and_idempotent(
         assert replay.json()["replayed"] is True
 
     with main.database.connect() as connection:
-        assert connection.execute(
-            "SELECT COUNT(*) FROM career_os_application_plans"
-        ).fetchone()[0] == 1
-        assert connection.execute(
-            "SELECT COUNT(*) FROM complete_application_sessions"
-        ).fetchone()[0] == 0
-        assert connection.execute(
-            "SELECT COUNT(*) FROM final_submit_commands"
-        ).fetchone()[0] == 0
-        assert connection.execute(
-            "SELECT COUNT(*) FROM application_submission_receipts"
-        ).fetchone()[0] == 0
+        assert (
+            connection.execute("SELECT COUNT(*) FROM career_os_application_plans").fetchone()[0]
+            == 1
+        )
+        assert (
+            connection.execute("SELECT COUNT(*) FROM complete_application_sessions").fetchone()[0]
+            == 0
+        )
+        assert connection.execute("SELECT COUNT(*) FROM final_submit_commands").fetchone()[0] == 0
+        assert (
+            connection.execute("SELECT COUNT(*) FROM application_submission_receipts").fetchone()[0]
+            == 0
+        )
 
 
 def test_direct_apply_task_resolution_is_closed_in_favor_of_hunter_supersession(

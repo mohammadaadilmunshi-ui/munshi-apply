@@ -1000,6 +1000,8 @@ class CompleteApplicationLoopService:
         if str(plan["resume"]["artifact_sha256"]) != str(review["resume_digest"]):
             raise ValueError("Resume changed after review was created")
         review_snapshot = json.loads(str(review["review_json"]))
+        if _sha(review_snapshot) != str(review["review_digest"]):
+            raise ValueError("Final review snapshot integrity failure")
         reviewed_cover = review_snapshot.get("cover_letter")
         current_cover = plan.get("cover_letter")
         if current_cover is None:
@@ -1122,6 +1124,8 @@ class CompleteApplicationLoopService:
         if str(plan["resume"]["artifact_sha256"]) != str(review["resume_digest"]):
             raise ValueError("Resume changed after final review approval")
         review_snapshot = json.loads(str(review["review_json"]))
+        if _sha(review_snapshot) != str(review["review_digest"]):
+            raise ValueError("Final review snapshot integrity failure")
         reviewed_cover = review_snapshot.get("cover_letter")
         current_cover = plan.get("cover_letter")
         if current_cover is None:
@@ -1168,6 +1172,35 @@ class CompleteApplicationLoopService:
             if prior_review is not None:
                 receipt = self._receipt_for_command(str(prior_review["command_id"]))
                 return receipt or {"command_id": prior_review["command_id"], "replayed": True}
+            # Browser inspection runs outside the write lock. Re-read the exact
+            # approved state under that lock so revocation or replacement during
+            # inspection cannot authorize the cached snapshot.
+            locked_review = connection.execute(
+                "SELECT * FROM final_application_reviews WHERE review_id=?", (review_id,)
+            ).fetchone()
+            if locked_review is None or dict(locked_review) != review:
+                raise ValueError("Final review changed during submission inspection")
+            if locked_review["approved_at"] is None or locked_review["invalidated_at"] is not None:
+                raise ValueError("Final review is no longer approved")
+            locked_session = connection.execute(
+                "SELECT * FROM complete_application_sessions WHERE session_id=?",
+                (session["session_id"],),
+            ).fetchone()
+            if locked_session is None or dict(locked_session) != session:
+                raise ValueError("Browser session changed during submission inspection")
+            locked_plan = connection.execute(
+                "SELECT * FROM career_os_application_plans "
+                "WHERE plan_id=? AND tenant_id=? AND user_id=?",
+                (review["plan_id"], self.tenant_id, self.user_id),
+            ).fetchone()
+            if locked_plan is None:
+                raise ValueError("Application Plan changed during submission inspection")
+            locked_plan_record = dict(locked_plan)
+            locked_plan_record["plan"] = json.loads(locked_plan_record.pop("plan_json"))
+            if locked_plan_record != plan_record:
+                raise ValueError("Application Plan changed during submission inspection")
+            if not _truthy(FINAL_SUBMIT_ENV):
+                raise RuntimeError("Final submit authority is disabled")
             command_id = f"submit-command-{uuid4()}"
             command_payload = {
                 "application_id": review["application_id"],
@@ -1324,3 +1357,4 @@ class CompleteApplicationLoopService:
             "receipt_id": receipt_id,
             "verification_status": final_status,
         }
+

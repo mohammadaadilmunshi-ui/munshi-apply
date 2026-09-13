@@ -65,6 +65,7 @@ def test_runtime_migration_health_and_backup_round_trip(tmp_path: Path) -> None:
         "021_persistent_interaction_knowledge.sql",
         "022_teach_munshi_async_learning.sql",
         "023_teach_munshi_telegram_outbox.sql",
+        "024_confirmation_evidence.sql",
     ]
     assert json.loads(second.stdout)["applied"] == []
     assert json.loads(health.stdout)["status"] == "healthy"
