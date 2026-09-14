@@ -137,7 +137,7 @@ describe("planAutoPilotStep", () => {
     expect(afterFill.checkpointRequired).toBe(true);
   });
 
-  it("never plans an automatic final submission", () => {
+  it("routes final submission away from the preparation-only extension", () => {
     const plan = planAutoPilotStep({
       observation: {
         ...observation,
@@ -147,7 +147,8 @@ describe("planAutoPilotStep", () => {
       preflight: readyGate,
       fillInstructions: [],
     });
-    expect(plan.action.type).toBe("PAUSE_FINAL_APPROVAL");
+    expect(plan.action.type).toBe("BLOCK_FINAL_SUBMISSION");
+    expect(plan.reason).toMatch(/cannot claim canonical submission authority/i);
   });
 
   it("checkpoints before navigating after all visible fills are verified", () => {
