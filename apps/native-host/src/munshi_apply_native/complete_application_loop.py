@@ -1054,6 +1054,28 @@ class CompleteApplicationLoopService:
             "review_digest": str(review["review_digest"]),
         }
 
+    def approve_and_submit(
+        self,
+        *,
+        review_id: str,
+        idempotency_key: str,
+        adapter: BrowserExecutionAdapter,
+    ) -> dict[str, Any]:
+        """Execute the sole customer-facing approval and submission action.
+
+        The caller presents the already-built review once.  This method turns that
+        one deliberate action into a durable reviewed-state approval followed by
+        the existing guarded, exactly-once submit flow.  The intermediate
+        READY_TO_SUBMIT state remains an internal integrity boundary; it must not
+        be rendered as another approval prompt.
+        """
+        self.approve_review(review_id=review_id)
+        return self.submit(
+            review_id=review_id,
+            idempotency_key=idempotency_key,
+            adapter=adapter,
+        )
+
     def _event_chain_digest(self, session_id: str) -> str:
         with self.database.connect() as connection:
             rows = connection.execute(
