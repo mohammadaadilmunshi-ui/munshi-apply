@@ -40,7 +40,7 @@ export type AutoPilotAction =
   | { type: "NAVIGATE_NEXT" }
   | { type: "PAUSE_REVIEW"; reason: string }
   | { type: "PAUSE_SECURITY"; checkpoint: SecurityCheckpointKind }
-  | { type: "PAUSE_FINAL_APPROVAL" }
+  | { type: "BLOCK_FINAL_SUBMISSION"; reason: string }
   | { type: "WAIT"; reason: string };
 
 export type AutoPilotPlan = {
@@ -204,9 +204,14 @@ export function planAutoPilotStep(input: {
 
   if (observation.isFinalSubmissionStep || observation.state === "SUBMISSION") {
     return {
-      action: { type: "PAUSE_FINAL_APPROVAL" },
+      action: {
+        type: "BLOCK_FINAL_SUBMISSION",
+        reason:
+          "Final submission requires the canonical one-use Hunter authority worker",
+      },
       checkpointRequired: true,
-      reason: "Final submission is always a deliberate owner checkpoint",
+      reason:
+        "This preparation-only extension cannot claim canonical submission authority",
     };
   }
 
