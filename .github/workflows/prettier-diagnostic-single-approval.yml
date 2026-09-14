@@ -1,0 +1,35 @@
+name: Temporary Prettier diagnostic
+
+on:
+  push:
+    branches:
+      - feat/single-approval-submit-20260914
+
+permissions:
+  contents: read
+
+jobs:
+  prettier-diff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Print exact pinned-Prettier diff
+        shell: bash
+        run: |
+          npx prettier --write \
+            apps/extension/src/background/autopilot-controller.test.ts \
+            apps/extension/src/background/service-worker.ts
+          echo '--- EXACT PRETTIER DIFF START ---'
+          git diff -- \
+            apps/extension/src/background/autopilot-controller.test.ts \
+            apps/extension/src/background/service-worker.ts
+          echo '--- EXACT PRETTIER DIFF END ---'
+          test -z "$(git status --porcelain -- \
+            apps/extension/src/background/autopilot-controller.test.ts \
+            apps/extension/src/background/service-worker.ts)"
