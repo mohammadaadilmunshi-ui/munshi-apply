@@ -276,7 +276,7 @@ describe("persistent AutoPilot controller", () => {
     expect(test.counts().navigateCount).toBe(1);
   });
 
-  it("pauses at security/final boundaries and fills safely before a review pause", async () => {
+  it("pauses at security boundaries, stops at canonical-submit boundaries, and fills safely", async () => {
     const security = harness(page({ securityCheckpoint: "MFA" }));
     const securityStatus = await security.controller.start(startInput());
     expect(securityStatus.session.status).toBe("PAUSED_SECURITY");
@@ -285,7 +285,8 @@ describe("persistent AutoPilot controller", () => {
 
     const final = harness(page({ final: true, navigation: true }));
     const finalStatus = await final.controller.start(startInput());
-    expect(finalStatus.session.status).toBe("PAUSED_FINAL");
+    expect(finalStatus.session.status).toBe("STOPPED");
+    expect(finalStatus.session.pauseReason).toMatch(/canonical one-use Hunter authority/i);
     expect(final.counts().fillCount).toBe(0);
     expect(final.counts().navigateCount).toBe(0);
 
