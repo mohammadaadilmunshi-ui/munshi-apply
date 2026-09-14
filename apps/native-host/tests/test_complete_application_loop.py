@@ -137,6 +137,32 @@ def ready(loop):
     return service, db, browser, session, review
 
 
+def test_one_customer_approval_freezes_and_submits_once(loop):
+    service, _, browser = loop
+    session = service.start_session(plan_id="application-plan-1")
+    pending = service.prepare_session(session_id=session.session_id, adapter=browser)
+    assert pending.state == "NEEDS_INPUT"
+    task = service.resolutions.list(application_id=session.application_id)[0]
+    service.resolve_task(task_id=task.task_id, value="https://example.test/portfolio")
+    prepared = service.prepare_session(session_id=session.session_id, adapter=browser)
+    assert prepared.state == "READY_FOR_REVIEW"
+    review = service.build_review(session_id=session.session_id)
+
+    first = service.approve_and_submit(
+        review_id=review["review_id"],
+        idempotency_key="single-approval-1",
+        adapter=browser,
+    )
+    second = service.approve_and_submit(
+        review_id=review["review_id"],
+        idempotency_key="single-approval-1",
+        adapter=browser,
+    )
+
+    assert first["verification_status"] == "VERIFIED"
+    assert second["receipt_id"] == first["receipt_id"]
+    assert browser.calls == 1
+
 def test_checkpoint_resolution_review_and_submit_once(loop):
     service, db, browser, session, review = ready(loop)
     first = service.submit(

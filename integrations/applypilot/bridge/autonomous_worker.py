@@ -213,7 +213,9 @@ def _envelope(request:dict[str,Any],result:dict[str,Any],usage:dict[str,Any],sta
     if status=="NEEDS_INPUT":
         kind=str(result.get("needs_input_kind") or "ANSWER_REQUIRED"); kind=kind if kind in ALLOWED_NEEDS_INPUT else "ANSWER_REQUIRED"; needs=[{"kind":kind,"message":str(result.get("reason") or "Owner input is required"),"question_key":None}]
     observation=_safe_submission_observation(result.get("submission_observation")); provider_id=result.get("provider_application_id") or (observation or {}).get("provider_application_id")
-    out={"schema_version":"1.0","worker_run_id":run_id,"plan_id":request["plan_id"],"plan_digest":request["plan_digest"],"status":status,"final_url":result.get("final_url") or request["job"]["url"],"provider":request["job"].get("provider"),"provider_application_id":provider_id,"claimed_submission":claimed,"needs_input":needs,"events":[{"sequence":1,"kind":"WORKER_REQUEST_ACCEPTED","timestamp":_utc_now(),"verified":True,"detail":f"Autonomous worker {run_id} accepted governed request."},{"sequence":2,"kind":"AGENT_EXECUTION_COMPLETE","timestamp":_utc_now(),"verified":not claimed,"detail":str(result.get("reason") or status)}],"submission_observation":observation,"cost":{"estimated_total_usd":float(usage.get("cost_usd",0) or 0),"agent_usd":float(usage.get("cost_usd",0) or 0),"captcha_usd":0.0,"input_tokens":int(usage.get("input_tokens",0) or 0),"output_tokens":int(usage.get("output_tokens",0) or 0),"agent_steps":int(usage.get("turns",0) or 0),"wall_seconds":max(0.0,time.time()-started)}}
+    submission_outcome=str(result.get("submission_outcome") or ("SUBMISSION_OBSERVED" if claimed else "NOT_ATTEMPTED"))
+    if submission_outcome not in {"NOT_ATTEMPTED","SUBMISSION_OBSERVED","UNKNOWN_AFTER_AUTHORITY_CLAIM"}: submission_outcome="UNKNOWN_AFTER_AUTHORITY_CLAIM" if claim is not None else "NOT_ATTEMPTED"
+    out={"schema_version":"1.0","worker_run_id":run_id,"plan_id":request["plan_id"],"plan_digest":request["plan_digest"],"status":status,"final_url":result.get("final_url") or request["job"]["url"],"provider":request["job"].get("provider"),"provider_application_id":provider_id,"claimed_submission":claimed,"submission_outcome":submission_outcome,"needs_input":needs,"events":[{"sequence":1,"kind":"WORKER_REQUEST_ACCEPTED","timestamp":_utc_now(),"verified":True,"detail":f"Autonomous worker {run_id} accepted governed request."},{"sequence":2,"kind":"AGENT_EXECUTION_COMPLETE","timestamp":_utc_now(),"verified":not claimed,"detail":str(result.get("reason") or status)}],"submission_observation":observation,"cost":{"estimated_total_usd":float(usage.get("cost_usd",0) or 0),"agent_usd":float(usage.get("cost_usd",0) or 0),"captcha_usd":0.0,"input_tokens":int(usage.get("input_tokens",0) or 0),"output_tokens":int(usage.get("output_tokens",0) or 0),"agent_steps":int(usage.get("turns",0) or 0),"wall_seconds":max(0.0,time.time()-started)}}
     if claim is not None: out["submit_authorization_claim"]={k:claim.get(k) for k in ("authorization_id","authority_digest","claim_digest","generation","status","submission_authority")}
     return out
 
@@ -246,11 +248,18 @@ def execute(request_path:Path,*,dry_run:bool,port:int)->dict[str,Any]:
         try: claim=claim_submit_authorization(auth,claimant_id=claimant)
         except SubmitAuthorizationError as e: raise WorkerError(f"Canonical submit authorization claim failed: {e}") from e
         remaining_cost=max(0.0,max_cost-float(usage1.get("cost_usd",0) or 0)); remaining_turns=max(1,max_turns-int(usage1.get("turns",0) or 0)); elapsed=max(0,int(time.time()-started)); remaining_wall=max(1,max_wall-elapsed)
-        final,usage2=_run_agent(prompt=_submit_prompt(request,auth,claim),port=port,settings=settings,max_turns=remaining_turns,max_cost=remaining_cost,max_wall_seconds=remaining_wall)
+        try:
+            final,usage2=_run_agent(prompt=_submit_prompt(request,auth,claim),port=port,settings=settings,max_turns=remaining_turns,max_cost=remaining_cost,max_wall_seconds=remaining_wall)
+        except WorkerError as error:
+            # Once authority is claimed, never emit a retryable "nothing happened"
+            # result. The one-use claim remains consumed pending reconciliation.
+            unknown={"status":"BLOCKED","claimed_submission":False,"submission_outcome":"UNKNOWN_AFTER_AUTHORITY_CLAIM","reason":f"Submission outcome requires reconciliation after authority claim: {error}","final_url":request["job"]["url"],"submission_observation":None}
+            return _envelope(request,unknown,usage1,started,claim)
         if final.get("claimed_submission") is True:
             observation=_safe_submission_observation(final.get("submission_observation"))
             if not observation or str(observation.get("method") or "").upper()!="POST" or str(observation.get("target") or "")!=str(auth.get("target_url") or ""):
-                raise WorkerError("Agent reported submission without exact reviewed POST target evidence")
+                unknown={"status":"BLOCKED","claimed_submission":False,"submission_outcome":"UNKNOWN_AFTER_AUTHORITY_CLAIM","reason":"Submission was reported without exact reviewed POST target evidence; reconciliation is required","final_url":final.get("final_url") or request["job"]["url"],"submission_observation":observation}
+                return _envelope(request,unknown,_merge_usage(usage1,usage2),started,claim)
         return _envelope(request,final,_merge_usage(usage1,usage2),started,claim)
     finally: _kill_process_tree(browser.process)
 

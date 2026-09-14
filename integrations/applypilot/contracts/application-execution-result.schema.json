@@ -179,6 +179,15 @@
           "minimum": 0
         }
       }
+    },
+    "submission_outcome": {
+      "type": "string",
+      "enum": [
+        "NOT_ATTEMPTED",
+        "SUBMISSION_OBSERVED",
+        "UNKNOWN_AFTER_AUTHORITY_CLAIM"
+      ],
+      "description": "Durable retry guard. UNKNOWN_AFTER_AUTHORITY_CLAIM must be reconciled and must not be retried automatically."
     }
   }
 }

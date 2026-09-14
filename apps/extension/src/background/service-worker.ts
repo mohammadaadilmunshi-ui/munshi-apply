@@ -371,7 +371,8 @@ async function sendFillInstruction(
   if (
     primaryResults.some(
       (result) =>
-        result.controlId === instruction.controlId && result.status === "FILLED",
+        result.controlId === instruction.controlId &&
+        result.status === "FILLED",
     )
   ) {
     return primaryResults;
@@ -426,7 +427,8 @@ async function sendFillInstruction(
     const fallbackResults = fallbackResponse?.results ?? [];
     const verified = fallbackResults.some(
       (result) =>
-        result.controlId === instruction.controlId && result.status === "FILLED",
+        result.controlId === instruction.controlId &&
+        result.status === "FILLED",
     );
     if (!verified) {
       return fallbackResults.length > 0 ? fallbackResults : primaryResults;

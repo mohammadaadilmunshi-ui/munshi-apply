@@ -134,7 +134,9 @@ function parseProposal(value: unknown): InteractionRecoveryProposal {
     candidate.providerCallMade !== true ||
     candidate.valueBearingInputSent !== false
   ) {
-    throw new Error("Recovery proposal violated the value-free provider contract");
+    throw new Error(
+      "Recovery proposal violated the value-free provider contract",
+    );
   }
   const teacherKind = candidate.teacherKind;
   if (teacherKind !== "MODEL" && teacherKind !== "LOCAL_MODEL") {

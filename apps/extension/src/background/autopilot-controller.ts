@@ -849,11 +849,20 @@ export class AutoPilotController {
           reason: plan.reason,
         });
 
-      case "PAUSE_FINAL_APPROVAL":
-        return this.persistPause(runtime, observation, {
-          type: "FINAL",
-          reason: plan.reason,
+      case "BLOCK_FINAL_SUBMISSION": {
+        const stopped = parseAutoPilotRuntimeState({
+          ...runtime,
+          session: reduceAutoPilotSession(runtime.session, {
+            type: "STOP",
+            reason: plan.action.reason,
+            at: this.now(),
+          }),
+          waitingFor: null,
+          actionDeadlineAt: null,
         });
+        await this.persist(stopped);
+        return stopped;
+      }
 
       case "WAIT":
         await this.persist(runtime);
@@ -956,12 +965,20 @@ export class AutoPilotController {
           "Browser security checkpoint requires owner action",
       });
     } else if (runtime.session.status === "PAUSED_FINAL") {
-      runtime = await this.persistPause(runtime, observation, {
-        type: "FINAL",
-        reason:
-          runtime.session.pauseReason ??
-          "Final employer submission requires owner action",
+      // Migrate legacy persisted final-approval pauses to a non-resumable stop.
+      // The canonical authority worker owns the only permitted submit path.
+      runtime = parseAutoPilotRuntimeState({
+        ...runtime,
+        session: reduceAutoPilotSession(runtime.session, {
+          type: "STOP",
+          reason:
+            "Legacy final approval pause retired; canonical submit authority is required",
+          at: this.now(),
+        }),
+        waitingFor: null,
+        actionDeadlineAt: null,
       });
+      await this.persist(runtime);
     } else if (runtime.session.status === "PAUSED_REVIEW") {
       runtime = await this.persistPause(runtime, observation, {
         type: "REVIEW",

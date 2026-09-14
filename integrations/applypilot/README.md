@@ -61,7 +61,7 @@ MUNSHI remains authoritative for candidate facts, work-authorization and sponsor
 
 The browser agent receives only the application package MUNSHI authorizes. It may not invent candidate facts or silently change protected answers.
 
-Final submission requires **both** `permissions.final_submit=true` in the immutable MUNSHI execution request and `allowFinalSubmit=true` in local Autonomous Apply settings. If either authority is absent, the agent must stop before the irreversible submit action.
+Final submission requires **both** `permissions.final_submit=true` in the immutable MUNSHI execution request and `allowFinalSubmit=true` in local Autonomous Apply settings. If either authority is absent, the agent must stop before the irreversible submit action. The extension preparation controller cannot perform this action; only this worker may do so after atomically claiming Hunter's exact one-use authorization. If execution becomes ambiguous after the claim, the worker returns `UNKNOWN_AFTER_AUTHORITY_CLAIM` and automatic retry remains blocked pending reconciliation.
 
 ## Security checkpoints
 
