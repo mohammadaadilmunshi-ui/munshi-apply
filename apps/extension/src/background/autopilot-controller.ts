@@ -850,7 +850,8 @@ export class AutoPilotController {
         });
 
       case "BLOCK_FINAL_SUBMISSION": {
-        const stopped = this.withRuntime(runtime, {
+        const stopped = parseAutoPilotRuntimeState({
+          ...runtime,
           session: reduceAutoPilotSession(runtime.session, {
             type: "STOP",
             reason: plan.action.reason,
@@ -966,7 +967,8 @@ export class AutoPilotController {
     } else if (runtime.session.status === "PAUSED_FINAL") {
       // Migrate legacy persisted final-approval pauses to a non-resumable stop.
       // The canonical authority worker owns the only permitted submit path.
-      runtime = this.withRuntime(runtime, {
+      runtime = parseAutoPilotRuntimeState({
+        ...runtime,
         session: reduceAutoPilotSession(runtime.session, {
           type: "STOP",
           reason:
