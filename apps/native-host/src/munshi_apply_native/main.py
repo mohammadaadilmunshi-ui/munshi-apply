@@ -223,14 +223,18 @@ def freeze_complete_loop_review(
 
 
 @app.post("/v1/complete-loop/reviews/{review_id}/approve")
-def approve_complete_loop_review(
+def reject_separate_complete_loop_approval(
     review_id: str,
     service: CompleteApplicationLoopService = Depends(_loop_service),  # noqa: B008
 ) -> dict[str, Any]:
-    try:
-        return service.approve_review(review_id=review_id)
-    except (LookupError, PermissionError, RuntimeError, ValueError) as error:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    del review_id, service
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail=(
+            "Separate final approval was retired. Use the single Hunter "
+            "Approve & Submit action bound to the frozen review digest."
+        ),
+    )
 
 
 @app.post("/v1/complete-loop/tasks/{task_id}/resolve")
