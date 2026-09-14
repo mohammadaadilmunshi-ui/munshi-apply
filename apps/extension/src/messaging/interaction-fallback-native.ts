@@ -7,12 +7,15 @@ const broker = createNativeRequestBroker({
   idleDisconnectMilliseconds: 2_000,
 });
 
+const recoveryKeys = ["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"] as const;
+type RecoveryKey = (typeof recoveryKeys)[number];
+
 export type RecoveryAction =
   | { type: "FOCUS" }
   | { type: "CLICK" }
   | { type: "TYPE"; valueSource: "ANSWER" }
   | { type: "SELECT_EXACT_OPTION" }
-  | { type: "KEY"; key: "ArrowDown" | "ArrowUp" | "Enter" | "Tab" | "Escape" }
+  | { type: "KEY"; key: RecoveryKey }
   | { type: "WAIT_FOR_STATE"; state: "OPTIONS_VISIBLE" | "VALUE_COMMITTED" };
 
 export type InteractionRecoveryProposal = {
@@ -74,6 +77,10 @@ function textValue(value: unknown, label: string): string {
   return value.trim();
 }
 
+function isRecoveryKey(value: unknown): value is RecoveryKey {
+  return typeof value === "string" && recoveryKeys.includes(value as RecoveryKey);
+}
+
 function parseAction(value: unknown): RecoveryAction {
   const action = objectValue(value, "recovery action");
   switch (action.type) {
@@ -84,13 +91,9 @@ function parseAction(value: unknown): RecoveryAction {
     case "TYPE":
       if (action.valueSource !== "ANSWER") throw new Error("Recovery TYPE must use ANSWER");
       return { type: "TYPE", valueSource: "ANSWER" };
-    case "KEY": {
-      const key = action.key;
-      if (!["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"].includes(String(key))) {
-        throw new Error("Recovery key is not allowed");
-      }
-      return { type: "KEY", key: key as RecoveryAction & never } as RecoveryAction;
-    }
+    case "KEY":
+      if (!isRecoveryKey(action.key)) throw new Error("Recovery key is not allowed");
+      return { type: "KEY", key: action.key };
     case "WAIT_FOR_STATE": {
       const state = action.state;
       if (state !== "OPTIONS_VISIBLE" && state !== "VALUE_COMMITTED") {
