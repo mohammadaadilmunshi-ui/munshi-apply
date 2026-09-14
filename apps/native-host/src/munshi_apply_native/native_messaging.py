@@ -19,6 +19,7 @@ from .autonomous_apply_credentials import (
 from .checkpoint_store import ApplicationCheckpointStore
 from .database import Database
 from .document_ingestion import DocumentIngestionService
+from .interaction_fallback_service import InteractionFallbackService
 from .interaction_recipe_listing import list_interaction_recipes
 from .interaction_recipe_service import InteractionRecipeService
 from .job_signal_store import JobSignalStore
@@ -26,6 +27,7 @@ from .models import ApplicationCheckpointPayload, EventEnvelope
 from .profile_store import ProfileStore
 from .resolution_task_messages import handle_resolution_task_message
 from .settings import Settings
+from .teach_munshi_service import TeachMunshiService
 from .writing_style import WritingStyleStore
 
 NATIVE_PROTOCOL_VERSION = 3
@@ -36,6 +38,8 @@ NATIVE_CAPABILITIES: dict[str, bool] = {
     "interaction_learning_list": True,
     "teach_munshi": True,
     "teach_munshi_state_capture": True,
+    "teach_munshi_async_capture": True,
+    "automatic_interaction_recovery": True,
     "ai_settings": True,
     "ai_governance": True,
     "ai_draft_lifecycle": True,
@@ -259,6 +263,20 @@ def handle(
         return {
             "ok": True,
             "data": InteractionRecipeService(database).record_outcome(message.get("payload")),
+        }
+    if message_type == "CAPTURE_TEACH_MUNSHI_LESSON":
+        return {
+            "ok": True,
+            "data": TeachMunshiService(database).capture(message.get("payload")),
+        }
+    if message_type == "PROPOSE_INTERACTION_RECOVERY":
+        if ai_store is None:
+            return {"ok": False, "error": "AI settings store is unavailable"}
+        return {
+            "ok": True,
+            "data": InteractionFallbackService(ai_store.runtime_root).propose(
+                message.get("payload")
+            ),
         }
 
     if message_type in {
