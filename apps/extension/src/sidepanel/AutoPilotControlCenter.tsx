@@ -356,7 +356,7 @@ export function AutoPilotControlCenter({
               )}
               {page.finalSubmissionBoundary && (
                 <span className="diagnostic-error">
-                  Final submission control detected · owner action required
+                  Final submission control detected · canonical submit worker required
                 </span>
               )}
               {plan.accountPlan.flow !== "NONE" && (
@@ -594,9 +594,11 @@ export function AutoPilotControlCenter({
       <div className="safety-callout">
         <strong>Permanent owner boundaries</strong>
         <span>
-          AutoPilot never performs final submission, CAPTCHA, MFA, OTP, identity
-          verification, authentication, password entry, credential storage, or
-          OS file selection. Those actions pause or hand control to you.
+          This preparation controller never performs final submission. After
+          your single Approve & Submit action, only the canonical one-use
+          authority worker may cross that boundary. CAPTCHA, MFA, OTP, identity
+          verification, authentication, password entry, credential storage, and
+          OS file selection remain blocked or require your control.
         </span>
       </div>
     </section>
