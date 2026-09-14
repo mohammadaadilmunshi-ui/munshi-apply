@@ -849,11 +849,19 @@ export class AutoPilotController {
           reason: plan.reason,
         });
 
-      case "PAUSE_FINAL_APPROVAL":
-        return this.persistPause(runtime, observation, {
-          type: "FINAL",
-          reason: plan.reason,
+      case "BLOCK_FINAL_SUBMISSION": {
+        const stopped = this.withRuntime(runtime, {
+          session: reduceAutoPilotSession(runtime.session, {
+            type: "STOP",
+            reason: plan.action.reason,
+            at: this.now(),
+          }),
+          waitingFor: null,
+          actionDeadlineAt: null,
         });
+        await this.persist(stopped);
+        return stopped;
+      }
 
       case "WAIT":
         await this.persist(runtime);
