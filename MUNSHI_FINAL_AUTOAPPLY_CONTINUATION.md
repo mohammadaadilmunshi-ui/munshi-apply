@@ -33,7 +33,12 @@ Tests authored; executable evidence pending GitHub CI.
 
 ## Exact next task
 
-Run CI on this isolated branch via a non-main PR after checking workflow safety. Inspect Hunter autonomous eligibility admission and worker wiring at the RC-v2 SHA; implement priorities 1–2 using existing targeting, Candidate Truth and Answer Vault. Then wire same-session reversible-control fallback to existing async Teach capture. Preserve one review-screen submit, add durable reconciliation before enabling any submit execution.
+Continue in Hunter branch feat/autoapply-preparation-20260914; read its MUNSHI_FINAL_AUTOAPPLY_CONTINUATION.md first.
+Tested source SHA: a1d726e881a09027d9e9fcdacc2ed095b215d290. GitHub targeted run 34804734083: 24 passed in 4.74s.
+The answer worker now refreshes confirmed NORMAL Candidate Truth answers with the existing resolver before reading the vault inventory and revalidates truth afterward.
+Automatic admission, Native/n8n runner integration, ISSUE isolation, and NEEDS REVIEW convergence are still pending.
+Do not redo Teach safety or this answer-refresh change. Do not start fallback or final-submit implementation before completing the product preparation tranche.
+Hunter base remains eb61d05490a738327db20bd0f73bf7f56c3d12c9; Apply source remains df914cd0033f1af6fe9966a2ec30fae86d9bd5e2 with documentation-only updates.
 
 ## Remaining acceptance
 
