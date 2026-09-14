@@ -196,9 +196,13 @@ class InteractionFallbackService:
         ).upper()
         if any(marker in semantic_type for marker in _BLOCKED_SEMANTIC_MARKERS):
             raise InteractionFallbackError("Security controls cannot use automatic recovery")
-        control_kind = _required_text(payload.get("controlKind"), "controlKind", limit=80).upper()
+        control_kind = _required_text(
+            payload.get("controlKind"), "controlKind", limit=80
+        ).upper()
         if control_kind in _BLOCKED_CONTROL_KINDS:
-            raise InteractionFallbackError("This control kind is not eligible for mechanics recovery")
+            raise InteractionFallbackError(
+                "This control kind is not eligible for mechanics recovery"
+            )
 
         config = self.credentials.load()
         if not config.enabled:
@@ -213,14 +217,20 @@ class InteractionFallbackService:
         )
 
         safe_context = {
-            "siteOrigin": _required_text(payload.get("siteOrigin"), "siteOrigin", limit=500),
+            "siteOrigin": _required_text(
+                payload.get("siteOrigin"), "siteOrigin", limit=500
+            ),
             "componentFingerprint": component_fingerprint,
             "semanticType": semantic_type,
             "controlKind": control_kind,
             "label": _optional_text(payload.get("label"), "label", limit=500),
             "role": _optional_text(payload.get("role"), "role", limit=120),
-            "hasPopup": _optional_text(payload.get("hasPopup"), "hasPopup", limit=120),
-            "atsFamily": _optional_text(payload.get("atsFamily"), "atsFamily", limit=80),
+            "hasPopup": _optional_text(
+                payload.get("hasPopup"), "hasPopup", limit=120
+            ),
+            "atsFamily": _optional_text(
+                payload.get("atsFamily"), "atsFamily", limit=80
+            ),
             "options": [str(item)[:160] for item in payload.get("options", [])[:40]]
             if isinstance(payload.get("options"), list)
             else [],
@@ -229,15 +239,19 @@ class InteractionFallbackService:
             ),
         }
         prompt = (
-            "You are the bounded interaction-mechanics fallback for MUNSHI AutoApply. "
-            "The deterministic executor already failed on one reversible, non-sensitive form control. "
-            "Return ONLY a value-free action recipe; never invent or repeat the candidate's answer, "
-            "credentials, OTPs, secrets, identity data, or submission actions. The extension supplies "
-            "the approved answer at runtime when TYPE(valueSource=ANSWER) or SELECT_EXACT_OPTION is used. "
-            "Allowed actions: FOCUS, CLICK, TYPE with valueSource ANSWER, SELECT_EXACT_OPTION, KEY with "
-            "ArrowDown/ArrowUp/Enter/Tab/Escape, WAIT_FOR_STATE with OPTIONS_VISIBLE/VALUE_COMMITTED. "
-            "Do not navigate, submit, bypass authentication, solve CAPTCHA, or interact with government ID. "
-            "Keep the sequence minimal and bounded.\nCONTROL="
+            "You are the bounded interaction-mechanics fallback for MUNSHI "
+            "AutoApply. "
+            "The deterministic executor already failed on one reversible, "
+            "non-sensitive form control. "
+            "Return ONLY a value-free action recipe; never invent or repeat the "
+            "candidate's answer, credentials, OTPs, secrets, identity data, or "
+            "submission actions. The extension supplies the approved answer at "
+            "runtime when TYPE(valueSource=ANSWER) or SELECT_EXACT_OPTION is used. "
+            "Allowed actions: FOCUS, CLICK, TYPE with valueSource ANSWER, "
+            "SELECT_EXACT_OPTION, KEY with ArrowDown/ArrowUp/Enter/Tab/Escape, "
+            "WAIT_FOR_STATE with OPTIONS_VISIBLE/VALUE_COMMITTED. Do not navigate, "
+            "submit, bypass authentication, solve CAPTCHA, or interact with "
+            "government ID. Keep the sequence minimal and bounded.\nCONTROL="
             + json.dumps(safe_context, ensure_ascii=False, separators=(",", ":"))
             + f"\nOutput exactly one line: {_RESULT_PREFIX}"
             + '{"actions":[...],"reason":"short mechanics rationale"}'
