@@ -356,7 +356,8 @@ export function AutoPilotControlCenter({
               )}
               {page.finalSubmissionBoundary && (
                 <span className="diagnostic-error">
-                  Final submission control detected · canonical submit worker required
+                  Final submission control detected · canonical submit worker
+                  required
                 </span>
               )}
               {plan.accountPlan.flow !== "NONE" && (
