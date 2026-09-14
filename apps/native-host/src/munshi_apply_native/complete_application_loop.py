@@ -1077,7 +1077,24 @@ class CompleteApplicationLoopService:
         if existing_review is None:
             raise LookupError("Final review was not found")
         if existing_review["approved_at"] is None:
-            self.approve_review(review_id=review_id)
+            try:
+                self.approve_review(review_id=review_id)
+            except (RuntimeError, ValueError):
+                # A duplicate click may race the first approval.  Continue only
+                # when that peer produced a durable approval; otherwise preserve
+                # the original fail-closed error.
+                with self.database.connect() as connection:
+                    current = connection.execute(
+                        "SELECT approved_at,invalidated_at FROM final_application_reviews "
+                        "WHERE review_id=?",
+                        (review_id,),
+                    ).fetchone()
+                if (
+                    current is None
+                    or current["approved_at"] is None
+                    or current["invalidated_at"] is not None
+                ):
+                    raise
         return self.submit(
             review_id=review_id,
             idempotency_key=idempotency_key,
