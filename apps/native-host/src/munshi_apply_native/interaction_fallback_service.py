@@ -7,7 +7,6 @@ import shutil
 import subprocess  # noqa: S404
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 from .autonomous_apply_credentials import AutonomousApplyCredentialStore
 
@@ -27,7 +26,7 @@ _BLOCKED_CONTROL_KINDS = {"FILE", "BUTTON"}
 _ALLOWED_KEYS = {"ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"}
 _ALLOWED_WAIT_STATES = {"OPTIONS_VISIBLE", "VALUE_COMMITTED"}
 
-Runner = Callable[[str, str, str, float, int], str]
+Runner = Callable[[str, str, str, float, int, str | None], str]
 
 
 class InteractionFallbackError(ValueError):
@@ -116,6 +115,7 @@ def _default_runner(
     auth_mode: str,
     max_cost_usd: float,
     max_wall_seconds: int,
+    api_key: str | None,
 ) -> str:
     claude = shutil.which("claude")
     if not claude:
@@ -142,6 +142,8 @@ def _default_runner(
     env = os.environ.copy()
     if auth_mode == "subscription":
         env.pop("ANTHROPIC_API_KEY", None)
+    elif api_key:
+        env["ANTHROPIC_API_KEY"] = api_key
     process = subprocess.run(  # noqa: S603
         command,
         input=prompt,
@@ -204,9 +206,11 @@ class InteractionFallbackService:
         model = config.model.strip()
         if not model:
             raise InteractionFallbackError("Autonomous Apply fallback model is not configured")
-        if config.auth_mode == "api":
-            # Resolve the secret only into the child-process environment, never the prompt.
-            os.environ["ANTHROPIC_API_KEY"] = self.credentials.get_secret("anthropic")
+        api_key = (
+            self.credentials.get_secret("anthropic")
+            if config.auth_mode == "api"
+            else None
+        )
 
         safe_context = {
             "siteOrigin": _required_text(payload.get("siteOrigin"), "siteOrigin", limit=500),
@@ -244,6 +248,7 @@ class InteractionFallbackService:
             config.auth_mode,
             min(max(config.max_cost_per_application_usd, 0.01), 0.15),
             30,
+            api_key,
         )
         proposed = _parse_output(stdout)
         actions = _validate_actions(proposed.get("actions"))
