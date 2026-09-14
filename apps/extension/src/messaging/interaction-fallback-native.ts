@@ -7,7 +7,13 @@ const broker = createNativeRequestBroker({
   idleDisconnectMilliseconds: 2_000,
 });
 
-const recoveryKeys = ["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"] as const;
+const recoveryKeys = [
+  "ArrowDown",
+  "ArrowUp",
+  "Enter",
+  "Tab",
+  "Escape",
+] as const;
 type RecoveryKey = (typeof recoveryKeys)[number];
 
 export type RecoveryAction =
@@ -16,7 +22,10 @@ export type RecoveryAction =
   | { type: "TYPE"; valueSource: "ANSWER" }
   | { type: "SELECT_EXACT_OPTION" }
   | { type: "KEY"; key: RecoveryKey }
-  | { type: "WAIT_FOR_STATE"; state: "OPTIONS_VISIBLE" | "VALUE_COMMITTED" };
+  | {
+      type: "WAIT_FOR_STATE";
+      state: "OPTIONS_VISIBLE" | "VALUE_COMMITTED";
+    };
 
 export type InteractionRecoveryProposal = {
   actions: RecoveryAction[];
@@ -78,7 +87,9 @@ function textValue(value: unknown, label: string): string {
 }
 
 function isRecoveryKey(value: unknown): value is RecoveryKey {
-  return typeof value === "string" && recoveryKeys.includes(value as RecoveryKey);
+  return (
+    typeof value === "string" && recoveryKeys.includes(value as RecoveryKey)
+  );
 }
 
 function parseAction(value: unknown): RecoveryAction {
@@ -89,10 +100,14 @@ function parseAction(value: unknown): RecoveryAction {
     case "SELECT_EXACT_OPTION":
       return { type: action.type };
     case "TYPE":
-      if (action.valueSource !== "ANSWER") throw new Error("Recovery TYPE must use ANSWER");
+      if (action.valueSource !== "ANSWER") {
+        throw new Error("Recovery TYPE must use ANSWER");
+      }
       return { type: "TYPE", valueSource: "ANSWER" };
     case "KEY":
-      if (!isRecoveryKey(action.key)) throw new Error("Recovery key is not allowed");
+      if (!isRecoveryKey(action.key)) {
+        throw new Error("Recovery key is not allowed");
+      }
       return { type: "KEY", key: action.key };
     case "WAIT_FOR_STATE": {
       const state = action.state;
@@ -108,10 +123,17 @@ function parseAction(value: unknown): RecoveryAction {
 
 function parseProposal(value: unknown): InteractionRecoveryProposal {
   const candidate = objectValue(value, "interaction recovery proposal");
-  if (!Array.isArray(candidate.actions) || candidate.actions.length < 1 || candidate.actions.length > 16) {
+  if (
+    !Array.isArray(candidate.actions) ||
+    candidate.actions.length < 1 ||
+    candidate.actions.length > 16
+  ) {
     throw new Error("Recovery proposal actions are invalid");
   }
-  if (candidate.providerCallMade !== true || candidate.valueBearingInputSent !== false) {
+  if (
+    candidate.providerCallMade !== true ||
+    candidate.valueBearingInputSent !== false
+  ) {
     throw new Error("Recovery proposal violated the value-free provider contract");
   }
   const teacherKind = candidate.teacherKind;
