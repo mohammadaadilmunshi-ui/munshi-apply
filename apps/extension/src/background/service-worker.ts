@@ -1,4 +1,5 @@
 import {
+  buildInteractionEscalationPlan,
   isEligibleApplicationPage,
   type PreflightGateSummary,
 } from "@munshi-apply/application-model";
@@ -51,6 +52,10 @@ import {
   type InteractionRecipeStrategy,
   saveNativeApplicationCheckpoint,
 } from "../messaging/native";
+import {
+  captureTeachMunshiLesson,
+  proposeInteractionRecovery,
+} from "../messaging/interaction-fallback-native";
 import {
   localProfileSaveAck,
   syncedProfileSaveAck,
@@ -175,64 +180,59 @@ const learnableStrategies = new Set<InteractionRecipeStrategy>([
   "CUSTOM_MULTI_SELECT",
 ]);
 
-async function sendFillInstruction(
-  tabId: number,
-  instruction: FillInstruction,
-): Promise<FillResult[]> {
-  const before = await getMergedPageForTab(tabId);
-  const control = before?.controls.find(
-    (candidate) => candidate.controlId === instruction.controlId,
-  );
-  const question = before?.questions.find(
-    (candidate) => candidate.controlId === instruction.controlId,
-  );
-  let siteOrigin: string | null = null;
-  try {
-    siteOrigin = before ? new URL(before.url).origin : null;
-  } catch {
-    siteOrigin = null;
-  }
-  let promotedRecipe: Awaited<ReturnType<typeof getPromotedInteractionRecipe>> =
-    null;
-  if (
-    siteOrigin &&
-    control?.componentFingerprint &&
-    question &&
-    !question.sensitive
-  ) {
-    try {
-      promotedRecipe = await getPromotedInteractionRecipe({
-        siteOrigin,
-        componentFingerprint: control.componentFingerprint,
-        semanticType: question.semanticType,
-      });
-    } catch {
-      promotedRecipe = null;
-    }
-  }
-
-  const preferredRecipes =
-    promotedRecipe?.strategy === "TAUGHT_RECIPE" &&
-    promotedRecipe.state !== "ROLLED_BACK"
-      ? {
-          [instruction.controlId]: {
-            recipeId: promotedRecipe.recipeId,
-            strategy: "TAUGHT_RECIPE" as const,
-            actions: promotedRecipe.actions,
-            state: promotedRecipe.state,
-            version: promotedRecipe.version,
-          },
-        }
-      : {};
-  const response = await sendWithContentRecovery<
-    { results?: FillResult[] } | undefined
-  >(contentRuntimeApi, tabId, instruction.frameId, {
-    type: "APPLY_FILL_INSTRUCTIONS",
-    instructions: [instruction],
-    preferredRecipes,
+function automaticRecoveryAllowed(
+  page: ApplicationPage,
+  control: ApplicationPage["controls"][number],
+  question: ApplicationPage["questions"][number],
+  promotedRecipe: Awaited<ReturnType<typeof getPromotedInteractionRecipe>>,
+): boolean {
+  if (!control.componentFingerprint || question.sensitive) return false;
+  const reversible = control.kind !== "FILE" && control.kind !== "BUTTON";
+  const plan = buildInteractionEscalationPlan({
+    kind: control.kind,
+    semanticType: question.semanticType,
+    sensitive: question.sensitive,
+    reversible,
+    authenticationBoundary:
+      page.securityCheckpoint !== null || page.applicationState === "AUTH",
+    finalSubmit:
+      page.finalSubmissionBoundary || page.applicationState === "SUBMISSION",
+    frameReachable: true,
+    promotedRecipeAvailable: promotedRecipe?.state === "PROMOTED",
+    shadowRecipeAvailable: promotedRecipe?.state === "SHADOW",
+    popupExpected: control.kind === "COMBOBOX" || Boolean(control.hasPopup),
+    popupOwned: control.options.length > 0,
+    keyboardOperable: [
+      "TEXT",
+      "EMAIL",
+      "TEL",
+      "NUMBER",
+      "DATE",
+      "TEXTAREA",
+      "SELECT",
+      "CHECKBOX",
+      "RADIO",
+      "COMBOBOX",
+    ].includes(control.kind),
+    visualFallbackEnabled: false,
+    localSemanticHintEnabled: false,
+    modelRecipeProposalEnabled: true,
   });
-  const results = response?.results ?? [];
+  return (
+    !plan.blocked &&
+    plan.steps.some(
+      (step) => step.strategy === "MODEL_RECIPE_PROPOSAL" && step.allowed,
+    )
+  );
+}
 
+async function learnPrimaryFillResults(
+  results: FillResult[],
+  siteOrigin: string | null,
+  control: ApplicationPage["controls"][number] | undefined,
+  question: ApplicationPage["questions"][number] | undefined,
+  promotedRecipe: Awaited<ReturnType<typeof getPromotedInteractionRecipe>>,
+): Promise<FillResult[]> {
   return Promise.all(
     results.map(async (result) => {
       if (
@@ -303,6 +303,164 @@ async function sendFillInstruction(
       }
     }),
   );
+}
+
+async function sendFillInstruction(
+  tabId: number,
+  instruction: FillInstruction,
+): Promise<FillResult[]> {
+  const before = await getMergedPageForTab(tabId);
+  const control = before?.controls.find(
+    (candidate) => candidate.controlId === instruction.controlId,
+  );
+  const question = before?.questions.find(
+    (candidate) => candidate.controlId === instruction.controlId,
+  );
+  let siteOrigin: string | null = null;
+  try {
+    siteOrigin = before ? new URL(before.url).origin : null;
+  } catch {
+    siteOrigin = null;
+  }
+  let promotedRecipe: Awaited<ReturnType<typeof getPromotedInteractionRecipe>> =
+    null;
+  if (
+    siteOrigin &&
+    control?.componentFingerprint &&
+    question &&
+    !question.sensitive
+  ) {
+    try {
+      promotedRecipe = await getPromotedInteractionRecipe({
+        siteOrigin,
+        componentFingerprint: control.componentFingerprint,
+        semanticType: question.semanticType,
+      });
+    } catch {
+      promotedRecipe = null;
+    }
+  }
+
+  const preferredRecipes =
+    promotedRecipe?.strategy === "TAUGHT_RECIPE" &&
+    promotedRecipe.state !== "ROLLED_BACK"
+      ? {
+          [instruction.controlId]: {
+            recipeId: promotedRecipe.recipeId,
+            strategy: "TAUGHT_RECIPE" as const,
+            actions: promotedRecipe.actions,
+            state: promotedRecipe.state,
+            version: promotedRecipe.version,
+          },
+        }
+      : {};
+  const response = await sendWithContentRecovery<
+    { results?: FillResult[] } | undefined
+  >(contentRuntimeApi, tabId, instruction.frameId, {
+    type: "APPLY_FILL_INSTRUCTIONS",
+    instructions: [instruction],
+    preferredRecipes,
+  });
+  const primaryResults = await learnPrimaryFillResults(
+    response?.results ?? [],
+    siteOrigin,
+    control,
+    question,
+    promotedRecipe,
+  );
+  if (
+    primaryResults.some(
+      (result) =>
+        result.controlId === instruction.controlId && result.status === "FILLED",
+    )
+  ) {
+    return primaryResults;
+  }
+  if (
+    !before ||
+    !control ||
+    !question ||
+    !siteOrigin ||
+    !control.componentFingerprint ||
+    !automaticRecoveryAllowed(before, control, question, promotedRecipe)
+  ) {
+    return primaryResults;
+  }
+
+  const failedResult = primaryResults.find(
+    (result) => result.controlId === instruction.controlId,
+  );
+  try {
+    const proposal = await proposeInteractionRecovery({
+      siteOrigin,
+      componentFingerprint: control.componentFingerprint,
+      semanticType: question.semanticType,
+      controlKind: control.kind,
+      label: question.rawText || control.label,
+      role: control.role,
+      hasPopup: control.hasPopup,
+      atsFamily: before.atsFamily,
+      options: control.options,
+      failureReason: failedResult?.reason,
+      reversible: true,
+      sensitive: false,
+      authenticationBoundary: false,
+      finalSubmit: false,
+    });
+    const fallbackRecipeId = `auto-fallback-${crypto.randomUUID()}`;
+    const fallbackResponse = await sendWithContentRecovery<
+      { results?: FillResult[] } | undefined
+    >(contentRuntimeApi, tabId, instruction.frameId, {
+      type: "APPLY_FILL_INSTRUCTIONS",
+      instructions: [instruction],
+      preferredRecipes: {
+        [instruction.controlId]: {
+          recipeId: fallbackRecipeId,
+          strategy: "TAUGHT_RECIPE" as const,
+          actions: proposal.actions,
+          state: "SHADOW" as const,
+          version: 1,
+        },
+      },
+    });
+    const fallbackResults = fallbackResponse?.results ?? [];
+    const verified = fallbackResults.some(
+      (result) =>
+        result.controlId === instruction.controlId && result.status === "FILLED",
+    );
+    if (!verified) {
+      return fallbackResults.length > 0 ? fallbackResults : primaryResults;
+    }
+
+    runSafely(
+      captureTeachMunshiLesson({
+        observationId: `fallback-${crypto.randomUUID()}`,
+        applicationId: null,
+        siteOrigin,
+        componentFingerprint: control.componentFingerprint,
+        semanticType: question.semanticType,
+        atsFamily: before.atsFamily ?? null,
+        teacherKind: proposal.teacherKind,
+        teacherProvider: proposal.provider,
+        sourceLane: proposal.sourceLane,
+        actions: proposal.actions,
+        verifiedSuccess: true,
+      }),
+    );
+    return fallbackResults.map((result) =>
+      result.controlId === instruction.controlId
+        ? {
+            ...result,
+            strategy: "AUTOAPPLY_FALLBACK",
+            recipeId: fallbackRecipeId,
+            recipeAttempted: true,
+            recipeSucceeded: true,
+          }
+        : result,
+    );
+  } catch {
+    return primaryResults;
+  }
 }
 
 async function sendNavigationAction(
