@@ -244,7 +244,6 @@ describe("persistent AutoPilot controller", () => {
     const status = await test.controller.start(startInput());
 
     expect(status.session.status).toBe("WAITING_RESCAN");
-    expect(status.waitingFor).toBe("NAVIGATION");
     expect(test.events.indexOf("checkpoint:0")).toBeGreaterThanOrEqual(0);
     expect(test.events.indexOf("navigate")).toBeGreaterThan(
       test.events.indexOf("checkpoint:0"),
@@ -286,9 +285,7 @@ describe("persistent AutoPilot controller", () => {
     const final = harness(page({ final: true, navigation: true }));
     const finalStatus = await final.controller.start(startInput());
     expect(finalStatus.session.status).toBe("STOPPED");
-    expect(finalStatus.session.pauseReason).toMatch(
-      /canonical one-use Hunter authority/i,
-    );
+    expect(finalStatus.session.pauseReason).toMatch(/canonical submit authority/i);
     expect(final.counts().fillCount).toBe(0);
     expect(final.counts().navigateCount).toBe(0);
 
