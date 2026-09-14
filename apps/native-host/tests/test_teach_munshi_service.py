@@ -242,3 +242,30 @@ def test_learning_metrics_preserve_teacher_provider_mix(tmp_path: Path) -> None:
     assert providers["openai"]["count"] == 1
     assert providers["gemini"]["count"] == 1
     assert providers["non-model"]["count"] == 1
+
+
+@pytest.mark.parametrize(
+    "semantic_type",
+    ["FINAL_SUBMIT", "SUBMIT_APPLICATION", "GOVERNMENT_ID", "SMS_CODE", "TOTP",
+     "PASSWORD", "CAPTCHA", "IDENTITY_VERIFICATION", "AUTHENTICATION"],
+)
+def test_irreversible_and_security_controls_never_enter_learning(
+    tmp_path: Path, semantic_type: str,
+) -> None:
+    database, teach, recipes = create_services(tmp_path)
+    payload = lesson("forbidden-control", semantic_type=semantic_type)
+
+    with pytest.raises(TeachMunshiError, match="security"):
+        teach.capture(payload)
+    with pytest.raises(ValueError, match="security"):
+        recipes.lookup(payload)
+    with pytest.raises(ValueError, match="security"):
+        recipes.teach({**payload, "attemptId": "forbidden-attempt"})
+
+    with database.connect() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM teach_munshi_lessons"
+        ).fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT COUNT(*) FROM interaction_recipes"
+        ).fetchone()[0] == 0
