@@ -48,10 +48,7 @@
       "properties": {
         "resume": { "$ref": "#/$defs/artifact" },
         "cover_letter": {
-          "oneOf": [
-            { "$ref": "#/$defs/artifact" },
-            { "type": "null" }
-          ]
+          "oneOf": [{ "$ref": "#/$defs/artifact" }, { "type": "null" }]
         }
       }
     },
@@ -201,8 +198,14 @@
         "plan_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
         "review_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
         "approval_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-        "prepared_package_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-        "browser_form_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "prepared_package_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "browser_form_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
         "resume_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
         "cover_letter_sha256": {
           "type": ["string", "null"],
