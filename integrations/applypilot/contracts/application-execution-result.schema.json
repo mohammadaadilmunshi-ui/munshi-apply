@@ -39,23 +39,14 @@
       ]
     },
     "final_url": {
-      "type": [
-        "string",
-        "null"
-      ],
+      "type": ["string", "null"],
       "format": "uri"
     },
     "provider": {
-      "type": [
-        "string",
-        "null"
-      ]
+      "type": ["string", "null"]
     },
     "provider_application_id": {
-      "type": [
-        "string",
-        "null"
-      ]
+      "type": ["string", "null"]
     },
     "claimed_submission": {
       "type": "boolean",
@@ -66,10 +57,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "kind",
-          "message"
-        ],
+        "required": ["kind", "message"],
         "properties": {
           "kind": {
             "enum": [
@@ -89,10 +77,7 @@
             "minLength": 1
           },
           "question_key": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           }
         }
       },
@@ -103,12 +88,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "sequence",
-          "kind",
-          "timestamp",
-          "verified"
-        ],
+        "required": ["sequence", "kind", "timestamp", "verified"],
         "properties": {
           "sequence": {
             "type": "integer",
@@ -126,84 +106,49 @@
             "type": "boolean"
           },
           "control_id": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "question_key": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "artifact_sha256": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "pattern": "^[A-Fa-f0-9]{64}$"
           },
           "detail": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           }
         }
       }
     },
     "submission_observation": {
-      "type": [
-        "object",
-        "null"
-      ],
+      "type": ["object", "null"],
       "additionalProperties": false,
       "properties": {
         "method": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "target": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "http_status": {
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         },
         "provider_application_id": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "completion_marker": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "response_marker": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         }
       }
     },
     "cost": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "estimated_total_usd"
-      ],
+      "required": ["estimated_total_usd"],
       "properties": {
         "estimated_total_usd": {
           "type": "number",
