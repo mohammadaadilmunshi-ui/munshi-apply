@@ -264,8 +264,7 @@ async function learnPrimaryFillResults(
         }
       }
       const strategy = result.strategy as
-        | Exclude<InteractionRecipeStrategy, "TAUGHT_RECIPE">
-        | undefined;
+        Exclude<InteractionRecipeStrategy, "TAUGHT_RECIPE"> | undefined;
       if (
         !siteOrigin ||
         !control?.componentFingerprint ||
