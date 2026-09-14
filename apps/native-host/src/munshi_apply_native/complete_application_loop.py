@@ -1069,7 +1069,15 @@ class CompleteApplicationLoopService:
         READY_TO_SUBMIT state remains an internal integrity boundary; it must not
         be rendered as another approval prompt.
         """
-        self.approve_review(review_id=review_id)
+        with self.database.connect() as connection:
+            existing_review = connection.execute(
+                "SELECT approved_at FROM final_application_reviews WHERE review_id=?",
+                (review_id,),
+            ).fetchone()
+        if existing_review is None:
+            raise LookupError("Final review was not found")
+        if existing_review["approved_at"] is None:
+            self.approve_review(review_id=review_id)
         return self.submit(
             review_id=review_id,
             idempotency_key=idempotency_key,
