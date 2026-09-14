@@ -264,7 +264,8 @@ async function learnPrimaryFillResults(
         }
       }
       const strategy = result.strategy as
-        Exclude<InteractionRecipeStrategy, "TAUGHT_RECIPE"> | undefined;
+        | Exclude<InteractionRecipeStrategy, "TAUGHT_RECIPE">
+        | undefined;
       if (
         !siteOrigin ||
         !control?.componentFingerprint ||
@@ -371,7 +372,8 @@ async function sendFillInstruction(
   if (
     primaryResults.some(
       (result) =>
-        result.controlId === instruction.controlId && result.status === "FILLED",
+        result.controlId === instruction.controlId &&
+        result.status === "FILLED",
     )
   ) {
     return primaryResults;
@@ -426,7 +428,8 @@ async function sendFillInstruction(
     const fallbackResults = fallbackResponse?.results ?? [];
     const verified = fallbackResults.some(
       (result) =>
-        result.controlId === instruction.controlId && result.status === "FILLED",
+        result.controlId === instruction.controlId &&
+        result.status === "FILLED",
     );
     if (!verified) {
       return fallbackResults.length > 0 ? fallbackResults : primaryResults;
