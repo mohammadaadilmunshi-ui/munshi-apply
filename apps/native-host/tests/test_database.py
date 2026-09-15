@@ -33,6 +33,7 @@ EXPECTED_MIGRATIONS = [
     "023_teach_munshi_telegram_outbox.sql",
     "024_confirmation_evidence.sql",
     "025_production_submit_authority_inbox.sql",
+    "026_production_receipt_outbox.sql",
 ]
 
 
@@ -43,8 +44,8 @@ def test_migrations_are_idempotent(tmp_path: Path) -> None:
     assert database.migrate() == []
     health = database.health()
     assert health["status"] == "healthy"
-    assert health["migration_count"] == 25
-    assert health["schema_version"] == "025_production_submit_authority_inbox.sql"
+    assert health["migration_count"] == 27
+    assert health["schema_version"] == "027_production_submit_authority_rollover.sql"
 
 
 def test_architecture_tables_are_created_with_integrity_constraints(tmp_path: Path) -> None:
