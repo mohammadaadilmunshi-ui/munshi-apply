@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS production_submit_authorities (
     -- Exactly one ISSUED authority per (tenant, user, session). A re-issued
     -- authority for the same session replaces this row through the inbox,
     -- never via direct UPDATE (UPDATE is blocked by immutability trigger).
-    UNIQUE(tenant_id, user_id, session_id)
+    UNIQUE(tenant_id, user_id, session_id, generation)
 );
 
 CREATE INDEX IF NOT EXISTS idx_production_submit_authorities_session

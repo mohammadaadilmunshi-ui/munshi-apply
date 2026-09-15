@@ -525,6 +525,35 @@ class SubmitAuthorityInbox:
                     )
 
                 self._validate_bindings_locked(connection, envelope)
+                prior_generation = connection.execute(
+                    """SELECT a.authorization_id,a.generation,c.state
+                       FROM production_submit_authorities a
+                       JOIN production_submit_authority_claims c
+                         ON c.authorization_id=a.authorization_id
+                       WHERE a.tenant_id=? AND a.user_id=? AND a.session_id=?
+                       ORDER BY a.generation DESC LIMIT 1""",
+                    (envelope.tenant_id, envelope.user_id, envelope.session_id),
+                ).fetchone()
+                if prior_generation is not None:
+                    if int(envelope.generation) <= int(prior_generation["generation"]):
+                        raise ValueError("submit authority generation is stale or conflicting")
+                    if str(prior_generation["state"]) != CLAIM_STATE_RECEIVED:
+                        raise ValueError(
+                            "submit authority cannot roll over an in-flight or claimed generation"
+                        )
+                    connection.execute(
+                        """UPDATE production_submit_authority_claims
+                           SET state=?,finalized_at=?,final_error=?,updated_at=?
+                           WHERE authorization_id=? AND state=?""",
+                        (
+                            CLAIM_STATE_REJECTED,
+                            now,
+                            "superseded_by_new_authority_generation",
+                            datetime.now(UTC).isoformat(),
+                            str(prior_generation["authorization_id"]),
+                            CLAIM_STATE_RECEIVED,
+                        ),
+                    )
                 connection.execute(
                     """INSERT INTO production_submit_authorities(
                            authorization_id,tenant_id,user_id,application_id,plan_id,

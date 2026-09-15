@@ -244,6 +244,10 @@ def execute(request_path:Path,*,dry_run:bool,port:int)->dict[str,Any]:
         prepare,usage1=_run_agent(prompt=_prepare_prompt(request),port=port,settings=settings,max_turns=max_turns,max_cost=max_cost,max_wall_seconds=max_wall)
         if prepare.get("claimed_submission") is True: raise WorkerError("Preparation phase crossed the final-submit boundary without authority")
         if prepare.get("status")!="COMPLETED" or not final_intent: return _envelope(request,prepare,usage1,started)
+        raise WorkerError(
+            "Legacy autonomous final-submit path is retired; "
+            "use the canonical Complete Application Loop executor"
+        )
         auth=_validate_authorization_binding(request); claimant=f"applypilot-{uuid.uuid4()}"
         try: claim=claim_submit_authorization(auth,claimant_id=claimant)
         except SubmitAuthorizationError as e: raise WorkerError(f"Canonical submit authorization claim failed: {e}") from e
