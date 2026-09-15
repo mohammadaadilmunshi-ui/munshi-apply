@@ -26,7 +26,7 @@ class ProductionReceiptError(RuntimeError):
 def _canonical(value: Mapping[str, Any]) -> bytes:
     return json.dumps(
         dict(value), sort_keys=True, separators=(",", ":"), ensure_ascii=True
-    ).encode("utf-8")
+    ).encode()
 
 
 def _text(value: Any, label: str) -> str:
@@ -137,7 +137,7 @@ def build_verified_receipt(
     if len(secret) < 32:
         raise ProductionReceiptError("Production receipt HMAC secret is not configured")
     signature = hmac.new(
-        secret.encode("utf-8"), receipt_digest.encode("utf-8"), hashlib.sha256
+        secret.encode(), receipt_digest.encode(), hashlib.sha256
     ).hexdigest()
     return {
         **material,
@@ -191,8 +191,8 @@ class ProductionReceiptClient:
         body_digest = hashlib.sha256(body).hexdigest()
         timestamp = str(int(time.time()))
         request_signature = hmac.new(
-            self.secret.encode("utf-8"),
-            f"{event_id}.{timestamp}.{body_digest}".encode("utf-8"),
+            self.secret.encode(),
+            f"{event_id}.{timestamp}.{body_digest}".encode(),
             hashlib.sha256,
         ).hexdigest()
         request = urllib.request.Request(  # noqa: S310
@@ -226,8 +226,8 @@ class ProductionReceiptClient:
             )
 
         expected = hmac.new(
-            self.secret.encode("utf-8"),
-            f"{event_id}.{PURPOSE}.{response_digest}.{plan_digest}".encode("utf-8"),
+            self.secret.encode(),
+            f"{event_id}.{PURPOSE}.{response_digest}.{plan_digest}".encode(),
             hashlib.sha256,
         ).hexdigest()
         if not all(

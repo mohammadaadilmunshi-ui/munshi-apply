@@ -25,7 +25,7 @@ class SubmitAuthorizationClientError(RuntimeError):
 def _canonical(value: Mapping[str, Any]) -> bytes:
     return json.dumps(
         dict(value), sort_keys=True, separators=(",", ":"), ensure_ascii=True
-    ).encode("utf-8")
+    ).encode()
 
 
 def _expected_claim_digest(
@@ -98,8 +98,8 @@ class HunterSubmitAuthorityClient:
         body_digest = hashlib.sha256(body).hexdigest()
         timestamp = str(int(time.time()))
         signature = hmac.new(
-            self.secret.encode("utf-8"),
-            f"{event_id}.{timestamp}.{body_digest}".encode("utf-8"),
+            self.secret.encode(),
+            f"{event_id}.{timestamp}.{body_digest}".encode(),
             hashlib.sha256,
         ).hexdigest()
         request = urllib.request.Request(  # noqa: S310
@@ -136,8 +136,8 @@ class HunterSubmitAuthorityClient:
             )
 
         expected_signature = hmac.new(
-            self.secret.encode("utf-8"),
-            f"{event_id}.{purpose}.{response_digest}.{plan_digest}".encode("utf-8"),
+            self.secret.encode(),
+            f"{event_id}.{purpose}.{response_digest}.{plan_digest}".encode(),
             hashlib.sha256,
         ).hexdigest()
         checks = (
