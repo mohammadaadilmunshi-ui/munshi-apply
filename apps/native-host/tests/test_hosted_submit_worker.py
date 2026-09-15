@@ -49,6 +49,17 @@ class _HunterAuthorityClient:
         }
 
 
+class _FlakyReceiptClient:
+    def __init__(self):
+        self.calls = 0
+
+    def ingest(self, receipt):
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError("synthetic transient receipt handoff failure")
+        return {"receipt_id": receipt["receipt_id"], "accepted": True}
+
+
 def test_hunter_single_approval_reaches_guarded_submit_without_second_apply_approval(loop):
     service, database, browser = loop
     session = service.start_session(plan_id="application-plan-1")
@@ -102,10 +113,12 @@ def test_hunter_single_approval_reaches_guarded_submit_without_second_apply_appr
     )
     envelope = sign_authority_envelope(envelope)
     hunter = _HunterAuthorityClient(envelope)
+    receipt_client = _FlakyReceiptClient()
     runner = HostedSubmitRunner(
         database,
         adapter_factory=lambda _job: browser,
         authority_client=hunter,
+        production_receipt_client=receipt_client,
     )
 
     result = runner.run_once()
@@ -116,6 +129,7 @@ def test_hunter_single_approval_reaches_guarded_submit_without_second_apply_appr
     assert browser.calls == 1
     assert hunter.read_calls == 1
     assert hunter.claim_calls == 1
+    assert receipt_client.calls == 1
 
     with database.connect() as connection:
         local_review = connection.execute(
@@ -130,11 +144,34 @@ def test_hunter_single_approval_reaches_guarded_submit_without_second_apply_appr
             "SELECT COUNT(*) FROM final_submit_commands WHERE session_id=?",
             (session.session_id,),
         ).fetchone()[0]
+        pending_receipt = connection.execute(
+            "SELECT state,attempt_count FROM production_receipt_outbox"
+        ).fetchone()
     assert local_review["approved_at"] is not None
     assert final_session["state"] == "VERIFIED"
     assert commands == 1
+    assert pending_receipt["state"] == "PENDING"
+    assert pending_receipt["attempt_count"] == 1
 
-    # Terminal sessions are no longer candidates, so a worker replay cannot
-    # click the employer action a second time.
+    # A transient Hunter receipt-handoff failure is retried from the durable
+    # outbox only. The terminal employer session is never submitted again.
+    retry = runner.run_once()
+    assert retry is not None
+    assert retry.state == "RECEIPT_DELIVERED"
+    assert retry.attempted is False
+    assert retry.verification_status == "VERIFIED"
+    assert browser.calls == 1
+    assert receipt_client.calls == 2
+
+    with database.connect() as connection:
+        delivered_receipt = connection.execute(
+            "SELECT state,attempt_count FROM production_receipt_outbox"
+        ).fetchone()
+    assert delivered_receipt["state"] == "DELIVERED"
+    assert delivered_receipt["attempt_count"] == 2
+
+    # Terminal sessions and delivered receipts are no longer candidates, so a
+    # worker replay cannot click the employer action or redeliver the receipt.
     assert runner.run_once() is None
     assert browser.calls == 1
+    assert receipt_client.calls == 2
