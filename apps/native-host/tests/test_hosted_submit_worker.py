@@ -3,11 +3,13 @@ from __future__ import annotations
 import hashlib
 
 from conftest import build_authority_envelope, sign_authority_envelope
-from test_complete_application_loop import loop  # noqa: F401
+from test_complete_application_loop import loop as _complete_application_loop_fixture
 
 from munshi_apply_native.background_prepare_queue import DurablePreparationQueue
 from munshi_apply_native.hosted_submit_worker import HostedSubmitRunner
 from munshi_apply_native.submit_authority_inbox_v1 import expected_claim_digest
+
+loop = _complete_application_loop_fixture
 
 
 class _HunterAuthorityClient:
