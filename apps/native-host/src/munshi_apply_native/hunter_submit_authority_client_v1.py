@@ -49,7 +49,9 @@ class HunterSubmitAuthorityClient:
         self.secret = str(secret)
         self.timeout = float(timeout)
         if not self.base_url:
-            raise SubmitAuthorizationClientError("Hunter base URL is not configured")
+            raise SubmitAuthorizationClientError(
+                "Canonical submit authority control client is unavailable: Hunter base URL is not configured"
+            )
         if not (
             self.base_url.startswith("https://")
             or self.base_url.startswith("http://127.0.0.1")
