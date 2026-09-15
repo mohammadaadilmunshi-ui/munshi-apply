@@ -27,10 +27,12 @@ from .execution_policy import (
 )
 from .models import ResolutionTaskPayload, ResolutionTaskResolutionPayload
 from .resolution_task_store import ResolutionTaskStore
+from .submit_authority_inbox_v1 import SubmitAuthorityInbox
 
 BACKGROUND_PREPARE_ENV = "MUNSHI_APPLY_BACKGROUND_PREPARE_ENABLED"
 FINAL_REVIEW_ENV = "MUNSHI_FINAL_REVIEW_ENABLED"
 FINAL_SUBMIT_ENV = "MUNSHI_FINAL_SUBMIT_ENABLED"
+PRODUCTION_AUTHORITY_ENV = "MUNSHI_APPLY_PRODUCTION_SUBMIT_AUTHORITY_ENABLED"
 
 SESSION_STATES = frozenset(
     {
@@ -123,6 +125,20 @@ class CompleteApplicationLoopService:
         self.database = database
         self.checkpoints = ApplicationCheckpointStore(database)
         self.resolutions = ResolutionTaskStore(database)
+        self._authority_inbox: SubmitAuthorityInbox | None = None
+
+    def bind_submit_authority_inbox(self, inbox: SubmitAuthorityInbox) -> None:
+        """Wire the canonical submit authority inbox into this service.
+
+        The default constructor does NOT create the inbox (to avoid an
+        import cycle); callers that want to enforce the §6 canonical-authority
+        gate must bind a real inbox before ``submit()`` is invoked.
+        """
+        self._authority_inbox = inbox
+
+    @property
+    def has_submit_authority_inbox(self) -> bool:
+        return self._authority_inbox is not None
 
     def _plan(self, plan_id: str) -> dict[str, Any]:
         with self.database.connect() as connection:
@@ -1134,6 +1150,10 @@ class CompleteApplicationLoopService:
     ) -> dict[str, Any]:
         if not _truthy(FINAL_SUBMIT_ENV):
             raise RuntimeError("Final submit authority is disabled")
+        if not _truthy(PRODUCTION_AUTHORITY_ENV):
+            # §6: a bare boolean + a local approved_at is no longer sufficient.
+            # A canonical Hunter-issued submit authority must back the boundary.
+            raise RuntimeError("Canonical submit authority is disabled")
         key = str(idempotency_key or "").strip()
         if not key:
             raise ValueError("Explicit Submit command idempotency key is required")
@@ -1248,6 +1268,40 @@ class CompleteApplicationLoopService:
                 raise ValueError("Application Plan changed during submission inspection")
             if not _truthy(FINAL_SUBMIT_ENV):
                 raise RuntimeError("Final submit authority is disabled")
+            if not _truthy(PRODUCTION_AUTHORITY_ENV):
+                # §6 (mirror of the early check inside the locked transaction):
+                # the irreversible boundary is unreachable without a canonical
+                # Hunter-issued submit authority backing it.
+                raise RuntimeError("Canonical submit authority is disabled")
+            # Consume the canonical submit authority durably. The box (a)
+            # proves a CLAIMED state and (b) records a one-shot local
+            # execution row, so a second dispatch (lost response) cannot
+            # re-cross the irreversible boundary. We share the open parent
+            # connection so the inbox can extend the same write transaction
+            # without contending for a separate BEGIN IMMEDIATE.
+            # Constructed on demand rather than only when the receive route ran:
+            # ``_loop_service`` yields a fresh service per request, so an inbox
+            # bound during delivery would not exist on the instance that submits.
+            # The inbox is keyless and stateless (a view over ``self.database``),
+            # so building it here grants nothing extra; every authority check
+            # below still has to pass.
+            if self._authority_inbox is None:
+                self._authority_inbox = SubmitAuthorityInbox(self.database)
+            authority_proof = self._authority_inbox.consume_for_execution(
+                session_id=str(review["session_id"]),
+                now=_now(),
+                connection=connection,
+            )
+            if not authority_proof.claimed:
+                raise RuntimeError(
+                    f"Canonical submit authority is not available: {authority_proof.error}"
+                )
+            if (
+                authority_proof.authority_digest is None
+                or authority_proof.authorization_id is None
+                or authority_proof.claim_digest is None
+            ):
+                raise RuntimeError("Canonical submit authority proof is incomplete")
             command_id = f"submit-command-{uuid4()}"
             command_payload = {
                 "application_id": review["application_id"],

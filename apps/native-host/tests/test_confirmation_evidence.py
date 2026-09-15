@@ -11,10 +11,12 @@ from munshi_apply_native.confirmation_evidence import (
 )
 
 loop = fixtures.loop
+_seed_authority = fixtures._seed_authority
 
 
 def setup(loop):
     service, db, browser, session, review = fixtures.ready(loop)
+    _seed_authority(loop, review, session)
     submit = browser.submit
 
     def observed(*, plan, review):

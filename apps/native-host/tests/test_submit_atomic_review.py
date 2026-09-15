@@ -7,11 +7,13 @@ import test_complete_application_loop as fixtures
 
 loop = fixtures.loop
 ready = fixtures.ready
+_seed_authority = fixtures._seed_authority
 
 
 @pytest.mark.parametrize("mutation", ["invalidate", "unapprove", "snapshot", "plan"])
 def test_change_during_browser_inspection_cannot_submit(loop, mutation):
-    service, db, browser, _, review = ready(loop)
+    service, db, browser, session, review = ready(loop)
+    _seed_authority(loop, review, session)
     inspect = browser.inspect_submission
 
     def race(*, plan):
@@ -51,7 +53,8 @@ def test_change_during_browser_inspection_cannot_submit(loop, mutation):
 
 
 def test_corrupted_review_snapshot_is_rejected_before_browser_access(loop):
-    service, db, browser, _, review = ready(loop)
+    service, db, browser, session, review = ready(loop)
+    _seed_authority(loop, review, session)
     with db.connect() as connection:
         changed = dict(review["review"])
         changed["answers"] = []
