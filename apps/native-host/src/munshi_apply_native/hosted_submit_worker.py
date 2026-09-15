@@ -18,10 +18,11 @@ import json
 import os
 import socket
 import time
+from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Mapping
+from typing import Any
 from uuid import uuid4
 
 from .background_prepare_queue import DurablePreparationQueue
