@@ -198,7 +198,7 @@ class HunterSubmitAuthorityClient:
             payload=exact,
         )
         if (
-            result.get("status") != "ISSUED"
+            result.get("status") not in {None, "ISSUED"}
             or result.get("submission_authority") is not True
             or any(str(result.get(key) or "") != str(exact[key]) for key in exact)
         ):
