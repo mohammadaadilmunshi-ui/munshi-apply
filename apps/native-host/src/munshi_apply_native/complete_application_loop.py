@@ -1139,8 +1139,9 @@ class CompleteApplicationLoopService:
         inbox = self._authority_inbox or SubmitAuthorityInbox(self.database)
         self._authority_inbox = inbox
         envelope = inbox.authority_for_session(session_id=str(review["session_id"]))
-        client = self._submit_authority_client or HunterSubmitAuthorityClient.from_environment()
+        client = self._submit_authority_client
         if envelope is None:
+            client = client or HunterSubmitAuthorityClient.from_environment()
             envelope = client.read(
                 {
                     "tenant_id": self.tenant_id,
@@ -1170,6 +1171,7 @@ class CompleteApplicationLoopService:
             raise RuntimeError(
                 f"Canonical submit authority claim cannot start: {phase.error}"
             )
+        client = client or HunterSubmitAuthorityClient.from_environment()
         claim = client.claim(envelope, claimant_id=phase.claimant_id)
         finalized = inbox.finalize_claim(
             authorization_id=str(envelope["authorization_id"]),
