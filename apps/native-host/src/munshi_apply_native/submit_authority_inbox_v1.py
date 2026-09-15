@@ -600,6 +600,22 @@ class SubmitAuthorityInbox:
             state=CLAIM_STATE_RECEIVED,
         )
 
+    def authority_for_session(self, *, session_id: str) -> dict[str, Any] | None:
+        """Return the exact accepted envelope for a bound Apply session."""
+        resolved = _text(session_id, "Session id")
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """SELECT envelope_json FROM production_submit_authorities
+                   WHERE session_id=? ORDER BY generation DESC LIMIT 1""",
+                (resolved,),
+            ).fetchone()
+        if row is None:
+            return None
+        value = json.loads(str(row["envelope_json"]))
+        if not isinstance(value, dict):
+            raise ValueError("stored submit authority envelope is malformed")
+        return value
+
     def claim_for_execution(
         self,
         *,
@@ -609,11 +625,11 @@ class SubmitAuthorityInbox:
     ) -> SubmitAuthorityClaimProof:
         """Atomically claim a Hunter authority for local one-use execution.
 
-        Transitions the claim row from RECEIVED -> CLAIM_IN_FLIGHT inside a
-        single guarded UPDATE under BEGIN IMMEDIATE; if the row is already in
-        CLAIM_IN_FLIGHT or any terminal state, the update is refused and the
-        proof is returned as AMBIGUOUS. A second dispatch (lost response) thus
-        cannot proceed to the adapter call.
+        Transitions RECEIVED -> CLAIM_IN_FLIGHT under a guarded write. An
+        existing CLAIM_IN_FLIGHT row is returned with the same durable
+        claimant_id so the authenticated Hunter CLAIM may be replayed safely
+        after a lost response. The employer adapter is still unreachable until
+        Hunter's deterministic receipt is validated and finalized as CLAIMED.
         """
         if not production_authority_enabled():
             return SubmitAuthorityClaimProof(
@@ -669,19 +685,17 @@ class SubmitAuthorityInbox:
                     ),
                 )
             if current_state == CLAIM_STATE_IN_FLIGHT:
-                # A second dispatch has already claimed-in-flight. A lost
-                # response must NEVER permit a second blind submit.
+                # Replaying Hunter CLAIM with the exact durable claimant is
+                # idempotent. This recovers a lost HTTP response without ever
+                # granting local execution authority by itself.
                 return SubmitAuthorityClaimProof(
-                    claimed=False,
+                    claimed=True,
                     authorization_id=resolved,
                     authority_digest=str(row["authority_digest"]),
                     claim_digest=None,
                     generation=int(row["generation"]),
-                    state=CLAIM_STATE_AMBIGUOUS,
-                    error=(
-                        "submit authority claim is in-flight (lost response): "
-                        "cannot dispatch"
-                    ),
+                    state=CLAIM_STATE_IN_FLIGHT,
+                    claimant_id=str(row["claimant_id"]),
                 )
 
             # RECEIVED -> CLAIM_IN_FLIGHT is the only path that advances the

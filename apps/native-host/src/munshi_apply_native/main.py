@@ -386,6 +386,7 @@ async def accept_production_submit_authority(
         raise HTTPException(status_code=status_code, detail=result.error or "rejected")
     return {
         "authorization_id": result.authorization_id,
+        "session_id": str(session_id),
         "state": result.state,
         "accepted": True,
         "replayed": result.replayed,

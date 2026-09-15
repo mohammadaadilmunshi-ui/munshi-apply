@@ -28,6 +28,7 @@ from .execution_policy import (
 from .models import ResolutionTaskPayload, ResolutionTaskResolutionPayload
 from .resolution_task_store import ResolutionTaskStore
 from .submit_authority_inbox_v1 import SubmitAuthorityInbox
+from .hunter_submit_authority_client_v1 import HunterSubmitAuthorityClient
 
 BACKGROUND_PREPARE_ENV = "MUNSHI_APPLY_BACKGROUND_PREPARE_ENABLED"
 FINAL_REVIEW_ENV = "MUNSHI_FINAL_REVIEW_ENABLED"
@@ -117,7 +118,14 @@ def _event_id(replay_identity: str) -> str:
 
 
 class CompleteApplicationLoopService:
-    def __init__(self, database: Database, *, tenant_id: str, user_id: str) -> None:
+    def __init__(
+        self,
+        database: Database,
+        *,
+        tenant_id: str,
+        user_id: str,
+        submit_authority_client: HunterSubmitAuthorityClient | None = None,
+    ) -> None:
         if not tenant_id or not user_id:
             raise ValueError("Execution owner is required")
         self.tenant_id = tenant_id
@@ -126,6 +134,7 @@ class CompleteApplicationLoopService:
         self.checkpoints = ApplicationCheckpointStore(database)
         self.resolutions = ResolutionTaskStore(database)
         self._authority_inbox: SubmitAuthorityInbox | None = None
+        self._submit_authority_client = submit_authority_client
 
     def bind_submit_authority_inbox(self, inbox: SubmitAuthorityInbox) -> None:
         """Wire the canonical submit authority inbox into this service.
@@ -1117,6 +1126,56 @@ class CompleteApplicationLoopService:
             adapter=adapter,
         )
 
+    def _ensure_canonical_authority_claimed(
+        self,
+        *,
+        review: dict[str, Any],
+        plan_record: dict[str, Any],
+    ) -> None:
+        """Recover, claim, and validate Hunter authority before local execution."""
+        inbox = self._authority_inbox or SubmitAuthorityInbox(self.database)
+        self._authority_inbox = inbox
+        envelope = inbox.authority_for_session(session_id=str(review["session_id"]))
+        client = self._submit_authority_client or HunterSubmitAuthorityClient.from_environment()
+        if envelope is None:
+            envelope = client.read(
+                {
+                    "tenant_id": self.tenant_id,
+                    "user_id": self.user_id,
+                    "application_id": str(review["application_id"]),
+                    "plan_id": str(review["plan_id"]),
+                    "session_id": str(review["session_id"]),
+                    "plan_digest": str(plan_record["plan_digest"]),
+                }
+            )
+            accepted = inbox.accept(envelope, now=_now())
+            if not accepted.accepted:
+                raise RuntimeError(
+                    f"Recovered canonical submit authority was rejected: {accepted.error}"
+                )
+        phase = inbox.claim_for_execution(
+            authorization_id=str(envelope["authorization_id"]),
+            now=_now(),
+        )
+        if (
+            not phase.claimed
+            or phase.state != "CLAIM_IN_FLIGHT"
+            or not phase.claimant_id
+        ):
+            raise RuntimeError(
+                f"Canonical submit authority claim cannot start: {phase.error}"
+            )
+        claim = client.claim(envelope, claimant_id=phase.claimant_id)
+        finalized = inbox.finalize_claim(
+            authorization_id=str(envelope["authorization_id"]),
+            claim_digest=str(claim["claim_digest"]),
+            now=_now(),
+        )
+        if not finalized.claimed or finalized.state != "CLAIMED":
+            raise RuntimeError(
+                f"Canonical submit authority claim could not finalize: {finalized.error}"
+            )
+
     def _event_chain_digest(self, session_id: str) -> str:
         with self.database.connect() as connection:
             rows = connection.execute(
@@ -1219,6 +1278,8 @@ class CompleteApplicationLoopService:
                 )
             self._transition(session, "PREPARING")
             raise
+
+        self._ensure_canonical_authority_claimed(review=review, plan_record=plan_record)
 
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
