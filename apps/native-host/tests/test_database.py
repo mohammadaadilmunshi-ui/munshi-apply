@@ -34,6 +34,7 @@ EXPECTED_MIGRATIONS = [
     "024_confirmation_evidence.sql",
     "025_production_submit_authority_inbox.sql",
     "026_production_receipt_outbox.sql",
+    "027_production_submit_authority_rollover.sql",
 ]
 
 
