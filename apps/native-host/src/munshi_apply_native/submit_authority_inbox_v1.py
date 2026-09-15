@@ -1066,7 +1066,9 @@ class SubmitAuthorityInbox:
                    FROM production_submit_authorities a
                    JOIN production_submit_authority_claims c
                      ON c.authorization_id=a.authorization_id
-                   WHERE a.session_id=?""",
+                   WHERE a.session_id=?
+                   ORDER BY a.generation DESC, a.accepted_at DESC
+                   LIMIT 1""",
                 (resolved,),
             ).fetchone()
             if row is None:
