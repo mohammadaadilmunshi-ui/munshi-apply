@@ -8,7 +8,8 @@ import os
 import time
 import urllib.error
 import urllib.request
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 from uuid import uuid4
 
 REQUEST_VERSION = "munshi-application-execution-request-v1"
@@ -101,7 +102,7 @@ class HunterSubmitAuthorityClient:
             f"{event_id}.{timestamp}.{body_digest}".encode("utf-8"),
             hashlib.sha256,
         ).hexdigest()
-        request = urllib.request.Request(
+        request = urllib.request.Request(  # noqa: S310
             self.base_url + "/api/application-execution/plan-current",
             data=body,
             headers={

@@ -9,7 +9,8 @@ import time
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 from uuid import uuid4
 
 RECEIPT_VERSION = "munshi-production-submission-receipt-v1"
@@ -194,7 +195,7 @@ class ProductionReceiptClient:
             f"{event_id}.{timestamp}.{body_digest}".encode("utf-8"),
             hashlib.sha256,
         ).hexdigest()
-        request = urllib.request.Request(
+        request = urllib.request.Request(  # noqa: S310
             self.base_url + "/api/application-execution/plan-current",
             data=body,
             headers={
