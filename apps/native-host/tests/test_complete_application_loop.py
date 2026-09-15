@@ -154,7 +154,7 @@ def ready(loop):
     return service, db, browser, session, review
 
 
-def _seed_authority(loop, review, session):
+def _seed_authority(loop, review, session, *, accept=True):
     """Seed a CLAIMED production authority for the given review+session.
 
     Reads the durable plan/session/checkpoint fields so the envelope binds
@@ -194,6 +194,8 @@ def _seed_authority(loop, review, session):
     envelope["browser_form_digest"] = str(session_row["browser_form_digest"])
     envelope["target_url"] = str(session_row["current_url"])
     envelope = sign_authority_envelope(envelope)
+    if not accept:
+        return envelope
     return seed_production_authority(
         database=db, service=service, envelope=envelope, review_id=review["review_id"]
     )
@@ -371,3 +373,128 @@ def test_submit_rebuilds_keyless_inbox_on_fresh_instance(loop):
     )
     assert browser.calls == 1
     assert "verification_status" in receipt
+
+
+class FixtureAuthorityClient:
+    def __init__(self, envelope, *, fail_first_claim=False):
+        self.envelope = dict(envelope)
+        self.fail_first_claim = fail_first_claim
+        self.read_calls = 0
+        self.claimants = []
+
+    def read(self, binding):
+        self.read_calls += 1
+        for key in (
+            "tenant_id", "user_id", "application_id",
+            "plan_id", "session_id", "plan_digest",
+        ):
+            assert str(binding[key]) == str(self.envelope[key])
+        return dict(self.envelope)
+
+    def claim(self, envelope, *, claimant_id):
+        from munshi_apply_native.submit_authority_inbox_v1 import expected_claim_digest
+
+        self.claimants.append(claimant_id)
+        if self.fail_first_claim and len(self.claimants) == 1:
+            raise RuntimeError("simulated lost Hunter CLAIM response")
+        return {
+            "authorization_id": envelope["authorization_id"],
+            "authority_digest": envelope["authority_digest"],
+            "claim_digest": expected_claim_digest(
+                authorization_id=envelope["authorization_id"],
+                authority_digest=envelope["authority_digest"],
+                claimant_id=claimant_id,
+                generation=int(envelope["generation"]),
+            ),
+            "generation": int(envelope["generation"]),
+            "status": "CLAIMED",
+            "submission_authority": True,
+        }
+
+
+class FixtureReceiptClient:
+    def __init__(self):
+        self.receipt_ids = []
+
+    def ingest(self, receipt):
+        self.receipt_ids.append(receipt["receipt_id"])
+        return {
+            "receipt_id": receipt["receipt_id"],
+            "status": "INGESTED",
+            "verification_status": "VERIFIED",
+            "replayed": len(self.receipt_ids) > 1,
+        }
+
+
+def test_coordinated_single_approval_runtime_recovers_delivery_and_is_exactly_once(loop):
+    service, db, browser, session, review = ready(loop)
+    envelope = _seed_authority(loop, review, session, accept=False)
+    authority_client = FixtureAuthorityClient(envelope)
+    receipt_client = FixtureReceiptClient()
+    service._submit_authority_client = authority_client
+    service._production_receipt_client = receipt_client
+
+    first = service.approve_and_submit(
+        review_id=review["review_id"],
+        idempotency_key="coordinated-e2e",
+        adapter=browser,
+    )
+    second = service.approve_and_submit(
+        review_id=review["review_id"],
+        idempotency_key="coordinated-e2e",
+        adapter=browser,
+    )
+
+    assert first["verification_status"] == "VERIFIED"
+    assert second["receipt_id"] == first["receipt_id"]
+    assert authority_client.read_calls == 1
+    assert len(authority_client.claimants) == 1
+    assert browser.calls == 1
+    assert len(set(receipt_client.receipt_ids)) == 1
+    with db.connect() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM final_application_reviews WHERE approved_at IS NOT NULL"
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT COUNT(*) FROM final_submit_commands"
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT COUNT(*) FROM production_receipt_outbox WHERE state='DELIVERED'"
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT COUNT(*) FROM complete_application_sessions WHERE state='PAUSED_FINAL'"
+        ).fetchone()[0] == 0
+
+
+def test_restart_after_lost_claim_response_reuses_durable_claimant(loop):
+    service, db, browser, session, review = ready(loop)
+    envelope = _seed_authority(loop, review, session, accept=False)
+    authority_client = FixtureAuthorityClient(envelope, fail_first_claim=True)
+    receipt_client = FixtureReceiptClient()
+    service._submit_authority_client = authority_client
+    service._production_receipt_client = receipt_client
+
+    with pytest.raises(RuntimeError, match="lost Hunter CLAIM"):
+        service.submit(
+            review_id=review["review_id"],
+            idempotency_key="lost-claim-response",
+            adapter=browser,
+        )
+    assert browser.calls == 0
+
+    restarted = CompleteApplicationLoopService(
+        db,
+        tenant_id="tenant-a",
+        user_id="member-a",
+        submit_authority_client=authority_client,
+        production_receipt_client=receipt_client,
+    )
+    receipt = restarted.submit(
+        review_id=review["review_id"],
+        idempotency_key="lost-claim-response",
+        adapter=browser,
+    )
+    assert receipt["verification_status"] == "VERIFIED"
+    assert len(authority_client.claimants) == 2
+    assert authority_client.claimants[0] == authority_client.claimants[1]
+    assert browser.calls == 1
