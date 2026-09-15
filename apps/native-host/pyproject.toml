@@ -26,6 +26,7 @@ dev = [
 [project.scripts]
 munshi-apply-native = "munshi_apply_native.native_messaging:main"
 munshi-apply-hosted-trust-worker = "munshi_apply_native.hosted_trust_worker:main"
+munshi-apply-hosted-submit-worker = "munshi_apply_native.hosted_submit_worker:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/munshi_apply_native"]
