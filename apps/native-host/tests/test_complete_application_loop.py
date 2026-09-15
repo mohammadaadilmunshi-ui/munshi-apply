@@ -85,6 +85,15 @@ class FixtureBrowser:
             "action_executed": True,
             "verification_status": "VERIFIED",
             "submission_url": plan["job"]["apply_url"],
+            "provider_application_id": "fixture-001",
+            "provider_observation": {
+                "lookup_confirmed": True,
+                "provider": "GREENHOUSE",
+                "provider_application_id": "fixture-001",
+                "target_url": plan["job"]["apply_url"],
+                "external_observation_id": "fixture-provider-lookup-001",
+                "observed_status": "RECEIVED",
+            },
             "success_evidence": (
                 {"url_transition": "somewhere"}
                 if self.ambiguous
@@ -122,6 +131,7 @@ def loop(tmp_path, monkeypatch):
         PRODUCTION_AUTHORITY_ENV,
     ):
         monkeypatch.setenv(flag, "true")
+    monkeypatch.setenv("MUNSHI_PRODUCTION_RECEIPT_HMAC_SECRET", "r" * 32)
     consumer, db = _consumer(tmp_path)
     body, headers = _signed(_envelope())
     assert consumer.accept(body, headers, now=1000).accepted

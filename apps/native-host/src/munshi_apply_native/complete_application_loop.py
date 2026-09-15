@@ -1160,6 +1160,8 @@ class CompleteApplicationLoopService:
             authorization_id=str(envelope["authorization_id"]),
             now=_now(),
         )
+        if phase.claimed and phase.state == "CLAIMED" and phase.claim_digest:
+            return
         if (
             not phase.claimed
             or phase.state != "CLAIM_IN_FLIGHT"

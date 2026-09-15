@@ -313,12 +313,14 @@ def test_two_concurrent_claims_only_one_wins(tmp_path, monkeypatch):
     assert first.claimed is True
     assert first.state == CLAIM_STATE_IN_FLIGHT
 
-    # Second claim sees CLAIM_IN_FLIGHT and returns AMBIGUOUS, claimed=False.
+    # Second claim safely resumes the exact durable claimant. Replaying
+    # Hunter CLAIM with this identity is idempotent and does not execute locally.
     second = inbox.claim_for_execution(
         authorization_id="auth-test-1", now=TEST_ISSUED_AT
     )
-    assert second.claimed is False
-    assert second.state == CLAIM_STATE_AMBIGUOUS
+    assert second.claimed is True
+    assert second.state == CLAIM_STATE_IN_FLIGHT
+    assert second.claimant_id == first.claimant_id
 
 
 def test_lost_response_cannot_re_execute(tmp_path, monkeypatch):

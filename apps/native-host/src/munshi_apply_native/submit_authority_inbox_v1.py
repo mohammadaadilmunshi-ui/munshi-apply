@@ -648,7 +648,7 @@ class SubmitAuthorityInbox:
             row = conn.execute(
                 """SELECT a.application_id,a.plan_id,a.session_id,a.provider,
                           a.review_id,a.approval_id,a.authority_digest,a.generation,
-                          c.claimant_id,c.body_sha256,c.state
+                          c.claimant_id,c.body_sha256,c.claim_digest,c.state
                    FROM production_submit_authorities a
                    JOIN production_submit_authority_claims c
                      ON c.authorization_id=a.authorization_id
@@ -667,11 +667,17 @@ class SubmitAuthorityInbox:
                 )
 
             current_state = str(row["state"])
-            if current_state in {
-                CLAIM_STATE_CLAIMED,
-                CLAIM_STATE_REJECTED,
-                CLAIM_STATE_AMBIGUOUS,
-            }:
+            if current_state == CLAIM_STATE_CLAIMED:
+                return SubmitAuthorityClaimProof(
+                    claimed=True,
+                    authorization_id=resolved,
+                    authority_digest=str(row["authority_digest"]),
+                    claim_digest=str(row["claim_digest"]),
+                    generation=int(row["generation"]),
+                    state=CLAIM_STATE_CLAIMED,
+                    claimant_id=str(row["claimant_id"]),
+                )
+            if current_state in {CLAIM_STATE_REJECTED, CLAIM_STATE_AMBIGUOUS}:
                 return SubmitAuthorityClaimProof(
                     claimed=False,
                     authorization_id=resolved,
