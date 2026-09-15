@@ -75,7 +75,7 @@ class HostedSubmitRunResult:
 
 
 class HostedSubmitRunner:
-    """Poll durable READY_FOR_REVIEW/READY_TO_SUBMIT sessions and execute safely."""
+    """Poll durable single-approval submissions and retry receipt handoff safely."""
 
     def __init__(
         self,
@@ -83,12 +83,14 @@ class HostedSubmitRunner:
         *,
         adapter_factory: Any,
         authority_client: HunterSubmitAuthorityClient,
+        production_receipt_client: Any | None = None,
         candidate_limit: int = 50,
     ) -> None:
         self.database = database
         self.queue = DurablePreparationQueue(database)
         self.adapter_factory = adapter_factory
         self.authority_client = authority_client
+        self.production_receipt_client = production_receipt_client
         self.candidate_limit = max(1, min(int(candidate_limit), 250))
 
     def _candidates(self) -> list[dict[str, Any]]:
@@ -247,12 +249,57 @@ class HostedSubmitRunner:
         ):
             raise ValueError("Rebuilt browser form has incomplete required fields")
 
+    def _retry_pending_receipt(self) -> HostedSubmitRunResult | None:
+        """Retry Hunter receipt handoff only; never re-enter the employer boundary."""
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """SELECT o.command_id,s.session_id,s.application_id,
+                          p.tenant_id,p.user_id
+                   FROM production_receipt_outbox AS o
+                   JOIN final_submit_commands AS c ON c.command_id=o.command_id
+                   JOIN complete_application_sessions AS s ON s.session_id=c.session_id
+                   JOIN career_os_application_plans AS p ON p.plan_id=s.plan_id
+                   WHERE o.state='PENDING'
+                   ORDER BY o.updated_at,o.receipt_id
+                   LIMIT 1"""
+            ).fetchone()
+        if row is None:
+            return None
+
+        service = CompleteApplicationLoopService(
+            self.database,
+            tenant_id=str(row["tenant_id"]),
+            user_id=str(row["user_id"]),
+            production_receipt_client=self.production_receipt_client,
+        )
+        delivery = service._deliver_pending_production_receipt(  # noqa: SLF001
+            str(row["command_id"])
+        )
+        if not delivery or str(delivery.get("state")) != "DELIVERED":
+            error = None if not delivery else delivery.get("error")
+            return HostedSubmitRunResult(
+                session_id=str(row["session_id"]),
+                application_id=str(row["application_id"]),
+                state="RECEIPT_PENDING",
+                attempted=False,
+                verification_status="VERIFIED",
+                error=str(error or "Verified production receipt delivery remains pending"),
+            )
+        return HostedSubmitRunResult(
+            session_id=str(row["session_id"]),
+            application_id=str(row["application_id"]),
+            state="RECEIPT_DELIVERED",
+            attempted=False,
+            verification_status="VERIFIED",
+        )
+
     def _run_session(self, session: dict[str, Any]) -> HostedSubmitRunResult:
         service = CompleteApplicationLoopService(
             self.database,
             tenant_id=str(session["tenant_id"]),
             user_id=str(session["user_id"]),
             submit_authority_client=self.authority_client,
+            production_receipt_client=self.production_receipt_client,
         )
         plan_record = service._plan(str(session["plan_id"]))  # noqa: SLF001
         review = self._local_review(session)
@@ -353,6 +400,10 @@ class HostedSubmitRunner:
         )
 
     def run_once(self) -> HostedSubmitRunResult | None:
+        pending_receipt = self._retry_pending_receipt()
+        if pending_receipt is not None and pending_receipt.error is None:
+            return pending_receipt
+
         for session in self._candidates():
             try:
                 return self._run_session(session)
@@ -369,7 +420,7 @@ class HostedSubmitRunner:
                     attempted=False,
                     error=str(error),
                 )
-        return None
+        return pending_receipt
 
 
 def run_forever() -> None:
