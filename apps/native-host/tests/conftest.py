@@ -12,7 +12,7 @@ import hashlib
 import hmac
 import json
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -27,9 +27,13 @@ from munshi_apply_native.submit_authority_inbox_v1 import (
 # Obviously-fake test-only HMAC secret. NEVER read from .env or real secrets.
 TEST_AUTHORITY_HMAC_SECRET = "test-only-submit-authority-secret-not-a-real-key-0123456789"  # noqa: S105
 
-# A pinned timestamp for deterministic tests.
-TEST_ISSUED_AT = "2026-09-14T12:00:00Z"
-TEST_EXPIRES_AT = "2026-09-14T12:30:00Z"
+# Runtime authority fixtures must stay inside the real freshness window no matter
+# when CI runs. The cross-runtime golden-vector test keeps its own pinned literal
+# timestamps, so making these helper timestamps relative does not weaken the
+# canonicalization contract.
+_TEST_NOW = datetime.now(UTC)
+TEST_ISSUED_AT = (_TEST_NOW - timedelta(minutes=1)).isoformat()
+TEST_EXPIRES_AT = (_TEST_NOW + timedelta(minutes=29)).isoformat()
 
 
 @dataclass(frozen=True)
