@@ -8,8 +8,8 @@ import os
 import time
 import urllib.error
 import urllib.request
-from datetime import UTC, datetime
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
