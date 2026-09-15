@@ -29,6 +29,7 @@ from .models import ResolutionTaskPayload, ResolutionTaskResolutionPayload
 from .resolution_task_store import ResolutionTaskStore
 from .submit_authority_inbox_v1 import SubmitAuthorityInbox
 from .hunter_submit_authority_client_v1 import HunterSubmitAuthorityClient
+from .production_receipt_v1 import ProductionReceiptClient, build_verified_receipt
 
 BACKGROUND_PREPARE_ENV = "MUNSHI_APPLY_BACKGROUND_PREPARE_ENABLED"
 FINAL_REVIEW_ENV = "MUNSHI_FINAL_REVIEW_ENABLED"
@@ -125,6 +126,7 @@ class CompleteApplicationLoopService:
         tenant_id: str,
         user_id: str,
         submit_authority_client: HunterSubmitAuthorityClient | None = None,
+        production_receipt_client: ProductionReceiptClient | None = None,
     ) -> None:
         if not tenant_id or not user_id:
             raise ValueError("Execution owner is required")
@@ -135,6 +137,7 @@ class CompleteApplicationLoopService:
         self.resolutions = ResolutionTaskStore(database)
         self._authority_inbox: SubmitAuthorityInbox | None = None
         self._submit_authority_client = submit_authority_client
+        self._production_receipt_client = production_receipt_client
 
     def bind_submit_authority_inbox(self, inbox: SubmitAuthorityInbox) -> None:
         """Wire the canonical submit authority inbox into this service.
@@ -1187,6 +1190,48 @@ class CompleteApplicationLoopService:
             ).fetchall()
         return _sha([dict(row) for row in rows])
 
+    def _deliver_pending_production_receipt(self, command_id: str) -> dict[str, Any] | None:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """SELECT receipt_id,receipt_json,state FROM production_receipt_outbox
+                   WHERE command_id=?""",
+                (command_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        if str(row["state"]) == "DELIVERED":
+            return {"state": "DELIVERED", "receipt_id": str(row["receipt_id"])}
+        receipt = json.loads(str(row["receipt_json"]))
+        try:
+            client = self._production_receipt_client or ProductionReceiptClient.from_environment()
+            acknowledged = client.ingest(receipt)
+        except Exception as error:
+            with self.database.connect() as connection:
+                connection.execute(
+                    """UPDATE production_receipt_outbox
+                       SET attempt_count=attempt_count+1,last_error=?,updated_at=?
+                       WHERE receipt_id=? AND state='PENDING'""",
+                    (str(error)[:4000], _now(), str(row["receipt_id"])),
+                )
+            return {
+                "state": "PENDING",
+                "receipt_id": str(row["receipt_id"]),
+                "error": str(error),
+            }
+        with self.database.connect() as connection:
+            connection.execute(
+                """UPDATE production_receipt_outbox
+                   SET state='DELIVERED',attempt_count=attempt_count+1,
+                       delivered_at=?,last_error=NULL,updated_at=?
+                   WHERE receipt_id=? AND state='PENDING'""",
+                (_now(), _now(), str(row["receipt_id"])),
+            )
+        return {
+            "state": "DELIVERED",
+            "receipt_id": str(row["receipt_id"]),
+            "acknowledgement": acknowledged,
+        }
+
     def _receipt_for_command(self, command_id: str) -> dict[str, Any] | None:
         with self.database.connect() as connection:
             row = connection.execute(
@@ -1198,6 +1243,10 @@ class CompleteApplicationLoopService:
         result = dict(row)
         result["receipt"] = json.loads(result.pop("receipt_json"))
         result["success_evidence"] = json.loads(result.pop("success_evidence_json"))
+        if str(result.get("verification_status")) == "VERIFIED":
+            result["production_receipt_delivery"] = (
+                self._deliver_pending_production_receipt(command_id)
+            )
         return result
 
     def submit(
@@ -1444,6 +1493,48 @@ class CompleteApplicationLoopService:
             ).fetchall()
         execution_events = [dict(row) for row in event_rows]
         chain_digest = self._event_chain_digest(str(session["session_id"]))
+        production_receipt: dict[str, Any] | None = None
+        if final_status == "VERIFIED":
+            provider_observation = result.get("provider_observation")
+            try:
+                production_receipt = build_verified_receipt(
+                    authorization=(
+                        self._authority_inbox
+                        or SubmitAuthorityInbox(self.database)
+                    ).authority_for_session(session_id=str(review["session_id"]))
+                    or {},
+                    claim={
+                        "status": "CLAIMED",
+                        "submission_authority": True,
+                        "authorization_id": authority_proof.authorization_id,
+                        "authority_digest": authority_proof.authority_digest,
+                        "claim_digest": authority_proof.claim_digest,
+                    },
+                    execution={
+                        "status": "COMPLETED",
+                        "claimed_submission": True,
+                        "plan_id": str(review["plan_id"]),
+                        "plan_digest": str(review["plan_digest"]),
+                        "provider": str(plan_record["provider"]),
+                        "provider_application_id": result.get("provider_application_id"),
+                        "submission_observation": {
+                            "method": success_evidence.get("submit_method"),
+                            "target": success_evidence.get("submit_action"),
+                            "provider_application_id": result.get("provider_application_id"),
+                        },
+                    },
+                    provider_observation=(
+                        provider_observation
+                        if isinstance(provider_observation, dict)
+                        else {}
+                    ),
+                    verified_at=str(result.get("verified_at") or _now()),
+                )
+            except Exception:
+                # Browser evidence without independent provider confirmation is
+                # not enough to project SUBMITTED in Hunter.
+                final_status = "SUBMISSION_UNVERIFIED"
+
         receipt_snapshot = {
             "application_id": review["application_id"],
             "plan_id": review["plan_id"],
@@ -1503,6 +1594,27 @@ class CompleteApplicationLoopService:
                 "UPDATE final_submit_commands SET state=?,completed_at=? WHERE command_id=?",
                 (final_status, _now(), command_id),
             )
+            connection.execute(
+                """UPDATE production_submit_authority_executions
+                   SET state=?,completed_at=?
+                   WHERE authorization_id=? AND state='SUBMITTING'""",
+                (final_status, _now(), authority_proof.authorization_id),
+            )
+            if production_receipt is not None:
+                connection.execute(
+                    """INSERT OR IGNORE INTO production_receipt_outbox(
+                           receipt_id,command_id,authorization_id,receipt_json,
+                           state,attempt_count,created_at,updated_at
+                       ) VALUES (?,?,?,?,'PENDING',0,?,?)""",
+                    (
+                        str(production_receipt["receipt_id"]),
+                        command_id,
+                        str(authority_proof.authorization_id),
+                        canonical_json(production_receipt),
+                        _now(),
+                        _now(),
+                    ),
+                )
         session = self._transition(session, final_status)
         self._record_event(
             session=session,
