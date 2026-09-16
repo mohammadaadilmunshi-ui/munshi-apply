@@ -17,12 +17,23 @@ done
 
 [[ -d "$STAGING_REPO/.git" ]] || { echo "Apply staging repository missing: $STAGING_REPO" >&2; exit 10; }
 [[ -f "$STAGING_ENV" ]] || { echo "Apply staging env file missing: $STAGING_ENV" >&2; exit 11; }
-[[ -f "$STAGING_REPO/deploy/staging/compose.yaml" ]] || { echo "Apply staging compose file missing" >&2; exit 12; }
+[[ -r "$STAGING_ENV" ]] || { echo "Apply staging env file is not readable by the deployment user: $STAGING_ENV" >&2; exit 12; }
+[[ -f "$STAGING_REPO/deploy/staging/compose.yaml" ]] || { echo "Apply staging compose file missing" >&2; exit 13; }
 
 if [[ -z "$EXPECTED_SHA" ]]; then
   EXPECTED_SHA="$(git -C "$STAGING_REPO" rev-parse HEAD)"
 fi
-[[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "expected SHA must be a full lowercase Git SHA" >&2; exit 13; }
+[[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "expected SHA must be a full lowercase Git SHA" >&2; exit 14; }
+repo_head="$(git -C "$STAGING_REPO" rev-parse --verify HEAD 2>/dev/null)" || {
+  echo "Apply staging repository has no verifiable HEAD" >&2
+  exit 15
+}
+[[ "$repo_head" == "$EXPECTED_SHA" ]] || {
+  echo "Apply staging checkout/image provenance mismatch: checkout=$repo_head expected=$EXPECTED_SHA" >&2
+  exit 16
+}
+
+echo "APPLY_STAGING_SOURCE_PROVENANCE=PASS"
 
 compose=(
   docker compose
