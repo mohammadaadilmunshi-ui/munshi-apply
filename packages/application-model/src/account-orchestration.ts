@@ -9,6 +9,22 @@ export type AccountFlow =
   | "AUTH_VERIFY"
   | "AUTH_UNKNOWN";
 
+export type AccountVerificationKind =
+  | "EMAIL_LINK"
+  | "EMAIL_CODE"
+  | "PASSWORD_RESET_LINK"
+  | "MAGIC_LOGIN_LINK"
+  | "SECURITY_INTERVENTION"
+  | null;
+
+export type AccountAutomationCapabilities = {
+  automatedAccountCreation?: boolean;
+  secureCredentialResolver?: boolean;
+  candidateMailAlias?: boolean;
+  ordinaryEmailVerification?: boolean;
+  verificationKind?: AccountVerificationKind;
+};
+
 export type AccountRecord = {
   accountId: string;
   employer: string | null;
@@ -26,15 +42,22 @@ export type AccountOrchestrationState =
   | "NOT_REQUIRED"
   | "OWNER_ACTION_REQUIRED"
   | "DUPLICATE_RISK"
-  | "READY_TO_CONTINUE";
+  | "READY_TO_CONTINUE"
+  | "ISSUE";
 
 export type AccountOrchestrationAction =
   | "CONTINUE_APPLICATION"
+  | "CONTINUE_EXACT_APPLICATION"
   | "USE_EXISTING_ACCOUNT"
   | "PREPARE_IDENTITY"
   | "SECURE_CREDENTIAL_HANDOFF"
+  | "FILL_PASSWORD_FROM_SECURE_CREDENTIAL_RESOLVER"
   | "RECOVER_ACCOUNT"
   | "VERIFY_ACCOUNT"
+  | "WAIT_FOR_EMAIL_VERIFICATION"
+  | "CONSUME_ONE_TIME_VERIFICATION_CODE"
+  | "OPEN_VERIFICATION_LINK"
+  | "AUTHENTICATE_ACCOUNT"
   | "RECORD_ACCOUNT";
 
 export type AccountOrchestrationPlan = {
@@ -59,27 +82,17 @@ function compact(value: string | null | undefined): string {
 }
 
 function accountSurfaceText(page: ApplicationPage): string {
-  return compact(
-    `${page.title} ${page.url} ${page.pageContext ?? ""}`,
-  ).toLocaleLowerCase("en-US");
+  return compact(`${page.title} ${page.url} ${page.pageContext ?? ""}`).toLocaleLowerCase("en-US");
 }
 
 function hasSharedTenantHost(hostname: string): boolean {
-  return sharedTenantHosts.some(
-    (suffix) => hostname === suffix || hostname.endsWith(`.${suffix}`),
-  );
+  return sharedTenantHosts.some((suffix) => hostname === suffix || hostname.endsWith(`.${suffix}`));
 }
 
-/**
- * Credential/account scope is intentionally narrower than origin for shared
- * ATS hosts. A Workday tenant must not be treated as the same account merely
- * because another employer uses the same Workday hostname.
- */
 export function portalScopeFromUrl(rawUrl: string): string {
   const url = new URL(rawUrl);
   const hostname = url.hostname.toLocaleLowerCase("en-US");
   if (!hasSharedTenantHost(hostname)) return hostname;
-
   const tenant = url.pathname
     .split("/")
     .map((part) => part.trim().toLocaleLowerCase("en-US"))
@@ -101,56 +114,23 @@ function hasAccountRoute(page: ApplicationPage): boolean {
 export function detectAccountFlow(page: ApplicationPage): AccountFlow {
   if (page.applicationState === "VERIFY_ACCOUNT") return "AUTH_VERIFY";
   if (page.applicationState === "ACCOUNT_CREATE") return "AUTH_CREATE";
-
   if (
     page.securityCheckpoint === "MFA" ||
     page.securityCheckpoint === "OTP" ||
     page.securityCheckpoint === "IDENTITY_VERIFICATION"
-  ) {
-    return "AUTH_VERIFY";
-  }
+  ) return "AUTH_VERIFY";
 
   const text = accountSurfaceText(page);
   const accountContext =
     page.applicationState === "AUTH" ||
     page.securityCheckpoint === "AUTHENTICATION" ||
     hasAccountRoute(page);
-
   if (!accountContext) return "NONE";
-
-  if (
-    /\b(forgot (?:your )?(?:password|username)|reset (?:your )?password|recover (?:your )?account|account recovery)\b/.test(
-      text,
-    )
-  ) {
-    return "AUTH_RECOVERY";
-  }
-
-  if (
-    /\b(verify (?:your )?(?:account|email|identity)|email verification|verification code|enter the code we sent)\b/.test(
-      text,
-    )
-  ) {
-    return "AUTH_VERIFY";
-  }
-
-  if (
-    /\b(create (?:an? )?account|register(?: as)?(?: a)? candidate|new candidate|sign up|signup)\b/.test(
-      text,
-    )
-  ) {
-    return "AUTH_CREATE";
-  }
-
-  if (
-    /\b(sign in|signin|log in|login|existing account|returning candidate)\b/.test(
-      text,
-    )
-  ) {
-    return "AUTH_LOGIN";
-  }
-
-  return accountContext ? "AUTH_UNKNOWN" : "NONE";
+  if (/\b(forgot (?:your )?(?:password|username)|reset (?:your )?password|recover (?:your )?account|account recovery)\b/.test(text)) return "AUTH_RECOVERY";
+  if (/\b(verify (?:your )?(?:account|email|identity)|email verification|verification code|enter the code we sent)\b/.test(text)) return "AUTH_VERIFY";
+  if (/\b(create (?:an? )?account|register(?: as)?(?: a)? candidate|new candidate|sign up|signup)\b/.test(text)) return "AUTH_CREATE";
+  if (/\b(sign in|signin|log in|login|existing account|returning candidate)\b/.test(text)) return "AUTH_LOGIN";
+  return "AUTH_UNKNOWN";
 }
 
 export function selectKnownAccount(
@@ -162,30 +142,55 @@ export function selectKnownAccount(
   const preferred = compact(preferredEmail).toLocaleLowerCase("en-US");
   const candidates = accounts
     .filter((account) => account.exists && account.scopeKey === scopeKey)
-    .filter(
-      (account) =>
-        !preferred || account.email.toLocaleLowerCase("en-US") === preferred,
-    )
-    .sort(
-      (left, right) =>
-        right.lastUsed.localeCompare(left.lastUsed) ||
-        left.accountId.localeCompare(right.accountId),
-    );
+    .filter((account) => !preferred || account.email.toLocaleLowerCase("en-US") === preferred)
+    .sort((left, right) => right.lastUsed.localeCompare(left.lastUsed) || left.accountId.localeCompare(right.accountId));
   return candidates[0] ?? null;
+}
+
+function canUseResolvedPassword(capabilities?: AccountAutomationCapabilities): boolean {
+  return capabilities?.secureCredentialResolver === true;
+}
+
+function canCreateAutomatically(capabilities?: AccountAutomationCapabilities): boolean {
+  return capabilities?.automatedAccountCreation === true &&
+    capabilities.secureCredentialResolver === true &&
+    capabilities.candidateMailAlias === true;
+}
+
+function canConsumeOrdinaryEmailVerification(capabilities?: AccountAutomationCapabilities): boolean {
+  return capabilities?.ordinaryEmailVerification === true &&
+    capabilities.verificationKind !== null &&
+    capabilities.verificationKind !== undefined &&
+    capabilities.verificationKind !== "SECURITY_INTERVENTION";
+}
+
+function emailVerificationActions(kind: AccountVerificationKind): readonly AccountOrchestrationAction[] {
+  if (kind === "EMAIL_CODE") {
+    return [
+      "WAIT_FOR_EMAIL_VERIFICATION",
+      "CONSUME_ONE_TIME_VERIFICATION_CODE",
+      "VERIFY_ACCOUNT",
+      "CONTINUE_EXACT_APPLICATION",
+    ];
+  }
+  return [
+    "WAIT_FOR_EMAIL_VERIFICATION",
+    "OPEN_VERIFICATION_LINK",
+    "VERIFY_ACCOUNT",
+    "CONTINUE_EXACT_APPLICATION",
+  ];
 }
 
 export function buildAccountOrchestrationPlan(input: {
   page: ApplicationPage;
   knownAccounts?: readonly AccountRecord[];
   preferredEmail?: string | null;
+  capabilities?: AccountAutomationCapabilities;
 }): AccountOrchestrationPlan {
   const flow = detectAccountFlow(input.page);
   const scopeKey = portalScopeFromUrl(input.page.url);
-  const knownAccount = selectKnownAccount(
-    input.knownAccounts ?? [],
-    input.page.url,
-    input.preferredEmail,
-  );
+  const knownAccount = selectKnownAccount(input.knownAccounts ?? [], input.page.url, input.preferredEmail);
+  const capabilities = input.capabilities;
 
   if (flow === "NONE") {
     return {
@@ -200,7 +205,43 @@ export function buildAccountOrchestrationPlan(input: {
     };
   }
 
+  if (capabilities?.verificationKind === "SECURITY_INTERVENTION") {
+    return {
+      flow,
+      state: "ISSUE",
+      scopeKey,
+      knownAccount,
+      requiresOwner: true,
+      canAutoAct: false,
+      actions: [],
+      reasons: [
+        "A protected security challenge requires external user/security intervention",
+        "The exact application continuation must be preserved and no challenge bypass may be attempted",
+      ],
+    };
+  }
+
   if (flow === "AUTH_CREATE" && knownAccount) {
+    if (canUseResolvedPassword(capabilities)) {
+      return {
+        flow,
+        state: "READY_TO_CONTINUE",
+        scopeKey,
+        knownAccount,
+        requiresOwner: false,
+        canAutoAct: true,
+        actions: [
+          "USE_EXISTING_ACCOUNT",
+          "FILL_PASSWORD_FROM_SECURE_CREDENTIAL_RESOLVER",
+          "AUTHENTICATE_ACCOUNT",
+          "CONTINUE_EXACT_APPLICATION",
+        ],
+        reasons: [
+          "A previously recorded account exists for this exact employer portal scope",
+          "Secure credential resolution allows reuse without duplicate account creation",
+        ],
+      };
+    }
     return {
       flow,
       state: "DUPLICATE_RISK",
@@ -211,12 +252,32 @@ export function buildAccountOrchestrationPlan(input: {
       actions: ["USE_EXISTING_ACCOUNT", "SECURE_CREDENTIAL_HANDOFF"],
       reasons: [
         "A previously recorded account exists for this employer portal scope",
-        "MUNSHI will not create a duplicate account or enter authentication secrets autonomously",
+        "MUNSHI will not create a duplicate account without a secure credential resolver",
       ],
     };
   }
 
   if (flow === "AUTH_CREATE") {
+    if (canCreateAutomatically(capabilities)) {
+      return {
+        flow,
+        state: "READY_TO_CONTINUE",
+        scopeKey,
+        knownAccount: null,
+        requiresOwner: false,
+        canAutoAct: true,
+        actions: [
+          "PREPARE_IDENTITY",
+          "FILL_PASSWORD_FROM_SECURE_CREDENTIAL_RESOLVER",
+          "RECORD_ACCOUNT",
+          "CONTINUE_EXACT_APPLICATION",
+        ],
+        reasons: [
+          "All account-creation automation capabilities are verified",
+          "Password material is resolved only at execution time and never enters the application or Teach ledgers",
+        ],
+      };
+    }
     return {
       flow,
       state: "OWNER_ACTION_REQUIRED",
@@ -224,19 +285,32 @@ export function buildAccountOrchestrationPlan(input: {
       knownAccount: null,
       requiresOwner: true,
       canAutoAct: false,
-      actions: [
-        "PREPARE_IDENTITY",
-        "SECURE_CREDENTIAL_HANDOFF",
-        "RECORD_ACCOUNT",
-      ],
+      actions: ["PREPARE_IDENTITY", "SECURE_CREDENTIAL_HANDOFF", "RECORD_ACCOUNT"],
       reasons: [
         "A new candidate account is required",
-        "Identity fields may be prepared, but password creation/storage and authentication remain owner/browser credential-manager actions",
+        "Automatic creation remains fail-closed until mail identity and secure credential resolution are available",
       ],
     };
   }
 
   if (flow === "AUTH_LOGIN") {
+    if (knownAccount && canUseResolvedPassword(capabilities)) {
+      return {
+        flow,
+        state: "READY_TO_CONTINUE",
+        scopeKey,
+        knownAccount,
+        requiresOwner: false,
+        canAutoAct: true,
+        actions: [
+          "USE_EXISTING_ACCOUNT",
+          "FILL_PASSWORD_FROM_SECURE_CREDENTIAL_RESOLVER",
+          "AUTHENTICATE_ACCOUNT",
+          "CONTINUE_EXACT_APPLICATION",
+        ],
+        reasons: ["A matching account exists and its password can be resolved through the privileged credential boundary"],
+      };
+    }
     return {
       flow,
       state: "OWNER_ACTION_REQUIRED",
@@ -244,19 +318,37 @@ export function buildAccountOrchestrationPlan(input: {
       knownAccount,
       requiresOwner: true,
       canAutoAct: false,
-      actions: knownAccount
-        ? ["USE_EXISTING_ACCOUNT", "SECURE_CREDENTIAL_HANDOFF"]
-        : ["SECURE_CREDENTIAL_HANDOFF"],
+      actions: knownAccount ? ["USE_EXISTING_ACCOUNT", "SECURE_CREDENTIAL_HANDOFF"] : ["SECURE_CREDENTIAL_HANDOFF"],
       reasons: [
-        knownAccount
-          ? "A matching account record exists for this portal scope"
-          : "No matching account record is available for this portal scope",
-        "Authentication credentials are never stored in the application ledger or entered autonomously",
+        knownAccount ? "A matching account record exists for this portal scope" : "No matching account record is available for this portal scope",
+        "A privileged secure credential reference is required before login may be automated",
       ],
     };
   }
 
   if (flow === "AUTH_RECOVERY") {
+    if (capabilities?.ordinaryEmailVerification === true && capabilities.verificationKind === "PASSWORD_RESET_LINK") {
+      return {
+        flow,
+        state: "READY_TO_CONTINUE",
+        scopeKey,
+        knownAccount,
+        requiresOwner: false,
+        canAutoAct: true,
+        actions: [
+          "RECOVER_ACCOUNT",
+          "WAIT_FOR_EMAIL_VERIFICATION",
+          "OPEN_VERIFICATION_LINK",
+          "FILL_PASSWORD_FROM_SECURE_CREDENTIAL_RESOLVER",
+          "AUTHENTICATE_ACCOUNT",
+          "CONTINUE_EXACT_APPLICATION",
+        ],
+        reasons: [
+          "Password recovery is bound to a candidate-controlled MUNSHI mail alias",
+          "The reset link and replacement password remain one-time/resolver-controlled values",
+        ],
+      };
+    }
     return {
       flow,
       state: "OWNER_ACTION_REQUIRED",
@@ -266,13 +358,28 @@ export function buildAccountOrchestrationPlan(input: {
       canAutoAct: false,
       actions: ["RECOVER_ACCOUNT", "SECURE_CREDENTIAL_HANDOFF"],
       reasons: [
-        "Account recovery requires explicit owner control",
-        "Recovery links, secrets, OTPs, and password-reset values are not persisted by MUNSHI",
+        "Account recovery is not proven to be an ordinary candidate-controlled email flow",
+        "Recovery remains fail-closed rather than guessing the challenge channel",
       ],
     };
   }
 
   if (flow === "AUTH_VERIFY") {
+    if (canConsumeOrdinaryEmailVerification(capabilities)) {
+      return {
+        flow,
+        state: "READY_TO_CONTINUE",
+        scopeKey,
+        knownAccount,
+        requiresOwner: false,
+        canAutoAct: true,
+        actions: emailVerificationActions(capabilities?.verificationKind ?? null),
+        reasons: [
+          "The verification challenge is explicitly correlated to a candidate-controlled MUNSHI mail alias",
+          "One-time verification material is consumed through the mail resolver and is not persisted in recipes or account state",
+        ],
+      };
+    }
     return {
       flow,
       state: "OWNER_ACTION_REQUIRED",
@@ -282,8 +389,8 @@ export function buildAccountOrchestrationPlan(input: {
       canAutoAct: false,
       actions: ["VERIFY_ACCOUNT"],
       reasons: [
-        "Account verification is a human/security checkpoint",
-        "MFA, OTP, identity verification, and verification links remain owner actions",
+        "The authentication page does not have trusted ordinary-email verification provenance",
+        "SMS, TOTP, passkeys, CAPTCHA, identity checks, and ambiguous OTP challenges remain external intervention cases",
       ],
     };
   }
@@ -296,16 +403,14 @@ export function buildAccountOrchestrationPlan(input: {
     requiresOwner: true,
     canAutoAct: false,
     actions: ["SECURE_CREDENTIAL_HANDOFF"],
-    reasons: [
-      "An authentication surface is active but its exact account path is unresolved",
-    ],
+    reasons: ["An authentication surface is active but its exact account path is unresolved"],
   };
 }
 
-export function accountPreflightItem(
-  plan: AccountOrchestrationPlan,
-): PreflightGateItem {
+export function accountPreflightItem(plan: AccountOrchestrationPlan): PreflightGateItem {
+  if (plan.canAutoAct) return { id: `account:${plan.scopeKey}`, state: "READY" };
   const hardBlocked =
+    plan.state === "ISSUE" ||
     plan.state === "DUPLICATE_RISK" ||
     plan.flow === "AUTH_RECOVERY" ||
     plan.flow === "AUTH_VERIFY" ||
