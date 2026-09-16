@@ -123,6 +123,10 @@ def main() -> None:
     require(
         verify,
         (
+            '[[ -r "$STAGING_ENV" ]]',
+            'repo_head="$(git -C "$STAGING_REPO" rev-parse --verify HEAD',
+            '[[ "$repo_head" == "$EXPECTED_SHA" ]]',
+            "APPLY_STAGING_SOURCE_PROVENANCE=PASS",
             "APPLY_STAGING_COMPOSE_SAFETY=PASS",
             "APPLY_STAGING_SUBMIT_WORKER_ACTIVE=NO",
             "hosted-submit-proof",
