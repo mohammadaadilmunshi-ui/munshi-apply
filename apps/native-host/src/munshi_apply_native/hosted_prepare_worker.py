@@ -27,8 +27,11 @@ from .browser_runtime import resolve_browser_executable
 from .complete_application_loop import BACKGROUND_PREPARE_ENV, CompleteApplicationLoopService
 from .database import Database
 from .execution_policy import prepare_permissions
-from .plan_browser_adapter import PlanBrowserAdapter, provider_for_url
+from .hosted_interaction_recovery import HostedRecoveringPlanBrowserAdapter
+from .interaction_fallback_service import InteractionFallbackService
+from .plan_browser_adapter import provider_for_url
 from .settings import Settings
+from .teach_munshi_service import TeachMunshiService
 
 HOSTED_WORKER_ENV = "MUNSHI_APPLY_HOSTED_PREPARE_WORKER_ENABLED"
 BRIDGE_URL_ENV = "MUNSHI_HUNTER_EXECUTION_BRIDGE_BASE_URL"
@@ -73,7 +76,7 @@ def _target_url(plan: dict[str, Any]) -> str:
     return target
 
 
-class HostedPlanBrowserAdapter(PlanBrowserAdapter):
+class HostedPlanBrowserAdapter(HostedRecoveringPlanBrowserAdapter):
     def __init__(
         self,
         *args: Any,
@@ -118,6 +121,9 @@ class HostedAdapterFactory:
         bridge_factory: Any = HunterExecutionBridgeClient,
         playwright_factory: Any = sync_playwright,
         context_configurer: Any = None,
+        runtime_root: Path | None = None,
+        interaction_fallback_service: Any = None,
+        teach_munshi_service: Any = None,
     ) -> None:
         self.database = database
         self.queue = queue
@@ -129,6 +135,10 @@ class HostedAdapterFactory:
         self.bridge_factory = bridge_factory
         self.playwright_factory = playwright_factory
         self.context_configurer = context_configurer
+        self.interaction_fallback_service = interaction_fallback_service
+        if self.interaction_fallback_service is None and runtime_root is not None:
+            self.interaction_fallback_service = InteractionFallbackService(runtime_root)
+        self.teach_munshi_service = teach_munshi_service or TeachMunshiService(database)
 
     def _plan(self, job: dict[str, Any]) -> dict[str, Any]:
         with self.database.connect() as connection:
@@ -229,6 +239,8 @@ class HostedAdapterFactory:
                 cover_letter_reader=(cover_letter_reader if cover_binding is not None else None),
                 current_plan=current_plan,
                 runtime_path=_runtime_path(),
+                interaction_fallback_service=self.interaction_fallback_service,
+                teach_munshi_service=self.teach_munshi_service,
                 playwright_instance=pw,
                 browser=browser,
                 context=context,
@@ -379,6 +391,7 @@ def run_forever() -> None:
         allow_staging_http=allow_staging_http,
         browser_executable=os.getenv("MUNSHI_BROWSER_EXECUTABLE") or None,
         navigation_timeout_ms=int(os.getenv("MUNSHI_APPLY_BROWSER_TIMEOUT_MS", "30000")),
+        runtime_root=settings.runtime_root,
     )
     runner = HostedPreparationRunner(
         queue,
