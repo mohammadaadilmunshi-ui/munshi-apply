@@ -139,8 +139,7 @@ python3 - <<'PY'
 import urllib.request
 with urllib.request.urlopen("http://127.0.0.1:19000/health", timeout=5) as response:
     if response.status != 200:
-        raise SystemExit(f"Apply staging /health returned {response.status}
-")
+        raise SystemExit(f"Apply staging /health returned {response.status}")
 print("APPLY_STAGING_HTTP_HEALTH=PASS")
 PY
 
