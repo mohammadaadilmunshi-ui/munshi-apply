@@ -27,6 +27,11 @@ export type ComponentFingerprintV2Input = ComponentFingerprintInput & {
   frameworkHint?: ComponentFrameworkHint;
 };
 
+/**
+ * Recipes describe interaction mechanics only. Account actions deliberately
+ * contain no password, OTP, reset token, magic-link token, URL, or credential
+ * reference. Those values are resolved by privileged runtime boundaries.
+ */
 export type RecipeAction =
   | { type: "FOCUS" }
   | { type: "CLICK" }
@@ -36,7 +41,10 @@ export type RecipeAction =
       key: "ArrowDown" | "ArrowUp" | "Enter" | "Tab" | "Escape";
     }
   | { type: "SELECT_EXACT_OPTION" }
-  | { type: "WAIT_FOR_STATE"; state: "OPTIONS_VISIBLE" | "VALUE_COMMITTED" };
+  | { type: "WAIT_FOR_STATE"; state: "OPTIONS_VISIBLE" | "VALUE_COMMITTED" }
+  | { type: "FILL_PASSWORD_FROM_SECURE_CREDENTIAL_RESOLVER" }
+  | { type: "CONSUME_ONE_TIME_VERIFICATION_CODE" }
+  | { type: "OPEN_VERIFICATION_LINK" };
 
 export type InteractionRecipe = {
   recipeId: string;
