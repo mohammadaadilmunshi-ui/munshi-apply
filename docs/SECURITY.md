@@ -23,6 +23,26 @@ The `0.2.0` extension requests only:
 
 `scripting`, `downloads`, and `debugger` are not requested. Native Messaging is limited to the fixed `systems.munshi.apply` host installed for the exact local Edge extension ID.
 
+## Netcup staging deployment permission
+
+The Apply staging transport introduces one infrastructure permission that is intentionally separate from browser/native-host permissions: an ed25519 GitHub Actions deployment key restricted by the server's `authorized_keys` entry to `/opt/munshi/bin/github-apply-staging-deploy-gateway`.
+
+The permission is staging-only and least-privilege by command grammar:
+
+- the forced-command gateway accepts only `/opt/munshi/bin/deploy-apply-staging-release --commit <40-char-sha> --branch <branch>`;
+- it has no Hunter deployment route and no production deployment route;
+- it has no arbitrary shell or command passthrough;
+- the private key exists only as a protected GitHub staging secret and is never installed on Netcup by the bootstrap script;
+- source reaches Netcup as a Git bundle created from an exact GitHub branch ref, then the server re-verifies the requested SHA's ancestry before checkout;
+- deployment recreates only the Apply staging API service and verifies Hunter staging/production container identities did not change;
+- the normal deployment path refuses active prepare/submit proof workers and leaves final review, final submit, and production submit authority disabled;
+- the controlled `hosted-submit-proof` profile remains a separate, explicit later operation and is not activated by this transport;
+- the one-time bootstrap installer updates only its uniquely tagged Apply staging `authorized_keys` entry and Apply-specific `/opt/munshi/bin` wrappers, with transactional rollback on install failure.
+
+The transport is manual (`workflow_dispatch`) and exact-SHA based. It must not be converted to automatic push/schedule deployment, broadened to production, or changed to an unrestricted SSH key without a new security review and ADR.
+
+See `docs/adr/0001-apply-staging-deployment-transport.md` for the decision record.
+
 ## Explicitly prohibited behavior
 
 MUNSHI Apply must not defeat CAPTCHA, MFA, OTP, identity verification, authentication protections, rate limits, bot detection, or anti-abuse controls. It must not interact with hidden honeypot controls. It must not falsify eligibility or protected facts.
