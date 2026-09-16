@@ -86,7 +86,9 @@ describe("capability-gated account automation", () => {
       },
     });
     expect(ready.canAutoAct).toBe(true);
-    expect(ready.actions).toContain("FILL_PASSWORD_FROM_SECURE_CREDENTIAL_RESOLVER");
+    expect(ready.actions).toContain(
+      "FILL_PASSWORD_FROM_SECURE_CREDENTIAL_RESOLVER",
+    );
     expect(ready.actions).toContain("RECORD_ACCOUNT");
   });
 
@@ -144,7 +146,9 @@ describe("capability-gated account automation", () => {
     });
     expect(recovery.canAutoAct).toBe(true);
     expect(recovery.actions).toContain("OPEN_VERIFICATION_LINK");
-    expect(recovery.actions).toContain("FILL_PASSWORD_FROM_SECURE_CREDENTIAL_RESOLVER");
+    expect(recovery.actions).toContain(
+      "FILL_PASSWORD_FROM_SECURE_CREDENTIAL_RESOLVER",
+    );
 
     const protectedChallenge = buildAccountOrchestrationPlan({
       page: page({
