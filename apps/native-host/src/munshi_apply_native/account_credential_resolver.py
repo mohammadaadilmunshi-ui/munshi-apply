@@ -6,6 +6,9 @@ from typing import Protocol
 
 
 _CREDENTIAL_REF_RE = re.compile(r"^credref:v1:[A-Za-z0-9_-]{16,128}$")
+_HUNTER_ATS_SECRET_REF_RE = re.compile(
+    r"^ats-secret://[A-Za-z0-9_-]{8,128}/password$"
+)
 
 
 class AccountCredentialResolverError(RuntimeError):
@@ -25,9 +28,15 @@ class AccountCredentialResolver(Protocol):
 
 
 def validate_credential_ref(value: object) -> str:
-    if not isinstance(value, str) or not _CREDENTIAL_REF_RE.fullmatch(value.strip()):
+    if not isinstance(value, str):
         raise AccountCredentialResolverError("Invalid opaque ATS credential reference")
-    return value.strip()
+    normalized = value.strip()
+    if not (
+        _CREDENTIAL_REF_RE.fullmatch(normalized)
+        or _HUNTER_ATS_SECRET_REF_RE.fullmatch(normalized)
+    ):
+        raise AccountCredentialResolverError("Invalid opaque ATS credential reference")
+    return normalized
 
 
 @dataclass
