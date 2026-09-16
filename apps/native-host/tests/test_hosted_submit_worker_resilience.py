@@ -3,10 +3,8 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier, Lock
 
-from test_complete_application_loop import (
-    _seed_authority,
-    loop as _complete_application_loop_fixture,
-)
+from test_complete_application_loop import _seed_authority
+from test_complete_application_loop import loop as _complete_application_loop_fixture
 
 from munshi_apply_native.background_prepare_queue import DurablePreparationQueue
 from munshi_apply_native.hosted_submit_worker import HostedSubmitRunner
