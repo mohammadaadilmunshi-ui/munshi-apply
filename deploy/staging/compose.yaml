@@ -84,6 +84,40 @@ services:
       - apply_data:/data
     shm_size: "1gb"
 
+  # Controlled proof only. This service is absent unless the
+  # `hosted-submit-proof` profile is selected, and every irreversible gate
+  # below still defaults to false. It deliberately does not auto-restart.
+  submit-worker:
+    profiles: ["hosted-submit-proof"]
+    image: munshi-apply-staging:${MUNSHI_APPLY_IMAGE_TAG:-local}
+    restart: "no"
+    depends_on:
+      apply:
+        condition: service_healthy
+    command: ["python", "-m", "munshi_apply_native.hosted_submit_worker"]
+    environment:
+      MUNSHI_RUNTIME_ROOT: /data
+      MUNSHI_DATABASE_PATH: /data/munshi-apply.sqlite
+      MUNSHI_MIGRATIONS_PATH: /app/migrations
+      MUNSHI_BROWSER_EXECUTABLE: /usr/bin/chromium
+      MUNSHI_ENVIRONMENT: "staging"
+      MUNSHI_APPLY_HANDOFF_HMAC_SECRET: "${MUNSHI_APPLY_HANDOFF_HMAC_SECRET:-}"
+      MUNSHI_PRODUCTION_RECEIPT_HMAC_SECRET: "${MUNSHI_PRODUCTION_RECEIPT_HMAC_SECRET:-}"
+      MUNSHI_HUNTER_EXECUTION_BRIDGE_BASE_URL: "${MUNSHI_HUNTER_EXECUTION_BRIDGE_BASE_URL:-}"
+      MUNSHI_HUNTER_EXECUTION_BRIDGE_STAGING_HTTP_ENABLED: "${MUNSHI_HUNTER_EXECUTION_BRIDGE_STAGING_HTTP_ENABLED:-false}"
+      MUNSHI_APPLY_SUBMIT_POLL_SECONDS: "${MUNSHI_APPLY_SUBMIT_POLL_SECONDS:-1}"
+      MUNSHI_APPLY_HOSTED_SUBMIT_WORKER_ENABLED: "${MUNSHI_APPLY_HOSTED_SUBMIT_WORKER_ENABLED:-false}"
+      MUNSHI_FINAL_REVIEW_ENABLED: "${MUNSHI_FINAL_REVIEW_ENABLED:-false}"
+      MUNSHI_FINAL_SUBMIT_ENABLED: "${MUNSHI_FINAL_SUBMIT_ENABLED:-false}"
+      MUNSHI_APPLY_PRODUCTION_SUBMIT_AUTHORITY_ENABLED: "${MUNSHI_APPLY_PRODUCTION_SUBMIT_AUTHORITY_ENABLED:-false}"
+      MUNSHI_APPLY_RESUME_UPLOAD_ENABLED: "${MUNSHI_APPLY_RESUME_UPLOAD_ENABLED:-false}"
+      MUNSHI_APPLY_NORMAL_ANSWER_AUTOFILL_ENABLED: "${MUNSHI_APPLY_NORMAL_ANSWER_AUTOFILL_ENABLED:-false}"
+    networks:
+      hunter_staging:
+    volumes:
+      - apply_data:/data
+    shm_size: "1gb"
+
 networks:
   hunter_staging:
     external: true
