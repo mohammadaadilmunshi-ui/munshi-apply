@@ -386,8 +386,10 @@ export function buildAccountOrchestrationPlan(input: {
 
   if (flow === "AUTH_RECOVERY") {
     if (
+      knownAccount &&
       capabilities?.ordinaryEmailVerification === true &&
-      capabilities.verificationKind === "PASSWORD_RESET_LINK"
+      capabilities.verificationKind === "PASSWORD_RESET_LINK" &&
+      capabilities.secureCredentialResolver === true
     ) {
       return {
         flow,
@@ -405,7 +407,7 @@ export function buildAccountOrchestrationPlan(input: {
           "CONTINUE_EXACT_APPLICATION",
         ],
         reasons: [
-          "Password recovery is bound to a candidate-controlled MUNSHI mail alias",
+          "Password recovery is bound to a candidate-controlled MUNSHI mail alias and an exact known portal account",
           "The reset link and replacement password remain one-time/resolver-controlled values",
         ],
       };
@@ -419,8 +421,8 @@ export function buildAccountOrchestrationPlan(input: {
       canAutoAct: false,
       actions: ["RECOVER_ACCOUNT", "SECURE_CREDENTIAL_HANDOFF"],
       reasons: [
-        "Account recovery is not proven to be an ordinary candidate-controlled email flow",
-        "Recovery remains fail-closed rather than guessing the challenge channel",
+        "Account recovery is not fully bound to an exact known account, candidate-controlled email flow, and secure credential resolver",
+        "Recovery remains fail-closed rather than guessing the challenge channel or password source",
       ],
     };
   }

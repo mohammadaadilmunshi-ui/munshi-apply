@@ -118,7 +118,7 @@ describe("capability-gated account automation", () => {
     ]);
   });
 
-  it("automates ordinary verify links and password-reset links but not security challenges", () => {
+  it("automates ordinary verification and reset links only with their required bindings", () => {
     const verifyLink = buildAccountOrchestrationPlan({
       page: page({
         url: "https://example.com/candidate/verify",
@@ -133,11 +133,36 @@ describe("capability-gated account automation", () => {
     expect(verifyLink.canAutoAct).toBe(true);
     expect(verifyLink.actions).toContain("OPEN_VERIFICATION_LINK");
 
+    const recoveryPage = page({
+      url: "https://example.com/candidate/forgot-password",
+      pageContext: "Forgot your password? Reset password",
+    });
+    const noResolver = buildAccountOrchestrationPlan({
+      page: recoveryPage,
+      knownAccounts: [account()],
+      capabilities: {
+        ordinaryEmailVerification: true,
+        verificationKind: "PASSWORD_RESET_LINK",
+      },
+    });
+    expect(noResolver.canAutoAct).toBe(false);
+    expect(noResolver.actions).not.toContain(
+      "FILL_PASSWORD_FROM_SECURE_CREDENTIAL_RESOLVER",
+    );
+
+    const noKnownAccount = buildAccountOrchestrationPlan({
+      page: recoveryPage,
+      capabilities: {
+        ordinaryEmailVerification: true,
+        verificationKind: "PASSWORD_RESET_LINK",
+        secureCredentialResolver: true,
+      },
+    });
+    expect(noKnownAccount.canAutoAct).toBe(false);
+
     const recovery = buildAccountOrchestrationPlan({
-      page: page({
-        url: "https://example.com/candidate/forgot-password",
-        pageContext: "Forgot your password? Reset password",
-      }),
+      page: recoveryPage,
+      knownAccounts: [account()],
       capabilities: {
         ordinaryEmailVerification: true,
         verificationKind: "PASSWORD_RESET_LINK",
@@ -149,7 +174,30 @@ describe("capability-gated account automation", () => {
     expect(recovery.actions).toContain(
       "FILL_PASSWORD_FROM_SECURE_CREDENTIAL_RESOLVER",
     );
+  });
 
+  it("automates an explicitly correlated candidate-controlled magic login link", () => {
+    const magic = buildAccountOrchestrationPlan({
+      page: page({
+        url: "https://example.com/candidate/verify",
+        applicationState: "VERIFY_ACCOUNT",
+        pageContext: "Use the secure sign-in link sent to your email",
+      }),
+      capabilities: {
+        ordinaryEmailVerification: true,
+        verificationKind: "MAGIC_LOGIN_LINK",
+      },
+    });
+    expect(magic.canAutoAct).toBe(true);
+    expect(magic.actions).toEqual([
+      "WAIT_FOR_EMAIL_VERIFICATION",
+      "OPEN_VERIFICATION_LINK",
+      "VERIFY_ACCOUNT",
+      "CONTINUE_EXACT_APPLICATION",
+    ]);
+  });
+
+  it("routes protected security challenges to ISSUE", () => {
     const protectedChallenge = buildAccountOrchestrationPlan({
       page: page({
         applicationState: "VERIFY_ACCOUNT",
