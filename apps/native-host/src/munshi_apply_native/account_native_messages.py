@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .account_credential_resolver import validate_credential_ref
 from .account_teach_service import AccountTeachService
 from .ats_account_lifecycle import ATSAccountLifecycle
 from .database import Database
@@ -44,6 +45,46 @@ def _text(payload: dict[str, Any], key: str, label: str) -> str:
     return value.strip()
 
 
+def _provision_account(
+    lifecycle: ATSAccountLifecycle,
+    database: Database,
+    payload: object,
+) -> dict[str, object]:
+    """Accept Hunter's canonical opaque vault handle without duplicating a vault.
+
+    ATSAccountLifecycle predates the Hunter vault contract and originally accepted
+    only ``credref:v1`` handles. The native boundary is the cross-repository
+    contract, so validate either supported opaque reference here, let the lifecycle
+    provision all ordinary state, then persist the already-validated opaque handle.
+    No secret value crosses this boundary.
+    """
+    if not isinstance(payload, dict):
+        raise ValueError("ATS account provision payload must be an object")
+    normalized = dict(payload)
+    credential_ref = normalized.pop("credentialRef", None)
+    validated_ref = (
+        validate_credential_ref(credential_ref) if credential_ref is not None else None
+    )
+    result = lifecycle.provision(normalized)
+    if validated_ref is None:
+        return result
+
+    account_id = _text(normalized, "accountId", "ATS account provision")
+    observed_at = _text(normalized, "observedAt", "ATS account provision")
+    with database.connect() as connection:
+        changed = connection.execute(
+            """
+            UPDATE ats_account_state
+            SET credential_ref = ?, version = version + 1, updated_at = ?
+            WHERE account_id = ?
+            """,
+            (validated_ref, observed_at, account_id),
+        ).rowcount
+        if changed != 1:
+            raise ValueError("ATS account lifecycle state disappeared during provision")
+    return lifecycle.snapshot(account_id)
+
+
 def handle_account_message(
     message: dict[str, object],
     database: Database,
@@ -54,7 +95,10 @@ def handle_account_message(
 
     lifecycle = ATSAccountLifecycle(database)
     if message_type == "PROVISION_ATS_ACCOUNT":
-        return {"ok": True, "data": lifecycle.provision(message.get("payload"))}
+        return {
+            "ok": True,
+            "data": _provision_account(lifecycle, database, message.get("payload")),
+        }
     if message_type == "BEGIN_ATS_ACCOUNT_CREATION":
         payload = _payload(message, "ATS account creation")
         return {
