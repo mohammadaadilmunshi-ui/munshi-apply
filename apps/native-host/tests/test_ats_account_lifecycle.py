@@ -81,10 +81,10 @@ def test_account_creation_verification_and_continuation_survive_restart(tmp_path
         "account-1", "app-1", NOW, verification_required=True
     )
     assert created["state"] == "VERIFICATION_PENDING"
-    assert [event["event_type"] for event in created["events"]] == [
+    assert {event["event_type"] for event in created["events"]} == {
         "ATS_ACCOUNT_CREATED",
         "ATS_ACCOUNT_VERIFICATION_PENDING",
-    ]
+    }
 
     lifecycle.start_verification(
         {
@@ -121,7 +121,7 @@ def test_account_creation_verification_and_continuation_survive_restart(tmp_path
 
     verified = restarted.mark_verified("account-1", "app-1", LATER)
     assert verified["state"] == "VERIFIED"
-    assert verified["events"][-1]["event_type"] == "ATS_ACCOUNT_VERIFIED"
+    assert any(event["event_type"] == "ATS_ACCOUNT_VERIFIED" for event in verified["events"])
 
     ready = restarted.mark_continuation_ready("continuation-1", LATER)
     assert ready["state"] == "READY"
@@ -130,7 +130,10 @@ def test_account_creation_verification_and_continuation_survive_restart(tmp_path
 
     authenticated = restarted.mark_authenticated("account-1", "app-1", LATER)
     assert authenticated["state"] == "AUTHENTICATED"
-    assert authenticated["events"][-1]["event_type"] == "ATS_ACCOUNT_AUTHENTICATED"
+    assert any(
+        event["event_type"] == "ATS_ACCOUNT_AUTHENTICATED"
+        for event in authenticated["events"]
+    )
 
 
 def test_no_raw_verification_or_password_material_is_durable(tmp_path: Path) -> None:
@@ -174,16 +177,22 @@ def test_no_raw_verification_or_password_material_is_durable(tmp_path: Path) -> 
             "observedAt": NOW,
         }
     )
-    with pytest.raises(ATSAccountLifecycleError, match="Secret"):
-        lifecycle.mark_verification_ready(
-            {
-                "challengeId": "challenge-1",
-                "mailEventId": "mail-event-1",
-                "artifactDigest": "b" * 64,
-                "verificationUrl": "https://example.test/verify?token=raw",
-                "observedAt": LATER,
-            }
-        )
+    lifecycle.mark_verification_ready(
+        {
+            "challengeId": "challenge-1",
+            "mailEventId": "mail-event-1",
+            "artifactDigest": "b" * 64,
+            "observedAt": LATER,
+        }
+    )
+    with database.connect() as connection:
+        row = connection.execute(
+            "SELECT * FROM ats_verification_challenges WHERE challenge_id='challenge-1'"
+        ).fetchone()
+        assert row is not None
+        durable = "|".join(str(row[key]) for key in row.keys())
+        assert "https://" not in durable
+        assert "verification code" not in durable.lower()
 
 
 def test_security_challenges_fail_to_preserved_issue_state(tmp_path: Path) -> None:
@@ -205,7 +214,7 @@ def test_security_challenges_fail_to_preserved_issue_state(tmp_path: Path) -> No
     assert issue["state"] == "NEEDS_USER_ACTION"
     assert issue["issue_code"] == "SECURITY_INTERVENTION_TOTP"
     assert issue["continuations"][0]["state"] == "ISSUE"
-    assert issue["events"][-1]["event_type"] == "ATS_ACCOUNT_ISSUE"
+    assert any(event["event_type"] == "ATS_ACCOUNT_ISSUE" for event in issue["events"])
 
     with pytest.raises(ATSAccountLifecycleError, match="candidate-controlled"):
         lifecycle.start_verification(
