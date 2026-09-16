@@ -226,20 +226,24 @@ class HostedRecoveringPlanBrowserAdapter(PlanBrowserAdapter):
                     unresolved.get("reason") or "Deterministic fill failed"
                 ),
             )
+            proposal: dict[str, Any] | None = None
+            recovered = False
             try:
-                proposal = self.interaction_fallback_service.propose(payload)
-                actions = proposal.get("actions") if isinstance(proposal, dict) else None
-                self._execute_actions(
-                    control_id=control_id,
-                    control=control,
-                    actions=actions,
-                    answer=str(value),
-                )
-                if not self._field_satisfied(control_id):
-                    continue
+                candidate = self.interaction_fallback_service.propose(payload)
+                if isinstance(candidate, dict):
+                    proposal = candidate
+                    self._execute_actions(
+                        control_id=control_id,
+                        control=control,
+                        actions=proposal.get("actions"),
+                        answer=str(value),
+                    )
+                    recovered = self._field_satisfied(control_id)
             except Exception:
                 # Recovery is optional. Any provider, recipe or browser failure
                 # preserves the original deterministic unresolved result.
+                recovered = False
+            if not recovered or proposal is None:
                 continue
 
             any_recovered = True
