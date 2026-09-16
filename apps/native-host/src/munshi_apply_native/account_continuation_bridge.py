@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Any
 
 from .ats_account_lifecycle import ATSAccountLifecycle
 from .complete_application_loop import (
@@ -180,10 +179,6 @@ class AccountContinuationBridge:
             session_state=str(row["session_state"]),
             target_url=target_url.strip(),
         )
-
-    @staticmethod
-    def _result(binding: AccountContinuationBinding) -> SessionResult:
-        raise AssertionError("SessionResult must be loaded from the current session")
 
     def _current_result(self, session_id: str) -> SessionResult:
         with self.database.connect() as connection:
