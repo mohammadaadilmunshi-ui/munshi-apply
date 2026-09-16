@@ -38,6 +38,15 @@ def _payload(message: dict[str, object], label: str) -> dict[str, Any]:
     return value
 
 
+def _only_keys(payload: dict[str, Any], allowed: set[str], label: str) -> None:
+    unexpected = set(payload) - allowed
+    if unexpected:
+        raise ValueError(
+            f"{label} contains forbidden value-bearing fields: "
+            + ", ".join(sorted(unexpected))
+        )
+
+
 def _text(payload: dict[str, Any], key: str, label: str) -> str:
     value = payload.get(key)
     if not isinstance(value, str) or not value.strip():
@@ -60,6 +69,11 @@ def _provision_account(
     """
     if not isinstance(payload, dict):
         raise ValueError("ATS account provision payload must be an object")
+    _only_keys(
+        payload,
+        {"accountId", "provider", "credentialRef", "mailAlias", "observedAt"},
+        "ATS account provision",
+    )
     normalized = dict(payload)
     credential_ref = normalized.pop("credentialRef", None)
     validated_ref = (
@@ -127,9 +141,15 @@ def handle_account_message(
     if message_type == "START_ATS_EMAIL_VERIFICATION":
         return {"ok": True, "data": lifecycle.start_verification(message.get("payload"))}
     if message_type == "MARK_ATS_EMAIL_VERIFICATION_READY":
+        payload = _payload(message, "ATS email verification ready")
+        _only_keys(
+            payload,
+            {"challengeId", "mailEventId", "artifactDigest", "observedAt"},
+            "ATS email verification ready",
+        )
         return {
             "ok": True,
-            "data": lifecycle.mark_verification_ready(message.get("payload")),
+            "data": lifecycle.mark_verification_ready(payload),
         }
     if message_type in {
         "CLAIM_ATS_EMAIL_VERIFICATION",
