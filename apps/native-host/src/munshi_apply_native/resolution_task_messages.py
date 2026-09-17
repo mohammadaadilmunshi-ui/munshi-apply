@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .account_native_messages import handle_account_message
 from .application_store import ApplicationStore
 from .database import Database
 from .interaction_knowledge_store import InteractionKnowledgeStore
@@ -124,9 +125,15 @@ def handle_resolution_task_message(
     message: dict[str, object],
     database: Database,
 ) -> dict[str, object] | None:
-    # This dispatcher is invoked before the legacy native-message switch. Teach
-    # MUNSHI uses it so capture stays a tiny local SQLite operation and does not
-    # add another blocking provider call to the browser interaction path.
+    # This dispatcher is invoked before the legacy native-message switch.
+    # ATS account lifecycle/Teach messages use the same seam so account state
+    # can advance without introducing another native protocol or any submit authority.
+    account_response = handle_account_message(message, database)
+    if account_response is not None:
+        return account_response
+
+    # Generic Teach MUNSHI remains isolated from password/auth controls. The
+    # account-specific Teach router above only accepts secretless semantic actions.
     teach_response = _handle_teach_message(message, database)
     if teach_response is not None:
         return teach_response

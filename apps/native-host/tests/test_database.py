@@ -35,6 +35,8 @@ EXPECTED_MIGRATIONS = [
     "025_production_submit_authority_inbox.sql",
     "026_production_receipt_outbox.sql",
     "027_production_submit_authority_rollover.sql",
+    "028_ats_account_mail_verification.sql",
+    "029_ats_account_teach_queue.sql",
 ]
 
 
@@ -45,8 +47,8 @@ def test_migrations_are_idempotent(tmp_path: Path) -> None:
     assert database.migrate() == []
     health = database.health()
     assert health["status"] == "healthy"
-    assert health["migration_count"] == 27
-    assert health["schema_version"] == "027_production_submit_authority_rollover.sql"
+    assert health["migration_count"] == 29
+    assert health["schema_version"] == "029_ats_account_teach_queue.sql"
 
 
 def test_architecture_tables_are_created_with_integrity_constraints(tmp_path: Path) -> None:
@@ -88,6 +90,11 @@ def test_architecture_tables_are_created_with_integrity_constraints(tmp_path: Pa
             "progressive_memory_observations",
             "account_records",
             "account_application_links",
+            "ats_account_state",
+            "ats_account_continuations",
+            "ats_verification_challenges",
+            "ats_account_events",
+            "ats_teach_lessons",
             "job_signal_reports",
             "job_signal_dimensions",
             "job_signal_evidence",
