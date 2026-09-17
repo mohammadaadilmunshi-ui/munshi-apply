@@ -278,11 +278,11 @@ rendered="$(mktemp /tmp/munshi-apply-staging-rendered.XXXXXX.json)"
 env \
   MUNSHI_APPLY_DEPLOY_SHA="$commit" \
   MUNSHI_APPLY_IMAGE_TAG="$commit" \
-  "${compose[@]}" config -q
+  "${compose[@]}" --profile hosted-prepare --profile hosted-submit-proof config -q
 env \
   MUNSHI_APPLY_DEPLOY_SHA="$commit" \
   MUNSHI_APPLY_IMAGE_TAG="$commit" \
-  "${compose[@]}" config --format json > "$rendered"
+  "${compose[@]}" --profile hosted-prepare --profile hosted-submit-proof config --format json > "$rendered"
 python3 - "$rendered" <<'PY'
 import json
 import sys
