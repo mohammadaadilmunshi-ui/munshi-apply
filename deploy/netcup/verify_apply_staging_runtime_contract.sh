@@ -48,12 +48,12 @@ trap 'rm -f "$rendered"' EXIT
 env \
   MUNSHI_APPLY_DEPLOY_SHA="$EXPECTED_SHA" \
   MUNSHI_APPLY_IMAGE_TAG="$EXPECTED_SHA" \
-  "${compose[@]}" config -q
+  "${compose[@]}" --profile hosted-prepare --profile hosted-submit-proof config -q
 
 env \
   MUNSHI_APPLY_DEPLOY_SHA="$EXPECTED_SHA" \
   MUNSHI_APPLY_IMAGE_TAG="$EXPECTED_SHA" \
-  "${compose[@]}" config --format json > "$rendered"
+  "${compose[@]}" --profile hosted-prepare --profile hosted-submit-proof config --format json > "$rendered"
 
 python3 - "$rendered" <<'PY'
 import json
