@@ -4,6 +4,12 @@ import hashlib
 import json
 
 import pytest
+from conftest import (
+    PRODUCTION_AUTHORITY_ENV,
+    build_authority_envelope,
+    seed_production_authority,
+    sign_authority_envelope,
+)
 from test_application_plan_handoff_v2 import _consumer, _envelope, _signed
 
 from munshi_apply_native.complete_application_loop import CompleteApplicationLoopService
@@ -79,6 +85,15 @@ class FixtureBrowser:
             "action_executed": True,
             "verification_status": "VERIFIED",
             "submission_url": plan["job"]["apply_url"],
+            "provider_application_id": "fixture-001",
+            "provider_observation": {
+                "lookup_confirmed": True,
+                "provider": "GREENHOUSE",
+                "provider_application_id": "fixture-001",
+                "target_url": plan["job"]["apply_url"],
+                "external_observation_id": "fixture-provider-lookup-001",
+                "observed_status": "RECEIVED",
+            },
             "success_evidence": (
                 {"url_transition": "somewhere"}
                 if self.ambiguous
@@ -113,8 +128,10 @@ def loop(tmp_path, monkeypatch):
         "MUNSHI_APPLY_BACKGROUND_PREPARE_ENABLED",
         "MUNSHI_FINAL_REVIEW_ENABLED",
         "MUNSHI_FINAL_SUBMIT_ENABLED",
+        PRODUCTION_AUTHORITY_ENV,
     ):
         monkeypatch.setenv(flag, "true")
+    monkeypatch.setenv("MUNSHI_PRODUCTION_RECEIPT_HMAC_SECRET", "r" * 32)
     consumer, db = _consumer(tmp_path)
     body, headers = _signed(_envelope())
     assert consumer.accept(body, headers, now=1000).accepted
@@ -137,6 +154,53 @@ def ready(loop):
     return service, db, browser, session, review
 
 
+def _seed_authority(loop, review, session, *, accept=True):
+    """Seed a CLAIMED production authority for the given review+session.
+
+    Reads the durable plan/session/checkpoint fields so the envelope binds
+    exactly to Apply's current state.
+    """
+    service, db, browser = loop
+    plan_record = service._plan("application-plan-1")  # noqa: SLF001 - test fixture
+    form_digest = (
+        browser.last_form["form_digest"]
+        if browser.last_form
+        else "f" * 64
+    )
+    envelope = build_authority_envelope(
+        authorization_id="auth-test-1",
+        application_id=session.application_id,
+        plan_id=session.plan_id,
+        session_id=session.session_id,
+        review_id=review["review_id"],
+        approval_id="review-approval-test-1",
+        plan_digest=plan_record["plan_digest"],
+        review_digest=review["review_digest"],
+        approval_digest=hashlib.sha256(b"approval").hexdigest(),
+        prepared_package_digest=hashlib.sha256(b"prepared").hexdigest(),
+        browser_form_digest=form_digest,
+        resume_sha256=plan_record["plan"]["resume"]["artifact_sha256"],
+        cover_letter_sha256=None,
+        target_url=plan_record["plan"]["job"]["apply_url"],
+        checkpoint_id="checkpoint-1",
+    )
+    with db.connect() as connection:
+        session_row = connection.execute(
+            "SELECT checkpoint_id, browser_form_digest, current_url "
+            "FROM complete_application_sessions WHERE session_id=?",
+            (session.session_id,),
+        ).fetchone()
+    envelope["checkpoint_id"] = str(session_row["checkpoint_id"])
+    envelope["browser_form_digest"] = str(session_row["browser_form_digest"])
+    envelope["target_url"] = str(session_row["current_url"])
+    envelope = sign_authority_envelope(envelope)
+    if not accept:
+        return envelope
+    return seed_production_authority(
+        database=db, service=service, envelope=envelope, review_id=review["review_id"]
+    )
+
+
 def test_one_customer_approval_freezes_and_submits_once(loop):
     service, _, browser = loop
     session = service.start_session(plan_id="application-plan-1")
@@ -147,6 +211,10 @@ def test_one_customer_approval_freezes_and_submits_once(loop):
     prepared = service.prepare_session(session_id=session.session_id, adapter=browser)
     assert prepared.state == "READY_FOR_REVIEW"
     review = service.build_review(session_id=session.session_id)
+    # approve_review transitions the session to READY_TO_SUBMIT before we
+    # seed the canonical authority. The seed requires READY_TO_SUBMIT.
+    service.approve_review(review_id=review["review_id"])
+    _seed_authority(loop, review, session)
 
     first = service.approve_and_submit(
         review_id=review["review_id"],
@@ -165,6 +233,7 @@ def test_one_customer_approval_freezes_and_submits_once(loop):
 
 def test_checkpoint_resolution_review_and_submit_once(loop):
     service, db, browser, session, review = ready(loop)
+    _seed_authority(loop, review, session)
     first = service.submit(
         review_id=review["review_id"], idempotency_key="submit-1", adapter=browser
     )
@@ -180,7 +249,8 @@ def test_checkpoint_resolution_review_and_submit_once(loop):
 
 
 def test_browser_change_after_approval_prevents_submit(loop):
-    service, _, browser, _, review = ready(loop)
+    service, _, browser, session, review = ready(loop)
+    _seed_authority(loop, review, session)
     browser.changed = True
     with pytest.raises((ValueError, RuntimeError), match="(?i)form|review|changed"):
         service.submit(review_id=review["review_id"], idempotency_key="submit-1", adapter=browser)
@@ -188,7 +258,8 @@ def test_browser_change_after_approval_prevents_submit(loop):
 
 
 def test_security_checkpoint_after_approval_prevents_submit(loop):
-    service, _, browser, _, review = ready(loop)
+    service, _, browser, session, review = ready(loop)
+    _seed_authority(loop, review, session)
     browser.blocker = "MFA"
     with pytest.raises((ValueError, RuntimeError), match="(?i)security|blocked"):
         service.submit(review_id=review["review_id"], idempotency_key="submit-1", adapter=browser)
@@ -196,7 +267,8 @@ def test_security_checkpoint_after_approval_prevents_submit(loop):
 
 
 def test_url_transition_alone_is_not_verification(loop):
-    service, _, browser, _, review = ready(loop)
+    service, _, browser, session, review = ready(loop)
+    _seed_authority(loop, review, session)
     browser.ambiguous = True
     receipt = service.submit(
         review_id=review["review_id"], idempotency_key="submit-1", adapter=browser
@@ -205,7 +277,8 @@ def test_url_transition_alone_is_not_verification(loop):
 
 
 def test_generic_confirmation_alone_is_not_verification(loop):
-    service, _, browser, _, review = ready(loop)
+    service, _, browser, session, review = ready(loop)
+    _seed_authority(loop, review, session)
     browser.generic_confirmation = True
     receipt = service.submit(
         review_id=review["review_id"], idempotency_key="submit-1", adapter=browser
@@ -214,7 +287,8 @@ def test_generic_confirmation_alone_is_not_verification(loop):
 
 
 def test_lost_response_is_durable_ambiguous_outcome(loop):
-    service, _, browser, _, review = ready(loop)
+    service, _, browser, session, review = ready(loop)
+    _seed_authority(loop, review, session)
     browser.crash = True
     receipt = service.submit(
         review_id=review["review_id"], idempotency_key="submit-1", adapter=browser
@@ -225,7 +299,8 @@ def test_lost_response_is_durable_ambiguous_outcome(loop):
 
 
 def test_receipt_binds_resolved_answer_and_final_event(loop):
-    service, db, browser, _, review = ready(loop)
+    service, db, browser, session, review = ready(loop)
+    _seed_authority(loop, review, session)
     receipt = service.submit(
         review_id=review["review_id"], idempotency_key="submit-1", adapter=browser
     )
@@ -238,8 +313,188 @@ def test_receipt_binds_resolved_answer_and_final_event(loop):
 
 
 def test_default_off_submit_never_calls_adapter(loop, monkeypatch):
-    service, _, browser, _, review = ready(loop)
+    service, _, browser, session, review = ready(loop)
+    _seed_authority(loop, review, session)
     monkeypatch.delenv("MUNSHI_FINAL_SUBMIT_ENABLED")
     with pytest.raises(RuntimeError, match="disabled"):
         service.submit(review_id=review["review_id"], idempotency_key="submit-1", adapter=browser)
     assert browser.calls == 0
+
+
+def test_production_authority_enabled_without_a_claimed_authority_blocks_submit(loop):
+    """§6: even with BOTH gates on, no claimed authority means no boundary crossing.
+
+    The inbox is keyless and constructed on demand, so a missing wiring cannot be
+    the security property. What must hold is that the irreversible adapter call is
+    unreachable unless a canonical authority has actually been claimed for the
+    session.
+    """
+    service, _, browser, session, review = ready(loop)
+    from munshi_apply_native.submit_authority_inbox_v1 import production_authority_enabled
+
+    assert production_authority_enabled() is True
+    with pytest.raises(RuntimeError, match="Canonical submit authority"):
+        service.submit(
+            review_id=review["review_id"], idempotency_key="submit-1", adapter=browser
+        )
+    assert browser.calls == 0
+
+
+def test_production_authority_default_off(monkeypatch):
+    """The §6 canonical-authority gate must remain default-off."""
+    monkeypatch.delenv("MUNSHI_APPLY_PRODUCTION_SUBMIT_AUTHORITY_ENABLED", raising=False)
+    from munshi_apply_native.submit_authority_inbox_v1 import production_authority_enabled
+    assert production_authority_enabled() is False
+
+
+def test_production_authority_default_off_blocks_submit(loop, monkeypatch):
+    """§6: with the canonical gate off, the irreversible boundary is unreachable."""
+    service, _, browser, session, review = ready(loop)
+    monkeypatch.delenv(PRODUCTION_AUTHORITY_ENV, raising=False)
+    with pytest.raises(RuntimeError, match="Canonical submit authority is disabled"):
+        service.submit(
+            review_id=review["review_id"], idempotency_key="submit-1", adapter=browser
+        )
+    assert browser.calls == 0
+
+
+def test_submit_rebuilds_keyless_inbox_on_fresh_instance(loop):
+    """Claimed authority must be honourable without a previously bound inbox.
+
+    _loop_service yields a fresh service per request, so the instance that
+    receives a delivery is never the instance that submits. The inbox is keyless
+    and stateless, so constructing it on demand grants nothing extra.
+    """
+    service, _, browser, session, review = ready(loop)
+    _seed_authority(loop, review, session)
+    service._authority_inbox = None  # noqa: SLF001 - simulate a fresh instance
+    receipt = service.submit(
+        review_id=review["review_id"], idempotency_key="submit-1", adapter=browser
+    )
+    assert browser.calls == 1
+    assert "verification_status" in receipt
+
+
+class FixtureAuthorityClient:
+    def __init__(self, envelope, *, fail_first_claim=False):
+        self.envelope = dict(envelope)
+        self.fail_first_claim = fail_first_claim
+        self.read_calls = 0
+        self.claimants = []
+
+    def read(self, binding):
+        self.read_calls += 1
+        for key in (
+            "tenant_id", "user_id", "application_id",
+            "plan_id", "session_id", "plan_digest",
+        ):
+            assert str(binding[key]) == str(self.envelope[key])
+        return dict(self.envelope)
+
+    def claim(self, envelope, *, claimant_id):
+        from munshi_apply_native.submit_authority_inbox_v1 import expected_claim_digest
+
+        self.claimants.append(claimant_id)
+        if self.fail_first_claim and len(self.claimants) == 1:
+            raise RuntimeError("simulated lost Hunter CLAIM response")
+        return {
+            "authorization_id": envelope["authorization_id"],
+            "authority_digest": envelope["authority_digest"],
+            "claim_digest": expected_claim_digest(
+                authorization_id=envelope["authorization_id"],
+                authority_digest=envelope["authority_digest"],
+                claimant_id=claimant_id,
+                generation=int(envelope["generation"]),
+            ),
+            "generation": int(envelope["generation"]),
+            "status": "CLAIMED",
+            "submission_authority": True,
+        }
+
+
+class FixtureReceiptClient:
+    def __init__(self):
+        self.receipt_ids = []
+
+    def ingest(self, receipt):
+        self.receipt_ids.append(receipt["receipt_id"])
+        return {
+            "receipt_id": receipt["receipt_id"],
+            "status": "INGESTED",
+            "verification_status": "VERIFIED",
+            "replayed": len(self.receipt_ids) > 1,
+        }
+
+
+def test_coordinated_single_approval_runtime_recovers_delivery_and_is_exactly_once(loop):
+    service, db, browser, session, review = ready(loop)
+    envelope = _seed_authority(loop, review, session, accept=False)
+    authority_client = FixtureAuthorityClient(envelope)
+    receipt_client = FixtureReceiptClient()
+    service._submit_authority_client = authority_client
+    service._production_receipt_client = receipt_client
+
+    first = service.approve_and_submit(
+        review_id=review["review_id"],
+        idempotency_key="coordinated-e2e",
+        adapter=browser,
+    )
+    second = service.approve_and_submit(
+        review_id=review["review_id"],
+        idempotency_key="coordinated-e2e",
+        adapter=browser,
+    )
+
+    assert first["verification_status"] == "VERIFIED"
+    assert second["receipt_id"] == first["receipt_id"]
+    assert authority_client.read_calls == 1
+    assert len(authority_client.claimants) == 1
+    assert browser.calls == 1
+    assert len(set(receipt_client.receipt_ids)) == 1
+    with db.connect() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM final_application_reviews WHERE approved_at IS NOT NULL"
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT COUNT(*) FROM final_submit_commands"
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT COUNT(*) FROM production_receipt_outbox WHERE state='DELIVERED'"
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT COUNT(*) FROM complete_application_sessions WHERE state='PAUSED_FINAL'"
+        ).fetchone()[0] == 0
+
+
+def test_restart_after_lost_claim_response_reuses_durable_claimant(loop):
+    service, db, browser, session, review = ready(loop)
+    envelope = _seed_authority(loop, review, session, accept=False)
+    authority_client = FixtureAuthorityClient(envelope, fail_first_claim=True)
+    receipt_client = FixtureReceiptClient()
+    service._submit_authority_client = authority_client
+    service._production_receipt_client = receipt_client
+
+    with pytest.raises(RuntimeError, match="lost Hunter CLAIM"):
+        service.submit(
+            review_id=review["review_id"],
+            idempotency_key="lost-claim-response",
+            adapter=browser,
+        )
+    assert browser.calls == 0
+
+    restarted = CompleteApplicationLoopService(
+        db,
+        tenant_id="tenant-a",
+        user_id="member-a",
+        submit_authority_client=authority_client,
+        production_receipt_client=receipt_client,
+    )
+    receipt = restarted.submit(
+        review_id=review["review_id"],
+        idempotency_key="lost-claim-response",
+        adapter=browser,
+    )
+    assert receipt["verification_status"] == "VERIFIED"
+    assert len(authority_client.claimants) == 2
+    assert authority_client.claimants[0] == authority_client.claimants[1]
+    assert browser.calls == 1

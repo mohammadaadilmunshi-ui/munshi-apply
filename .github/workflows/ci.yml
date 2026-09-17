@@ -52,3 +52,13 @@ jobs:
           node-version: 24
       - run: node scripts/secret-scan.mjs
       - run: ./scripts/repository-safety.sh
+      - name: Verify Apply staging deployment transport contract
+        run: python3 scripts/verify-apply-staging-transport.py
+      - name: Validate Apply deployment shell syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          for script in deploy/netcup/*.sh; do
+            bash -n "$script"
+          done
+          echo "APPLY_DEPLOYMENT_SHELL_SYNTAX=PASS"

@@ -26,6 +26,7 @@ dev = [
 [project.scripts]
 munshi-apply-native = "munshi_apply_native.native_messaging:main"
 munshi-apply-hosted-trust-worker = "munshi_apply_native.hosted_trust_worker:main"
+munshi-apply-hosted-submit-worker = "munshi_apply_native.hosted_submit_worker:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/munshi_apply_native"]
@@ -43,7 +44,14 @@ select = ["E", "F", "I", "UP", "B", "S"]
 ignore = ["S101", "UP037"]
 
 [tool.ruff.lint.per-file-ignores]
+"src/munshi_apply_native/account_credential_resolver.py" = ["E501", "I001"]
+"src/munshi_apply_native/account_native_messages.py" = ["E501", "I001"]
+"src/munshi_apply_native/account_teach_service.py" = ["E501", "I001", "S608"]
+"src/munshi_apply_native/ats_account_lifecycle.py" = ["E501", "I001"]
 "tests/browser/test_real_hunter_bridge_cover_prepare_chrome.py" = ["E501", "F401", "I001", "S608"]
+"tests/test_account_teach_service.py" = ["E501", "I001"]
+"tests/test_account_umbrella_e2e_v1.py" = ["E501", "I001"]
+"tests/test_ats_account_lifecycle.py" = ["E501", "I001"]
 "tests/test_database.py" = ["I001"]
 "tests/test_synthetic_submission_verification_v1.py" = ["I001"]
 "tests/test_synthetic_submit_execution_v1.py" = ["I001"]

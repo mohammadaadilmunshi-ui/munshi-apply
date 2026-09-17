@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import secrets
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
@@ -300,3 +302,98 @@ def cancel_complete_loop_preparation_job(
         )
     except (LookupError, PermissionError, RuntimeError, ValueError) as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
+
+# §6 canonical-authority handoff: production submit authority ingest.
+#
+# This route is the only seam where Hunter-issued canonical authority enters
+# Apply. It is gated by:
+#   1. The same `_loop_service` dependency used by every other loop route
+#      (command secret + tenant/user headers), AND
+#   2. The default-off ``MUNSHI_APPLY_PRODUCTION_SUBMIT_AUTHORITY_ENABLED``
+#      env var — without it, the route refuses with 503/409.
+#
+# The inbox (D1) handles parsing, signature verification, and durable
+# binding. The route itself only forwards the envelope and reports the
+# acknowledged state.
+
+
+def _production_authority_inbox(
+    service: CompleteApplicationLoopService,
+) -> Any:
+    """Bind the production submit-authority inbox to the loop service.
+
+    The inbox shares the loop service's database connection scope (and
+    database file). Creating one is cheap and side-effect-free, and it holds
+    no key material by design.
+    """
+    from .submit_authority_inbox_v1 import SubmitAuthorityInbox
+
+    inbox = SubmitAuthorityInbox(database)
+    service.bind_submit_authority_inbox(inbox)
+    return inbox
+
+
+@app.post("/v1/complete-loop/sessions/{session_id}/submit-authority")
+async def accept_production_submit_authority(
+    session_id: str,
+    request: Request,
+    service: CompleteApplicationLoopService = Depends(_loop_service),  # noqa: B008
+) -> dict[str, Any]:
+    """Persist a Hunter-issued canonical submit authority for this session.
+
+    Default-off. The path ``session_id`` must equal the envelope
+    ``session_id``; the inbox verifies the signature, recomputes
+    ``authority_digest``, and binds the envelope to durable Apply state
+    (plan, session, checkpoint). No browser action is taken.
+    """
+    if not _production_authority_enabled():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Production submit authority is disabled",
+        )
+    inbox = _production_authority_inbox(service)
+
+    body = await request.body()
+    try:
+        envelope = json.loads(body)
+    except json.JSONDecodeError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Malformed submit authority body: {error}",
+        ) from error
+    if not isinstance(envelope, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Submit authority body must be a JSON object",
+        )
+    if str(envelope.get("session_id") or "") != str(session_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Submit authority session_id does not match URL session",
+        )
+
+    now = datetime.now(UTC).isoformat()
+    result = inbox.accept(envelope, now=now)
+    if not result.accepted:
+        if result.error in {
+            "production submit authority disabled",
+            "submit authority replay conflict",
+        }:
+            status_code = status.HTTP_409_CONFLICT
+        else:
+            status_code = status.HTTP_400_BAD_REQUEST
+        raise HTTPException(status_code=status_code, detail=result.error or "rejected")
+    return {
+        "authorization_id": result.authorization_id,
+        "session_id": str(session_id),
+        "state": result.state,
+        "accepted": True,
+        "replayed": result.replayed,
+    }
+
+
+def _production_authority_enabled() -> bool:
+    from .submit_authority_inbox_v1 import production_authority_enabled as _e
+
+    return _e()

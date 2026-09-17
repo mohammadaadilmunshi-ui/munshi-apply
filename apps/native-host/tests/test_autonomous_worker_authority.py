@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 BRIDGE = Path(__file__).resolve().parents[3] / "integrations" / "applypilot" / "bridge"
 if str(BRIDGE) not in sys.path:
     sys.path.insert(0, str(BRIDGE))
@@ -13,7 +15,7 @@ if str(BRIDGE) not in sys.path:
 worker = importlib.import_module("autonomous_worker")
 
 
-def test_post_claim_worker_failure_is_not_reported_as_safe_retry(
+def test_legacy_autonomous_worker_cannot_bypass_canonical_executor(
     tmp_path: Path, monkeypatch
 ) -> None:
     request = {
@@ -26,7 +28,6 @@ def test_post_claim_worker_failure_is_not_reported_as_safe_retry(
     }
     request_path = tmp_path / "request.json"
     request_path.write_text(json.dumps(request), encoding="utf-8")
-
     monkeypatch.setattr(worker, "_validate_request", lambda _request: None)
     monkeypatch.setattr(
         worker,
@@ -44,48 +45,19 @@ def test_post_claim_worker_failure_is_not_reported_as_safe_retry(
     monkeypatch.setattr(worker, "_kill_process_tree", lambda _process: None)
     monkeypatch.setattr(
         worker,
-        "_validate_authorization_binding",
-        lambda _request: {
-            "authorization_id": "auth-1",
-            "authority_digest": "b" * 64,
-            "target_url": "https://jobs.example.test/submit",
-        },
+        "_run_agent",
+        lambda **_kwargs: (
+            {"status": "COMPLETED", "claimed_submission": False, "reason": "prepared"},
+            {},
+        ),
     )
+    claimed = []
     monkeypatch.setattr(
         worker,
         "claim_submit_authorization",
-        lambda _auth, claimant_id: {
-            "authorization_id": "auth-1",
-            "authority_digest": "b" * 64,
-            "claim_digest": "c" * 64,
-            "generation": 1,
-            "status": "CLAIMED",
-            "submission_authority": True,
-        },
+        lambda *_args, **_kwargs: claimed.append(True),
     )
 
-    calls = 0
-
-    def run_agent(**_kwargs):
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            return (
-                {
-                    "status": "COMPLETED",
-                    "claimed_submission": False,
-                    "reason": "prepared",
-                },
-                {},
-            )
-        raise worker.WorkerError("agent connection lost")
-
-    monkeypatch.setattr(worker, "_run_agent", run_agent)
-
-    result = worker.execute(request_path, dry_run=False, port=9222)
-
-    assert result["status"] == "BLOCKED"
-    assert result["claimed_submission"] is False
-    assert result["submission_outcome"] == "UNKNOWN_AFTER_AUTHORITY_CLAIM"
-    assert result["submit_authorization_claim"]["status"] == "CLAIMED"
-    assert "reconciliation" in result["events"][-1]["detail"].lower()
+    with pytest.raises(worker.WorkerError, match="canonical Complete Application Loop"):
+        worker.execute(request_path, dry_run=False, port=9222)
+    assert claimed == []

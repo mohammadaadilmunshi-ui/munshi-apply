@@ -29,9 +29,15 @@ def test_runtime_migration_health_and_backup_round_trip(tmp_path: Path) -> None:
     database = runtime_root / "database/munshi-apply.sqlite"
     ai_settings = runtime_root / "settings/ai.json"
 
-    first = run_runtime("migrate", "--database", str(database), "--migrations", str(MIGRATIONS))
-    second = run_runtime("migrate", "--database", str(database), "--migrations", str(MIGRATIONS))
-    health = run_runtime("health", "--database", str(database), "--migrations", str(MIGRATIONS))
+    first = run_runtime(
+        "migrate", "--database", str(database), "--migrations", str(MIGRATIONS)
+    )
+    second = run_runtime(
+        "migrate", "--database", str(database), "--migrations", str(MIGRATIONS)
+    )
+    health = run_runtime(
+        "health", "--database", str(database), "--migrations", str(MIGRATIONS)
+    )
     ai_settings.parent.mkdir(parents=True)
     ai_settings.write_text(
         '{"provider":"openai","model":"gpt-test","enabled":false}\n',
@@ -66,6 +72,11 @@ def test_runtime_migration_health_and_backup_round_trip(tmp_path: Path) -> None:
         "022_teach_munshi_async_learning.sql",
         "023_teach_munshi_telegram_outbox.sql",
         "024_confirmation_evidence.sql",
+        "025_production_submit_authority_inbox.sql",
+        "026_production_receipt_outbox.sql",
+        "027_production_submit_authority_rollover.sql",
+        "028_ats_account_mail_verification.sql",
+        "029_ats_account_teach_queue.sql",
     ]
     assert json.loads(second.stdout)["applied"] == []
     assert json.loads(health.stdout)["status"] == "healthy"

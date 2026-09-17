@@ -59,7 +59,7 @@ describe("account orchestration", () => {
     expect(accountPreflightItem(plan).state).toBe("READY");
   });
 
-  it("detects create-account flow before incidental sign-in text", () => {
+  it("keeps new account creation fail-closed without verified capabilities", () => {
     const current = page({
       url: "https://example.com/candidate/register",
       applicationState: "AUTH",
@@ -73,6 +73,31 @@ describe("account orchestration", () => {
     expect(plan.actions).toContain("PREPARE_IDENTITY");
     expect(plan.actions).toContain("SECURE_CREDENTIAL_HANDOFF");
     expect(accountPreflightItem(plan).state).toBe("REVIEW");
+  });
+
+  it("automates new account creation only with mail identity and secure resolver", () => {
+    const current = page({
+      url: "https://example.com/candidate/register",
+      applicationState: "ACCOUNT_CREATE",
+      pageContext: "Create candidate account",
+    });
+    const plan = buildAccountOrchestrationPlan({
+      page: current,
+      capabilities: {
+        automatedAccountCreation: true,
+        secureCredentialResolver: true,
+        candidateMailAlias: true,
+      },
+    });
+    expect(plan.canAutoAct).toBe(true);
+    expect(plan.state).toBe("READY_TO_CONTINUE");
+    expect(plan.actions).toEqual([
+      "PREPARE_IDENTITY",
+      "FILL_PASSWORD_FROM_SECURE_CREDENTIAL_RESOLVER",
+      "RECORD_ACCOUNT",
+      "CONTINUE_EXACT_APPLICATION",
+    ]);
+    expect(accountPreflightItem(plan).state).toBe("READY");
   });
 
   it("uses an exact portal-scope account for login without exposing credentials", () => {
@@ -101,7 +126,30 @@ describe("account orchestration", () => {
     expect(accountPreflightItem(plan).state).toBe("REVIEW");
   });
 
-  it("blocks duplicate account creation when a matching account exists", () => {
+  it("reuses an existing account through the secure resolver instead of creating a duplicate", () => {
+    const current = page({
+      url: "https://example.com/candidate/register",
+      applicationState: "ACCOUNT_CREATE",
+      pageContext: "Create account",
+    });
+    const plan = buildAccountOrchestrationPlan({
+      page: current,
+      knownAccounts: [account()],
+      preferredEmail: "aadil@example.com",
+      capabilities: { secureCredentialResolver: true },
+    });
+    expect(plan.state).toBe("READY_TO_CONTINUE");
+    expect(plan.actions).toEqual([
+      "USE_EXISTING_ACCOUNT",
+      "FILL_PASSWORD_FROM_SECURE_CREDENTIAL_RESOLVER",
+      "AUTHENTICATE_ACCOUNT",
+      "CONTINUE_EXACT_APPLICATION",
+    ]);
+    expect(plan.actions).not.toContain("RECORD_ACCOUNT");
+    expect(accountPreflightItem(plan).state).toBe("READY");
+  });
+
+  it("blocks duplicate account creation when a matching account exists without a resolver", () => {
     const current = page({
       url: "https://example.com/candidate/register",
       applicationState: "ACCOUNT_CREATE",
@@ -118,28 +166,86 @@ describe("account orchestration", () => {
     expect(accountPreflightItem(plan).state).toBe("BLOCKED");
   });
 
-  it("treats recovery and verification as owner security checkpoints", () => {
-    const recovery = page({
-      url: "https://example.com/account/forgot-password",
-      applicationState: "AUTH",
-      pageContext: "Forgot your password? Recover your account",
-    });
-    expect(detectAccountFlow(recovery)).toBe("AUTH_RECOVERY");
-    const recoveryPlan = buildAccountOrchestrationPlan({ page: recovery });
-    expect(recoveryPlan.actions).toContain("RECOVER_ACCOUNT");
-    expect(accountPreflightItem(recoveryPlan).state).toBe("BLOCKED");
-
+  it("does not infer ordinary email verification from an ambiguous OTP screen", () => {
     const verification = page({
       applicationState: "VERIFY_ACCOUNT",
       securityCheckpoint: "OTP",
       pageContext: "Enter the verification code we sent",
     });
     expect(detectAccountFlow(verification)).toBe("AUTH_VERIFY");
-    const verificationPlan = buildAccountOrchestrationPlan({
-      page: verification,
+    const plan = buildAccountOrchestrationPlan({ page: verification });
+    expect(plan.actions).toEqual(["VERIFY_ACCOUNT"]);
+    expect(plan.canAutoAct).toBe(false);
+    expect(accountPreflightItem(plan).state).toBe("BLOCKED");
+  });
+
+  it("automates an explicitly correlated candidate-controlled email code", () => {
+    const verification = page({
+      applicationState: "VERIFY_ACCOUNT",
+      securityCheckpoint: "OTP",
+      pageContext: "Enter the verification code we sent to your email",
     });
-    expect(verificationPlan.actions).toEqual(["VERIFY_ACCOUNT"]);
-    expect(accountPreflightItem(verificationPlan).state).toBe("BLOCKED");
+    const plan = buildAccountOrchestrationPlan({
+      page: verification,
+      capabilities: {
+        ordinaryEmailVerification: true,
+        verificationKind: "EMAIL_CODE",
+      },
+    });
+    expect(plan.canAutoAct).toBe(true);
+    expect(plan.actions).toEqual([
+      "WAIT_FOR_EMAIL_VERIFICATION",
+      "CONSUME_ONE_TIME_VERIFICATION_CODE",
+      "VERIFY_ACCOUNT",
+      "CONTINUE_EXACT_APPLICATION",
+    ]);
+    expect(accountPreflightItem(plan).state).toBe("READY");
+  });
+
+  it("automates candidate-controlled password reset links without persisting reset material", () => {
+    const recovery = page({
+      url: "https://example.com/account/forgot-password",
+      applicationState: "AUTH",
+      pageContext: "Forgot your password? Recover your account",
+    });
+    const plan = buildAccountOrchestrationPlan({
+      page: recovery,
+      knownAccounts: [account()],
+      capabilities: {
+        ordinaryEmailVerification: true,
+        secureCredentialResolver: true,
+        verificationKind: "PASSWORD_RESET_LINK",
+      },
+    });
+    expect(plan.canAutoAct).toBe(true);
+    expect(plan.actions).toEqual([
+      "RECOVER_ACCOUNT",
+      "WAIT_FOR_EMAIL_VERIFICATION",
+      "OPEN_VERIFICATION_LINK",
+      "FILL_PASSWORD_FROM_SECURE_CREDENTIAL_RESOLVER",
+      "AUTHENTICATE_ACCOUNT",
+      "CONTINUE_EXACT_APPLICATION",
+    ]);
+    expect(accountPreflightItem(plan).state).toBe("READY");
+  });
+
+  it("routes protected security challenges to ISSUE with continuation preserved", () => {
+    const verification = page({
+      applicationState: "VERIFY_ACCOUNT",
+      securityCheckpoint: "IDENTITY_VERIFICATION",
+      pageContext: "Security check",
+    });
+    const plan = buildAccountOrchestrationPlan({
+      page: verification,
+      capabilities: {
+        ordinaryEmailVerification: true,
+        verificationKind: "SECURITY_INTERVENTION",
+      },
+    });
+    expect(plan.state).toBe("ISSUE");
+    expect(plan.canAutoAct).toBe(false);
+    expect(plan.actions).toEqual([]);
+    expect(accountPreflightItem(plan).state).toBe("BLOCKED");
   });
 
   it("hard-blocks an unrecognized authentication surface", () => {
