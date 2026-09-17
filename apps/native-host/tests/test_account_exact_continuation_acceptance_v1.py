@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+
 from conftest import PRODUCTION_AUTHORITY_ENV
 from test_application_plan_handoff_v2 import _consumer, _envelope, _signed
 from test_complete_application_loop import FixtureBrowser, _seed_authority
@@ -16,12 +18,11 @@ from munshi_apply_native.mail_artifact_broker import ClaimedMailArtifact
 
 NOW = "2026-09-16T17:00:00+00:00"
 LATER = "2026-09-16T17:01:00+00:00"
+CLAIM_TOKEN = hashlib.sha256(b"acceptance-claim-token").hexdigest()
 
 
 class AcceptanceMailBroker:
     def __init__(self) -> None:
-        import hashlib
-
         self.artifact = "482915"
         self.digest = hashlib.sha256(self.artifact.encode("utf-8")).hexdigest()
         self.claims = 0
@@ -36,7 +37,7 @@ class AcceptanceMailBroker:
             artifact_kind="EMAIL_VERIFICATION_CODE",
             artifact_digest=self.digest,
             artifact=self.artifact,
-            claim_token="opaque-acceptance-claim-token",
+            claim_token=CLAIM_TOKEN,
             lease_expires_at="2026-09-16T17:10:00+00:00",
         )
 
@@ -49,7 +50,7 @@ class AcceptanceMailBroker:
     ) -> None:
         assert request_id == "hunter-request-exact-application"
         assert application_key == "application-key-exact-application"
-        assert claim_token == "opaque-acceptance-claim-token"
+        assert claim_token == CLAIM_TOKEN
         self.consumes += 1
 
 

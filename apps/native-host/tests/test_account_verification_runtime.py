@@ -4,16 +4,16 @@ import hashlib
 
 import pytest
 
-from test_account_umbrella_e2e_v1 import _lifecycle
-
 from munshi_apply_native.account_verification_runtime import (
     AccountVerificationRuntime,
     AccountVerificationRuntimeError,
 )
 from munshi_apply_native.mail_artifact_broker import ClaimedMailArtifact
+from test_account_umbrella_e2e_v1 import _lifecycle
 
 NOW = "2026-09-16T22:00:00+00:00"
 LATER = "2026-09-16T22:01:00+00:00"
+CLAIM_TOKEN = hashlib.sha256(b"runtime-claim-token").hexdigest()
 
 
 class FakeBroker:
@@ -34,7 +34,7 @@ class FakeBroker:
             artifact_kind=self.artifact_kind,
             artifact_digest=self.digest,
             artifact=self.artifact,
-            claim_token="opaque-claim-token",
+            claim_token=CLAIM_TOKEN,
             lease_expires_at="2026-09-16T22:10:00+00:00",
         )
 
@@ -47,7 +47,7 @@ class FakeBroker:
     ) -> None:
         assert request_id == "hunter-request-1"
         assert application_key == "app-key-1"
-        assert claim_token == "opaque-claim-token"
+        assert claim_token == CLAIM_TOKEN
         self.consumes += 1
         if self.fail_consume:
             raise RuntimeError("synthetic consume response lost")

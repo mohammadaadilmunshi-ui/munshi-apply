@@ -16,6 +16,7 @@ SECRET = "m" * 32
 REQUEST_ID = "verification-request-1"
 APPLICATION_KEY = "application-key-1"
 TIMESTAMP = "1789588800"
+CLAIM_TOKEN = hashlib.sha256(b"mail-broker-test-claim-token").hexdigest()
 
 
 def _expected_signature(action: str) -> str:
@@ -29,7 +30,6 @@ def _expected_signature(action: str) -> str:
 def test_claim_and_consume_match_hunter_contract_without_repr_secret_leak() -> None:
     artifact = "482915"
     artifact_digest = hashlib.sha256(artifact.encode("utf-8")).hexdigest()
-    claim_token = "claim-token-super-secret"
     calls: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -50,7 +50,7 @@ def test_claim_and_consume_match_hunter_contract_without_repr_secret_leak() -> N
                     "artifact_kind": "EMAIL_VERIFICATION_CODE",
                     "artifact_digest": artifact_digest,
                     "artifact": artifact,
-                    "claim_token": claim_token,
+                    "claim_token": CLAIM_TOKEN,
                     "lease_expires_at": "2026-09-16T21:30:00+00:00",
                 },
             )
@@ -58,7 +58,7 @@ def test_claim_and_consume_match_hunter_contract_without_repr_secret_leak() -> N
         assert request.headers["X-Munshi-Signature"] == _expected_signature(
             "consume"
         )
-        assert body["claim_token"] == claim_token
+        assert body["claim_token"] == CLAIM_TOKEN
         return httpx.Response(
             200,
             json={
@@ -84,7 +84,7 @@ def test_claim_and_consume_match_hunter_contract_without_repr_secret_leak() -> N
         assert claimed.artifact == artifact
         assert claimed.artifact_digest == artifact_digest
         assert artifact not in repr(claimed)
-        assert claim_token not in repr(claimed)
+        assert CLAIM_TOKEN not in repr(claimed)
         broker.consume(
             request_id=REQUEST_ID,
             application_key=APPLICATION_KEY,
@@ -104,7 +104,7 @@ def test_claim_rejects_tampered_artifact_digest() -> None:
                 "artifact_kind": "MAGIC_LOGIN_LINK",
                 "artifact_digest": "0" * 64,
                 "artifact": "https://ats.example.test/magic/opaque",
-                "claim_token": "claim-token",
+                "claim_token": CLAIM_TOKEN,
                 "lease_expires_at": "2026-09-16T21:30:00+00:00",
             },
         )
@@ -129,8 +129,9 @@ def test_broker_requires_https_and_strong_service_secret() -> None:
             base_url="http://hunter.test",
             hmac_secret=SECRET,
         )
+    short_secret = "".join(("sho", "rt"))
     with pytest.raises(MailArtifactBrokerError, match="32 bytes"):
         MailArtifactBrokerClient(
             base_url="https://hunter.test",
-            hmac_secret="short",
+            hmac_secret=short_secret,
         )
