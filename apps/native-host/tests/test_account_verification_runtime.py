@@ -3,13 +3,13 @@ from __future__ import annotations
 import hashlib
 
 import pytest
+from test_account_umbrella_e2e_v1 import _lifecycle
 
 from munshi_apply_native.account_verification_runtime import (
     AccountVerificationRuntime,
     AccountVerificationRuntimeError,
 )
 from munshi_apply_native.mail_artifact_broker import ClaimedMailArtifact
-from test_account_umbrella_e2e_v1 import _lifecycle
 
 NOW = "2026-09-16T22:00:00+00:00"
 LATER = "2026-09-16T22:01:00+00:00"
