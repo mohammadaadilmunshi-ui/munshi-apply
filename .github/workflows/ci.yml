@@ -33,6 +33,10 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+      - name: Verify operational Python selector
+        run: |
+          source scripts/lib/common.sh
+          "${PYTHON_BIN}" -c 'import sys; assert sys.version_info >= (3, 12); print(sys.executable)'
       - run: python -m pip install -e './apps/native-host[dev]'
       - run: python -m ruff check apps/native-host
       - run: python -m pytest apps/native-host
@@ -43,12 +47,8 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - name: Reject committed local data
-        shell: bash
-        run: |
-          forbidden="$(git ls-files '*.sqlite' '*.db' '*.env' '*.pdf' 'backups/**' 'reports/generated/**' | grep -v '^backups/\.gitkeep$' || true)"
-          if [ -n "$forbidden" ]; then
-            echo "Forbidden local or personal artifacts are tracked:"
-            echo "$forbidden"
-            exit 1
-          fi
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: node scripts/secret-scan.mjs
+      - run: ./scripts/repository-safety.sh

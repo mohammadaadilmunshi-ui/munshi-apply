@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist-mobile/
 coverage/
 .DS_Store
 .env
@@ -10,6 +11,8 @@ coverage/
 *.sqlite-shm
 *.sqlite-wal
 *.db
+*.pem
+*.key
 .pytest_cache/
 __pycache__/
 *.py[cod]
@@ -17,4 +20,10 @@ __pycache__/
 reports/generated/
 backups/*
 !backups/.gitkeep
+runtime-data/
+private/
+secrets/
+real-resumes/
+application-data/
+diagnostics-private/
 apps/extension/.vite/

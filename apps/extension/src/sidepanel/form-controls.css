@@ -1,0 +1,25 @@
+:root {
+  color-scheme: light;
+}
+
+input,
+textarea,
+select {
+  color: #0f1115;
+  -webkit-text-fill-color: #0f1115;
+  caret-color: #0f1115;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #777c84;
+  -webkit-text-fill-color: #777c84;
+  opacity: 1;
+}
+
+input:disabled,
+textarea:disabled,
+select:disabled {
+  -webkit-text-fill-color: currentColor;
+  opacity: 0.65;
+}

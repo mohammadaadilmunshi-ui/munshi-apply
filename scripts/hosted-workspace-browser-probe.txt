@@ -1,0 +1,186 @@
+(async () => {
+  "use strict";
+
+  const EXPECTED_HOST = "munshi-apply-mobile.mohammadaadilmunshi.chatgpt.site";
+  const MARKERS = [
+    "paired devices",
+    "active devices",
+    "sync conflicts",
+    "answers to review",
+    "confirmed facts",
+    "encrypted resumes",
+    "Sync",
+    "Welcome, Aadil",
+  ];
+
+  if (location.hostname !== EXPECTED_HOST) {
+    throw new Error(`Open the private MUNSHI Apply workspace first. Current host: ${location.hostname}`);
+  }
+
+  const stripUrl = (value) => {
+    const url = new URL(value, location.href);
+    return `${url.origin}${url.pathname}`;
+  };
+
+  const safePath = (value) => {
+    try {
+      const url = new URL(value, location.href);
+      return url.pathname;
+    } catch {
+      return null;
+    }
+  };
+
+  const cssPath = (element) => {
+    if (!(element instanceof Element)) return null;
+    const parts = [];
+    let current = element;
+    for (let depth = 0; current && depth < 6; depth += 1) {
+      let part = current.tagName.toLowerCase();
+      const stableClasses = [...current.classList]
+        .filter((name) => /^[A-Za-z][A-Za-z0-9_-]{0,48}$/.test(name))
+        .slice(0, 3);
+      if (stableClasses.length > 0) part += `.${stableClasses.join(".")}`;
+      const parent = current.parentElement;
+      if (parent) {
+        const peers = [...parent.children].filter((child) => child.tagName === current.tagName);
+        if (peers.length > 1) part += `:nth-of-type(${peers.indexOf(current) + 1})`;
+      }
+      parts.unshift(part);
+      current = parent;
+    }
+    return parts.join(" > ");
+  };
+
+  const markerDomHits = [];
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  let node;
+  while ((node = walker.nextNode())) {
+    const value = (node.nodeValue || "").trim();
+    if (!value) continue;
+    for (const marker of MARKERS) {
+      if (!value.toLowerCase().includes(marker.toLowerCase())) continue;
+      const element = node.parentElement;
+      if (!element) continue;
+      markerDomHits.push({
+        marker,
+        tag: element.tagName.toLowerCase(),
+        role: element.getAttribute("role"),
+        ariaLabel: element.getAttribute("aria-label"),
+        classes: [...element.classList].slice(0, 6),
+        path: cssPath(element),
+      });
+    }
+  }
+
+  const resources = performance
+    .getEntriesByType("resource")
+    .map((entry) => ({
+      type: entry.initiatorType || "unknown",
+      url: stripUrl(entry.name),
+      path: safePath(entry.name),
+    }))
+    .filter((entry) => entry.url.startsWith(location.origin));
+
+  const uniqueResources = [...new Map(resources.map((entry) => [`${entry.type}|${entry.url}`, entry])).values()];
+  const apiPaths = [...new Set(uniqueResources.map((entry) => entry.path).filter((path) => path && path.startsWith("/api/")))].sort();
+
+  const scriptUrls = [...new Set(
+    [...document.scripts]
+      .map((script) => script.src)
+      .filter(Boolean)
+      .map(stripUrl)
+      .filter((url) => url.startsWith(location.origin)),
+  )];
+
+  const bundleFindings = [];
+  const sourceMaps = [];
+
+  for (const scriptUrl of scriptUrls) {
+    try {
+      const response = await fetch(scriptUrl, {
+        method: "GET",
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      const text = await response.text();
+      const lower = text.toLowerCase();
+      const markerHits = MARKERS.filter((marker) => lower.includes(marker.toLowerCase()));
+      const endpointHits = [...new Set(
+        [...text.matchAll(/["'`](\/api\/[A-Za-z0-9_./:-]+)(?:\?[^"'`]*)?["'`]/g)].map((match) => match[1]),
+      )].sort();
+      const mapMatch = text.match(/[#@]\s*sourceMappingURL=([^\s*]+)/);
+      const sourceMapRef = mapMatch ? mapMatch[1] : null;
+
+      bundleFindings.push({
+        script: new URL(scriptUrl).pathname,
+        status: response.status,
+        bytes: text.length,
+        markerHits,
+        apiPaths: endpointHits,
+        sourceMapRef,
+      });
+
+      if (sourceMapRef) {
+        try {
+          const mapUrl = new URL(sourceMapRef, scriptUrl);
+          if (mapUrl.origin !== location.origin) continue;
+          const mapResponse = await fetch(mapUrl.toString(), {
+            method: "GET",
+            credentials: "same-origin",
+            cache: "no-store",
+          });
+          if (!mapResponse.ok) {
+            sourceMaps.push({ map: mapUrl.pathname, status: mapResponse.status });
+            continue;
+          }
+          const map = await mapResponse.json();
+          const sources = Array.isArray(map.sources) ? map.sources : [];
+          sourceMaps.push({
+            map: mapUrl.pathname,
+            status: mapResponse.status,
+            sourceCount: sources.length,
+            sources: sources.slice(0, 60),
+          });
+        } catch (error) {
+          sourceMaps.push({
+            map: sourceMapRef,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    } catch (error) {
+      bundleFindings.push({
+        script: safePath(scriptUrl),
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  const report = {
+    diagnostic: "MUNSHI Apply signed-in hosted workspace browser probe",
+    safety: {
+      cookiesRead: false,
+      localStorageRead: false,
+      sessionStorageRead: false,
+      indexedDbRead: false,
+      authHeadersPrinted: false,
+      formValuesRead: false,
+    },
+    page: {
+      origin: location.origin,
+      pathname: location.pathname,
+      title: document.title,
+    },
+    markerDomHits,
+    apiPaths,
+    sameOriginResources: uniqueResources.slice(0, 120),
+    bundles: bundleFindings,
+    sourceMaps,
+  };
+
+  console.log("MUNSHI_HOSTED_WORKSPACE_PROBE_BEGIN");
+  console.log(JSON.stringify(report, null, 2));
+  console.log("MUNSHI_HOSTED_WORKSPACE_PROBE_END");
+  return report;
+})();

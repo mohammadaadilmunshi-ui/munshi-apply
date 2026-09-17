@@ -9,6 +9,10 @@
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts"
+    },
+    "./profile-vault": {
+      "types": "./src/profile-vault.ts",
+      "import": "./src/profile-vault.ts"
     }
   },
   "scripts": {
