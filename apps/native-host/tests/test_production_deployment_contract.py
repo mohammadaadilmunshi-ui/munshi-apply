@@ -42,6 +42,8 @@ def test_production_transport_is_rollback_guarded_and_staging_is_protected() -> 
     assert "APPLY_PRODUCTION_SUBMIT_WORKER_ACTIVE=NO" in verify
     assert "APPLY_PRODUCTION_SUBMIT_WORKER_ACTIVE=YES" in verify
     assert "ROLLBACK APPLY FULL-SUBMIT ACTIVATION" in activate
+    assert 'safe.directory=$REPO' in verify
+    assert 'safe.directory=$REPO' in activate
     assert "APPLY_PRODUCTION_FINAL_SUBMIT=ENABLED" in activate
 
 
