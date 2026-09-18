@@ -84,17 +84,6 @@ rollback_tag=""
 db_backup="NONE_FIRST_DEPLOY"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 
-read_required_env() {
-  local key="$1"
-  local value="${!key:-}"
-  if [[ -z "$value" ]]; then
-    local line
-    line="$(grep -E "^${key}=" "$STAGING_ENV" | tail -n1 || true)"
-    [[ -n "$line" ]] && value="${line#*=}"
-  fi
-  [[ -n "$value" ]] || { echo "required deployment configuration missing: $key" >&2; exit 7; }
-  printf '%s' "$value"
-}
 
 
 cleanup() {
