@@ -70,9 +70,27 @@ def _signed_response(request: httpx.Request) -> httpx.Response:
         ).encode()
         headers = {}
     elif purpose == module.PURPOSE_AUTOAPPLY_CREDENTIAL:
-        body = b"dashboard-anthropic-secret"
+        nonce = b"0123456789ab"
+        key = hmac.new(
+            SECRET.encode(),
+            (
+                f"autoapply-credential:{payload['request_id']}:"
+                f"{payload['plan_digest']}"
+            ).encode(),
+            hashlib.sha256,
+        ).digest()
+        aad = (
+            f"{payload['request_id']}.{payload['plan_digest']}."
+            "autoapply_anthropic_api_key"
+        ).encode()
+        body = nonce + module.AESGCM(key).encrypt(
+            nonce,
+            b"dashboard-anthropic-secret",
+            aad,
+        )
         headers = {
             "X-Munshi-Credential-Type": "autoapply_anthropic_api_key",
+            "X-Munshi-Credential-Encryption": "aes-gcm-v1",
             "X-Munshi-Submission-Authority": "false",
         }
     else:
@@ -128,6 +146,9 @@ def test_dashboard_autoapply_config_and_secret_are_response_signed(monkeypatch):
     assert config["authMode"] == "api"
     assert config["model"] == "sonnet"
     assert client.anthropic_api_key(_plan()) == "dashboard-anthropic-secret"
+    # The credential is encrypted in transit; plaintext exists only after Apply decrypts it.
+    request = httpx.Request("POST", "https://hunter.internal")
+    _ = request
     client.close()
 
 
