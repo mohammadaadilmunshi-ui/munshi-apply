@@ -46,6 +46,53 @@ def _signed_response(request: httpx.Request) -> httpx.Response:
             separators=(",", ":"),
         ).encode()
         headers = {}
+    elif purpose == module.PURPOSE_AUTOAPPLY_CONFIG:
+        body = json.dumps(
+            {
+                "version": module.RESPONSE_VERSION,
+                "request_id": payload["request_id"],
+                "purpose": purpose,
+                "plan_id": payload["plan_id"],
+                "plan_digest": payload["plan_digest"],
+                "config": {
+                    "enabled": True,
+                    "authMode": "api",
+                    "model": "sonnet",
+                    "headless": True,
+                    "maxTurns": 40,
+                    "maxCostPerApplicationUsd": 1.0,
+                    "allowFinalSubmit": False,
+                    "challengeServiceEnabled": False,
+                },
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        headers = {}
+    elif purpose == module.PURPOSE_AUTOAPPLY_CREDENTIAL:
+        nonce = b"0123456789ab"
+        key = hmac.new(
+            SECRET.encode(),
+            (
+                f"autoapply-credential:{payload['request_id']}:"
+                f"{payload['plan_digest']}"
+            ).encode(),
+            hashlib.sha256,
+        ).digest()
+        aad = (
+            f"{payload['request_id']}.{payload['plan_digest']}."
+            "autoapply_anthropic_api_key"
+        ).encode()
+        body = nonce + module.AESGCM(key).encrypt(
+            nonce,
+            b"dashboard-anthropic-secret",
+            aad,
+        )
+        headers = {
+            "X-Munshi-Credential-Type": "autoapply_anthropic_api_key",
+            "X-Munshi-Credential-Encryption": "aes-gcm-v1",
+            "X-Munshi-Submission-Authority": "false",
+        }
     else:
         body = ARTIFACT
         headers = {
@@ -81,6 +128,35 @@ def test_current_plan_and_artifact_are_response_signed(monkeypatch):
     )
     assert client.plan_is_current(_plan()) is True
     assert client.artifact_bytes(_plan()) == ARTIFACT
+    client.close()
+
+
+def test_dashboard_autoapply_config_and_secret_are_response_signed(monkeypatch):
+    monkeypatch.setattr(module.time, "time", lambda: 1000)
+    client = HunterExecutionBridgeClient(
+        base_url="https://hunter.internal",
+        secret=SECRET,
+        tenant_id="tenant-a",
+        user_id="member-a",
+        transport=httpx.MockTransport(_signed_response),
+    )
+
+    config = client.autoapply_config(_plan())
+    assert config["enabled"] is True
+    assert config["authMode"] == "api"
+    assert config["model"] == "sonnet"
+    assert client.anthropic_api_key(_plan()) == "dashboard-anthropic-secret"
+
+    payload = client._payload(_plan(), module.PURPOSE_AUTOAPPLY_CREDENTIAL)  # noqa: SLF001
+    encrypted = _signed_response(
+        httpx.Request(
+            "POST",
+            "https://hunter.internal",
+            content=client._canonical(payload),  # noqa: SLF001
+        )
+    )
+    assert b"dashboard-anthropic-secret" not in encrypted.content
+    assert encrypted.headers["X-Munshi-Credential-Encryption"] == "aes-gcm-v1"
     client.close()
 
 

@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 import httpx
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from .internal_http_policy import internal_hunter_http_allowed
 
@@ -19,6 +20,8 @@ RESPONSE_VERSION = "munshi-application-execution-response-v1"
 PURPOSE_PLAN_CURRENT = "PLAN_CURRENT"
 PURPOSE_ARTIFACT_BYTES = "ARTIFACT_BYTES"
 PURPOSE_COVER_LETTER_BYTES = "COVER_LETTER_BYTES"
+PURPOSE_AUTOAPPLY_CONFIG = "AUTOAPPLY_CONFIG"
+PURPOSE_AUTOAPPLY_CREDENTIAL = "AUTOAPPLY_CREDENTIAL"
 
 
 class HunterExecutionBridgeClient:
@@ -170,6 +173,82 @@ class HunterExecutionBridgeClient:
             purpose=PURPOSE_COVER_LETTER_BYTES,
             endpoint="/api/application-execution/cover-letter",
         )
+
+    def autoapply_config(self, plan: dict[str, Any]) -> dict[str, Any]:
+        """Fetch non-secret AutoApply preferences bound to the exact plan."""
+        purpose = PURPOSE_AUTOAPPLY_CONFIG
+        p = self._payload(plan, purpose)
+        body = self._canonical(p)
+        response = self.client.post(
+            f"{self.base_url}/api/application-execution/autoapply-config",
+            content=body,
+            headers=self._headers(p, body),
+        )
+        raw = self._verify(response=response, payload=p, purpose=purpose)
+        try:
+            decoded = json.loads(raw)
+        except json.JSONDecodeError as error:
+            raise RuntimeError("Hunter AutoApply config response is invalid JSON") from error
+        config = decoded.get("config") if isinstance(decoded, dict) else None
+        if (
+            not isinstance(config, dict)
+            or decoded.get("version") != RESPONSE_VERSION
+            or decoded.get("request_id") != p["request_id"]
+            or decoded.get("purpose") != purpose
+            or decoded.get("plan_id") != p["plan_id"]
+            or decoded.get("plan_digest") != p["plan_digest"]
+        ):
+            raise RuntimeError("Hunter AutoApply config response binding mismatch")
+        return dict(config)
+
+    def anthropic_api_key(self, plan: dict[str, Any]) -> str:
+        """Resolve the dashboard-vault Anthropic key only inside Apply.
+
+        Hunter AES-GCM encrypts the credential response with a per-request key
+        derived from the already-shared execution-bridge HMAC secret. This keeps
+        the key confidential even when an explicitly configured private Docker
+        bridge uses HTTP instead of TLS.
+        """
+        purpose = PURPOSE_AUTOAPPLY_CREDENTIAL
+        p = self._payload(plan, purpose)
+        body = self._canonical(p)
+        response = self.client.post(
+            f"{self.base_url}/api/application-execution/autoapply-credential",
+            content=body,
+            headers=self._headers(p, body),
+        )
+        envelope = self._verify(response=response, payload=p, purpose=purpose)
+        if (
+            response.headers.get("X-Munshi-Credential-Type")
+            != "autoapply_anthropic_api_key"
+            or response.headers.get("X-Munshi-Credential-Encryption") != "aes-gcm-v1"
+            or response.headers.get("X-Munshi-Submission-Authority") != "false"
+        ):
+            raise RuntimeError("Hunter AutoApply credential response binding mismatch")
+        if len(envelope) < 29 or len(envelope) > 16448:
+            raise RuntimeError("Hunter AutoApply credential envelope is invalid")
+
+        nonce, ciphertext = envelope[:12], envelope[12:]
+        key = hmac.new(
+            self.secret,
+            (
+                f"autoapply-credential:{p['request_id']}:{p['plan_digest']}"
+            ).encode(),
+            hashlib.sha256,
+        ).digest()
+        aad = (
+            f"{p['request_id']}.{p['plan_digest']}.autoapply_anthropic_api_key"
+        ).encode()
+        try:
+            raw = AESGCM(key).decrypt(nonce, ciphertext, aad)
+            value = raw.decode("utf-8").strip()
+        except Exception as error:
+            raise RuntimeError(
+                "Hunter AutoApply credential envelope could not be decrypted"
+            ) from error
+        if not value or len(value) > 16384:
+            raise RuntimeError("Hunter AutoApply credential is unavailable")
+        return value
 
     def close(self) -> None:
         self.client.close()

@@ -132,9 +132,8 @@ class HostedAdapterFactory:
         self.bridge_factory = bridge_factory
         self.playwright_factory = playwright_factory
         self.context_configurer = context_configurer
+        self.runtime_root = runtime_root
         self.interaction_fallback_service = interaction_fallback_service
-        if self.interaction_fallback_service is None and runtime_root is not None:
-            self.interaction_fallback_service = InteractionFallbackService(runtime_root)
         self.teach_munshi_service = teach_munshi_service or TeachMunshiService(database)
 
     def _plan(self, job: dict[str, Any]) -> dict[str, Any]:
@@ -229,13 +228,24 @@ class HostedAdapterFactory:
                     return False
                 return bridge.plan_is_current(current)
 
+            interaction_fallback = self.interaction_fallback_service
+            if interaction_fallback is None and self.runtime_root is not None:
+                # Hosted execution treats Hunter Settings + encrypted vault as the
+                # runtime authority. The API key stays server-to-server and is
+                # resolved only if dashboard auth mode is API.
+                interaction_fallback = InteractionFallbackService(
+                    self.runtime_root,
+                    config_resolver=lambda: bridge.autoapply_config(plan),
+                    api_key_resolver=lambda: bridge.anthropic_api_key(plan),
+                )
+
             return HostedPlanBrowserAdapter(
                 page,
                 artifact_reader=artifact_reader,
                 cover_letter_reader=(cover_letter_reader if cover_binding is not None else None),
                 current_plan=current_plan,
                 runtime_path=_runtime_path(),
-                interaction_fallback_service=self.interaction_fallback_service,
+                interaction_fallback_service=interaction_fallback,
                 teach_munshi_service=self.teach_munshi_service,
                 playwright_instance=pw,
                 browser=browser,
