@@ -162,6 +162,53 @@ def test_live_handoff_is_default_off(tmp_path: Path, monkeypatch) -> None:
     assert _table_count(database, "career_os_application_plans") == 0
 
 
+
+def test_accepts_exact_agile_ats_plan_binding(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("MUNSHI_APPLY_LIVE_HANDOFF_ENABLED", "true")
+    consumer, database = _consumer(tmp_path)
+    plan = _plan()
+    plan["job"] = {
+        **dict(plan["job"]),
+        "job_url": "https://neomax.jobs.agile-ats.com/jobs/details/1119",
+        "apply_url": "https://neomax.jobs.agile-ats.com/jobs/details/1119",
+    }
+    plan["provider_policy"] = {
+        "provider": "AGILE_ATS",
+        "permitted": True,
+        "allowed_hosts": ["agile-ats.com"],
+        "authentication_mode": "PAUSE_IF_REQUIRED",
+        "captcha_policy": "PAUSE",
+        "mfa_policy": "PAUSE",
+        "credentials_authority": False,
+    }
+    plan.pop("plan_digest", None)
+    digest_payload = {
+        key: value
+        for key, value in plan.items()
+        if key not in {"plan_id", "idempotency_key", "plan_digest", "created_at"}
+    }
+    plan["plan_digest"] = hashlib.sha256(
+        json.dumps(
+            digest_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    envelope = _envelope(plan=plan, provider="AGILE_ATS")
+    body, headers = _signed(envelope)
+
+    result = consumer.accept(body, headers, now=1000)
+
+    assert result.accepted is True
+    assert result.state == "PLAN_ACCEPTED"
+    with database.connect() as connection:
+        row = connection.execute(
+            "SELECT provider FROM career_os_application_plans WHERE plan_id=?",
+            (plan["plan_id"],),
+        ).fetchone()
+        assert str(row["provider"]) == "AGILE_ATS"
+
 def test_accepts_exact_plan_without_browser_or_application_side_effect(
     tmp_path: Path, monkeypatch
 ) -> None:
