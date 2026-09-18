@@ -6,7 +6,7 @@ services:
       args:
         MUNSHI_APPLY_COMMIT_SHA: ${MUNSHI_APPLY_DEPLOY_SHA:?MUNSHI_APPLY_DEPLOY_SHA is required}
 
-    image: munshi-apply-staging:${MUNSHI_APPLY_IMAGE_TAG:-local}
+    image: ${MUNSHI_APPLY_IMAGE_REPOSITORY:?MUNSHI_APPLY_IMAGE_REPOSITORY is required}:${MUNSHI_APPLY_IMAGE_TAG:-local}
 
     restart: unless-stopped
 
@@ -15,6 +15,7 @@ services:
       MUNSHI_DATABASE_PATH: /data/munshi-apply.sqlite
       MUNSHI_MIGRATIONS_PATH: /app/migrations
       MUNSHI_BROWSER_EXECUTABLE: /usr/bin/chromium
+      MUNSHI_ENVIRONMENT: "${MUNSHI_ENVIRONMENT:?MUNSHI_ENVIRONMENT is required}"
 
       MUNSHI_APPLY_LIVE_HANDOFF_ENABLED: "${MUNSHI_APPLY_LIVE_HANDOFF_ENABLED:-false}"
       MUNSHI_APPLY_HANDOFF_HMAC_SECRET: "${MUNSHI_APPLY_HANDOFF_HMAC_SECRET:-}"
@@ -29,7 +30,7 @@ services:
       MUNSHI_FINAL_SUBMIT_ENABLED: "false"
 
     ports:
-      - "127.0.0.1:19000:8000"
+      - "${MUNSHI_APPLY_BIND_HOST:?MUNSHI_APPLY_BIND_HOST is required}:${MUNSHI_APPLY_PUBLISHED_PORT:?MUNSHI_APPLY_PUBLISHED_PORT is required}:8000"
 
     networks:
       default:
@@ -57,7 +58,7 @@ services:
 
   prepare-worker:
     profiles: ["hosted-prepare"]
-    image: munshi-apply-staging:${MUNSHI_APPLY_IMAGE_TAG:-local}
+    image: ${MUNSHI_APPLY_IMAGE_REPOSITORY:?MUNSHI_APPLY_IMAGE_REPOSITORY is required}:${MUNSHI_APPLY_IMAGE_TAG:-local}
     restart: unless-stopped
     depends_on:
       apply:
@@ -75,7 +76,7 @@ services:
       MUNSHI_APPLY_RESUME_UPLOAD_ENABLED: "${MUNSHI_APPLY_RESUME_UPLOAD_ENABLED:-false}"
       MUNSHI_APPLY_NORMAL_ANSWER_AUTOFILL_ENABLED: "${MUNSHI_APPLY_NORMAL_ANSWER_AUTOFILL_ENABLED:-false}"
       MUNSHI_HUNTER_EXECUTION_BRIDGE_STAGING_HTTP_ENABLED: "${MUNSHI_HUNTER_EXECUTION_BRIDGE_STAGING_HTTP_ENABLED:-false}"
-      MUNSHI_ENVIRONMENT: "staging"
+      MUNSHI_ENVIRONMENT: "${MUNSHI_ENVIRONMENT:?MUNSHI_ENVIRONMENT is required}"
       MUNSHI_FINAL_REVIEW_ENABLED: "false"
       MUNSHI_FINAL_SUBMIT_ENABLED: "false"
     networks:
@@ -89,7 +90,7 @@ services:
   # below still defaults to false. It deliberately does not auto-restart.
   submit-worker:
     profiles: ["hosted-submit-proof"]
-    image: munshi-apply-staging:${MUNSHI_APPLY_IMAGE_TAG:-local}
+    image: ${MUNSHI_APPLY_IMAGE_REPOSITORY:?MUNSHI_APPLY_IMAGE_REPOSITORY is required}:${MUNSHI_APPLY_IMAGE_TAG:-local}
     restart: "no"
     depends_on:
       apply:
@@ -100,7 +101,7 @@ services:
       MUNSHI_DATABASE_PATH: /data/munshi-apply.sqlite
       MUNSHI_MIGRATIONS_PATH: /app/migrations
       MUNSHI_BROWSER_EXECUTABLE: /usr/bin/chromium
-      MUNSHI_ENVIRONMENT: "staging"
+      MUNSHI_ENVIRONMENT: "${MUNSHI_ENVIRONMENT:?MUNSHI_ENVIRONMENT is required}"
       MUNSHI_APPLY_HANDOFF_HMAC_SECRET: "${MUNSHI_APPLY_HANDOFF_HMAC_SECRET:-}"
       MUNSHI_PRODUCTION_RECEIPT_HMAC_SECRET: "${MUNSHI_PRODUCTION_RECEIPT_HMAC_SECRET:-}"
       MUNSHI_HUNTER_EXECUTION_BRIDGE_BASE_URL: "${MUNSHI_HUNTER_EXECUTION_BRIDGE_BASE_URL:-}"
@@ -121,7 +122,7 @@ services:
 networks:
   hunter_staging:
     external: true
-    name: munshi-netcup-staging_application
+    name: ${MUNSHI_HUNTER_NETWORK_NAME:?MUNSHI_HUNTER_NETWORK_NAME is required}
 
 volumes:
   apply_data:

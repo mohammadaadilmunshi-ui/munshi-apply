@@ -90,7 +90,13 @@ fi
 
 if [[ ! -e "$STAGING_ENV" ]]; then
   cat > "$STAGING_ENV" <<'ENV'
-# MUNSHI Apply staging defaults. Add staging-only secrets separately.
+# MUNSHI Apply deployment target configuration. Set these per target; source code does not choose them.
+MUNSHI_APPLY_COMPOSE_PROJECT=
+MUNSHI_APPLY_BIND_HOST=
+MUNSHI_APPLY_PUBLISHED_PORT=
+MUNSHI_HUNTER_NETWORK_NAME=
+MUNSHI_APPLY_IMAGE_REPOSITORY=
+MUNSHI_ENVIRONMENT=
 MUNSHI_APPLY_LIVE_HANDOFF_ENABLED=false
 MUNSHI_APPLY_HOSTED_PREPARE_WORKER_ENABLED=false
 MUNSHI_APPLY_RESUME_UPLOAD_ENABLED=false

@@ -2,12 +2,13 @@
 set -Eeuo pipefail
 umask 077
 
-PROJECT="${MUNSHI_APPLY_STAGING_PROJECT:-munshi-apply-staging}"
+PROJECT=""
 STAGING_ROOT="${MUNSHI_APPLY_STAGING_ROOT:-/home/munshi/munshi-apply-staging-v1}"
 STAGING_REPO="$STAGING_ROOT/repo"
 STAGING_ENV="$STAGING_ROOT/staging.env"
 VERIFY="/opt/munshi/bin/verify-apply-staging-runtime-contract"
-HUNTER_NETWORK="munshi-netcup-staging_application"
+HUNTER_NETWORK=""
+IMAGE_REPOSITORY=""
 LOCK_FILE="$STAGING_ROOT/runtime/deploy.lock"
 
 commit=""
@@ -27,6 +28,19 @@ old_revision=""
 rollback_tag=""
 db_backup="NONE_FIRST_DEPLOY"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+
+read_required_env() {
+  local key="$1"
+  local value="${!key:-}"
+  if [[ -z "$value" ]]; then
+    local line
+    line="$(grep -E "^${key}=" "$STAGING_ENV" | tail -n1 || true)"
+    [[ -n "$line" ]] && value="${line#*=}"
+  fi
+  [[ -n "$value" ]] || { echo "required deployment configuration missing: $key" >&2; exit 7; }
+  printf '%s' "$value"
+}
+
 
 cleanup() {
   [[ -n "${bundle_file:-}" ]] && rm -f "$bundle_file" 2>/dev/null || true
@@ -51,6 +65,11 @@ git check-ref-format --branch "$branch" >/dev/null || { echo "--branch is not a 
 [[ -x "$VERIFY" ]] || { echo "Apply staging verifier missing: $VERIFY" >&2; exit 5; }
 [[ -d "$STAGING_REPO/.git" ]] || { echo "Apply staging repository missing: $STAGING_REPO" >&2; exit 6; }
 [[ -f "$STAGING_ENV" ]] || { echo "Apply staging env file missing: $STAGING_ENV" >&2; exit 7; }
+PROJECT="$(read_required_env MUNSHI_APPLY_COMPOSE_PROJECT)"
+HUNTER_NETWORK="$(read_required_env MUNSHI_HUNTER_NETWORK_NAME)"
+IMAGE_REPOSITORY="$(read_required_env MUNSHI_APPLY_IMAGE_REPOSITORY)"
+[[ "$PROJECT" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || { echo "invalid MUNSHI_APPLY_COMPOSE_PROJECT" >&2; exit 7; }
+[[ "$IMAGE_REPOSITORY" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "invalid MUNSHI_APPLY_IMAGE_REPOSITORY" >&2; exit 7; }
 docker network inspect "$HUNTER_NETWORK" >/dev/null 2>&1 || { echo "Hunter staging application network missing: $HUNTER_NETWORK" >&2; exit 8; }
 
 mkdir -p "$STAGING_ROOT/runtime" "$STAGING_ROOT/backups" "$STAGING_ROOT/receipts"
@@ -157,7 +176,7 @@ if result != "ok":
     raise SystemExit(f"host Apply staging backup quick_check failed: {result}")
 print("APPLY_STAGING_DB_BACKUP_QUICK_CHECK=PASS")
 PY
-  rollback_tag="munshi-apply-staging:rollback-$stamp"
+  rollback_tag="$IMAGE_REPOSITORY:rollback-$stamp"
   docker tag "$old_image_id" "$rollback_tag"
 fi
 
@@ -307,8 +326,8 @@ env \
   MUNSHI_APPLY_DEPLOY_SHA="$commit" \
   MUNSHI_APPLY_IMAGE_TAG="$commit" \
   "${compose[@]}" build apply
-new_image_id="$(docker image inspect -f '{{.Id}}' "munshi-apply-staging:$commit")"
-new_revision="$(docker image inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "munshi-apply-staging:$commit")"
+new_image_id="$(docker image inspect -f '{{.Id}}' "$IMAGE_REPOSITORY:$commit")"
+new_revision="$(docker image inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$IMAGE_REPOSITORY:$commit")"
 [[ "$new_revision" == "$commit" ]] || { echo "built Apply image revision mismatch" >&2; exit 30; }
 
 echo "=== RECREATE APPLY STAGING API ONLY ==="

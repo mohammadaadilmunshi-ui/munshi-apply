@@ -2,11 +2,27 @@
 set -Eeuo pipefail
 umask 077
 
-PROJECT="${MUNSHI_APPLY_STAGING_PROJECT:-munshi-apply-staging}"
+PROJECT=""
 STAGING_ROOT="${MUNSHI_APPLY_STAGING_ROOT:-/home/munshi/munshi-apply-staging-v1}"
 STAGING_REPO="$STAGING_ROOT/repo"
 STAGING_ENV="$STAGING_ROOT/staging.env"
 EXPECTED_SHA=""
+BIND_HOST=""
+PUBLISHED_PORT=""
+HUNTER_NETWORK=""
+
+read_required_env() {
+  local key="$1"
+  local value="${!key:-}"
+  if [[ -z "$value" ]]; then
+    local line
+    line="$(grep -E "^${key}=" "$STAGING_ENV" | tail -n1 || true)"
+    [[ -n "$line" ]] && value="${line#*=}"
+  fi
+  [[ -n "$value" ]] || { echo "required deployment configuration missing: $key" >&2; exit 7; }
+  printf '%s' "$value"
+}
+
 
 while (($#)); do
   case "$1" in
@@ -19,6 +35,13 @@ done
 [[ -f "$STAGING_ENV" ]] || { echo "Apply staging env file missing: $STAGING_ENV" >&2; exit 11; }
 [[ -r "$STAGING_ENV" ]] || { echo "Apply staging env file is not readable by the deployment user: $STAGING_ENV" >&2; exit 12; }
 [[ -f "$STAGING_REPO/deploy/staging/compose.yaml" ]] || { echo "Apply staging compose file missing" >&2; exit 13; }
+PROJECT="$(read_required_env MUNSHI_APPLY_COMPOSE_PROJECT)"
+BIND_HOST="$(read_required_env MUNSHI_APPLY_BIND_HOST)"
+PUBLISHED_PORT="$(read_required_env MUNSHI_APPLY_PUBLISHED_PORT)"
+HUNTER_NETWORK="$(read_required_env MUNSHI_HUNTER_NETWORK_NAME)"
+[[ "$PROJECT" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || { echo "invalid MUNSHI_APPLY_COMPOSE_PROJECT" >&2; exit 13; }
+[[ "$BIND_HOST" =~ ^[0-9A-Fa-f:.]+$ ]] || { echo "invalid MUNSHI_APPLY_BIND_HOST" >&2; exit 13; }
+[[ "$PUBLISHED_PORT" =~ ^[0-9]{1,5}$ ]] || { echo "invalid MUNSHI_APPLY_PUBLISHED_PORT" >&2; exit 13; }
 
 if [[ -z "$EXPECTED_SHA" ]]; then
   EXPECTED_SHA="$(git -C "$STAGING_REPO" rev-parse HEAD)"
@@ -55,12 +78,13 @@ env \
   MUNSHI_APPLY_IMAGE_TAG="$EXPECTED_SHA" \
   "${compose[@]}" --profile hosted-prepare --profile hosted-submit-proof config --format json > "$rendered"
 
-python3 - "$rendered" <<'PY'
+python3 - "$rendered" "$BIND_HOST" "$PUBLISHED_PORT" "$HUNTER_NETWORK" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 config = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+expected_bind_host, expected_port, expected_network = sys.argv[2:5]
 services = config.get("services", {})
 required = {"apply", "prepare-worker", "submit-worker"}
 missing = sorted(required - services.keys())
@@ -77,9 +101,9 @@ ports = apply.get("ports", [])
 if len(ports) != 1:
     raise SystemExit(f"Apply staging must expose exactly one port: {ports!r}")
 port = ports[0]
-if str(port.get("target")) != "8000" or str(port.get("published")) != "19000":
+if str(port.get("target")) != "8000" or str(port.get("published")) != expected_port:
     raise SystemExit(f"unexpected Apply staging port mapping: {port!r}")
-if port.get("host_ip") != "127.0.0.1":
+if port.get("host_ip") != expected_bind_host:
     raise SystemExit(f"Apply staging port must bind loopback only: {port!r}")
 
 submit = services["submit-worker"]
@@ -97,7 +121,7 @@ for key in (
 
 networks = config.get("networks", {})
 hunter = networks.get("hunter_staging", {})
-if hunter.get("name") != "munshi-netcup-staging_application":
+if hunter.get("name") != expected_network:
     raise SystemExit("Apply staging must attach only to the established Hunter staging application network")
 
 print("APPLY_STAGING_COMPOSE_SAFETY=PASS")
@@ -135,20 +159,21 @@ grep -qx 'MUNSHI_FINAL_REVIEW_ENABLED=false' <<<"$container_env" || { echo "runn
 grep -qx 'MUNSHI_FINAL_SUBMIT_ENABLED=false' <<<"$container_env" || { echo "running Apply final-submit gate is not false" >&2; exit 25; }
 
 port_binding="$(docker port "$apply_id" 8000/tcp)"
-[[ "$port_binding" == "127.0.0.1:19000" ]] || {
-  echo "Apply staging port is not loopback-only 127.0.0.1:19000: $port_binding" >&2
+[[ "$port_binding" == "$BIND_HOST:$PUBLISHED_PORT" ]] || {
+  echo "Apply deployment port mismatch: expected=$BIND_HOST:$PUBLISHED_PORT actual=$port_binding" >&2
   exit 26
 }
 
 docker inspect -f '{{json .NetworkSettings.Networks}}' "$apply_id" \
-  | grep -Fq 'munshi-netcup-staging_application' || {
+  | grep -Fq "$HUNTER_NETWORK" || {
     echo "Apply staging is not attached to the Hunter staging application network" >&2
     exit 27
   }
 
-python3 - <<'PY'
+python3 - "$BIND_HOST" "$PUBLISHED_PORT" <<'PY'
+import sys
 import urllib.request
-with urllib.request.urlopen("http://127.0.0.1:19000/health", timeout=5) as response:
+with urllib.request.urlopen(f"http://{sys.argv[1]}:{sys.argv[2]}/health", timeout=5) as response:
     if response.status != 200:
         raise SystemExit(f"Apply staging /health returned {response.status}")
 print("APPLY_STAGING_HTTP_HEALTH=PASS")
