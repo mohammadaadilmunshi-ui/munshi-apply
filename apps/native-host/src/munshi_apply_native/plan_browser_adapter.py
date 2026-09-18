@@ -41,6 +41,7 @@ def provider_for_url(url: str) -> str:
         "ASHBY": ("ashbyhq.com",),
         "SMARTRECRUITERS": ("smartrecruiters.com",),
         "WORKDAY": ("myworkdayjobs.com", "myworkdaysite.com"),
+        "AGILE_ATS": ("agile-ats.com",),
     }.items():
         if any(host == domain or host.endswith("." + domain) for domain in domains):
             return provider
