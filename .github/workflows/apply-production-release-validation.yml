@@ -2,6 +2,9 @@ name: Apply Production Release Validation
 # Full-production validation for the initial dashboard activation release.
 
 on:
+  push:
+    branches:
+      - "release/apply-production-full-activation-20260918"
   pull_request:
     paths:
       - "deploy/production/**"
