@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - "release/apply-production-full-activation-v15-20260918"
+      - "release/apply-production-full-activation-v18-stdin-20260918"
   pull_request:
     paths:
       - "deploy/production/**"

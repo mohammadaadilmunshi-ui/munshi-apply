@@ -107,7 +107,7 @@ backup_apply_db() {
   old_revision="$(docker inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$old_api_id")"
   [[ "$old_revision" =~ ^[0-9a-f]{40}$ ]] || { echo "existing Apply production image lacks revision" >&2; exit 12; }
 
-  active_submitting="$(docker exec "$old_api_id" python - <<'PY'
+  active_submitting="$(docker exec -i "$old_api_id" python - <<'PY'
 import sqlite3
 p="/data/munshi-apply.sqlite"
 db=sqlite3.connect(f"file:{p}?mode=ro",uri=True,timeout=30)
@@ -124,7 +124,7 @@ PY
   [[ "$active_submitting" == "0" ]] || { echo "Apply production has active SUBMITTING session(s): $active_submitting" >&2; exit 13; }
 
   db_backup="$ROOT/backups/apply-predeploy-$stamp.sqlite"
-  docker exec "$old_api_id" python - "$stamp" <<'PY'
+  docker exec -i "$old_api_id" python - "$stamp" <<'PY'
 import sqlite3,sys
 from pathlib import Path
 stamp=sys.argv[1]
@@ -140,7 +140,7 @@ finally:
 print(dst)
 PY
   docker cp "$old_api_id:/tmp/apply-predeploy-$stamp.sqlite" "$db_backup"
-  docker exec "$old_api_id" rm -f "/tmp/apply-predeploy-$stamp.sqlite"
+  docker exec -i "$old_api_id" rm -f "/tmp/apply-predeploy-$stamp.sqlite"
   chmod 600 "$db_backup"
   python3 - "$db_backup" <<'PY'
 import sqlite3,sys
@@ -159,7 +159,7 @@ restore_apply_db() {
   if [[ -z "$volume" ]]; then
     volume="${PROJECT}_apply_data"
   fi
-  docker run --rm --user 0:0     --network none     --mount "type=volume,src=$volume,dst=/data"     --mount "type=bind,src=$ROOT/backups,dst=/backup,readonly"     --entrypoint python     "$old_image_id" - "$(basename "$db_backup")" <<'PY'
+  docker run --rm -i --user 0:0     --network none     --mount "type=volume,src=$volume,dst=/data"     --mount "type=bind,src=$ROOT/backups,dst=/backup,readonly"     --entrypoint python     "$old_image_id" - "$(basename "$db_backup")" <<'PY'
 import os,shutil,sqlite3,sys
 from pathlib import Path
 backup=Path("/backup")/sys.argv[1]

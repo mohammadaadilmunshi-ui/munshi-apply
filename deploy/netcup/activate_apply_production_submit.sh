@@ -43,7 +43,7 @@ prepare_id="$(docker ps -q --filter "label=com.docker.compose.project=$PROJECT" 
 [[ -n "$api_id" && -n "$prepare_id" ]] || { echo "Apply production reversible services missing" >&2; exit 14; }
 
 for id in "$api_id" "$prepare_id"; do
-  docker exec "$id" python - <<'PY'
+  docker exec -i "$id" python - <<'PY'
 import urllib.request
 with urllib.request.urlopen("http://hunter:8000/health", timeout=5) as response:
     if response.status != 200:
