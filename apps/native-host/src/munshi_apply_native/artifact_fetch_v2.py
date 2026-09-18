@@ -12,6 +12,8 @@ from uuid import uuid4
 
 import httpx
 
+from .internal_http_policy import internal_hunter_http_allowed
+
 REQUEST_VERSION = "munshi-application-execution-request-v1"
 RESPONSE_VERSION = "munshi-application-execution-response-v1"
 PURPOSE_PLAN_CURRENT = "PLAN_CURRENT"
@@ -27,7 +29,6 @@ class HunterExecutionBridgeClient:
         secret: str,
         tenant_id: str,
         user_id: str,
-        allow_staging_http: bool = False,
         timeout_seconds: float = 15.0,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
@@ -35,11 +36,10 @@ class HunterExecutionBridgeClient:
         if not base.startswith(("http://", "https://")):
             raise ValueError("Hunter execution bridge base URL is required")
         parsed = urlsplit(base)
-        staging_http = allow_staging_http is True and base == "http://hunter:8000"
         if (
             parsed.scheme != "https"
             and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}
-            and not staging_http
+            and not internal_hunter_http_allowed(base)
         ):
             raise ValueError("Hunter execution bridge must use HTTPS outside loopback")
         if len(str(secret or "")) < 16:

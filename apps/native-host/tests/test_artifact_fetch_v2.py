@@ -108,28 +108,43 @@ def test_tampered_response_fails_closed(monkeypatch):
     client.close()
 
 
-def test_plain_http_is_limited_to_explicit_staging_bridge():
+def test_plain_http_requires_exact_configured_internal_target(monkeypatch: pytest.MonkeyPatch):
+    target = "http://hunter-target.internal:8123"
     with pytest.raises(ValueError, match="HTTPS"):
         HunterExecutionBridgeClient(
-            base_url="http://hunter:8000", secret=SECRET, tenant_id="tenant-a", user_id="member-a"
+            base_url=target, secret=SECRET, tenant_id="tenant-a", user_id="member-a"
         )
+
+    monkeypatch.setenv("MUNSHI_ENVIRONMENT", "integration")
+    monkeypatch.setenv("MUNSHI_HUNTER_INTERNAL_HTTP_ENABLED", "true")
+    monkeypatch.setenv("MUNSHI_HUNTER_INTERNAL_HTTP_BASE_URL", target)
     HunterExecutionBridgeClient(
-        base_url="http://hunter:8000",
+        base_url=target,
         secret=SECRET,
         tenant_id="tenant-a",
         user_id="member-a",
-        allow_staging_http=True,
     ).close()
+
     with pytest.raises(ValueError, match="HTTPS"):
         HunterExecutionBridgeClient(
-            base_url="http://hunter:8001", secret=SECRET, tenant_id="tenant-a", user_id="member-a",
-            allow_staging_http=True,
-        )
-    with pytest.raises(ValueError, match="HTTPS"):
-        HunterExecutionBridgeClient(
-            base_url="http://hunter:8000/other",
+            base_url="http://different-target.internal:8123",
             secret=SECRET,
             tenant_id="tenant-a",
             user_id="member-a",
-            allow_staging_http=True,
+        )
+    with pytest.raises(ValueError, match="HTTPS"):
+        HunterExecutionBridgeClient(
+            base_url=target + "/other",
+            secret=SECRET,
+            tenant_id="tenant-a",
+            user_id="member-a",
+        )
+
+    monkeypatch.setenv("MUNSHI_ENVIRONMENT", "production")
+    with pytest.raises(ValueError, match="HTTPS"):
+        HunterExecutionBridgeClient(
+            base_url=target,
+            secret=SECRET,
+            tenant_id="tenant-a",
+            user_id="member-a",
         )
