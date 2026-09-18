@@ -61,3 +61,5 @@ jobs:
             /app/apps/native-host/tests/test_production_submission_verification_determinism.py \
             /app/apps/native-host/tests/test_submit_authority_inbox.py \
             /app/apps/native-host/tests/test_submit_authority_contract_vector.py
+      - name: Exercise API, prepare and submit startup on disposable isolated data
+        run: bash scripts/ci-production-activation-smoke.sh "$GITHUB_SHA"
