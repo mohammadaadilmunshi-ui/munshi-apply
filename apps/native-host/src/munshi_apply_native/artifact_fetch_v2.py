@@ -20,7 +20,7 @@ PURPOSE_PLAN_CURRENT = "PLAN_CURRENT"
 PURPOSE_ARTIFACT_BYTES = "ARTIFACT_BYTES"
 PURPOSE_COVER_LETTER_BYTES = "COVER_LETTER_BYTES"
 PURPOSE_AUTOAPPLY_CONFIG = "AUTOAPPLY_CONFIG"
-PURPOSE_AUTOAPPLY_ANTHROPIC_SECRET = "AUTOAPPLY_ANTHROPIC_SECRET"
+PURPOSE_AUTOAPPLY_CREDENTIAL = "AUTOAPPLY_CREDENTIAL"
 
 
 class HunterExecutionBridgeClient:
@@ -206,7 +206,7 @@ class HunterExecutionBridgeClient:
         The value is returned only to the Apply process over the signed execution
         bridge. It is never persisted by this client or exposed to Chromium.
         """
-        purpose = PURPOSE_AUTOAPPLY_ANTHROPIC_SECRET
+        purpose = PURPOSE_AUTOAPPLY_CREDENTIAL
         p = self._payload(plan, purpose)
         body = self._canonical(p)
         response = self.client.post(
