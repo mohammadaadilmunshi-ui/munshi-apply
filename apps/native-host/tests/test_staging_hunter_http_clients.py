@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import httpx
 import pytest
 
 from munshi_apply_native.hunter_submit_authority_client_v1 import (
@@ -9,6 +10,10 @@ from munshi_apply_native.hunter_submit_authority_client_v1 import (
 from munshi_apply_native.production_receipt_v1 import (
     ProductionReceiptClient,
     ProductionReceiptError,
+)
+from munshi_apply_native.mail_artifact_broker import (
+    MailArtifactBrokerClient,
+    MailArtifactBrokerError,
 )
 
 SECRET = "staging-only-test-secret-0123456789abcdef"  # noqa: S105
@@ -74,3 +79,45 @@ def test_staging_http_does_not_allow_arbitrary_hosts(
     _enable_internal_staging_http(monkeypatch)
     with pytest.raises(error_cls):
         client_cls(base_url="http://example.invalid:8000", secret=SECRET)
+
+
+def test_mail_artifact_broker_allows_exact_internal_staging_hunter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _enable_internal_staging_http(monkeypatch)
+    transport = httpx.MockTransport(
+        lambda _request: httpx.Response(500, json={"success": False})
+    )
+    client = httpx.Client(transport=transport)
+    try:
+        broker = MailArtifactBrokerClient(
+            base_url="http://hunter:8000",
+            hmac_secret=SECRET,
+            client=client,
+        )
+        assert broker.base_url == "http://hunter:8000"
+    finally:
+        client.close()
+
+
+def test_mail_artifact_broker_blocks_internal_http_outside_staging(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MUNSHI_ENVIRONMENT", "production")
+    monkeypatch.setenv("MUNSHI_HUNTER_EXECUTION_BRIDGE_STAGING_HTTP_ENABLED", "true")
+    with pytest.raises(MailArtifactBrokerError):
+        MailArtifactBrokerClient(
+            base_url="http://hunter:8000",
+            hmac_secret=SECRET,
+        )
+
+
+def test_mail_artifact_broker_blocks_arbitrary_staging_http(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _enable_internal_staging_http(monkeypatch)
+    with pytest.raises(MailArtifactBrokerError):
+        MailArtifactBrokerClient(
+            base_url="http://example.invalid:8000",
+            hmac_secret=SECRET,
+        )

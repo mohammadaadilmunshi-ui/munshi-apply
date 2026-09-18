@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -39,6 +40,23 @@ def _required(value: object, name: str) -> str:
     return text
 
 
+def _truthy(name: str) -> bool:
+    return str(os.getenv(name) or "").strip().casefold() in {"1", "true", "yes", "on"}
+
+
+def _internal_staging_http_allowed(normalized_url: str) -> bool:
+    parsed = urlparse(normalized_url)
+    return (
+        str(os.getenv("MUNSHI_ENVIRONMENT") or "").strip().casefold() == "staging"
+        and _truthy("MUNSHI_HUNTER_EXECUTION_BRIDGE_STAGING_HTTP_ENABLED")
+        and parsed.scheme == "http"
+        and parsed.hostname == "hunter"
+        and parsed.port == 8000
+        and not parsed.username
+        and not parsed.password
+    )
+
+
 def _service_material(
     *,
     action: str,
@@ -69,9 +87,13 @@ class MailArtifactBrokerClient:
     ) -> None:
         normalized_url = _required(base_url, "base_url").rstrip("/")
         parsed = urlparse(normalized_url)
-        if parsed.scheme != "https" or not parsed.hostname:
+        if not parsed.hostname or not (
+            parsed.scheme == "https"
+            or _internal_staging_http_allowed(normalized_url)
+        ):
             raise MailArtifactBrokerError(
-                "Mail artifact broker requires an HTTPS endpoint"
+                "Mail artifact broker requires HTTPS except for the explicit "
+                "internal staging Hunter bridge"
             )
         secret = hmac_secret.encode("utf-8")
         if len(secret) < 32:
