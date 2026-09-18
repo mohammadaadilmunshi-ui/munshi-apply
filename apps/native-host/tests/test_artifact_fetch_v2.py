@@ -69,7 +69,7 @@ def _signed_response(request: httpx.Request) -> httpx.Response:
             separators=(",", ":"),
         ).encode()
         headers = {}
-    elif purpose == module.PURPOSE_AUTOAPPLY_ANTHROPIC_SECRET:
+    elif purpose == module.PURPOSE_AUTOAPPLY_CREDENTIAL:
         body = b"dashboard-anthropic-secret"
         headers = {
             "X-Munshi-Credential-Type": "autoapply_anthropic_api_key",
