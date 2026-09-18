@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -135,8 +136,12 @@ class PlanBrowserAdapter:
                       element.id + ' ' + element.className + ' '
                       + (container ? container.id + ' ' + container.className : '')
                     ).toLowerCase();
-                    const cookieContext = /\bcookies?\b|tracking technologies|cookie settings/.test(context);
-                    const knownCmp = /(onetrust|cookiebot|cookie|trustarc|didomi|quantcast|consentmanager)/.test(identity);
+                    const cookieContext = (
+                      /\bcookies?\b|tracking technologies|cookie settings/
+                    ).test(context);
+                    const knownCmp = (
+                      /(onetrust|cookiebot|cookie|trustarc|didomi|quantcast|consentmanager)/
+                    ).test(identity);
                     if (!cookieContext && !knownCmp) continue;
                     element.click();
                     return { dismissed: true, label };
@@ -152,10 +157,8 @@ class PlanBrowserAdapter:
             "COOKIE_CONSENT_DISMISSED",
             {"strategy": "bounded_cookie_accept", "label": str(result.get("label") or "")[:80]},
         )
-        try:
+        with suppress(Exception):
             self.page.wait_for_timeout(100)
-        except Exception:
-            pass
         return True
 
     def inspect_job(self, *, plan: dict[str, Any]) -> dict[str, Any]:
