@@ -68,6 +68,96 @@ class PlanBrowserAdapter:
             self.page.add_script_tag(content=self.runtime_path.read_text(encoding="utf-8"))
         return self.page.evaluate("MunshiPlanRuntime.describeForm()")
 
+    def _dismiss_cookie_consent(self) -> bool:
+        """Dismiss only bounded, recognizably cookie-specific consent overlays.
+
+        This intentionally refuses generic form-consent buttons. A candidate is
+        clicked only when its label is an allow/accept-cookie action and the
+        surrounding component is clearly a cookie/CMP surface.
+        """
+        try:
+            result = self.page.evaluate(
+                """() => {
+                  const visible = element => {
+                    if (!(element instanceof HTMLElement)) return false;
+                    const style = getComputedStyle(element);
+                    const rect = element.getBoundingClientRect();
+                    return style.display !== 'none'
+                      && style.visibility !== 'hidden'
+                      && Number(style.opacity || 1) !== 0
+                      && rect.width > 0 && rect.height > 0;
+                  };
+                  const labelOf = element => (
+                    element.innerText
+                    || element.value
+                    || element.getAttribute('aria-label')
+                    || element.getAttribute('title')
+                    || ''
+                  ).replace(/\s+/g, ' ').trim().toLowerCase();
+                  const accepted = new Set([
+                    'accept all',
+                    'accept all cookies',
+                    'accept cookies',
+                    'allow all',
+                    'allow all cookies',
+                    'i agree',
+                    'agree to all',
+                    'agree & continue',
+                    'agree and continue',
+                    'accept & continue',
+                    'accept and continue',
+                    'got it',
+                  ]);
+                  const candidates = Array.from(document.querySelectorAll(
+                    'button,[role="button"],input[type="button"],input[type="submit"]'
+                  )).slice(0, 250);
+                  for (const element of candidates) {
+                    if (!visible(element)) continue;
+                    const label = labelOf(element);
+                    if (!accepted.has(label)) continue;
+                    const container = element.closest(
+                      '[role="dialog"],[aria-modal="true"],'
+                      + '#onetrust-banner-sdk,#CybotCookiebotDialog,'
+                      + '[id*="cookie" i],[class*="cookie" i],'
+                      + '[id*="onetrust" i],[class*="onetrust" i],'
+                      + '[id*="cookiebot" i],[class*="cookiebot" i],'
+                      + '[id*="trustarc" i],[class*="trustarc" i],'
+                      + '[id*="didomi" i],[class*="didomi" i],'
+                      + '[id*="quantcast" i],[class*="quantcast" i],'
+                      + '[id*="consentmanager" i],[class*="consentmanager" i]'
+                    );
+                    const context = String(
+                      (container && container.innerText)
+                      || (element.parentElement && element.parentElement.innerText)
+                      || ''
+                    ).toLowerCase();
+                    const identity = String(
+                      element.id + ' ' + element.className + ' '
+                      + (container ? container.id + ' ' + container.className : '')
+                    ).toLowerCase();
+                    const cookieContext = /\bcookies?\b|tracking technologies|cookie settings/.test(context);
+                    const knownCmp = /(onetrust|cookiebot|cookie|trustarc|didomi|quantcast|consentmanager)/.test(identity);
+                    if (!cookieContext && !knownCmp) continue;
+                    element.click();
+                    return { dismissed: true, label };
+                  }
+                  return { dismissed: false };
+                }"""
+            )
+        except Exception:
+            return False
+        if not isinstance(result, dict) or result.get("dismissed") is not True:
+            return False
+        self.on_event(
+            "COOKIE_CONSENT_DISMISSED",
+            {"strategy": "bounded_cookie_accept", "label": str(result.get("label") or "")[:80]},
+        )
+        try:
+            self.page.wait_for_timeout(100)
+        except Exception:
+            pass
+        return True
+
     def inspect_job(self, *, plan: dict[str, Any]) -> dict[str, Any]:
         expected = urlsplit(plan["job"]["apply_url"] or plan["job"]["job_url"])
         actual = urlsplit(self.page.url)
@@ -213,6 +303,9 @@ class PlanBrowserAdapter:
         if self.current_plan(plan) is not True:
             raise ValueError("Hunter plan is stale")
         for _step in range(10):
+            # Cookie/CMP overlays are reversible UI chrome and may otherwise
+            # intercept clicks. Dismiss them before each page scan/navigation step.
+            self._dismiss_cookie_consent()
             if self.current_plan(plan) is not True:
                 raise ValueError("Hunter plan is stale")
             observed = self.inspect_job(plan=plan)
@@ -330,6 +423,9 @@ class PlanBrowserAdapter:
     def submit(self, *, plan: dict[str, Any], review: dict[str, Any]) -> dict[str, Any]:
         from .execution_policy import validate_submit_observation
 
+        # A late cookie overlay must not masquerade as a changed reviewed form.
+        # This remains a bounded cookie-only action and never grants submit authority.
+        self._dismiss_cookie_consent()
         observation = self.inspect_submission(plan=plan)
         validate_submit_observation(observation, plan, review)
         buttons = [
