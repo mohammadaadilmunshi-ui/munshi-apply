@@ -14,6 +14,8 @@ IMAGE_REPOSITORY=""
 BIND_HOST=""
 PUBLISHED_PORT=""
 DEPLOY_ENVIRONMENT=""
+PROTECTED_COMPOSE_PROJECTS=""
+PROTECTED_CONTAINER_NAMES=""
 
 target_value() {
   local key="$1"
@@ -37,6 +39,8 @@ load_target_config() {
   HUNTER_NETWORK="$(target_value MUNSHI_HUNTER_NETWORK_NAME)"
   IMAGE_REPOSITORY="$(target_value MUNSHI_APPLY_IMAGE_REPOSITORY)"
   DEPLOY_ENVIRONMENT="$(target_value MUNSHI_ENVIRONMENT)"
+  PROTECTED_COMPOSE_PROJECTS="$(target_value MUNSHI_APPLY_PROTECTED_COMPOSE_PROJECTS)"
+  PROTECTED_CONTAINER_NAMES="$(target_value MUNSHI_APPLY_PROTECTED_CONTAINER_NAMES)"
 
   [[ "$STAGING_ROOT" == /* && "$STAGING_ROOT" =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "invalid MUNSHI_APPLY_DEPLOY_ROOT" >&2; exit 7; }
   [[ "$PROJECT" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || { echo "invalid MUNSHI_APPLY_COMPOSE_PROJECT" >&2; exit 7; }
@@ -46,6 +50,8 @@ load_target_config() {
   [[ "$HUNTER_NETWORK" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || { echo "invalid MUNSHI_HUNTER_NETWORK_NAME" >&2; exit 7; }
   [[ "$IMAGE_REPOSITORY" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "invalid MUNSHI_APPLY_IMAGE_REPOSITORY" >&2; exit 7; }
   [[ "$DEPLOY_ENVIRONMENT" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "invalid MUNSHI_ENVIRONMENT" >&2; exit 7; }
+  [[ "$PROTECTED_COMPOSE_PROJECTS" == "NONE" || "$PROTECTED_COMPOSE_PROJECTS" =~ ^[A-Za-z0-9_.-]+(,[A-Za-z0-9_.-]+)*$ ]] || { echo "invalid MUNSHI_APPLY_PROTECTED_COMPOSE_PROJECTS" >&2; exit 7; }
+  [[ "$PROTECTED_CONTAINER_NAMES" == "NONE" || "$PROTECTED_CONTAINER_NAMES" =~ ^[A-Za-z0-9_.-]+(,[A-Za-z0-9_.-]+)*$ ]] || { echo "invalid MUNSHI_APPLY_PROTECTED_CONTAINER_NAMES" >&2; exit 7; }
 
   STAGING_REPO="$STAGING_ROOT/repo"
   STAGING_ENV="$STAGING_ROOT/staging.env"
@@ -170,14 +176,22 @@ for service in prepare-worker submit-worker; do
 done
 
 snapshot_hunter() {
-  for project in munshi-netcup-staging munshi-netcup-shadow; do
-    while IFS= read -r id; do
-      [[ -n "$id" ]] || continue
-      docker inspect -f '{{.Id}}|{{.Name}}|{{.State.StartedAt}}|{{.RestartCount}}' "$id"
-    done < <(docker ps -aq --filter "label=com.docker.compose.project=$project" | sort)
-  done
-  if docker inspect munshi-staging-edge-caddy >/dev/null 2>&1; then
-    docker inspect -f '{{.Id}}|{{.Name}}|{{.State.StartedAt}}|{{.RestartCount}}' munshi-staging-edge-caddy
+  if [[ "$PROTECTED_COMPOSE_PROJECTS" != "NONE" ]]; then
+    IFS=',' read -r -a protected_projects <<< "$PROTECTED_COMPOSE_PROJECTS"
+    for project in "${protected_projects[@]}"; do
+      while IFS= read -r id; do
+        [[ -n "$id" ]] || continue
+        docker inspect -f '{{.Id}}|{{.Name}}|{{.State.StartedAt}}|{{.RestartCount}}' "$id"
+      done < <(docker ps -aq --filter "label=com.docker.compose.project=$project" | sort)
+    done
+  fi
+  if [[ "$PROTECTED_CONTAINER_NAMES" != "NONE" ]]; then
+    IFS=',' read -r -a protected_containers <<< "$PROTECTED_CONTAINER_NAMES"
+    for protected_name in "${protected_containers[@]}"; do
+      if docker inspect "$protected_name" >/dev/null 2>&1; then
+        docker inspect -f '{{.Id}}|{{.Name}}|{{.State.StartedAt}}|{{.RestartCount}}' "$protected_name"
+      fi
+    done
   fi
 }
 
@@ -243,17 +257,18 @@ write_receipt() {
   local result="$1"
   local active_sha="$2"
   local receipt="$STAGING_ROOT/receipts/apply-staging-$stamp-$commit.json"
-  python3 - "$receipt" "$result" "$commit" "$branch" "$active_sha" "${old_head:-}" "${rollback_tag:-}" "$db_backup" <<'PY'
+  python3 - "$receipt" "$result" "$commit" "$branch" "$active_sha" "${old_head:-}" "${rollback_tag:-}" "$db_backup" "$DEPLOY_ENVIRONMENT" "$target" <<'PY'
 import json
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-receipt, result, requested_sha, branch, active_sha, previous_sha, rollback_image, db_backup = sys.argv[1:]
+receipt, result, requested_sha, branch, active_sha, previous_sha, rollback_image, db_backup, environment, target = sys.argv[1:]
 payload = {
     "schema_version": "1.0",
     "created_at": datetime.now(UTC).isoformat(),
-    "environment": "staging",
+    "environment": environment,
+    "deployment_target": target,
     "component": "munshi-apply",
     "result": result,
     "requested_sha": requested_sha,
