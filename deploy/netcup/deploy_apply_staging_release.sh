@@ -249,7 +249,9 @@ git bundle verify "$bundle_file"
 bundle_ref=""
 for candidate in "refs/heads/$branch" "refs/remotes/origin/$branch"; do
   listed="$(git bundle list-heads "$bundle_file" "$candidate" || true)"
-  if [[ "$listed" =~ ^[0-9a-f]{40}[[:space:]]+$candidate$ ]]; then
+  listed_sha="${listed%% *}"
+  listed_ref="${listed#* }"
+  if [[ "$listed_sha" =~ ^[0-9a-f]{40}$ && "$listed_ref" == "$candidate" ]]; then
     bundle_ref="$candidate"
     break
   fi
