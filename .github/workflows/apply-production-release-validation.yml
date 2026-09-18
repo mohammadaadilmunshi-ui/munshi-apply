@@ -1,4 +1,5 @@
 name: Apply Production Release Validation
+# Full-production validation for the initial dashboard activation release.
 
 on:
   pull_request:
