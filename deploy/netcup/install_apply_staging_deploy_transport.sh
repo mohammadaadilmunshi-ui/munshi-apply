@@ -106,7 +106,7 @@ verify_target="$BIN_ROOT/verify-apply-staging-runtime-contract"
 gateway_target="$BIN_ROOT/github-apply-staging-deploy-gateway"
 
 install -d -o root -g root -m 0755 "$BIN_ROOT"
-install -d -o root -g root -m 0750 "$TARGET_CONFIG_DIR"
+install -d -o root -g "$group" -m 0750 "$TARGET_CONFIG_DIR"
 install -d -o "$TARGET_USER" -g "$group" -m 0750 "$STAGING_ROOT"
 install -d -o "$TARGET_USER" -g "$group" -m 0750 "$STAGING_REPO"
 install -d -o "$TARGET_USER" -g "$group" -m 0700 \
@@ -196,7 +196,7 @@ MUNSHI_APPLY_RUNTIME_ENV_FILE=$RUNTIME_ENV_FILE
 MUNSHI_APPLY_PROTECTED_COMPOSE_PROJECTS=$PROTECTED_COMPOSE_PROJECTS
 MUNSHI_APPLY_PROTECTED_CONTAINER_NAMES=$PROTECTED_CONTAINER_NAMES
 EOF
-install -o root -g root -m 0640 "$target_config_new" "$TARGET_CONFIG"
+install -o root -g "$group" -m 0640 "$target_config_new" "$TARGET_CONFIG"
 rm -f "$target_config_new"
 
 install -o root -g root -m 0755 "$SOURCE_ROOT/deploy/netcup/deploy_apply_staging_release.sh" "$BIN_ROOT/.deploy-apply-staging-release.new"
