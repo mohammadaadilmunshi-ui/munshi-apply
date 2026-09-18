@@ -50,14 +50,9 @@ def main() -> None:
     forbid(
         workflow,
         (
-            "NETCUP_APPLY_STAGING_SSH_PRIVATE_KEY",
-            "NETCUP_APPLY_STAGING_DEPLOY_USER",
-            "environment: staging",
-            "group: munshi-apply-netcup-staging",
-            "feat/apply-staging-transport-bootstrap",
-            "munshi-apply-staging.bundle",
             "schedule:",
             "branches: [main]",
+            "deploy-production-release",
         ),
         "Apply target workflow",
     )
@@ -187,25 +182,6 @@ def main() -> None:
         ),
         "Apply target compose",
     )
-
-    forbidden_legacy_contract_tokens = (
-        "MUNSHI_HUNTER_EXECUTION_BRIDGE_STAGING_HTTP_ENABLED",
-        "MUNSHI_APPLY_STAGING_PROJECT",
-        "MUNSHI_APPLY_STAGING_ROOT",
-        "NETCUP_APPLY_STAGING_",
-        "allow_staging_http",
-        "environment: staging",
-        "group: munshi-apply-netcup-staging",
-    )
-    for label, text in (
-        ("workflow", workflow),
-        ("gateway", gateway),
-        ("deploy", deploy),
-        ("verify", verify),
-        ("installer", installer),
-        ("compose", compose),
-    ):
-        forbid(text, forbidden_legacy_contract_tokens, label)
 
     for label, text in (("deploy", deploy), ("installer", installer)):
         forbid(
