@@ -146,9 +146,17 @@ def test_dashboard_autoapply_config_and_secret_are_response_signed(monkeypatch):
     assert config["authMode"] == "api"
     assert config["model"] == "sonnet"
     assert client.anthropic_api_key(_plan()) == "dashboard-anthropic-secret"
-    # The credential is encrypted in transit; plaintext exists only after Apply decrypts it.
-    request = httpx.Request("POST", "https://hunter.internal")
-    _ = request
+
+    payload = client._payload(_plan(), module.PURPOSE_AUTOAPPLY_CREDENTIAL)  # noqa: SLF001
+    encrypted = _signed_response(
+        httpx.Request(
+            "POST",
+            "https://hunter.internal",
+            content=client._canonical(payload),  # noqa: SLF001
+        )
+    )
+    assert b"dashboard-anthropic-secret" not in encrypted.content
+    assert encrypted.headers["X-Munshi-Credential-Encryption"] == "aes-gcm-v1"
     client.close()
 
 
