@@ -14,6 +14,7 @@ PUBLISHED_PORT=""
 HUNTER_NETWORK=""
 IMAGE_REPOSITORY=""
 DEPLOY_ENVIRONMENT=""
+RUNTIME_ENV_FILE=""
 PROTECTED_COMPOSE_PROJECTS=""
 PROTECTED_CONTAINER_NAMES=""
 TARGET_USER="${MUNSHI_DEPLOY_SSH_USER:-munshi}"
@@ -33,13 +34,14 @@ while (($#)); do
     --hunter-network) HUNTER_NETWORK="${2:-}"; shift 2 ;;
     --image-repository) IMAGE_REPOSITORY="${2:-}"; shift 2 ;;
     --environment) DEPLOY_ENVIRONMENT="${2:-}"; shift 2 ;;
+    --runtime-env-file) RUNTIME_ENV_FILE="${2:-}"; shift 2 ;;
     --protected-compose-projects) PROTECTED_COMPOSE_PROJECTS="${2:-}"; shift 2 ;;
     --protected-containers) PROTECTED_CONTAINER_NAMES="${2:-}"; shift 2 ;;
     --target-user) TARGET_USER="${2:-}"; shift 2 ;;
     --source-root) SOURCE_ROOT="${2:-}"; shift 2 ;;
     --source-sha) SOURCE_SHA="${2:-}"; shift 2 ;;
     -h|--help)
-      echo "Usage: sudo $0 --public-key-file KEY --target NAME --deploy-root PATH --compose-project NAME --bind-host IP --published-port PORT --hunter-network NAME --image-repository NAME --environment NAME --protected-compose-projects CSV|NONE --protected-containers CSV|NONE --source-root PATH --source-sha SHA [--target-user USER]"
+      echo "Usage: sudo $0 --public-key-file KEY --target NAME --deploy-root PATH --compose-project NAME --bind-host IP --published-port PORT --hunter-network NAME --image-repository NAME --environment NAME --runtime-env-file PATH --protected-compose-projects CSV|NONE --protected-containers CSV|NONE --source-root PATH --source-sha SHA [--target-user USER]"
       exit 0
       ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
@@ -56,10 +58,12 @@ done
 [[ "$HUNTER_NETWORK" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || { echo "--hunter-network invalid" >&2; exit 10; }
 [[ "$IMAGE_REPOSITORY" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "--image-repository invalid" >&2; exit 10; }
 [[ "$DEPLOY_ENVIRONMENT" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "--environment invalid" >&2; exit 10; }
+[[ "$RUNTIME_ENV_FILE" == /* && "$RUNTIME_ENV_FILE" =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "--runtime-env-file invalid" >&2; exit 10; }
+[[ "$RUNTIME_ENV_FILE" == "$STAGING_ROOT/"* ]] || { echo "--runtime-env-file must stay inside deploy root" >&2; exit 10; }
 [[ "$PROTECTED_COMPOSE_PROJECTS" == "NONE" || "$PROTECTED_COMPOSE_PROJECTS" =~ ^[A-Za-z0-9_.-]+(,[A-Za-z0-9_.-]+)*$ ]] || { echo "--protected-compose-projects invalid" >&2; exit 10; }
 [[ "$PROTECTED_CONTAINER_NAMES" == "NONE" || "$PROTECTED_CONTAINER_NAMES" =~ ^[A-Za-z0-9_.-]+(,[A-Za-z0-9_.-]+)*$ ]] || { echo "--protected-containers invalid" >&2; exit 10; }
 STAGING_REPO="$STAGING_ROOT/repo"
-STAGING_ENV="$STAGING_ROOT/staging.env"
+STAGING_ENV="$RUNTIME_ENV_FILE"
 TARGET_CONFIG="$TARGET_CONFIG_DIR/apply-$TARGET.env"
 [[ -n "$PUBLIC_KEY_FILE" && -f "$PUBLIC_KEY_FILE" ]] || { echo "--public-key-file is required" >&2; exit 11; }
 id "$TARGET_USER" >/dev/null 2>&1 || { echo "target user does not exist: $TARGET_USER" >&2; exit 12; }
@@ -188,6 +192,7 @@ MUNSHI_APPLY_PUBLISHED_PORT=$PUBLISHED_PORT
 MUNSHI_HUNTER_NETWORK_NAME=$HUNTER_NETWORK
 MUNSHI_APPLY_IMAGE_REPOSITORY=$IMAGE_REPOSITORY
 MUNSHI_ENVIRONMENT=$DEPLOY_ENVIRONMENT
+MUNSHI_APPLY_RUNTIME_ENV_FILE=$RUNTIME_ENV_FILE
 MUNSHI_APPLY_PROTECTED_COMPOSE_PROJECTS=$PROTECTED_COMPOSE_PROJECTS
 MUNSHI_APPLY_PROTECTED_CONTAINER_NAMES=$PROTECTED_CONTAINER_NAMES
 EOF

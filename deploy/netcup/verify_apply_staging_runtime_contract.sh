@@ -14,6 +14,7 @@ IMAGE_REPOSITORY=""
 BIND_HOST=""
 PUBLISHED_PORT=""
 DEPLOY_ENVIRONMENT=""
+RUNTIME_ENV_FILE=""
 
 target_value() {
   local key="$1"
@@ -37,6 +38,7 @@ load_target_config() {
   HUNTER_NETWORK="$(target_value MUNSHI_HUNTER_NETWORK_NAME)"
   IMAGE_REPOSITORY="$(target_value MUNSHI_APPLY_IMAGE_REPOSITORY)"
   DEPLOY_ENVIRONMENT="$(target_value MUNSHI_ENVIRONMENT)"
+  RUNTIME_ENV_FILE="$(target_value MUNSHI_APPLY_RUNTIME_ENV_FILE)"
 
   [[ "$STAGING_ROOT" == /* && "$STAGING_ROOT" =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "invalid MUNSHI_APPLY_DEPLOY_ROOT" >&2; exit 7; }
   [[ "$PROJECT" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || { echo "invalid MUNSHI_APPLY_COMPOSE_PROJECT" >&2; exit 7; }
@@ -46,9 +48,11 @@ load_target_config() {
   [[ "$HUNTER_NETWORK" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || { echo "invalid MUNSHI_HUNTER_NETWORK_NAME" >&2; exit 7; }
   [[ "$IMAGE_REPOSITORY" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "invalid MUNSHI_APPLY_IMAGE_REPOSITORY" >&2; exit 7; }
   [[ "$DEPLOY_ENVIRONMENT" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "invalid MUNSHI_ENVIRONMENT" >&2; exit 7; }
+  [[ "$RUNTIME_ENV_FILE" == /* && "$RUNTIME_ENV_FILE" =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "invalid MUNSHI_APPLY_RUNTIME_ENV_FILE" >&2; exit 7; }
+  [[ "$RUNTIME_ENV_FILE" == "$STAGING_ROOT/"* ]] || { echo "MUNSHI_APPLY_RUNTIME_ENV_FILE must stay inside deployment root" >&2; exit 7; }
 
   STAGING_REPO="$STAGING_ROOT/repo"
-  STAGING_ENV="$STAGING_ROOT/staging.env"
+  STAGING_ENV="$RUNTIME_ENV_FILE"
 
   export MUNSHI_APPLY_COMPOSE_PROJECT="$PROJECT"
   export MUNSHI_APPLY_BIND_HOST="$BIND_HOST"
