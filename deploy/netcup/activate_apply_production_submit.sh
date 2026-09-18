@@ -18,6 +18,7 @@ done
 
 [[ -d "$REPO/.git" ]] || { echo "Apply production repo missing" >&2; exit 10; }
 [[ -f "$ENV_FILE" ]] || { echo "Apply production env missing" >&2; exit 11; }
+cd -- "$REPO"
 if [[ -z "$EXPECTED_SHA" ]]; then EXPECTED_SHA="$(git -c "safe.directory=$REPO" -C "$REPO" rev-parse HEAD)"; fi
 [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "expected SHA invalid" >&2; exit 12; }
 [[ "$(git -c "safe.directory=$REPO" -C "$REPO" rev-parse HEAD)" == "$EXPECTED_SHA" ]] || { echo "Apply production SHA mismatch" >&2; exit 13; }

@@ -87,3 +87,38 @@ def test_docker_python_heredocs_keep_stdin_open() -> None:
         for command in commands:
             args = shlex.split(command.split("<<", 1)[0])
             assert "-i" in args or "--interactive" in args, (relative, command)
+
+
+def test_production_helpers_leave_inherited_directory_before_compose(tmp_path) -> None:
+    import os
+
+    root = tmp_path / "production"
+    repo = root / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / "deploy/production").mkdir(parents=True)
+    (repo / "deploy/production/compose.yaml").write_text("services: {}\n")
+    (root / "runtime").mkdir()
+    (root / "runtime/production.env").write_text("")
+    verifier = root / "verifier"
+    verifier.write_text("#!/bin/sh\nexit 0\n")
+    verifier.chmod(0o700)
+    inherited = tmp_path / "unrelated-ssh-directory"
+    inherited.mkdir()
+    env = dict(os.environ, MUNSHI_APPLY_PRODUCTION_ROOT=str(root),
+               MUNSHI_APPLY_PRODUCTION_VERIFY=str(verifier))
+    for name in ("deploy_apply_production_release.sh",
+                 "verify_apply_production_runtime_contract.sh",
+                 "activate_apply_production_submit.sh"):
+        source = (ROOT / "deploy/netcup" / name).read_text()
+        anchor = 'cd -- "$REPO"'
+        assert source.count(anchor) == 1
+        assert source.index(anchor) < source.index('source "$ENV_FILE"')
+        assert source.index(anchor) < source.index("docker ")
+        # Execute the real argument/validation prefix from a foreign cwd.
+        # No Docker, production state, or network is involved in this fixture.
+        prefix = source.split(anchor, 1)[0] + anchor + '\nprintf "CWD=%s\\n" "$PWD"\n'
+        args = ["--commit", "a" * 40, "--branch", "release/fixture"] if name.startswith("deploy_") else []
+        result = subprocess.run(["bash", "-s", "--", *args], input=prefix,
+                                text=True, capture_output=True, cwd=inherited,
+                                env=env, check=True)
+        assert f"CWD={repo}\n" in result.stdout

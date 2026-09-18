@@ -46,6 +46,9 @@ git check-ref-format --branch "$branch" >/dev/null || { echo "--branch invalid" 
 
 mkdir -p "$ROOT" "$ROOT/runtime" "$ROOT/backups" "$ROOT/receipts" "$REPO"
 chmod 700 "$ROOT/runtime" "$ROOT/backups" "$ROOT/receipts"
+# SSH/runuser can inherit /root, which the deployment user cannot stat.
+# Compose resolves its schema and project paths relative to the process cwd.
+cd -- "$REPO"
 if [[ ! -d "$REPO/.git" ]]; then
   if find "$REPO" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
     echo "Apply production repo directory non-empty but not Git" >&2; exit 7

@@ -6,6 +6,7 @@ on:
     branches:
       - "release/apply-production-full-activation-v15-20260918"
       - "release/apply-production-full-activation-v18-stdin-20260918"
+      - "release/apply-production-full-activation-v19-cwd-20260918"
   pull_request:
     paths:
       - "deploy/production/**"
@@ -26,7 +27,7 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -44,3 +45,18 @@ jobs:
       - name: Run production activation regression suite
         run: |
           pytest -q             apps/native-host/tests/test_internal_http_policy.py             apps/native-host/tests/test_production_deployment_contract.py             apps/native-host/tests/test_hosted_submit_worker.py             apps/native-host/tests/test_hosted_submit_worker_resilience.py             apps/native-host/tests/test_production_submission_verification_determinism.py             apps/native-host/tests/test_submit_authority_inbox.py             apps/native-host/tests/test_submit_authority_contract_vector.py
+      - name: Build exact production image and run the deploy-time suite
+        run: |
+          docker build -f deploy/production/Dockerfile --build-arg MUNSHI_APPLY_COMMIT_SHA="$GITHUB_SHA" -t munshi-apply-ci:"$GITHUB_SHA" .
+          docker run --rm --network none --read-only \
+            --tmpfs /tmp:rw,nosuid,nodev,size=512m \
+            --tmpfs /home/munshiapply:rw,nosuid,nodev,size=128m \
+            --entrypoint python munshi-apply-ci:"$GITHUB_SHA" \
+            -m pytest -q \
+            /app/apps/native-host/tests/test_internal_http_policy.py \
+            /app/apps/native-host/tests/test_production_deployment_contract.py \
+            /app/apps/native-host/tests/test_hosted_submit_worker.py \
+            /app/apps/native-host/tests/test_hosted_submit_worker_resilience.py \
+            /app/apps/native-host/tests/test_production_submission_verification_determinism.py \
+            /app/apps/native-host/tests/test_submit_authority_inbox.py \
+            /app/apps/native-host/tests/test_submit_authority_contract_vector.py

@@ -22,6 +22,7 @@ done
 [[ -d "$REPO/.git" ]] || { echo "Apply production repo missing: $REPO" >&2; exit 10; }
 [[ -f "$ENV_FILE" && -r "$ENV_FILE" ]] || { echo "Apply production env missing: $ENV_FILE" >&2; exit 11; }
 [[ -f "$REPO/deploy/production/compose.yaml" ]] || { echo "Apply production compose missing" >&2; exit 12; }
+cd -- "$REPO"
 
 if [[ -z "$EXPECTED_SHA" ]]; then EXPECTED_SHA="$(git -c "safe.directory=$REPO" -C "$REPO" rev-parse HEAD)"; fi
 [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "expected SHA invalid" >&2; exit 13; }
