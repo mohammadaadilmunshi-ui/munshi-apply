@@ -241,7 +241,25 @@ PY
 fi
 
 git bundle verify "$bundle_file"
-bundle_ref="refs/remotes/origin/$branch"
+
+# Authenticated bundle producers may encode the selected branch either as a
+# local branch ref (refs/heads/...) or a remote-tracking ref
+# (refs/remotes/origin/...). Accept only those two exact representations of
+# the requested branch; never guess or fetch an unrelated ref.
+bundle_ref=""
+for candidate in "refs/heads/$branch" "refs/remotes/origin/$branch"; do
+  listed="$(git bundle list-heads "$bundle_file" "$candidate" || true)"
+  if [[ "$listed" =~ ^[0-9a-f]{40}[[:space:]]+$candidate$ ]]; then
+    bundle_ref="$candidate"
+    break
+  fi
+done
+[[ -n "$bundle_ref" ]] || {
+  echo "deployment bundle does not contain requested branch: $branch" >&2
+  git bundle list-heads "$bundle_file" >&2 || true
+  exit 19
+}
+
 deploy_ref="refs/remotes/github-apply-deploy/$target/$branch"
 git fetch --no-tags "$bundle_file" "+$bundle_ref:$deploy_ref"
 git cat-file -e "$commit^{commit}"
@@ -249,6 +267,7 @@ git merge-base --is-ancestor "$commit" "$deploy_ref" || {
   echo "requested SHA is not contained in bundled Apply source branch" >&2
   exit 20
 }
+echo "APPLY_BUNDLE_SOURCE_REF=$bundle_ref"
 echo "GITHUB_APPLY_STAGING_BUNDLE_IMPORT=PASS"
 
 write_receipt() {
