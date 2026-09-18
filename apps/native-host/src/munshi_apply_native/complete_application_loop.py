@@ -1334,6 +1334,8 @@ class CompleteApplicationLoopService:
 
         self._ensure_canonical_authority_claimed(review=review, plan_record=plan_record)
 
+        replay_command_id: str | None = None
+        replay_command: dict[str, Any] | None = None
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
@@ -1343,17 +1345,23 @@ class CompleteApplicationLoopService:
             if existing is not None:
                 if str(existing["review_id"]) != review_id:
                     raise ValueError("Submit idempotency key belongs to another review")
-                receipt = self._receipt_for_command(str(existing["command_id"]))
-                return receipt or {"command": dict(existing), "replayed": True}
-            prior_review = connection.execute(
-                "SELECT command_id FROM final_submit_commands "
-                "WHERE application_id=? AND plan_id=? AND review_id=?",
-                (review["application_id"], review["plan_id"], review_id),
-            ).fetchone()
-            if prior_review is not None:
-                receipt = self._receipt_for_command(str(prior_review["command_id"]))
-                return receipt or {"command_id": prior_review["command_id"], "replayed": True}
-            # Browser inspection runs outside the write lock. Re-read the exact
+                # Never open the receipt-delivery connection while this
+                # BEGIN IMMEDIATE write lock is still held. A racing worker may
+                # already have completed the one submit command and queued its
+                # verified receipt; replay that receipt only after this context
+                # commits/releases the lock.
+                replay_command_id = str(existing["command_id"])
+                replay_command = dict(existing)
+            if replay_command_id is None:
+                prior_review = connection.execute(
+                    "SELECT command_id FROM final_submit_commands "
+                    "WHERE application_id=? AND plan_id=? AND review_id=?",
+                    (review["application_id"], review["plan_id"], review_id),
+                ).fetchone()
+                if prior_review is not None:
+                    replay_command_id = str(prior_review["command_id"])
+            if replay_command_id is None:
+                # Browser inspection runs outside the write lock. Re-read the exact
             # approved state under that lock so revocation or replacement during
             # inspection cannot authorize the cached snapshot.
             locked_review = connection.execute(
@@ -1427,22 +1435,31 @@ class CompleteApplicationLoopService:
                 "browser_form_digest": review["browser_form_digest"],
                 "resume_digest": review["resume_digest"],
             }
-            connection.execute(
-                """INSERT INTO final_submit_commands(
-                       command_id,application_id,plan_id,session_id,review_id,idempotency_key,
-                       command_digest,state,issued_at
-                   ) VALUES (?,?,?,?,?,?,?,'SUBMITTING',?)""",
-                (
-                    command_id,
-                    review["application_id"],
-                    review["plan_id"],
-                    review["session_id"],
-                    review_id,
-                    key,
-                    _sha(command_payload),
-                    _now(),
-                ),
-            )
+                connection.execute(
+                    """INSERT INTO final_submit_commands(
+                           command_id,application_id,plan_id,session_id,review_id,idempotency_key,
+                           command_digest,state,issued_at
+                       ) VALUES (?,?,?,?,?,?,?,'SUBMITTING',?)""",
+                    (
+                        command_id,
+                        review["application_id"],
+                        review["plan_id"],
+                        review["session_id"],
+                        review_id,
+                        key,
+                        _sha(command_payload),
+                        _now(),
+                    ),
+                )
+
+        if replay_command_id is not None:
+            receipt = self._receipt_for_command(replay_command_id)
+            if receipt is not None:
+                return receipt
+            if replay_command is not None:
+                return {"command": replay_command, "replayed": True}
+            return {"command_id": replay_command_id, "replayed": True}
+
         session = self._transition(session, "SUBMITTING")
         self._record_event(
             session=session,
