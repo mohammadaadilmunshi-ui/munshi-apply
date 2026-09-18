@@ -26,47 +26,53 @@ def main() -> None:
     deploy = read("deploy/netcup/deploy_apply_staging_release.sh")
     verify = read("deploy/netcup/verify_apply_staging_runtime_contract.sh")
     installer = read("deploy/netcup/install_apply_staging_deploy_transport.sh")
+    compose = read("deploy/staging/compose.yaml")
 
     require(
         workflow,
         (
             "workflow_dispatch:",
-            "Exact 40-character Git SHA",
+            "deploy_target:",
+            "needs.validate-and-test.outputs.deploy_target",
+            "inputs.deploy_target",
+            "MUNSHI_DEPLOY_SSH_PRIVATE_KEY",
+            "MUNSHI_DEPLOY_KNOWN_HOSTS",
+            "MUNSHI_DEPLOY_HOST",
+            "MUNSHI_DEPLOY_USER",
+            "--target $DEPLOY_TARGET --commit $DEPLOY_SHA --branch $DEPLOY_BRANCH",
+            "DEPLOYED_TARGET=$DEPLOY_TARGET",
             "git merge-base --is-ancestor",
             "git bundle create",
             "git bundle verify",
-            "/opt/munshi/bin/deploy-apply-staging-release --commit $DEPLOY_SHA --branch $DEPLOY_BRANCH",
-            "NETCUP_APPLY_STAGING_SSH_PRIVATE_KEY",
-            "NETCUP_APPLY_STAGING_DEPLOY_USER",
-            "StrictHostKeyChecking=yes",
-            "environment: staging",
-            "group: munshi-apply-netcup-staging",
-            "RESULT=APPLY_STAGING_DEPLOYMENT_PASS",
         ),
-        "Apply staging workflow",
+        "Apply target workflow",
     )
     forbid(
         workflow,
         (
-            "deploy-production-release",
-            "/opt/munshi/bin/deploy-staging-release",
-            "NETCUP_SSH_PRIVATE_KEY",
+            "NETCUP_APPLY_STAGING_SSH_PRIVATE_KEY",
+            "NETCUP_APPLY_STAGING_DEPLOY_USER",
+            "environment: staging",
+            "group: munshi-apply-netcup-staging",
+            "feat/apply-staging-transport-bootstrap",
+            "munshi-apply-staging.bundle",
             "schedule:",
             "branches: [main]",
         ),
-        "Apply staging workflow",
+        "Apply target workflow",
     )
 
     require(
         gateway,
         (
             "SSH_ORIGINAL_COMMAND",
+            "--target\\ ",
             "([0-9a-f]{40})",
             'APPLY_STAGING_DEPLOY="/opt/munshi/bin/deploy-apply-staging-release"',
-            'exec "$APPLY_STAGING_DEPLOY" --commit "$commit" --branch "$branch"',
+            'exec "$APPLY_STAGING_DEPLOY" --target "$target" --commit "$commit" --branch "$branch"',
             "request rejected by MUNSHI Apply staging deployment gateway",
         ),
-        "Apply staging forced-command gateway",
+        "Apply forced-command gateway",
     )
     forbid(
         gateway,
@@ -77,52 +83,52 @@ def main() -> None:
             "bash -c",
             "sh -c",
         ),
-        "Apply staging forced-command gateway",
+        "Apply forced-command gateway",
     )
 
     require(
         deploy,
         (
-            'PROJECT="${MUNSHI_APPLY_STAGING_PROJECT:-munshi-apply-staging-v1}"',
-            'STAGING_ROOT="${MUNSHI_APPLY_STAGING_ROOT:-/home/munshi/munshi-apply-staging-v1}"',
-            'HUNTER_NETWORK="munshi-netcup-staging_application"',
+            "MUNSHI_APPLY_DEPLOY_TARGET_CONFIG_DIR",
+            '--target) target="${2:-}"',
+            'TARGET_CONFIG="$TARGET_CONFIG_DIR/apply-$target.env"',
+            "MUNSHI_APPLY_DEPLOY_ROOT",
+            "MUNSHI_APPLY_COMPOSE_PROJECT",
+            "MUNSHI_APPLY_BIND_HOST",
+            "MUNSHI_APPLY_PUBLISHED_PORT",
+            "MUNSHI_HUNTER_NETWORK_NAME",
+            "MUNSHI_APPLY_IMAGE_REPOSITORY",
+            "MUNSHI_ENVIRONMENT",
+            "MUNSHI_APPLY_RUNTIME_ENV_FILE",
+            "MUNSHI_APPLY_PROTECTED_COMPOSE_PROJECTS",
+            "MUNSHI_APPLY_PROTECTED_CONTAINER_NAMES",
             'flock -n 9',
             'timeout 120s cat > "$bundle_file"',
             'git bundle verify "$bundle_file"',
-            'git fetch --no-tags "$bundle_file" "+$bundle_ref:$deploy_ref"',
             'git merge-base --is-ancestor "$commit" "$deploy_ref"',
             'service in prepare-worker submit-worker',
             'source.backup(dest)',
             'PRAGMA quick_check',
-            'rollback_tag="munshi-apply-staging:rollback-$stamp"',
-            '"${compose[@]}" build apply',
-            '"${compose[@]}" up -d --no-deps --force-recreate apply',
-            '"$VERIFY" --expected-sha "$commit"',
+            'rollback_tag="$IMAGE_REPOSITORY:rollback-$stamp"',
+            '"$VERIFY" --target "$target" --expected-sha "$commit"',
             'hunter_snapshot_before="$(snapshot_hunter)"',
+            '"environment": environment',
+            '"deployment_target": target',
             '"production_deployment_performed": False',
             '"hunter_containers_recreated": False',
             '"final_submit_enabled": False',
-            'RESULT=APPLY_STAGING_DEPLOYMENT_PASS',
+            'echo "DEPLOYED_TARGET=$target"',
         ),
-        "Apply staging deploy wrapper",
-    )
-    forbid(
-        deploy,
-        (
-            "git fetch --prune origin",
-            'git fetch origin "$branch"',
-            "docker compose down",
-            "down -v",
-            "docker volume rm",
-            "MUNSHI_FINAL_SUBMIT_ENABLED=true",
-            "MUNSHI_APPLY_PRODUCTION_SUBMIT_AUTHORITY_ENABLED=true",
-        ),
-        "Apply staging deploy wrapper",
+        "Apply target deploy wrapper",
     )
 
     require(
         verify,
         (
+            "MUNSHI_APPLY_DEPLOY_TARGET_CONFIG_DIR",
+            '--target) target="${2:-}"',
+            'TARGET_CONFIG="$TARGET_CONFIG_DIR/apply-$target.env"',
+            "MUNSHI_APPLY_RUNTIME_ENV_FILE",
             '[[ -r "$STAGING_ENV" ]]',
             'repo_head="$(git -C "$STAGING_REPO" rev-parse --verify HEAD',
             '[[ "$repo_head" == "$EXPECTED_SHA" ]]',
@@ -132,48 +138,86 @@ def main() -> None:
             "hosted-submit-proof",
             "MUNSHI_FINAL_SUBMIT_ENABLED",
             "MUNSHI_APPLY_PRODUCTION_SUBMIT_AUTHORITY_ENABLED",
-            "127.0.0.1:19000",
+            '[[ "$port_binding" == "$BIND_HOST:$PUBLISHED_PORT" ]]',
+            'grep -Fq "$HUNTER_NETWORK"',
             "org.opencontainers.image.revision",
-            "munshi-netcup-staging_application",
             "APPLY_STAGING_DATABASE_HEALTH=PASS",
-            "RESULT=APPLY_STAGING_RUNTIME_CONTRACT_PASS",
         ),
-        "Apply staging runtime verifier",
+        "Apply target runtime verifier",
     )
 
     require(
         installer,
         (
             "--public-key-file",
+            "--target",
+            "--deploy-root",
+            "--runtime-env-file",
+            "--compose-project",
+            "--bind-host",
+            "--published-port",
+            "--hunter-network",
+            "--image-repository",
+            "--environment",
+            "--protected-compose-projects",
+            "--protected-containers",
             "--source-root",
             "--source-sha",
-            '[[ "$(git -C "$SOURCE_ROOT" rev-parse HEAD)" == "$SOURCE_SHA" ]]',
-            'KEY_COMMENT="munshi-github-actions-apply-staging-deploy"',
+            'TARGET_CONFIG="$TARGET_CONFIG_DIR/apply-$TARGET.env"',
+            "MUNSHI_APPLY_RUNTIME_ENV_FILE=$RUNTIME_ENV_FILE",
             'restrict,command="/opt/munshi/bin/github-apply-staging-deploy-gateway"',
-            "grep -v \" $KEY_COMMENT$\"",
-            "ssh-keygen -l",
-            "runuser -u \"$TARGET_USER\" -- docker info",
             "PRIVATE_KEY_INSTALLED_ON_SERVER=NO",
             "HUNTER_DEPLOY_KEY_CHANGED=NO",
             "PRODUCTION_DEPLOYMENT_PERFORMED=NO",
             "STAGING_DEPLOYMENT_PERFORMED=NO",
-            "RESULT=APPLY_STAGING_TRANSPORT_INSTALLED",
         ),
-        "Apply staging transport installer",
-    )
-    forbid(
-        installer,
-        (
-            "deploy-production-release",
-            "/opt/munshi/bin/deploy-staging-release",
-            "PRIVATE_KEY_INSTALLED_ON_SERVER=YES",
-            "docker compose up",
-            "docker compose down",
-        ),
-        "Apply staging transport installer",
+        "Apply target transport installer",
     )
 
-    print("APPLY_STAGING_TRANSPORT_STATIC_GUARD=PASS")
+    require(
+        compose,
+        (
+            "$" + "{MUNSHI_APPLY_IMAGE_REPOSITORY:?MUNSHI_APPLY_IMAGE_REPOSITORY is required}",
+            "$" + "{MUNSHI_APPLY_BIND_HOST:?MUNSHI_APPLY_BIND_HOST is required}",
+            "$" + "{MUNSHI_APPLY_PUBLISHED_PORT:?MUNSHI_APPLY_PUBLISHED_PORT is required}",
+            "$" + "{MUNSHI_HUNTER_NETWORK_NAME:?MUNSHI_HUNTER_NETWORK_NAME is required}",
+            "$" + "{MUNSHI_ENVIRONMENT:?MUNSHI_ENVIRONMENT is required}",
+        ),
+        "Apply target compose",
+    )
+
+    forbidden_target_literals = (
+        "munshi-apply-staging-v1",
+        "munshi-apply-staging_apply_data",
+        "munshi-netcup-staging_application",
+        "127.0.0.1:19000",
+        "munshi-netcup-shadow",
+        "munshi-staging-edge-caddy",
+    )
+    for label, text in (
+        ("workflow", workflow),
+        ("gateway", gateway),
+        ("deploy", deploy),
+        ("verify", verify),
+        ("installer", installer),
+        ("compose", compose),
+    ):
+        forbid(text, forbidden_target_literals, label)
+
+    for label, text in (("deploy", deploy), ("installer", installer)):
+        forbid(
+            text,
+            (
+                "docker compose down",
+                "down -v",
+                "docker volume rm",
+                "MUNSHI_FINAL_SUBMIT_ENABLED=true",
+                "MUNSHI_APPLY_PRODUCTION_SUBMIT_AUTHORITY_ENABLED=true",
+            ),
+            label,
+        )
+
+    print("APPLY_TARGET_TRANSPORT_STATIC_GUARD=PASS")
 
 
 if __name__ == "__main__":
