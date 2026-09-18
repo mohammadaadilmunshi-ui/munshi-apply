@@ -21,10 +21,11 @@ class Database:
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(self.path)
+        connection = sqlite3.connect(self.path, timeout=30.0)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA journal_mode = WAL")
+        connection.execute("PRAGMA busy_timeout = 30000")
         try:
             yield connection
             connection.commit()
@@ -218,62 +219,3 @@ class Database:
         event_id: str,
         *,
         failed_at: str,
-        next_retry_at: str | None,
-        error: str,
-        max_attempts: int,
-    ) -> str:
-        with self.connect() as connection:
-            row = connection.execute(
-                "SELECT attempt_count FROM outbox_events WHERE event_id = ?", (event_id,)
-            ).fetchone()
-            if row is None:
-                raise KeyError(f"Unknown outbox event: {event_id}")
-            status = "DEAD_LETTER" if row["attempt_count"] >= max_attempts else "RETRY"
-            connection.execute(
-                """
-                UPDATE outbox_events
-                SET delivery_status = ?, last_attempt_at = ?, next_retry_at = ?,
-                    last_error = ?
-                WHERE event_id = ?
-                """,
-                (
-                    status,
-                    failed_at,
-                    None if status == "DEAD_LETTER" else next_retry_at,
-                    error[:2000],
-                    event_id,
-                ),
-            )
-        return status
-
-    def outbox_counts(self) -> dict[str, int]:
-        statuses = ["PENDING", "IN_FLIGHT", "DELIVERED", "RETRY", "DEAD_LETTER"]
-        counts = {status: 0 for status in statuses}
-        with self.connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT delivery_status, COUNT(*) AS count
-                FROM outbox_events
-                GROUP BY delivery_status
-                """
-            )
-            for row in rows:
-                counts[row["delivery_status"]] = row["count"]
-        return counts
-
-    def health(self) -> dict[str, Any]:
-        with self.connect() as connection:
-            migration_count = connection.execute(
-                "SELECT COUNT(*) AS count FROM schema_migrations"
-            ).fetchone()["count"]
-            schema_version = connection.execute(
-                "SELECT migration FROM schema_migrations ORDER BY migration DESC LIMIT 1"
-            ).fetchone()["migration"]
-            connection.execute("SELECT 1").fetchone()
-        return {
-            "status": "healthy",
-            "database": "healthy",
-            "migration_count": migration_count,
-            "schema_version": schema_version,
-            "outbox": self.outbox_counts(),
-        }
