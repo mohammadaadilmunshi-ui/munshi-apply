@@ -43,6 +43,7 @@ from .hunter_submit_authority_client_v1 import (
     HunterSubmitAuthorityClient,
     SubmitAuthorizationClientError,
 )
+from .production_receipt_v1 import ProductionReceiptClient
 from .settings import Settings
 from .submit_authority_inbox_v1 import SubmitAuthorityInbox
 
@@ -463,6 +464,7 @@ def run_forever() -> None:
         database,
         adapter_factory=adapter_factory,
         authority_client=HunterSubmitAuthorityClient.from_environment(),
+        production_receipt_client=ProductionReceiptClient.from_environment(),
     )
     worker_id = str(
         os.getenv("MUNSHI_APPLY_SUBMIT_WORKER_ID")
