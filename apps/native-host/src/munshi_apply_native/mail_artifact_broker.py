@@ -10,6 +10,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from .internal_http_policy import internal_hunter_http_allowed
+
 
 class MailArtifactBrokerError(RuntimeError):
     pass
@@ -38,23 +40,6 @@ def _required(value: object, name: str) -> str:
     if not text:
         raise MailArtifactBrokerError(f"{name} is required")
     return text
-
-
-def _truthy(name: str) -> bool:
-    return str(os.getenv(name) or "").strip().casefold() in {"1", "true", "yes", "on"}
-
-
-def _internal_staging_http_allowed(normalized_url: str) -> bool:
-    parsed = urlparse(normalized_url)
-    return (
-        str(os.getenv("MUNSHI_ENVIRONMENT") or "").strip().casefold() == "staging"
-        and _truthy("MUNSHI_HUNTER_EXECUTION_BRIDGE_STAGING_HTTP_ENABLED")
-        and parsed.scheme == "http"
-        and parsed.hostname == "hunter"
-        and parsed.port == 8000
-        and not parsed.username
-        and not parsed.password
-    )
 
 
 def _service_material(
@@ -89,11 +74,11 @@ class MailArtifactBrokerClient:
         parsed = urlparse(normalized_url)
         if not parsed.hostname or not (
             parsed.scheme == "https"
-            or _internal_staging_http_allowed(normalized_url)
+            or internal_hunter_http_allowed(normalized_url)
         ):
             raise MailArtifactBrokerError(
                 "Mail artifact broker requires HTTPS except for the explicit "
-                "internal staging Hunter bridge"
+                "configured internal target Hunter bridge"
             )
         secret = hmac_secret.encode("utf-8")
         if len(secret) < 32:

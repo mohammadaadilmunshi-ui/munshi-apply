@@ -13,6 +13,8 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
+from .internal_http_policy import internal_hunter_http_allowed
+
 RECEIPT_VERSION = "munshi-production-submission-receipt-v1"
 REQUEST_VERSION = "munshi-application-execution-request-v1"
 RESPONSE_VERSION = "munshi-application-execution-response-v1"
@@ -21,18 +23,6 @@ PURPOSE = "PRODUCTION_RECEIPT_INGEST"
 
 class ProductionReceiptError(RuntimeError):
     pass
-
-
-def _truthy(name: str) -> bool:
-    return str(os.getenv(name) or "").strip().casefold() in {"1", "true", "yes", "on"}
-
-
-def _internal_staging_http_allowed(base_url: str) -> bool:
-    return (
-        str(os.getenv("MUNSHI_ENVIRONMENT") or "").strip().casefold() == "staging"
-        and _truthy("MUNSHI_HUNTER_EXECUTION_BRIDGE_STAGING_HTTP_ENABLED")
-        and base_url == "http://hunter:8000"
-    )
 
 
 def _canonical(value: Mapping[str, Any]) -> bytes:
@@ -168,11 +158,11 @@ class ProductionReceiptClient:
             self.base_url.startswith("https://")
             or self.base_url.startswith("http://127.0.0.1")
             or self.base_url.startswith("http://localhost")
-            or _internal_staging_http_allowed(self.base_url)
+            or internal_hunter_http_allowed(self.base_url)
         ):
             raise ProductionReceiptError(
                 "Hunter receipt endpoint must use HTTPS except localhost "
-                "or the explicit internal staging bridge"
+                "or the explicit configured internal target bridge"
             )
         if len(self.secret) < 16:
             raise ProductionReceiptError("Apply handoff HMAC secret is not configured")

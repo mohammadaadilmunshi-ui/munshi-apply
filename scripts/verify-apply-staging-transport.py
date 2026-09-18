@@ -182,6 +182,8 @@ def main() -> None:
             "$" + "{MUNSHI_APPLY_PUBLISHED_PORT:?MUNSHI_APPLY_PUBLISHED_PORT is required}",
             "$" + "{MUNSHI_HUNTER_NETWORK_NAME:?MUNSHI_HUNTER_NETWORK_NAME is required}",
             "$" + "{MUNSHI_ENVIRONMENT:?MUNSHI_ENVIRONMENT is required}",
+            "MUNSHI_HUNTER_INTERNAL_HTTP_ENABLED",
+            "MUNSHI_HUNTER_INTERNAL_HTTP_BASE_URL",
         ),
         "Apply target compose",
     )
@@ -193,6 +195,7 @@ def main() -> None:
         "127.0.0.1:19000",
         "munshi-netcup-shadow",
         "munshi-staging-edge-caddy",
+        "MUNSHI_HUNTER_EXECUTION_BRIDGE_STAGING_HTTP_ENABLED",
     )
     for label, text in (
         ("workflow", workflow),
