@@ -213,6 +213,48 @@ def test_real_chrome_prepares_exact_artifact_and_generic_navigation_refuses_subm
         browser.close()
 
 
+def test_real_chrome_uploads_resume_to_hidden_native_file_input():
+    browser_path = resolve_browser_executable()
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True, executable_path=browser_path)
+        page = browser.new_page()
+        plan = _plan()
+        fixture = (
+            _root()
+            / "apps/native-host/tests/browser/fixtures/greenhouse_like_application.html"
+        )
+        html = fixture.read_text().replace(
+            'id="resume"\n            name="resume"',
+            'id="resume"\n            style="display:none"\n            name="resume"',
+            1,
+        )
+        _route(page, html, correlated=True)
+        page.goto(JOB_URL, wait_until="domcontentloaded")
+        adapter = _adapter(page, plan)
+
+        scanned = adapter._scan()
+        resume_control = next(
+            control
+            for control in scanned["page"]["controls"]
+            if control.get("inputType") == "file"
+        )
+        assert resume_control["visible"] is False
+        assert "resume" in str(resume_control.get("label") or "").casefold()
+
+        prepared = adapter.prepare_form(
+            plan=plan,
+            checkpoint=None,
+            resolved_values={},
+        )
+
+        assert prepared["resume_uploaded"] is True
+        assert prepared["resume_sha256"] == RESUME_SHA
+        assert page.locator("#resume").evaluate(
+            "element => element.files && element.files.length"
+        ) == 1
+        browser.close()
+
+
 def test_dedicated_submit_requires_correlated_provider_response_for_verified():
     browser_path = resolve_browser_executable()
     with playwright.sync_playwright() as pw:
