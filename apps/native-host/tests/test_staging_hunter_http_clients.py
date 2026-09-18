@@ -7,13 +7,13 @@ from munshi_apply_native.hunter_submit_authority_client_v1 import (
     HunterSubmitAuthorityClient,
     SubmitAuthorizationClientError,
 )
-from munshi_apply_native.production_receipt_v1 import (
-    ProductionReceiptClient,
-    ProductionReceiptError,
-)
 from munshi_apply_native.mail_artifact_broker import (
     MailArtifactBrokerClient,
     MailArtifactBrokerError,
+)
+from munshi_apply_native.production_receipt_v1 import (
+    ProductionReceiptClient,
+    ProductionReceiptError,
 )
 
 TEST_HMAC_KEY_MATERIAL = "staging-only-test-material-0123456789abcdef"
