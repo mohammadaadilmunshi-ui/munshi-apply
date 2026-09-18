@@ -22,6 +22,18 @@ class SubmitAuthorizationClientError(RuntimeError):
     pass
 
 
+def _truthy(name: str) -> bool:
+    return str(os.getenv(name) or "").strip().casefold() in {"1", "true", "yes", "on"}
+
+
+def _internal_staging_http_allowed(base_url: str) -> bool:
+    return (
+        str(os.getenv("MUNSHI_ENVIRONMENT") or "").strip().casefold() == "staging"
+        and _truthy("MUNSHI_HUNTER_EXECUTION_BRIDGE_STAGING_HTTP_ENABLED")
+        and base_url == "http://hunter:8000"
+    )
+
+
 def _canonical(value: Mapping[str, Any]) -> bytes:
     return json.dumps(
         dict(value), sort_keys=True, separators=(",", ":"), ensure_ascii=True
@@ -57,9 +69,11 @@ class HunterSubmitAuthorityClient:
             self.base_url.startswith("https://")
             or self.base_url.startswith("http://127.0.0.1")
             or self.base_url.startswith("http://localhost")
+            or _internal_staging_http_allowed(self.base_url)
         ):
             raise SubmitAuthorizationClientError(
-                "Hunter control endpoint must use HTTPS except on localhost"
+                "Hunter control endpoint must use HTTPS except on localhost "
+                "or the explicit internal staging bridge"
             )
         if len(self.secret) < 16:
             raise SubmitAuthorizationClientError(
