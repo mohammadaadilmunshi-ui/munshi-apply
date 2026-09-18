@@ -182,6 +182,7 @@ def main() -> None:
             "$" + "{MUNSHI_ENVIRONMENT:?MUNSHI_ENVIRONMENT is required}",
             "MUNSHI_HUNTER_INTERNAL_HTTP_ENABLED",
             "MUNSHI_HUNTER_INTERNAL_HTTP_BASE_URL",
+            "munshi_apply_native.hosted_trust_worker",
         ),
         "Apply target compose",
     )

@@ -64,7 +64,7 @@ services:
     depends_on:
       apply:
         condition: service_healthy
-    command: ["python", "-m", "munshi_apply_native.hosted_prepare_worker"]
+    command: ["python", "-m", "munshi_apply_native.hosted_trust_worker"]
     environment:
       MUNSHI_RUNTIME_ROOT: /data
       MUNSHI_DATABASE_PATH: /data/munshi-apply.sqlite
