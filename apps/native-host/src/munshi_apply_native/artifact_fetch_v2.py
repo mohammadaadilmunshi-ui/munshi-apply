@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 import httpx
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from .internal_http_policy import internal_hunter_http_allowed
 
@@ -201,10 +202,12 @@ class HunterExecutionBridgeClient:
         return dict(config)
 
     def anthropic_api_key(self, plan: dict[str, Any]) -> str:
-        """Resolve the dashboard-vault Anthropic key server-to-server only.
+        """Resolve the dashboard-vault Anthropic key only inside Apply.
 
-        The value is returned only to the Apply process over the signed execution
-        bridge. It is never persisted by this client or exposed to Chromium.
+        Hunter AES-GCM encrypts the credential response with a per-request key
+        derived from the already-shared execution-bridge HMAC secret. This keeps
+        the key confidential even when an explicitly configured private Docker
+        bridge uses HTTP instead of TLS.
         """
         purpose = PURPOSE_AUTOAPPLY_CREDENTIAL
         p = self._payload(plan, purpose)
@@ -214,20 +217,36 @@ class HunterExecutionBridgeClient:
             content=body,
             headers=self._headers(p, body),
         )
-        raw = self._verify(response=response, payload=p, purpose=purpose)
+        envelope = self._verify(response=response, payload=p, purpose=purpose)
         if (
             response.headers.get("X-Munshi-Credential-Type")
             != "autoapply_anthropic_api_key"
+            or response.headers.get("X-Munshi-Credential-Encryption") != "aes-gcm-v1"
             or response.headers.get("X-Munshi-Submission-Authority") != "false"
         ):
             raise RuntimeError("Hunter AutoApply credential response binding mismatch")
-        if not raw or len(raw) > 16384:
-            raise RuntimeError("Hunter AutoApply credential is unavailable")
+        if len(envelope) < 29 or len(envelope) > 16448:
+            raise RuntimeError("Hunter AutoApply credential envelope is invalid")
+
+        nonce, ciphertext = envelope[:12], envelope[12:]
+        key = hmac.new(
+            self.secret,
+            (
+                f"autoapply-credential:{p['request_id']}:{p['plan_digest']}"
+            ).encode("utf-8"),
+            hashlib.sha256,
+        ).digest()
+        aad = (
+            f"{p['request_id']}.{p['plan_digest']}.autoapply_anthropic_api_key"
+        ).encode("utf-8")
         try:
+            raw = AESGCM(key).decrypt(nonce, ciphertext, aad)
             value = raw.decode("utf-8").strip()
-        except UnicodeDecodeError as error:
-            raise RuntimeError("Hunter AutoApply credential encoding is invalid") from error
-        if not value:
+        except Exception as error:
+            raise RuntimeError(
+                "Hunter AutoApply credential envelope could not be decrypted"
+            ) from error
+        if not value or len(value) > 16384:
             raise RuntimeError("Hunter AutoApply credential is unavailable")
         return value
 
