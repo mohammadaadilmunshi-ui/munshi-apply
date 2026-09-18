@@ -50,6 +50,33 @@ class _Teach:
         return {"queued": True}
 
 
+class _Recipes:
+    def __init__(self, recipe=None, *, lookup_error=None, record_error=None):
+        self.recipe = recipe
+        self.lookup_error = lookup_error
+        self.record_error = record_error
+        self.lookups = []
+        self.outcomes = []
+
+    def lookup(self, payload):
+        self.lookups.append(payload)
+        if self.lookup_error:
+            raise self.lookup_error
+        return self.recipe
+
+    def record_outcome(self, payload):
+        self.outcomes.append(payload)
+        if self.record_error:
+            raise self.record_error
+        return {"state": "PROMOTED"}
+
+
+class _TeachWithRecipes(_Teach):
+    def __init__(self, recipes, error=None):
+        super().__init__(error=error)
+        self.recipes = recipes
+
+
 class _BlockingTeach:
     def __init__(self):
         self.started = threading.Event()
@@ -199,6 +226,124 @@ def test_verified_recovery_teaches_without_answer_leak(monkeypatch):
     assert len(teach.lessons) == 1
     assert teach.lessons[0]["verifiedSuccess"] is True
     assert teach.lessons[0]["actions"] == fallback.proposal["actions"]
+
+
+def test_promoted_recipe_runs_before_sonnet(monkeypatch):
+    monkeypatch.setenv("MUNSHI_APPLY_NORMAL_ANSWER_AUTOFILL_ENABLED", "true")
+    recipe = {
+        "recipeId": "recipe-promoted-1",
+        "state": "PROMOTED",
+        "actions": [
+            {"type": "FOCUS"},
+            {"type": "TYPE", "valueSource": "ANSWER"},
+        ],
+    }
+    recipes = _Recipes(recipe)
+    teach = _TeachWithRecipes(recipes)
+    fallback = _Fallback()
+    adapter = _adapter(fallback, teach, dispatcher=lambda task: task())
+    initial = _unresolved()
+    verified = {"unresolved": [], "validation_errors": []}
+    calls = []
+
+    def deterministic(_self, **_kwargs):
+        calls.append(1)
+        return initial if len(calls) == 1 else verified
+
+    monkeypatch.setattr(PlanBrowserAdapter, "prepare_form", deterministic)
+    monkeypatch.setattr(adapter, "_scan", lambda: _scan())
+    executed = []
+    monkeypatch.setattr(adapter, "_execute_actions", lambda **kwargs: executed.append(kwargs))
+    monkeypatch.setattr(adapter, "_field_satisfied", lambda _control_id: True)
+
+    result = adapter.prepare_form(
+        plan=_plan(),
+        checkpoint=None,
+        resolved_values={"first_name": "Aadil"},
+    )
+
+    assert result is verified
+    assert len(recipes.lookups) == 1
+    assert len(executed) == 1
+    assert executed[0]["actions"] == recipe["actions"]
+    assert fallback.payloads == []
+    assert len(recipes.outcomes) == 1
+    assert recipes.outcomes[0]["success"] is True
+    assert teach.lessons == []
+
+
+def test_failed_promoted_recipe_uses_sonnet_same_run_and_reteaches(monkeypatch):
+    monkeypatch.setenv("MUNSHI_APPLY_NORMAL_ANSWER_AUTOFILL_ENABLED", "true")
+    recipe = {
+        "recipeId": "recipe-promoted-old",
+        "state": "PROMOTED",
+        "actions": [{"type": "CLICK"}],
+    }
+    recipes = _Recipes(recipe)
+    teach = _TeachWithRecipes(recipes)
+    fallback = _Fallback()
+    adapter = _adapter(fallback, teach, dispatcher=lambda task: task())
+    initial = _unresolved()
+    verified = {"unresolved": [], "validation_errors": []}
+    deterministic_calls = []
+
+    def deterministic(_self, **_kwargs):
+        deterministic_calls.append(1)
+        return initial if len(deterministic_calls) == 1 else verified
+
+    monkeypatch.setattr(PlanBrowserAdapter, "prepare_form", deterministic)
+    monkeypatch.setattr(adapter, "_scan", lambda: _scan())
+    executions = []
+    monkeypatch.setattr(adapter, "_execute_actions", lambda **kwargs: executions.append(kwargs))
+    satisfied = iter([False, True])
+    monkeypatch.setattr(adapter, "_field_satisfied", lambda _control_id: next(satisfied))
+
+    result = adapter.prepare_form(
+        plan=_plan(),
+        checkpoint=None,
+        resolved_values={"first_name": "Aadil"},
+    )
+
+    assert result is verified
+    assert len(executions) == 2
+    assert executions[0]["actions"] == recipe["actions"]
+    assert executions[1]["actions"] == fallback.proposal["actions"]
+    assert len(recipes.outcomes) == 1
+    assert recipes.outcomes[0]["success"] is False
+    assert len(fallback.payloads) == 1
+    assert len(teach.lessons) == 1
+    assert teach.lessons[0]["teacherKind"] == "MODEL"
+    assert teach.lessons[0]["verifiedSuccess"] is True
+    assert teach.lessons[0]["actions"] == fallback.proposal["actions"]
+
+
+def test_teach_recipe_store_failure_still_allows_sonnet_recovery(monkeypatch):
+    monkeypatch.setenv("MUNSHI_APPLY_NORMAL_ANSWER_AUTOFILL_ENABLED", "true")
+    recipes = _Recipes(lookup_error=RuntimeError("teach database unavailable"))
+    teach = _TeachWithRecipes(recipes)
+    fallback = _Fallback()
+    adapter = _adapter(fallback, teach, dispatcher=lambda task: task())
+    initial = _unresolved()
+    verified = {"unresolved": [], "validation_errors": []}
+    calls = []
+
+    def deterministic(_self, **_kwargs):
+        calls.append(1)
+        return initial if len(calls) == 1 else verified
+
+    monkeypatch.setattr(PlanBrowserAdapter, "prepare_form", deterministic)
+    _make_recovery_succeed(monkeypatch, adapter)
+
+    result = adapter.prepare_form(
+        plan=_plan(),
+        checkpoint=None,
+        resolved_values={"first_name": "Aadil"},
+    )
+
+    assert result is verified
+    assert len(recipes.lookups) == 1
+    assert len(fallback.payloads) == 1
+    assert len(teach.lessons) == 1
 
 
 def test_teach_capture_is_dispatched_off_critical_path(monkeypatch):
