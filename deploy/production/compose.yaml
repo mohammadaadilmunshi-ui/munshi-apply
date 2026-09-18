@@ -1,0 +1,110 @@
+services:
+  apply:
+    build:
+      context: ../..
+      dockerfile: deploy/production/Dockerfile
+      args:
+        MUNSHI_APPLY_COMMIT_SHA: ${MUNSHI_APPLY_DEPLOY_SHA:?MUNSHI_APPLY_DEPLOY_SHA is required}
+    image: ${MUNSHI_APPLY_IMAGE_REPOSITORY:?MUNSHI_APPLY_IMAGE_REPOSITORY is required}:${MUNSHI_APPLY_IMAGE_TAG:-local}
+    restart: unless-stopped
+    environment:
+      MUNSHI_RUNTIME_ROOT: /data
+      MUNSHI_DATABASE_PATH: /data/munshi-apply.sqlite
+      MUNSHI_MIGRATIONS_PATH: /app/migrations
+      MUNSHI_BROWSER_EXECUTABLE: /usr/bin/chromium
+      MUNSHI_ENVIRONMENT: production
+      MUNSHI_APPLY_COMMAND_SECRET: "${MUNSHI_APPLY_COMMAND_SECRET:?MUNSHI_APPLY_COMMAND_SECRET is required}"
+      MUNSHI_APPLY_HANDOFF_HMAC_SECRET: "${MUNSHI_APPLY_HANDOFF_HMAC_SECRET:?MUNSHI_APPLY_HANDOFF_HMAC_SECRET is required}"
+      MUNSHI_PRODUCTION_SUBMIT_AUTH_HMAC_SECRET: "${MUNSHI_PRODUCTION_SUBMIT_AUTH_HMAC_SECRET:?MUNSHI_PRODUCTION_SUBMIT_AUTH_HMAC_SECRET is required}"
+      MUNSHI_APPLY_LIVE_HANDOFF_ENABLED: "${MUNSHI_APPLY_LIVE_HANDOFF_ENABLED:-true}"
+      MUNSHI_APPLY_BACKGROUND_PREPARE_ENABLED: "${MUNSHI_APPLY_BACKGROUND_PREPARE_ENABLED:-true}"
+      MUNSHI_FINAL_REVIEW_ENABLED: "${MUNSHI_FINAL_REVIEW_ENABLED:-true}"
+      MUNSHI_FINAL_SUBMIT_ENABLED: "false"
+      MUNSHI_APPLY_PRODUCTION_SUBMIT_AUTHORITY_ENABLED: "${MUNSHI_APPLY_PRODUCTION_SUBMIT_AUTHORITY_ENABLED:-false}"
+    ports:
+      - "${MUNSHI_APPLY_BIND_HOST:-127.0.0.1}:${MUNSHI_APPLY_PUBLISHED_PORT:-8505}:8000"
+    networks:
+      hunter_internal:
+        aliases: [apply]
+    volumes:
+      - apply_data:/data
+    shm_size: "1gb"
+    healthcheck:
+      test: ["CMD","python","-c","import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 15s
+
+  prepare-worker:
+    profiles: ["hosted-prepare"]
+    image: ${MUNSHI_APPLY_IMAGE_REPOSITORY:?MUNSHI_APPLY_IMAGE_REPOSITORY is required}:${MUNSHI_APPLY_IMAGE_TAG:-local}
+    restart: unless-stopped
+    depends_on:
+      apply:
+        condition: service_healthy
+    command: ["python","-m","munshi_apply_native.hosted_trust_worker"]
+    environment:
+      MUNSHI_RUNTIME_ROOT: /data
+      MUNSHI_DATABASE_PATH: /data/munshi-apply.sqlite
+      MUNSHI_MIGRATIONS_PATH: /app/migrations
+      MUNSHI_BROWSER_EXECUTABLE: /usr/bin/chromium
+      MUNSHI_ENVIRONMENT: production
+      MUNSHI_APPLY_HANDOFF_HMAC_SECRET: "${MUNSHI_APPLY_HANDOFF_HMAC_SECRET:?MUNSHI_APPLY_HANDOFF_HMAC_SECRET is required}"
+      MUNSHI_HUNTER_EXECUTION_BRIDGE_BASE_URL: "${MUNSHI_HUNTER_EXECUTION_BRIDGE_BASE_URL:-http://hunter:8000}"
+      MUNSHI_HUNTER_BASE_URL: "${MUNSHI_HUNTER_EXECUTION_BRIDGE_BASE_URL:-http://hunter:8000}"
+      MUNSHI_PRODUCTION_INTERNAL_BRIDGE_ENABLED: "true"
+      MUNSHI_HUNTER_INTERNAL_HTTP_ENABLED: "true"
+      MUNSHI_HUNTER_INTERNAL_HTTP_BASE_URL: "${MUNSHI_HUNTER_EXECUTION_BRIDGE_BASE_URL:-http://hunter:8000}"
+      MUNSHI_APPLY_BACKGROUND_PREPARE_ENABLED: "true"
+      MUNSHI_APPLY_HOSTED_PREPARE_WORKER_ENABLED: "true"
+      MUNSHI_APPLY_RESUME_UPLOAD_ENABLED: "true"
+      MUNSHI_APPLY_NORMAL_ANSWER_AUTOFILL_ENABLED: "true"
+      MUNSHI_FINAL_REVIEW_ENABLED: "false"
+      MUNSHI_FINAL_SUBMIT_ENABLED: "false"
+    networks: [hunter_internal]
+    volumes:
+      - apply_data:/data
+    shm_size: "1gb"
+
+  submit-worker:
+    profiles: ["hosted-submit"]
+    image: ${MUNSHI_APPLY_IMAGE_REPOSITORY:?MUNSHI_APPLY_IMAGE_REPOSITORY is required}:${MUNSHI_APPLY_IMAGE_TAG:-local}
+    restart: unless-stopped
+    depends_on:
+      apply:
+        condition: service_healthy
+    command: ["python","-m","munshi_apply_native.hosted_submit_worker"]
+    environment:
+      MUNSHI_RUNTIME_ROOT: /data
+      MUNSHI_DATABASE_PATH: /data/munshi-apply.sqlite
+      MUNSHI_MIGRATIONS_PATH: /app/migrations
+      MUNSHI_BROWSER_EXECUTABLE: /usr/bin/chromium
+      MUNSHI_ENVIRONMENT: production
+      MUNSHI_APPLY_HANDOFF_HMAC_SECRET: "${MUNSHI_APPLY_HANDOFF_HMAC_SECRET:?MUNSHI_APPLY_HANDOFF_HMAC_SECRET is required}"
+      MUNSHI_PRODUCTION_SUBMIT_AUTH_HMAC_SECRET: "${MUNSHI_PRODUCTION_SUBMIT_AUTH_HMAC_SECRET:?MUNSHI_PRODUCTION_SUBMIT_AUTH_HMAC_SECRET is required}"
+      MUNSHI_PRODUCTION_RECEIPT_HMAC_SECRET: "${MUNSHI_PRODUCTION_RECEIPT_HMAC_SECRET:?MUNSHI_PRODUCTION_RECEIPT_HMAC_SECRET is required}"
+      MUNSHI_HUNTER_EXECUTION_BRIDGE_BASE_URL: "${MUNSHI_HUNTER_EXECUTION_BRIDGE_BASE_URL:-http://hunter:8000}"
+      MUNSHI_HUNTER_BASE_URL: "${MUNSHI_HUNTER_EXECUTION_BRIDGE_BASE_URL:-http://hunter:8000}"
+      MUNSHI_PRODUCTION_INTERNAL_BRIDGE_ENABLED: "true"
+      MUNSHI_HUNTER_INTERNAL_HTTP_ENABLED: "true"
+      MUNSHI_HUNTER_INTERNAL_HTTP_BASE_URL: "${MUNSHI_HUNTER_EXECUTION_BRIDGE_BASE_URL:-http://hunter:8000}"
+      MUNSHI_APPLY_SUBMIT_POLL_SECONDS: "${MUNSHI_APPLY_SUBMIT_POLL_SECONDS:-1}"
+      MUNSHI_APPLY_HOSTED_SUBMIT_WORKER_ENABLED: "true"
+      MUNSHI_FINAL_REVIEW_ENABLED: "true"
+      MUNSHI_FINAL_SUBMIT_ENABLED: "true"
+      MUNSHI_APPLY_PRODUCTION_SUBMIT_AUTHORITY_ENABLED: "true"
+      MUNSHI_APPLY_RESUME_UPLOAD_ENABLED: "true"
+      MUNSHI_APPLY_NORMAL_ANSWER_AUTOFILL_ENABLED: "true"
+    networks: [hunter_internal]
+    volumes:
+      - apply_data:/data
+    shm_size: "1gb"
+
+networks:
+  hunter_internal:
+    external: true
+    name: ${MUNSHI_HUNTER_NETWORK_NAME:?MUNSHI_HUNTER_NETWORK_NAME is required}
+
+volumes:
+  apply_data:
