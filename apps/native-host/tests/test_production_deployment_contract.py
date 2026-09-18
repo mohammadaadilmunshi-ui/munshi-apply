@@ -99,9 +99,10 @@ def test_production_helpers_leave_inherited_directory_before_compose(tmp_path) -
     (repo / "deploy/production/compose.yaml").write_text("services: {}\n")
     (root / "runtime").mkdir()
     (root / "runtime/production.env").write_text("")
-    verifier = root / "verifier"
-    verifier.write_text("#!/bin/sh\nexit 0\n")
-    verifier.chmod(0o700)
+    # /tmp may be mounted noexec in the deployment's read-only test container.
+    # This fixture only checks that the helper validates an executable verifier;
+    # it never invokes the verifier, so use the existing harmless system binary.
+    verifier = Path("/bin/true")
     inherited = tmp_path / "unrelated-ssh-directory"
     inherited.mkdir()
     env = dict(os.environ, MUNSHI_APPLY_PRODUCTION_ROOT=str(root),
