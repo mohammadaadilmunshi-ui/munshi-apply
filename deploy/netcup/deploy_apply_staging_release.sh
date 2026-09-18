@@ -2,14 +2,63 @@
 set -Eeuo pipefail
 umask 077
 
+TARGET_CONFIG_DIR="${MUNSHI_APPLY_DEPLOY_TARGET_CONFIG_DIR:-/opt/munshi/deploy-targets}"
+target=""
+TARGET_CONFIG=""
 PROJECT=""
-STAGING_ROOT="${MUNSHI_APPLY_STAGING_ROOT:-/home/munshi/munshi-apply-staging-v1}"
-STAGING_REPO="$STAGING_ROOT/repo"
-STAGING_ENV="$STAGING_ROOT/staging.env"
-VERIFY="/opt/munshi/bin/verify-apply-staging-runtime-contract"
+STAGING_ROOT=""
+STAGING_REPO=""
+STAGING_ENV=""
 HUNTER_NETWORK=""
 IMAGE_REPOSITORY=""
-LOCK_FILE="$STAGING_ROOT/runtime/deploy.lock"
+BIND_HOST=""
+PUBLISHED_PORT=""
+DEPLOY_ENVIRONMENT=""
+
+target_value() {
+  local key="$1"
+  local line
+  line="$(grep -E "^${key}=" "$TARGET_CONFIG" | tail -n1 || true)"
+  [[ -n "$line" ]] || { echo "deployment target is missing $key: $TARGET_CONFIG" >&2; exit 7; }
+  local value="${line#*=}"
+  [[ -n "$value" ]] || { echo "deployment target has empty $key: $TARGET_CONFIG" >&2; exit 7; }
+  printf '%s' "$value"
+}
+
+load_target_config() {
+  [[ "$target" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "--target invalid" >&2; exit 4; }
+  TARGET_CONFIG="$TARGET_CONFIG_DIR/apply-$target.env"
+  [[ -f "$TARGET_CONFIG" && -r "$TARGET_CONFIG" ]] || { echo "Apply deployment target config missing: $TARGET_CONFIG" >&2; exit 7; }
+
+  STAGING_ROOT="$(target_value MUNSHI_APPLY_DEPLOY_ROOT)"
+  PROJECT="$(target_value MUNSHI_APPLY_COMPOSE_PROJECT)"
+  BIND_HOST="$(target_value MUNSHI_APPLY_BIND_HOST)"
+  PUBLISHED_PORT="$(target_value MUNSHI_APPLY_PUBLISHED_PORT)"
+  HUNTER_NETWORK="$(target_value MUNSHI_HUNTER_NETWORK_NAME)"
+  IMAGE_REPOSITORY="$(target_value MUNSHI_APPLY_IMAGE_REPOSITORY)"
+  DEPLOY_ENVIRONMENT="$(target_value MUNSHI_ENVIRONMENT)"
+
+  [[ "$STAGING_ROOT" == /* && "$STAGING_ROOT" =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "invalid MUNSHI_APPLY_DEPLOY_ROOT" >&2; exit 7; }
+  [[ "$PROJECT" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || { echo "invalid MUNSHI_APPLY_COMPOSE_PROJECT" >&2; exit 7; }
+  [[ "$BIND_HOST" =~ ^[0-9A-Fa-f:.]+$ ]] || { echo "invalid MUNSHI_APPLY_BIND_HOST" >&2; exit 7; }
+  [[ "$PUBLISHED_PORT" =~ ^[0-9]{1,5}$ ]] || { echo "invalid MUNSHI_APPLY_PUBLISHED_PORT" >&2; exit 7; }
+  (( 10#$PUBLISHED_PORT >= 1 && 10#$PUBLISHED_PORT <= 65535 )) || { echo "MUNSHI_APPLY_PUBLISHED_PORT out of range" >&2; exit 7; }
+  [[ "$HUNTER_NETWORK" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || { echo "invalid MUNSHI_HUNTER_NETWORK_NAME" >&2; exit 7; }
+  [[ "$IMAGE_REPOSITORY" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "invalid MUNSHI_APPLY_IMAGE_REPOSITORY" >&2; exit 7; }
+  [[ "$DEPLOY_ENVIRONMENT" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "invalid MUNSHI_ENVIRONMENT" >&2; exit 7; }
+
+  STAGING_REPO="$STAGING_ROOT/repo"
+  STAGING_ENV="$STAGING_ROOT/staging.env"
+
+  export MUNSHI_APPLY_COMPOSE_PROJECT="$PROJECT"
+  export MUNSHI_APPLY_BIND_HOST="$BIND_HOST"
+  export MUNSHI_APPLY_PUBLISHED_PORT="$PUBLISHED_PORT"
+  export MUNSHI_HUNTER_NETWORK_NAME="$HUNTER_NETWORK"
+  export MUNSHI_APPLY_IMAGE_REPOSITORY="$IMAGE_REPOSITORY"
+  export MUNSHI_ENVIRONMENT="$DEPLOY_ENVIRONMENT"
+}
+VERIFY="/opt/munshi/bin/verify-apply-staging-runtime-contract"
+LOCK_FILE=""
 
 commit=""
 branch=""
@@ -53,11 +102,15 @@ trap cleanup EXIT
 
 while (($#)); do
   case "$1" in
+    --target) target="${2:-}"; shift 2 ;;
     --commit) commit="${2:-}"; shift 2 ;;
     --branch) branch="${2:-}"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+
+load_target_config
+LOCK_FILE="$STAGING_ROOT/runtime/deploy.lock"
 
 [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { echo "--commit must be a full lowercase Git SHA" >&2; exit 3; }
 [[ "$branch" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "--branch invalid" >&2; exit 4; }
@@ -65,11 +118,6 @@ git check-ref-format --branch "$branch" >/dev/null || { echo "--branch is not a 
 [[ -x "$VERIFY" ]] || { echo "Apply staging verifier missing: $VERIFY" >&2; exit 5; }
 [[ -d "$STAGING_REPO/.git" ]] || { echo "Apply staging repository missing: $STAGING_REPO" >&2; exit 6; }
 [[ -f "$STAGING_ENV" ]] || { echo "Apply staging env file missing: $STAGING_ENV" >&2; exit 7; }
-PROJECT="$(read_required_env MUNSHI_APPLY_COMPOSE_PROJECT)"
-HUNTER_NETWORK="$(read_required_env MUNSHI_HUNTER_NETWORK_NAME)"
-IMAGE_REPOSITORY="$(read_required_env MUNSHI_APPLY_IMAGE_REPOSITORY)"
-[[ "$PROJECT" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || { echo "invalid MUNSHI_APPLY_COMPOSE_PROJECT" >&2; exit 7; }
-[[ "$IMAGE_REPOSITORY" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "invalid MUNSHI_APPLY_IMAGE_REPOSITORY" >&2; exit 7; }
 docker network inspect "$HUNTER_NETWORK" >/dev/null 2>&1 || { echo "Hunter staging application network missing: $HUNTER_NETWORK" >&2; exit 8; }
 
 mkdir -p "$STAGING_ROOT/runtime" "$STAGING_ROOT/backups" "$STAGING_ROOT/receipts"
@@ -108,7 +156,7 @@ if [[ "${#apply_containers[@]}" -eq 1 ]]; then
       exit 16
     }
   fi
-  "$VERIFY" --expected-sha "$old_revision"
+  "$VERIFY" --target "$target" --expected-sha "$old_revision"
 fi
 
 for service in prepare-worker submit-worker; do
@@ -262,7 +310,7 @@ rollback() {
         [[ "$health" == "healthy" ]] && break
         sleep 5
       done
-      "$VERIFY" --expected-sha "$old_revision" || true
+      "$VERIFY" --target "$target" --expected-sha "$old_revision" || true
     else
       env \
         MUNSHI_APPLY_DEPLOY_SHA="$commit" \
@@ -352,7 +400,7 @@ for _ in $(seq 1 48); do
 done
 [[ "$healthy" == "1" ]] || { echo "Apply staging API did not return healthy" >&2; exit 31; }
 
-"$VERIFY" --expected-sha "$commit"
+"$VERIFY" --target "$target" --expected-sha "$commit"
 
 hunter_snapshot_after="$(snapshot_hunter)"
 [[ "$hunter_snapshot_before" == "$hunter_snapshot_after" ]] || {

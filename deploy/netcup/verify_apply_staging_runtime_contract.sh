@@ -2,14 +2,62 @@
 set -Eeuo pipefail
 umask 077
 
+TARGET_CONFIG_DIR="${MUNSHI_APPLY_DEPLOY_TARGET_CONFIG_DIR:-/opt/munshi/deploy-targets}"
+target=""
+TARGET_CONFIG=""
 PROJECT=""
-STAGING_ROOT="${MUNSHI_APPLY_STAGING_ROOT:-/home/munshi/munshi-apply-staging-v1}"
-STAGING_REPO="$STAGING_ROOT/repo"
-STAGING_ENV="$STAGING_ROOT/staging.env"
-EXPECTED_SHA=""
+STAGING_ROOT=""
+STAGING_REPO=""
+STAGING_ENV=""
+HUNTER_NETWORK=""
+IMAGE_REPOSITORY=""
 BIND_HOST=""
 PUBLISHED_PORT=""
-HUNTER_NETWORK=""
+DEPLOY_ENVIRONMENT=""
+
+target_value() {
+  local key="$1"
+  local line
+  line="$(grep -E "^${key}=" "$TARGET_CONFIG" | tail -n1 || true)"
+  [[ -n "$line" ]] || { echo "deployment target is missing $key: $TARGET_CONFIG" >&2; exit 7; }
+  local value="${line#*=}"
+  [[ -n "$value" ]] || { echo "deployment target has empty $key: $TARGET_CONFIG" >&2; exit 7; }
+  printf '%s' "$value"
+}
+
+load_target_config() {
+  [[ "$target" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "--target invalid" >&2; exit 4; }
+  TARGET_CONFIG="$TARGET_CONFIG_DIR/apply-$target.env"
+  [[ -f "$TARGET_CONFIG" && -r "$TARGET_CONFIG" ]] || { echo "Apply deployment target config missing: $TARGET_CONFIG" >&2; exit 7; }
+
+  STAGING_ROOT="$(target_value MUNSHI_APPLY_DEPLOY_ROOT)"
+  PROJECT="$(target_value MUNSHI_APPLY_COMPOSE_PROJECT)"
+  BIND_HOST="$(target_value MUNSHI_APPLY_BIND_HOST)"
+  PUBLISHED_PORT="$(target_value MUNSHI_APPLY_PUBLISHED_PORT)"
+  HUNTER_NETWORK="$(target_value MUNSHI_HUNTER_NETWORK_NAME)"
+  IMAGE_REPOSITORY="$(target_value MUNSHI_APPLY_IMAGE_REPOSITORY)"
+  DEPLOY_ENVIRONMENT="$(target_value MUNSHI_ENVIRONMENT)"
+
+  [[ "$STAGING_ROOT" == /* && "$STAGING_ROOT" =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "invalid MUNSHI_APPLY_DEPLOY_ROOT" >&2; exit 7; }
+  [[ "$PROJECT" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || { echo "invalid MUNSHI_APPLY_COMPOSE_PROJECT" >&2; exit 7; }
+  [[ "$BIND_HOST" =~ ^[0-9A-Fa-f:.]+$ ]] || { echo "invalid MUNSHI_APPLY_BIND_HOST" >&2; exit 7; }
+  [[ "$PUBLISHED_PORT" =~ ^[0-9]{1,5}$ ]] || { echo "invalid MUNSHI_APPLY_PUBLISHED_PORT" >&2; exit 7; }
+  (( 10#$PUBLISHED_PORT >= 1 && 10#$PUBLISHED_PORT <= 65535 )) || { echo "MUNSHI_APPLY_PUBLISHED_PORT out of range" >&2; exit 7; }
+  [[ "$HUNTER_NETWORK" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || { echo "invalid MUNSHI_HUNTER_NETWORK_NAME" >&2; exit 7; }
+  [[ "$IMAGE_REPOSITORY" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "invalid MUNSHI_APPLY_IMAGE_REPOSITORY" >&2; exit 7; }
+  [[ "$DEPLOY_ENVIRONMENT" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "invalid MUNSHI_ENVIRONMENT" >&2; exit 7; }
+
+  STAGING_REPO="$STAGING_ROOT/repo"
+  STAGING_ENV="$STAGING_ROOT/staging.env"
+
+  export MUNSHI_APPLY_COMPOSE_PROJECT="$PROJECT"
+  export MUNSHI_APPLY_BIND_HOST="$BIND_HOST"
+  export MUNSHI_APPLY_PUBLISHED_PORT="$PUBLISHED_PORT"
+  export MUNSHI_HUNTER_NETWORK_NAME="$HUNTER_NETWORK"
+  export MUNSHI_APPLY_IMAGE_REPOSITORY="$IMAGE_REPOSITORY"
+  export MUNSHI_ENVIRONMENT="$DEPLOY_ENVIRONMENT"
+}
+EXPECTED_SHA=""
 
 read_required_env() {
   local key="$1"
@@ -26,22 +74,18 @@ read_required_env() {
 
 while (($#)); do
   case "$1" in
+    --target) target="${2:-}"; shift 2 ;;
     --expected-sha) EXPECTED_SHA="${2:-}"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 
+load_target_config
+
 [[ -d "$STAGING_REPO/.git" ]] || { echo "Apply staging repository missing: $STAGING_REPO" >&2; exit 10; }
 [[ -f "$STAGING_ENV" ]] || { echo "Apply staging env file missing: $STAGING_ENV" >&2; exit 11; }
 [[ -r "$STAGING_ENV" ]] || { echo "Apply staging env file is not readable by the deployment user: $STAGING_ENV" >&2; exit 12; }
 [[ -f "$STAGING_REPO/deploy/staging/compose.yaml" ]] || { echo "Apply staging compose file missing" >&2; exit 13; }
-PROJECT="$(read_required_env MUNSHI_APPLY_COMPOSE_PROJECT)"
-BIND_HOST="$(read_required_env MUNSHI_APPLY_BIND_HOST)"
-PUBLISHED_PORT="$(read_required_env MUNSHI_APPLY_PUBLISHED_PORT)"
-HUNTER_NETWORK="$(read_required_env MUNSHI_HUNTER_NETWORK_NAME)"
-[[ "$PROJECT" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || { echo "invalid MUNSHI_APPLY_COMPOSE_PROJECT" >&2; exit 13; }
-[[ "$BIND_HOST" =~ ^[0-9A-Fa-f:.]+$ ]] || { echo "invalid MUNSHI_APPLY_BIND_HOST" >&2; exit 13; }
-[[ "$PUBLISHED_PORT" =~ ^[0-9]{1,5}$ ]] || { echo "invalid MUNSHI_APPLY_PUBLISHED_PORT" >&2; exit 13; }
 
 if [[ -z "$EXPECTED_SHA" ]]; then
   EXPECTED_SHA="$(git -C "$STAGING_REPO" rev-parse HEAD)"

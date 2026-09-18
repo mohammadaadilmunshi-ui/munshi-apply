@@ -3,24 +3,39 @@ set -Eeuo pipefail
 umask 077
 
 BIN_ROOT="${MUNSHI_ROOT:-/opt/munshi}/bin"
-STAGING_ROOT="${MUNSHI_APPLY_STAGING_ROOT:-/home/munshi/munshi-apply-staging-v1}"
-STAGING_REPO="$STAGING_ROOT/repo"
-STAGING_ENV="$STAGING_ROOT/staging.env"
+TARGET_CONFIG_DIR="${MUNSHI_APPLY_DEPLOY_TARGET_CONFIG_DIR:-${MUNSHI_ROOT:-/opt/munshi}/deploy-targets}"
+TARGET=""
+STAGING_ROOT=""
+STAGING_REPO=""
+STAGING_ENV=""
+COMPOSE_PROJECT=""
+BIND_HOST=""
+PUBLISHED_PORT=""
+HUNTER_NETWORK=""
+IMAGE_REPOSITORY=""
+DEPLOY_ENVIRONMENT=""
 TARGET_USER="${MUNSHI_DEPLOY_SSH_USER:-munshi}"
 PUBLIC_KEY_FILE=""
 SOURCE_ROOT="${MUNSHI_DEPLOY_SOURCE_ROOT:-}"
 SOURCE_SHA="${MUNSHI_DEPLOY_SOURCE_SHA:-}"
 KEY_COMMENT="munshi-github-actions-apply-staging-deploy"
-HUNTER_NETWORK="munshi-netcup-staging_application"
 
 while (($#)); do
   case "$1" in
     --public-key-file) PUBLIC_KEY_FILE="${2:-}"; shift 2 ;;
+    --target) TARGET="${2:-}"; shift 2 ;;
+    --deploy-root) STAGING_ROOT="${2:-}"; shift 2 ;;
+    --compose-project) COMPOSE_PROJECT="${2:-}"; shift 2 ;;
+    --bind-host) BIND_HOST="${2:-}"; shift 2 ;;
+    --published-port) PUBLISHED_PORT="${2:-}"; shift 2 ;;
+    --hunter-network) HUNTER_NETWORK="${2:-}"; shift 2 ;;
+    --image-repository) IMAGE_REPOSITORY="${2:-}"; shift 2 ;;
+    --environment) DEPLOY_ENVIRONMENT="${2:-}"; shift 2 ;;
     --target-user) TARGET_USER="${2:-}"; shift 2 ;;
     --source-root) SOURCE_ROOT="${2:-}"; shift 2 ;;
     --source-sha) SOURCE_SHA="${2:-}"; shift 2 ;;
     -h|--help)
-      echo "Usage: sudo $0 --public-key-file /path/to/apply-staging.pub --source-root /path/to/approved/apply-worktree --source-sha <40-char-sha> [--target-user munshi]"
+      echo "Usage: sudo $0 --public-key-file KEY --target NAME --deploy-root PATH --compose-project NAME --bind-host IP --published-port PORT --hunter-network NAME --image-repository NAME --environment NAME --source-root PATH --source-sha SHA [--target-user USER]"
       exit 0
       ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
@@ -28,6 +43,18 @@ while (($#)); do
 done
 
 [[ "$EUID" -eq 0 ]] || { echo "run with sudo/root" >&2; exit 10; }
+[[ "$TARGET" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "--target invalid" >&2; exit 10; }
+[[ "$STAGING_ROOT" == /* && "$STAGING_ROOT" =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "--deploy-root invalid" >&2; exit 10; }
+[[ "$COMPOSE_PROJECT" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || { echo "--compose-project invalid" >&2; exit 10; }
+[[ "$BIND_HOST" =~ ^[0-9A-Fa-f:.]+$ ]] || { echo "--bind-host invalid" >&2; exit 10; }
+[[ "$PUBLISHED_PORT" =~ ^[0-9]{1,5}$ ]] || { echo "--published-port invalid" >&2; exit 10; }
+(( 10#$PUBLISHED_PORT >= 1 && 10#$PUBLISHED_PORT <= 65535 )) || { echo "--published-port out of range" >&2; exit 10; }
+[[ "$HUNTER_NETWORK" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || { echo "--hunter-network invalid" >&2; exit 10; }
+[[ "$IMAGE_REPOSITORY" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "--image-repository invalid" >&2; exit 10; }
+[[ "$DEPLOY_ENVIRONMENT" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "--environment invalid" >&2; exit 10; }
+STAGING_REPO="$STAGING_ROOT/repo"
+STAGING_ENV="$STAGING_ROOT/staging.env"
+TARGET_CONFIG="$TARGET_CONFIG_DIR/apply-$TARGET.env"
 [[ -n "$PUBLIC_KEY_FILE" && -f "$PUBLIC_KEY_FILE" ]] || { echo "--public-key-file is required" >&2; exit 11; }
 id "$TARGET_USER" >/dev/null 2>&1 || { echo "target user does not exist: $TARGET_USER" >&2; exit 12; }
 [[ -n "$SOURCE_ROOT" && -d "$SOURCE_ROOT/.git" ]] || { echo "--source-root must be an approved Apply Git worktree" >&2; exit 13; }
@@ -69,6 +96,7 @@ verify_target="$BIN_ROOT/verify-apply-staging-runtime-contract"
 gateway_target="$BIN_ROOT/github-apply-staging-deploy-gateway"
 
 install -d -o root -g root -m 0755 "$BIN_ROOT"
+install -d -o root -g root -m 0750 "$TARGET_CONFIG_DIR"
 install -d -o "$TARGET_USER" -g "$group" -m 0750 "$STAGING_ROOT"
 install -d -o "$TARGET_USER" -g "$group" -m 0750 "$STAGING_REPO"
 install -d -o "$TARGET_USER" -g "$group" -m 0700 \
@@ -90,13 +118,7 @@ fi
 
 if [[ ! -e "$STAGING_ENV" ]]; then
   cat > "$STAGING_ENV" <<'ENV'
-# MUNSHI Apply deployment target configuration. Set these per target; source code does not choose them.
-MUNSHI_APPLY_COMPOSE_PROJECT=
-MUNSHI_APPLY_BIND_HOST=
-MUNSHI_APPLY_PUBLISHED_PORT=
-MUNSHI_HUNTER_NETWORK_NAME=
-MUNSHI_APPLY_IMAGE_REPOSITORY=
-MUNSHI_ENVIRONMENT=
+# MUNSHI Apply runtime feature flags. Deployment identity lives in the external target profile.
 MUNSHI_APPLY_LIVE_HANDOFF_ENABLED=false
 MUNSHI_APPLY_HOSTED_PREPARE_WORKER_ENABLED=false
 MUNSHI_APPLY_RESUME_UPLOAD_ENABLED=false
@@ -122,10 +144,12 @@ deploy_had=0
 verify_had=0
 gateway_had=0
 authorized_had=0
+target_config_had=0
 [[ -e "$deploy_target" ]] && { cp -a "$deploy_target" "$backup_dir/deploy-apply-staging-release"; deploy_had=1; }
 [[ -e "$verify_target" ]] && { cp -a "$verify_target" "$backup_dir/verify-apply-staging-runtime-contract"; verify_had=1; }
 [[ -e "$gateway_target" ]] && { cp -a "$gateway_target" "$backup_dir/github-apply-staging-deploy-gateway"; gateway_had=1; }
 [[ -e "$authorized" ]] && { cp -a "$authorized" "$backup_dir/authorized_keys"; authorized_had=1; }
+[[ -e "$TARGET_CONFIG" ]] && { cp -a "$TARGET_CONFIG" "$backup_dir/target.env"; target_config_had=1; }
 
 rollback_install() {
   rc=$?
@@ -134,6 +158,7 @@ rollback_install() {
   if (( deploy_had )); then cp -a "$backup_dir/deploy-apply-staging-release" "$deploy_target" || true; else rm -f "$deploy_target" || true; fi
   if (( verify_had )); then cp -a "$backup_dir/verify-apply-staging-runtime-contract" "$verify_target" || true; else rm -f "$verify_target" || true; fi
   if (( gateway_had )); then cp -a "$backup_dir/github-apply-staging-deploy-gateway" "$gateway_target" || true; else rm -f "$gateway_target" || true; fi
+  if (( target_config_had )); then cp -a "$backup_dir/target.env" "$TARGET_CONFIG" || true; else rm -f "$TARGET_CONFIG" || true; fi
   if (( authorized_had )); then
     cp -a "$backup_dir/authorized_keys" "$authorized" || true
     chown "$TARGET_USER:$group" "$authorized" || true
@@ -147,6 +172,19 @@ rollback_install() {
   exit "$rc"
 }
 trap rollback_install ERR
+
+target_config_new="$(mktemp /tmp/munshi-apply-target.XXXXXX)"
+cat > "$target_config_new" <<EOF
+MUNSHI_APPLY_DEPLOY_ROOT=$STAGING_ROOT
+MUNSHI_APPLY_COMPOSE_PROJECT=$COMPOSE_PROJECT
+MUNSHI_APPLY_BIND_HOST=$BIND_HOST
+MUNSHI_APPLY_PUBLISHED_PORT=$PUBLISHED_PORT
+MUNSHI_HUNTER_NETWORK_NAME=$HUNTER_NETWORK
+MUNSHI_APPLY_IMAGE_REPOSITORY=$IMAGE_REPOSITORY
+MUNSHI_ENVIRONMENT=$DEPLOY_ENVIRONMENT
+EOF
+install -o root -g root -m 0640 "$target_config_new" "$TARGET_CONFIG"
+rm -f "$target_config_new"
 
 install -o root -g root -m 0755 "$SOURCE_ROOT/deploy/netcup/deploy_apply_staging_release.sh" "$BIN_ROOT/.deploy-apply-staging-release.new"
 install -o root -g root -m 0755 "$SOURCE_ROOT/deploy/netcup/verify_apply_staging_runtime_contract.sh" "$BIN_ROOT/.verify-apply-staging-runtime-contract.new"
@@ -174,6 +212,8 @@ rm -f "$new_authorized"
 rm -rf "$backup_dir"
 
 echo "APPROVED_SOURCE_SHA=$SOURCE_SHA"
+echo "APPLY_DEPLOY_TARGET=$TARGET"
+echo "APPLY_DEPLOY_TARGET_CONFIG=$TARGET_CONFIG"
 echo "APPLY_STAGING_ROOT=$STAGING_ROOT"
 echo "APPLY_STAGING_DEPLOY_WRAPPER=$deploy_target"
 echo "APPLY_STAGING_VERIFIER=$verify_target"
