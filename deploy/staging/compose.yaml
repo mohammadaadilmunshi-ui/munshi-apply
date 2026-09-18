@@ -35,7 +35,7 @@ services:
 
     networks:
       default:
-      hunter_staging:
+      hunter_internal:
         aliases:
           - apply
 
@@ -82,7 +82,7 @@ services:
       MUNSHI_FINAL_REVIEW_ENABLED: "false"
       MUNSHI_FINAL_SUBMIT_ENABLED: "false"
     networks:
-      hunter_staging:
+      hunter_internal:
     volumes:
       - apply_data:/data
     shm_size: "1gb"
@@ -117,13 +117,13 @@ services:
       MUNSHI_APPLY_RESUME_UPLOAD_ENABLED: "${MUNSHI_APPLY_RESUME_UPLOAD_ENABLED:-false}"
       MUNSHI_APPLY_NORMAL_ANSWER_AUTOFILL_ENABLED: "${MUNSHI_APPLY_NORMAL_ANSWER_AUTOFILL_ENABLED:-false}"
     networks:
-      hunter_staging:
+      hunter_internal:
     volumes:
       - apply_data:/data
     shm_size: "1gb"
 
 networks:
-  hunter_staging:
+  hunter_internal:
     external: true
     name: ${MUNSHI_HUNTER_NETWORK_NAME:?MUNSHI_HUNTER_NETWORK_NAME is required}
 

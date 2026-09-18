@@ -157,7 +157,7 @@ for key in (
         raise SystemExit(f"submit proof gate must default false: {key}")
 
 networks = config.get("networks", {})
-hunter = networks.get("hunter_staging", {})
+hunter = networks.get("hunter_internal", {})
 if hunter.get("name") != expected_network:
     raise SystemExit("Apply staging must attach only to the established Hunter staging application network")
 
