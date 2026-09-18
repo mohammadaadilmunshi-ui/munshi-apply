@@ -5,10 +5,10 @@ import os
 import re
 import shutil
 import subprocess  # noqa: S404
-
-import httpx
 from collections.abc import Callable
 from pathlib import Path
+
+import httpx
 
 from .autonomous_apply_credentials import (
     AutonomousApplyConfiguration,
