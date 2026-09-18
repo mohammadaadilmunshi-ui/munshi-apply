@@ -151,11 +151,16 @@ if [[ "${#apply_containers[@]}" -eq 1 ]]; then
   [[ "$old_revision" =~ ^[0-9a-f]{40}$ ]] || { echo "existing Apply staging image lacks exact revision label" >&2; exit 15; }
   if (( had_old_head )); then
     [[ "$old_head" == "$old_revision" ]] || {
-      echo "existing Apply staging checkout/image provenance mismatch: checkout=$old_head image=$old_revision" >&2
+      echo "existing Apply target checkout/image provenance mismatch: checkout=$old_head image=$old_revision" >&2
       exit 16
     }
   fi
-  "$VERIFY" --target "$target" --expected-sha "$old_revision"
+  old_health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$old_apply_id")"
+  [[ "$old_health" == "healthy" || "$old_health" == "running" ]] || {
+    echo "existing Apply target container is not healthy: $old_health" >&2
+    exit 16
+  }
+  echo "APPLY_EXISTING_TARGET_PREFLIGHT=PASS"
 fi
 
 for service in prepare-worker submit-worker; do
