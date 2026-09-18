@@ -23,10 +23,10 @@ done
 [[ -f "$ENV_FILE" && -r "$ENV_FILE" ]] || { echo "Apply production env missing: $ENV_FILE" >&2; exit 11; }
 [[ -f "$REPO/deploy/production/compose.yaml" ]] || { echo "Apply production compose missing" >&2; exit 12; }
 
-if [[ -z "$EXPECTED_SHA" ]]; then EXPECTED_SHA="$(git -C "$REPO" rev-parse HEAD)"; fi
+if [[ -z "$EXPECTED_SHA" ]]; then EXPECTED_SHA="$(git -c "safe.directory=$REPO" -C "$REPO" rev-parse HEAD)"; fi
 [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "expected SHA invalid" >&2; exit 13; }
-[[ "$(git -C "$REPO" rev-parse HEAD)" == "$EXPECTED_SHA" ]] || { echo "Apply production checkout SHA mismatch" >&2; exit 14; }
-[[ -z "$(git -C "$REPO" status --porcelain)" ]] || { echo "Apply production repo dirty" >&2; exit 15; }
+[[ "$(git -c "safe.directory=$REPO" -C "$REPO" rev-parse HEAD)" == "$EXPECTED_SHA" ]] || { echo "Apply production checkout SHA mismatch" >&2; exit 14; }
+[[ -z "$(git -c "safe.directory=$REPO" -C "$REPO" status --porcelain)" ]] || { echo "Apply production repo dirty" >&2; exit 15; }
 
 set -a
 # shellcheck disable=SC1090
