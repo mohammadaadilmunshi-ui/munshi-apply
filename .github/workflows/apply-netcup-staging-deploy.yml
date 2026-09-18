@@ -1,49 +1,59 @@
-name: Apply Netcup Staging Deploy
+name: Apply Netcup Target Deploy
 
 on:
   workflow_dispatch:
     inputs:
+      deploy_target:
+        description: "Named deployment target configured on the server and as a GitHub Environment"
+        required: true
+        type: string
       commit_sha:
-        description: "Exact 40-character Git SHA to deploy to isolated Apply staging"
+        description: "Exact 40-character Git SHA to deploy"
         required: true
         type: string
       source_branch:
         description: "Apply branch that must contain the requested SHA"
         required: true
-        default: "feat/apply-staging-transport-bootstrap-20260916"
         type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: munshi-apply-netcup-staging
+  group: munshi-apply-netcup-${{ inputs.deploy_target }}
   cancel-in-progress: false
 
 jobs:
   validate-and-test:
     runs-on: ubuntu-latest
     outputs:
+      deploy_target: ${{ steps.validate.outputs.deploy_target }}
       commit_sha: ${{ steps.validate.outputs.commit_sha }}
       source_branch: ${{ steps.validate.outputs.source_branch }}
     steps:
-      - name: Validate staging request
+      - name: Validate deployment request
         id: validate
         shell: bash
         env:
+          REQUESTED_TARGET: ${{ inputs.deploy_target }}
           REQUESTED_SHA: ${{ inputs.commit_sha }}
           REQUESTED_BRANCH: ${{ inputs.source_branch }}
         run: |
           set -euo pipefail
+          [[ "$REQUESTED_TARGET" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || {
+            echo "deploy_target contains unsupported characters" >&2
+            exit 2
+          }
           [[ "$REQUESTED_SHA" =~ ^[0-9a-f]{40}$ ]] || {
             echo "commit_sha must be a full lowercase 40-character Git SHA" >&2
-            exit 2
+            exit 3
           }
           [[ "$REQUESTED_BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]] || {
             echo "source_branch contains unsupported characters" >&2
-            exit 3
+            exit 4
           }
           git check-ref-format --branch "$REQUESTED_BRANCH" >/dev/null
+          echo "deploy_target=$REQUESTED_TARGET" >> "$GITHUB_OUTPUT"
           echo "commit_sha=$REQUESTED_SHA" >> "$GITHUB_OUTPUT"
           echo "source_branch=$REQUESTED_BRANCH" >> "$GITHUB_OUTPUT"
 
@@ -84,69 +94,79 @@ jobs:
           for script in deploy/netcup/*.sh; do
             bash -n "$script"
           done
-      - name: Build exact-SHA staging image
+      - name: Build exact-SHA image without selecting a deployment target
         shell: bash
         env:
-          MUNSHI_APPLY_DEPLOY_SHA: ${{ inputs.commit_sha }}
-          MUNSHI_APPLY_IMAGE_TAG: ci-staging
-        run: docker compose -f deploy/staging/compose.yaml build apply
+          DEPLOY_SHA: ${{ inputs.commit_sha }}
+        run: |
+          set -euo pipefail
+          docker build \
+            -f deploy/staging/Dockerfile \
+            --build-arg "MUNSHI_APPLY_COMMIT_SHA=$DEPLOY_SHA" \
+            -t "munshi-apply-ci:$DEPLOY_SHA" \
+            .
 
   deploy:
     needs: validate-and-test
     runs-on: ubuntu-latest
-    environment: staging
+    environment: ${{ needs.validate-and-test.outputs.deploy_target }}
     timeout-minutes: 30
     steps:
-      - name: Checkout exact Apply staging SHA
+      - name: Checkout exact Apply SHA
         uses: actions/checkout@v7
         with:
           ref: ${{ needs.validate-and-test.outputs.commit_sha }}
           fetch-depth: 0
 
-      - name: Build authenticated Apply staging bundle
+      - name: Build authenticated Apply bundle
         shell: bash
         env:
+          DEPLOY_TARGET: ${{ needs.validate-and-test.outputs.deploy_target }}
           DEPLOY_SHA: ${{ needs.validate-and-test.outputs.commit_sha }}
           DEPLOY_BRANCH: ${{ needs.validate-and-test.outputs.source_branch }}
         run: |
           set -euo pipefail
           git fetch --no-tags origin "$DEPLOY_BRANCH:refs/remotes/origin/$DEPLOY_BRANCH"
           git merge-base --is-ancestor "$DEPLOY_SHA" "refs/remotes/origin/$DEPLOY_BRANCH"
-          git bundle create "$RUNNER_TEMP/munshi-apply-staging.bundle" "refs/remotes/origin/$DEPLOY_BRANCH"
-          git bundle verify "$RUNNER_TEMP/munshi-apply-staging.bundle"
+          bundle="$RUNNER_TEMP/munshi-apply-$DEPLOY_TARGET.bundle"
+          git bundle create "$bundle" "refs/remotes/origin/$DEPLOY_BRANCH"
+          git bundle verify "$bundle"
 
-      - name: Configure Apply-only restricted SSH
+      - name: Configure restricted deployment SSH
         shell: bash
         env:
-          NETCUP_APPLY_STAGING_SSH_PRIVATE_KEY: ${{ secrets.NETCUP_APPLY_STAGING_SSH_PRIVATE_KEY }}
-          NETCUP_KNOWN_HOSTS: ${{ secrets.NETCUP_KNOWN_HOSTS }}
+          MUNSHI_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.MUNSHI_DEPLOY_SSH_PRIVATE_KEY }}
+          MUNSHI_DEPLOY_KNOWN_HOSTS: ${{ secrets.MUNSHI_DEPLOY_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
           install -d -m 700 "$HOME/.ssh"
-          printf '%s\n' "$NETCUP_APPLY_STAGING_SSH_PRIVATE_KEY" > "$HOME/.ssh/netcup_apply_staging"
-          chmod 600 "$HOME/.ssh/netcup_apply_staging"
-          printf '%s\n' "$NETCUP_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          printf '%s\n' "$MUNSHI_DEPLOY_SSH_PRIVATE_KEY" > "$HOME/.ssh/munshi_apply_deploy"
+          chmod 600 "$HOME/.ssh/munshi_apply_deploy"
+          printf '%s\n' "$MUNSHI_DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
 
-      - name: Deploy exact SHA to isolated Apply staging
+      - name: Deploy exact SHA to named target
         shell: bash
         env:
-          NETCUP_HOST: ${{ secrets.NETCUP_HOST }}
-          NETCUP_USER: ${{ secrets.NETCUP_APPLY_STAGING_DEPLOY_USER }}
+          MUNSHI_DEPLOY_HOST: ${{ secrets.MUNSHI_DEPLOY_HOST }}
+          MUNSHI_DEPLOY_USER: ${{ secrets.MUNSHI_DEPLOY_USER }}
+          DEPLOY_TARGET: ${{ needs.validate-and-test.outputs.deploy_target }}
           DEPLOY_SHA: ${{ needs.validate-and-test.outputs.commit_sha }}
           DEPLOY_BRANCH: ${{ needs.validate-and-test.outputs.source_branch }}
         run: |
           set -euo pipefail
-          output="$RUNNER_TEMP/apply-staging-deploy-output.txt"
-          DEPLOY_COMMAND="/opt/munshi/bin/deploy-apply-staging-release --commit $DEPLOY_SHA --branch $DEPLOY_BRANCH"
-          cat "$RUNNER_TEMP/munshi-apply-staging.bundle" | \
+          output="$RUNNER_TEMP/apply-$DEPLOY_TARGET-deploy-output.txt"
+          bundle="$RUNNER_TEMP/munshi-apply-$DEPLOY_TARGET.bundle"
+          DEPLOY_COMMAND="/opt/munshi/bin/deploy-apply-staging-release --target $DEPLOY_TARGET --commit $DEPLOY_SHA --branch $DEPLOY_BRANCH"
+          cat "$bundle" | \
             ssh \
-              -i "$HOME/.ssh/netcup_apply_staging" \
+              -i "$HOME/.ssh/munshi_apply_deploy" \
               -o BatchMode=yes \
               -o IdentitiesOnly=yes \
               -o StrictHostKeyChecking=yes \
-              "$NETCUP_USER@$NETCUP_HOST" \
+              "$MUNSHI_DEPLOY_USER@$MUNSHI_DEPLOY_HOST" \
               "$DEPLOY_COMMAND" 2>&1 | tee "$output"
+          grep -Fxq "DEPLOYED_TARGET=$DEPLOY_TARGET" "$output"
           grep -Fxq "DEPLOYED_SHA=$DEPLOY_SHA" "$output"
           grep -Fxq 'FINAL_SUBMIT_ENABLED=false' "$output"
           grep -Fxq 'PRODUCTION_DEPLOYMENT_PERFORMED=NO' "$output"
