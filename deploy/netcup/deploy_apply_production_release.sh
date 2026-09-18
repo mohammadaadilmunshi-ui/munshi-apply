@@ -236,6 +236,24 @@ MUNSHI_APPLY_DEPLOY_SHA="$commit" MUNSHI_APPLY_IMAGE_TAG="$commit" "${compose[@]
 revision="$(docker image inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$MUNSHI_APPLY_IMAGE_REPOSITORY:$commit")"
 [[ "$revision" == "$commit" ]] || { echo "built Apply production image revision mismatch" >&2; exit 21; }
 
+echo "=== RUN EXACT-IMAGE APPLY PRODUCTION REGRESSION SUITE (NETWORK DISABLED) ==="
+timeout 1200s docker run --rm \
+  --network none \
+  --read-only \
+  --tmpfs /tmp:rw,nosuid,nodev,size=512m \
+  --tmpfs /home/munshiapply:rw,nosuid,nodev,size=128m \
+  --entrypoint python \
+  "$MUNSHI_APPLY_IMAGE_REPOSITORY:$commit" \
+  -m pytest -q \
+    /app/apps/native-host/tests/test_internal_http_policy.py \
+    /app/apps/native-host/tests/test_production_deployment_contract.py \
+    /app/apps/native-host/tests/test_hosted_submit_worker.py \
+    /app/apps/native-host/tests/test_hosted_submit_worker_resilience.py \
+    /app/apps/native-host/tests/test_production_submission_verification_determinism.py \
+    /app/apps/native-host/tests/test_submit_authority_inbox.py \
+    /app/apps/native-host/tests/test_submit_authority_contract_vector.py
+echo "APPLY_PRODUCTION_EXACT_IMAGE_TESTS=PASS"
+
 echo "=== FORCE SUBMIT OFF DURING REVERSIBLE DEPLOYMENT ==="
 MUNSHI_APPLY_PRODUCTION_SUBMIT_AUTHORITY_ENABLED=false MUNSHI_APPLY_DEPLOY_SHA="$commit" MUNSHI_APPLY_IMAGE_TAG="$commit"   "${compose[@]}" --profile hosted-prepare stop submit-worker >/dev/null 2>&1 || true
 MUNSHI_APPLY_PRODUCTION_SUBMIT_AUTHORITY_ENABLED=false MUNSHI_APPLY_DEPLOY_SHA="$commit" MUNSHI_APPLY_IMAGE_TAG="$commit"   "${compose[@]}" --profile hosted-prepare up -d --force-recreate apply prepare-worker
