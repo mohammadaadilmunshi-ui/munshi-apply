@@ -8,7 +8,10 @@ import subprocess  # noqa: S404
 from collections.abc import Callable
 from pathlib import Path
 
-from .autonomous_apply_credentials import AutonomousApplyCredentialStore
+from .autonomous_apply_credentials import (
+    AutonomousApplyConfiguration,
+    AutonomousApplyCredentialStore,
+)
 
 _RESULT_PREFIX = "MUNSHI_INTERACTION_RECOVERY="
 _BLOCKED_SEMANTIC_MARKERS = {
@@ -27,6 +30,8 @@ _ALLOWED_KEYS = {"ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"}
 _ALLOWED_WAIT_STATES = {"OPTIONS_VISIBLE", "VALUE_COMMITTED"}
 
 Runner = Callable[[str, str, str, float, int, str | None], str]
+ConfigResolver = Callable[[], AutonomousApplyConfiguration | dict[str, object]]
+SecretResolver = Callable[[], str]
 
 
 class InteractionFallbackError(ValueError):
@@ -170,9 +175,55 @@ class InteractionFallbackService:
     queue; this service never teaches and therefore never makes a second model call.
     """
 
-    def __init__(self, runtime_root: Path, *, runner: Runner | None = None) -> None:
+    def __init__(
+        self,
+        runtime_root: Path,
+        *,
+        runner: Runner | None = None,
+        config_resolver: ConfigResolver | None = None,
+        api_key_resolver: SecretResolver | None = None,
+    ) -> None:
         self.credentials = AutonomousApplyCredentialStore(runtime_root)
         self.runner = runner or _default_runner
+        self.config_resolver = config_resolver
+        self.api_key_resolver = api_key_resolver
+
+    def _configuration(self) -> AutonomousApplyConfiguration:
+        if self.config_resolver is None:
+            return self.credentials.load()
+        try:
+            resolved = self.config_resolver()
+            if isinstance(resolved, AutonomousApplyConfiguration):
+                return resolved
+            if isinstance(resolved, dict):
+                return AutonomousApplyConfiguration.from_payload(resolved)
+        except Exception as error:
+            raise InteractionFallbackError(
+                "Autonomous Apply dashboard configuration is unavailable"
+            ) from error
+        raise InteractionFallbackError(
+            "Autonomous Apply dashboard configuration is invalid"
+        )
+
+    def _anthropic_api_key(self) -> str:
+        if self.api_key_resolver is None:
+            try:
+                return self.credentials.get_secret("anthropic")
+            except Exception as error:
+                raise InteractionFallbackError(
+                    "Anthropic API credential is unavailable"
+                ) from error
+        try:
+            value = str(self.api_key_resolver() or "").strip()
+        except Exception as error:
+            raise InteractionFallbackError(
+                "Dashboard Anthropic API credential is unavailable"
+            ) from error
+        if not value or len(value) > 16384:
+            raise InteractionFallbackError(
+                "Dashboard Anthropic API credential is unavailable"
+            )
+        return value
 
     def propose(self, payload: object) -> dict[str, object]:
         if not isinstance(payload, dict):
@@ -204,17 +255,13 @@ class InteractionFallbackService:
                 "This control kind is not eligible for mechanics recovery"
             )
 
-        config = self.credentials.load()
+        config = self._configuration()
         if not config.enabled:
             raise InteractionFallbackError("Autonomous Apply fallback is disabled")
         model = config.model.strip()
         if not model:
             raise InteractionFallbackError("Autonomous Apply fallback model is not configured")
-        api_key = (
-            self.credentials.get_secret("anthropic")
-            if config.auth_mode == "api"
-            else None
-        )
+        api_key = self._anthropic_api_key() if config.auth_mode == "api" else None
 
         safe_context = {
             "siteOrigin": _required_text(
