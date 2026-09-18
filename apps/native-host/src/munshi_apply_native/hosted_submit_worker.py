@@ -37,7 +37,6 @@ from .hosted_prepare_worker import (
     BRIDGE_URL_ENV,
     NORMAL_AUTOFILL_ENV,
     RESUME_UPLOAD_ENV,
-    STAGING_HTTP_ENV,
     HostedAdapterFactory,
 )
 from .hunter_submit_authority_client_v1 import (
@@ -444,9 +443,6 @@ def run_forever() -> None:
     ).strip()
     if not bridge_url:
         raise RuntimeError("Hunter execution bridge base URL is required")
-    allow_staging_http = _truthy(STAGING_HTTP_ENV)
-    if allow_staging_http and str(os.getenv("MUNSHI_ENVIRONMENT") or "").casefold() != "staging":
-        raise RuntimeError("Hunter bridge staging HTTP is restricted to staging")
 
     database = Database(settings.database_path, settings.migrations_path)
     database.migrate()
@@ -456,7 +452,6 @@ def run_forever() -> None:
         queue,
         bridge_base_url=bridge_url,
         bridge_secret=settings.handoff_hmac_secret,
-        allow_staging_http=allow_staging_http,
         browser_executable=os.getenv("MUNSHI_BROWSER_EXECUTABLE") or None,
         navigation_timeout_ms=int(os.getenv("MUNSHI_APPLY_BROWSER_TIMEOUT_MS", "30000")),
     )
