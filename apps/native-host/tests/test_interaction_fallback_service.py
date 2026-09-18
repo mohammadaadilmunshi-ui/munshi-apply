@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 
 from munshi_apply_native import interaction_fallback_service as fallback_module
-
 from munshi_apply_native.autonomous_apply_credentials import (
     AutonomousApplyConfiguration,
     AutonomousApplyCredentialStore,
