@@ -16,6 +16,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from urllib.parse import urlsplit
+from uuid import uuid4
 
 from .execution_policy import prepare_permissions
 from .hunter_plan_semantic_bridge import answer_matches_question
@@ -226,6 +227,25 @@ class HostedRecoveringPlanBrowserAdapter(PlanBrowserAdapter):
                     unresolved.get("reason") or "Deterministic fill failed"
                 ),
             )
+            if self._try_promoted_recipe(
+                plan=plan,
+                payload=payload,
+                control_id=control_id,
+                control=control,
+                answer=str(value),
+            ):
+                any_recovered = True
+                self.on_event(
+                    "FIELD_VERIFIED",
+                    {
+                        "control_id": control_id,
+                        "status": "FILLED",
+                        "recovered": True,
+                        "source": "PROMOTED_RECIPE",
+                    },
+                )
+                continue
+
             proposal: dict[str, Any] | None = None
             recovered = False
             try:
@@ -240,8 +260,9 @@ class HostedRecoveringPlanBrowserAdapter(PlanBrowserAdapter):
                     )
                     recovered = self._field_satisfied(control_id)
             except Exception:
-                # Recovery is optional. Any provider, recipe or browser failure
-                # preserves the original deterministic unresolved result.
+                # Model recovery is optional. Recipe/Teach failures must never
+                # prevent the same run from falling through to Sonnet, and a
+                # provider/browser failure preserves the original unresolved result.
                 recovered = False
             if not recovered or proposal is None:
                 continue
@@ -253,8 +274,12 @@ class HostedRecoveringPlanBrowserAdapter(PlanBrowserAdapter):
                     "control_id": control_id,
                     "status": "FILLED",
                     "recovered": True,
+                    "source": "MODEL_FALLBACK",
                 },
             )
+            # The application continues immediately. Learning is best-effort and
+            # dispatched off the critical path, so a Teach outage cannot prevent
+            # later preparation or an already-authorized final submission.
             self._capture_teach_async(
                 plan=plan,
                 payload=payload,
@@ -351,6 +376,85 @@ class HostedRecoveringPlanBrowserAdapter(PlanBrowserAdapter):
             "authenticationBoundary": False,
             "finalSubmit": False,
         }
+
+    def _try_promoted_recipe(
+        self,
+        *,
+        plan: dict[str, Any],
+        payload: dict[str, Any],
+        control_id: str,
+        control: dict[str, Any],
+        answer: str,
+    ) -> bool:
+        """Try verified Teach knowledge first, then fail open to model recovery.
+
+        Recipe lookup, execution-health persistence, and Teach storage are all
+        advisory. None of them may block the current application. A promoted
+        recipe is accepted only after the normal browser scanner positively
+        verifies the field as satisfied.
+        """
+        service = self.teach_munshi_service
+        recipes = getattr(service, "recipes", None)
+        lookup = getattr(recipes, "lookup", None)
+        if not callable(lookup):
+            return False
+        try:
+            recipe = lookup(payload)
+        except Exception:
+            return False
+        if not isinstance(recipe, dict) or str(recipe.get("state") or "").upper() != "PROMOTED":
+            return False
+
+        verified_success = False
+        try:
+            self._execute_actions(
+                control_id=control_id,
+                control=control,
+                actions=recipe.get("actions"),
+                answer=answer,
+            )
+            verified_success = self._field_satisfied(control_id)
+        except Exception:
+            # A mechanical exception can still leave the field satisfied. Re-scan
+            # once before declaring a verified recipe failure.
+            try:
+                verified_success = self._field_satisfied(control_id)
+            except Exception:
+                verified_success = False
+
+        self._record_promoted_recipe_outcome(
+            plan=plan,
+            recipe=recipe,
+            success=verified_success,
+        )
+        return verified_success
+
+    def _record_promoted_recipe_outcome(
+        self,
+        *,
+        plan: dict[str, Any],
+        recipe: dict[str, Any],
+        success: bool,
+    ) -> None:
+        recipes = getattr(self.teach_munshi_service, "recipes", None)
+        record = getattr(recipes, "record_outcome", None)
+        recipe_id = str(recipe.get("recipeId") or "")
+        if not callable(record) or not recipe_id:
+            return
+        try:
+            record(
+                {
+                    "recipeId": recipe_id,
+                    "attemptId": f"hosted-recipe-{uuid4().hex}",
+                    "applicationId": str(plan.get("application_id") or "") or None,
+                    "success": bool(success),
+                    "verified": True,
+                    "failureReason": None if success else "promoted_recipe_failed_verification",
+                }
+            )
+        except Exception:
+            # Learning/health bookkeeping must never become an application gate.
+            return
 
     def _execute_actions(
         self,
