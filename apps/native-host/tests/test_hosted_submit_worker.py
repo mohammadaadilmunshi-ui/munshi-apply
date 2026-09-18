@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 
 from conftest import build_authority_envelope, sign_authority_envelope
 from test_complete_application_loop import loop as _complete_application_loop_fixture
 
+from munshi_apply_native import hosted_submit_worker as hosted_submit_module
 from munshi_apply_native.background_prepare_queue import DurablePreparationQueue
 from munshi_apply_native.hosted_submit_worker import HostedSubmitRunner
 from munshi_apply_native.submit_authority_inbox_v1 import expected_claim_digest
@@ -175,3 +177,8 @@ def test_hunter_single_approval_reaches_guarded_submit_without_second_apply_appr
     assert runner.run_once() is None
     assert browser.calls == 1
     assert receipt_client.calls == 2
+
+
+def test_submit_worker_rebuild_keeps_hosted_recovery_runtime_enabled():
+    source = inspect.getsource(hosted_submit_module.run_forever)
+    assert "runtime_root=settings.runtime_root" in source
