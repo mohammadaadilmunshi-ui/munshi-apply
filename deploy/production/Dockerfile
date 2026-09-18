@@ -19,6 +19,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         chromium \
+        git \
         fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 

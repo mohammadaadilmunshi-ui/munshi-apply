@@ -122,3 +122,12 @@ def test_production_helpers_leave_inherited_directory_before_compose(tmp_path) -
                                 text=True, capture_output=True, cwd=inherited,
                                 env=env, check=True)
         assert f"CWD={repo}\n" in result.stdout
+
+
+def test_deploy_time_regression_uses_disposable_writable_data() -> None:
+    deploy = (ROOT / "deploy/netcup/deploy_apply_production_release.sh").read_text()
+    command = deploy.split('echo "=== RUN EXACT-IMAGE APPLY', 1)[1].split('echo "APPLY_PRODUCTION_EXACT_IMAGE_TESTS=PASS"', 1)[0]
+    assert "--network none" in command
+    assert "--read-only" in command
+    assert "--tmpfs /data:rw,nosuid,nodev,size=256m,uid=10001,gid=10001,mode=0700" in command
+    assert "--mount" not in command and "--volume" not in command

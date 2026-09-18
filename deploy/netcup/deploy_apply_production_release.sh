@@ -243,6 +243,7 @@ echo "=== RUN EXACT-IMAGE APPLY PRODUCTION REGRESSION SUITE (NETWORK DISABLED) =
 timeout 1200s docker run --rm \
   --network none \
   --read-only \
+  --tmpfs /data:rw,nosuid,nodev,size=256m,uid=10001,gid=10001,mode=0700 \
   --tmpfs /tmp:rw,nosuid,nodev,size=512m \
   --tmpfs /home/munshiapply:rw,nosuid,nodev,size=128m \
   --entrypoint python \

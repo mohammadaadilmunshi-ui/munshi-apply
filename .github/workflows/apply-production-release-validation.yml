@@ -49,6 +49,7 @@ jobs:
         run: |
           docker build -f deploy/production/Dockerfile --build-arg MUNSHI_APPLY_COMMIT_SHA="$GITHUB_SHA" -t munshi-apply-ci:"$GITHUB_SHA" .
           docker run --rm --network none --read-only \
+            --tmpfs /data:rw,nosuid,nodev,size=256m,uid=10001,gid=10001,mode=0700 \
             --tmpfs /tmp:rw,nosuid,nodev,size=512m \
             --tmpfs /home/munshiapply:rw,nosuid,nodev,size=128m \
             --entrypoint python munshi-apply-ci:"$GITHUB_SHA" \
