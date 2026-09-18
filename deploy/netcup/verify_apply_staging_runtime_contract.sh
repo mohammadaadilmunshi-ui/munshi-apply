@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 umask 077
 
-PROJECT="${MUNSHI_APPLY_STAGING_PROJECT:-munshi-apply-staging-v1}"
+PROJECT="${MUNSHI_APPLY_STAGING_PROJECT:-munshi-apply-staging}"
 STAGING_ROOT="${MUNSHI_APPLY_STAGING_ROOT:-/home/munshi/munshi-apply-staging-v1}"
 STAGING_REPO="$STAGING_ROOT/repo"
 STAGING_ENV="$STAGING_ROOT/staging.env"
