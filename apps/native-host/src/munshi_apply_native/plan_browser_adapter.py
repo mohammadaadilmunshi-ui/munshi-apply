@@ -77,7 +77,7 @@ class PlanBrowserAdapter:
         """
         try:
             result = self.page.evaluate(
-                """() => {
+                r"""() => {
                   const visible = element => {
                     if (!(element instanceof HTMLElement)) return false;
                     const style = getComputedStyle(element);
