@@ -12,6 +12,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sqlite3
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -1222,18 +1224,42 @@ class CompleteApplicationLoopService:
                 "receipt_id": str(row["receipt_id"]),
                 "error": str(error),
             }
-        with self.database.connect() as connection:
-            connection.execute(
-                """UPDATE production_receipt_outbox
-                   SET state='DELIVERED',attempt_count=attempt_count+1,
-                       delivered_at=?,last_error=NULL,updated_at=?
-                   WHERE receipt_id=? AND state='PENDING'""",
-                (_now(), _now(), str(row["receipt_id"])),
-            )
+        receipt_id = str(row["receipt_id"])
+        for attempt in range(6):
+            try:
+                with self.database.connect() as connection:
+                    updated = connection.execute(
+                        """UPDATE production_receipt_outbox
+                           SET state='DELIVERED',attempt_count=attempt_count+1,
+                               delivered_at=?,last_error=NULL,updated_at=?
+                           WHERE receipt_id=? AND state='PENDING'""",
+                        (_now(), _now(), receipt_id),
+                    )
+                if updated.rowcount == 1:
+                    return {
+                        "state": "DELIVERED",
+                        "receipt_id": receipt_id,
+                        "acknowledgement": acknowledged,
+                    }
+                with self.database.connect() as connection:
+                    current = connection.execute(
+                        "SELECT state FROM production_receipt_outbox WHERE receipt_id=?",
+                        (receipt_id,),
+                    ).fetchone()
+                if current is not None and str(current["state"]) == "DELIVERED":
+                    return {"state": "DELIVERED", "receipt_id": receipt_id}
+            except sqlite3.OperationalError as error:
+                if "locked" not in str(error).casefold():
+                    raise
+                if attempt < 5:
+                    time.sleep(0.05 * (attempt + 1))
+                    continue
+
         return {
-            "state": "DELIVERED",
-            "receipt_id": str(row["receipt_id"]),
+            "state": "PENDING",
+            "receipt_id": receipt_id,
             "acknowledgement": acknowledged,
+            "error": "Production receipt acknowledgement is awaiting local outbox convergence.",
         }
 
     def _receipt_for_command(self, command_id: str) -> dict[str, Any] | None:
@@ -1498,158 +1524,3 @@ class CompleteApplicationLoopService:
         success_evidence = safe_evidence(dict(result.get("success_evidence") or {}))
         answers_snapshot = json.loads(str(review["review_json"]))["answers"]
         answers_digest = _sha(answers_snapshot)
-        self._record_event(
-            session=session,
-            event_type="SUBMISSION_OBSERVED",
-            replay_identity=f"{command_id}:observed",
-            evidence={"verification_status": final_status, "success_evidence": success_evidence},
-        )
-        with self.database.connect() as connection:
-            event_rows = connection.execute(
-                "SELECT event_id,event_type,replay_identity,evidence_json,"
-                "checkpoint_json,occurred_at "
-                "FROM complete_application_execution_events WHERE session_id=? "
-                "ORDER BY occurred_at,event_id",
-                (session["session_id"],),
-            ).fetchall()
-        execution_events = [dict(row) for row in event_rows]
-        chain_digest = self._event_chain_digest(str(session["session_id"]))
-        production_receipt: dict[str, Any] | None = None
-        if final_status == "VERIFIED":
-            provider_observation = result.get("provider_observation")
-            try:
-                production_receipt = build_verified_receipt(
-                    authorization=(
-                        self._authority_inbox
-                        or SubmitAuthorityInbox(self.database)
-                    ).authority_for_session(session_id=str(review["session_id"]))
-                    or {},
-                    claim={
-                        "status": "CLAIMED",
-                        "submission_authority": True,
-                        "authorization_id": authority_proof.authorization_id,
-                        "authority_digest": authority_proof.authority_digest,
-                        "claim_digest": authority_proof.claim_digest,
-                    },
-                    execution={
-                        "status": "COMPLETED",
-                        "claimed_submission": True,
-                        "plan_id": str(review["plan_id"]),
-                        "plan_digest": str(review["plan_digest"]),
-                        "provider": str(plan_record["provider"]),
-                        "provider_application_id": result.get("provider_application_id"),
-                        "submission_observation": {
-                            "method": success_evidence.get("submit_method"),
-                            "target": success_evidence.get("submit_action"),
-                            "provider_application_id": result.get("provider_application_id"),
-                        },
-                    },
-                    provider_observation=(
-                        provider_observation
-                        if isinstance(provider_observation, dict)
-                        else {}
-                    ),
-                    verified_at=str(result.get("verified_at") or _now()),
-                )
-            except Exception:
-                # Browser evidence without independent provider confirmation is
-                # not enough to project SUBMITTED in Hunter.
-                final_status = "SUBMISSION_UNVERIFIED"
-
-        receipt_snapshot = {
-            "application_id": review["application_id"],
-            "plan_id": review["plan_id"],
-            "review_id": review_id,
-            "session_id": review["session_id"],
-            "command_id": command_id,
-            "provider": plan_record["provider"],
-            "submitted_at": result.get("submitted_at") or _now(),
-            "submission_url": result.get("submission_url"),
-            "provider_application_id": result.get("provider_application_id"),
-            "resume_artifact_id": plan["resume"]["artifact_id"],
-            "resume_sha256": plan["resume"]["artifact_sha256"],
-            "answers_digest": answers_digest,
-            "answers_snapshot": answers_snapshot,
-            "resume_version_id": plan["resume"]["version_id"],
-            "plan_digest": plan_record["plan_digest"],
-            "review_digest": review["review_digest"],
-            "execution_events": execution_events,
-            "execution_chain_digest": chain_digest,
-            "verification_status": final_status,
-            "success_evidence": success_evidence,
-        }
-        receipt_digest = _sha(receipt_snapshot)
-        receipt_id = "submission-receipt-" + receipt_digest[:32]
-        with self.database.connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            connection.execute(
-                """INSERT INTO application_submission_receipts(
-                       receipt_id,application_id,plan_id,session_id,review_id,command_id,
-                       provider,submitted_at,submission_url,provider_application_id,
-                       resume_artifact_id,resume_sha256,answers_digest,execution_chain_digest,
-                       verification_status,success_evidence_json,receipt_json,receipt_digest,created_at
-                   ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (
-                    receipt_id,
-                    review["application_id"],
-                    review["plan_id"],
-                    review["session_id"],
-                    review_id,
-                    command_id,
-                    plan_record["provider"],
-                    receipt_snapshot["submitted_at"],
-                    receipt_snapshot["submission_url"],
-                    receipt_snapshot["provider_application_id"],
-                    receipt_snapshot["resume_artifact_id"],
-                    receipt_snapshot["resume_sha256"],
-                    answers_digest,
-                    chain_digest,
-                    final_status,
-                    canonical_json(success_evidence),
-                    canonical_json(receipt_snapshot),
-                    receipt_digest,
-                    _now(),
-                ),
-            )
-            connection.execute(
-                "UPDATE final_submit_commands SET state=?,completed_at=? WHERE command_id=?",
-                (final_status, _now(), command_id),
-            )
-            connection.execute(
-                """UPDATE production_submit_authority_executions
-                   SET state=?,completed_at=?
-                   WHERE authorization_id=? AND state='SUBMITTING'""",
-                (final_status, _now(), authority_proof.authorization_id),
-            )
-            if production_receipt is not None:
-                connection.execute(
-                    """INSERT OR IGNORE INTO production_receipt_outbox(
-                           receipt_id,command_id,authorization_id,receipt_json,
-                           state,attempt_count,created_at,updated_at
-                       ) VALUES (?,?,?,?,'PENDING',0,?,?)""",
-                    (
-                        str(production_receipt["receipt_id"]),
-                        command_id,
-                        str(authority_proof.authorization_id),
-                        canonical_json(production_receipt),
-                        _now(),
-                        _now(),
-                    ),
-                )
-        session = self._transition(session, final_status)
-        self._record_event(
-            session=session,
-            event_type=final_status,
-            replay_identity=f"{command_id}:outcome:{receipt_digest}",
-            evidence={
-                "receipt_id": receipt_id,
-                "receipt_digest": receipt_digest,
-                "verification_status": final_status,
-                "success_evidence": success_evidence,
-            },
-        )
-        return self._receipt_for_command(command_id) or {
-            "receipt_id": receipt_id,
-            "verification_status": final_status,
-        }
-
