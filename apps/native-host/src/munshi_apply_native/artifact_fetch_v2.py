@@ -233,12 +233,12 @@ class HunterExecutionBridgeClient:
             self.secret,
             (
                 f"autoapply-credential:{p['request_id']}:{p['plan_digest']}"
-            ).encode("utf-8"),
+            ).encode(),
             hashlib.sha256,
         ).digest()
         aad = (
             f"{p['request_id']}.{p['plan_digest']}.autoapply_anthropic_api_key"
-        ).encode("utf-8")
+        ).encode()
         try:
             raw = AESGCM(key).decrypt(nonce, ciphertext, aad)
             value = raw.decode("utf-8").strip()
