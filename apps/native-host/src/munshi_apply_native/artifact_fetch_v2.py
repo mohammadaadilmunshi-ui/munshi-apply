@@ -19,6 +19,8 @@ RESPONSE_VERSION = "munshi-application-execution-response-v1"
 PURPOSE_PLAN_CURRENT = "PLAN_CURRENT"
 PURPOSE_ARTIFACT_BYTES = "ARTIFACT_BYTES"
 PURPOSE_COVER_LETTER_BYTES = "COVER_LETTER_BYTES"
+PURPOSE_AUTOAPPLY_CONFIG = "AUTOAPPLY_CONFIG"
+PURPOSE_AUTOAPPLY_ANTHROPIC_SECRET = "AUTOAPPLY_ANTHROPIC_SECRET"
 
 
 class HunterExecutionBridgeClient:
@@ -170,6 +172,64 @@ class HunterExecutionBridgeClient:
             purpose=PURPOSE_COVER_LETTER_BYTES,
             endpoint="/api/application-execution/cover-letter",
         )
+
+    def autoapply_config(self, plan: dict[str, Any]) -> dict[str, Any]:
+        """Fetch non-secret AutoApply preferences bound to the exact plan."""
+        purpose = PURPOSE_AUTOAPPLY_CONFIG
+        p = self._payload(plan, purpose)
+        body = self._canonical(p)
+        response = self.client.post(
+            f"{self.base_url}/api/application-execution/autoapply-config",
+            content=body,
+            headers=self._headers(p, body),
+        )
+        raw = self._verify(response=response, payload=p, purpose=purpose)
+        try:
+            decoded = json.loads(raw)
+        except json.JSONDecodeError as error:
+            raise RuntimeError("Hunter AutoApply config response is invalid JSON") from error
+        config = decoded.get("config") if isinstance(decoded, dict) else None
+        if (
+            not isinstance(config, dict)
+            or decoded.get("version") != RESPONSE_VERSION
+            or decoded.get("request_id") != p["request_id"]
+            or decoded.get("purpose") != purpose
+            or decoded.get("plan_id") != p["plan_id"]
+            or decoded.get("plan_digest") != p["plan_digest"]
+        ):
+            raise RuntimeError("Hunter AutoApply config response binding mismatch")
+        return dict(config)
+
+    def anthropic_api_key(self, plan: dict[str, Any]) -> str:
+        """Resolve the dashboard-vault Anthropic key server-to-server only.
+
+        The value is returned only to the Apply process over the signed execution
+        bridge. It is never persisted by this client or exposed to Chromium.
+        """
+        purpose = PURPOSE_AUTOAPPLY_ANTHROPIC_SECRET
+        p = self._payload(plan, purpose)
+        body = self._canonical(p)
+        response = self.client.post(
+            f"{self.base_url}/api/application-execution/autoapply-credential",
+            content=body,
+            headers=self._headers(p, body),
+        )
+        raw = self._verify(response=response, payload=p, purpose=purpose)
+        if (
+            response.headers.get("X-Munshi-Credential-Type")
+            != "autoapply_anthropic_api_key"
+            or response.headers.get("X-Munshi-Submission-Authority") != "false"
+        ):
+            raise RuntimeError("Hunter AutoApply credential response binding mismatch")
+        if not raw or len(raw) > 16384:
+            raise RuntimeError("Hunter AutoApply credential is unavailable")
+        try:
+            value = raw.decode("utf-8").strip()
+        except UnicodeDecodeError as error:
+            raise RuntimeError("Hunter AutoApply credential encoding is invalid") from error
+        if not value:
+            raise RuntimeError("Hunter AutoApply credential is unavailable")
+        return value
 
     def close(self) -> None:
         self.client.close()
