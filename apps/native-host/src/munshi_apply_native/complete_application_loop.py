@@ -12,8 +12,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import sqlite3
-import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -1224,42 +1222,18 @@ class CompleteApplicationLoopService:
                 "receipt_id": str(row["receipt_id"]),
                 "error": str(error),
             }
-        receipt_id = str(row["receipt_id"])
-        for attempt in range(6):
-            try:
-                with self.database.connect() as connection:
-                    updated = connection.execute(
-                        """UPDATE production_receipt_outbox
-                           SET state='DELIVERED',attempt_count=attempt_count+1,
-                               delivered_at=?,last_error=NULL,updated_at=?
-                           WHERE receipt_id=? AND state='PENDING'""",
-                        (_now(), _now(), receipt_id),
-                    )
-                if updated.rowcount == 1:
-                    return {
-                        "state": "DELIVERED",
-                        "receipt_id": receipt_id,
-                        "acknowledgement": acknowledged,
-                    }
-                with self.database.connect() as connection:
-                    current = connection.execute(
-                        "SELECT state FROM production_receipt_outbox WHERE receipt_id=?",
-                        (receipt_id,),
-                    ).fetchone()
-                if current is not None and str(current["state"]) == "DELIVERED":
-                    return {"state": "DELIVERED", "receipt_id": receipt_id}
-            except sqlite3.OperationalError as error:
-                if "locked" not in str(error).casefold():
-                    raise
-                if attempt < 5:
-                    time.sleep(0.05 * (attempt + 1))
-                    continue
-
+        with self.database.connect() as connection:
+            connection.execute(
+                """UPDATE production_receipt_outbox
+                   SET state='DELIVERED',attempt_count=attempt_count+1,
+                       delivered_at=?,last_error=NULL,updated_at=?
+                   WHERE receipt_id=? AND state='PENDING'""",
+                (_now(), _now(), str(row["receipt_id"])),
+            )
         return {
-            "state": "PENDING",
-            "receipt_id": receipt_id,
+            "state": "DELIVERED",
+            "receipt_id": str(row["receipt_id"]),
             "acknowledgement": acknowledged,
-            "error": "Production receipt acknowledgement is awaiting local outbox convergence.",
         }
 
     def _receipt_for_command(self, command_id: str) -> dict[str, Any] | None:
@@ -1371,13 +1345,12 @@ class CompleteApplicationLoopService:
             if existing is not None:
                 if str(existing["review_id"]) != review_id:
                     raise ValueError("Submit idempotency key belongs to another review")
-                # Never open the receipt-delivery connection while this
-                # BEGIN IMMEDIATE write lock is still held. A racing worker may
-                # already have completed the one submit command and queued its
-                # verified receipt; replay that receipt only after this context
-                # commits/releases the lock.
+                # Do not call receipt replay while this BEGIN IMMEDIATE lock is
+                # held. A second connection cannot safely deliver/update the
+                # receipt until this transaction has released its write lock.
                 replay_command_id = str(existing["command_id"])
                 replay_command = dict(existing)
+
             if replay_command_id is None:
                 prior_review = connection.execute(
                     "SELECT command_id FROM final_submit_commands "
@@ -1386,81 +1359,77 @@ class CompleteApplicationLoopService:
                 ).fetchone()
                 if prior_review is not None:
                     replay_command_id = str(prior_review["command_id"])
+
             if replay_command_id is None:
                 # Browser inspection runs outside the write lock. Re-read the exact
-            # approved state under that lock so revocation or replacement during
-            # inspection cannot authorize the cached snapshot.
-            locked_review = connection.execute(
-                "SELECT * FROM final_application_reviews WHERE review_id=?", (review_id,)
-            ).fetchone()
-            if locked_review is None or dict(locked_review) != review:
-                raise ValueError("Final review changed during submission inspection")
-            if locked_review["approved_at"] is None or locked_review["invalidated_at"] is not None:
-                raise ValueError("Final review is no longer approved")
-            locked_session = connection.execute(
-                "SELECT * FROM complete_application_sessions WHERE session_id=?",
-                (session["session_id"],),
-            ).fetchone()
-            if locked_session is None or dict(locked_session) != session:
-                raise ValueError("Browser session changed during submission inspection")
-            locked_plan = connection.execute(
-                "SELECT * FROM career_os_application_plans "
-                "WHERE plan_id=? AND tenant_id=? AND user_id=?",
-                (review["plan_id"], self.tenant_id, self.user_id),
-            ).fetchone()
-            if locked_plan is None:
-                raise ValueError("Application Plan changed during submission inspection")
-            locked_plan_record = dict(locked_plan)
-            locked_plan_record["plan"] = json.loads(locked_plan_record.pop("plan_json"))
-            if locked_plan_record != plan_record:
-                raise ValueError("Application Plan changed during submission inspection")
-            if not _truthy(FINAL_SUBMIT_ENV):
-                raise RuntimeError("Final submit authority is disabled")
-            if not _truthy(PRODUCTION_AUTHORITY_ENV):
-                # §6 (mirror of the early check inside the locked transaction):
-                # the irreversible boundary is unreachable without a canonical
-                # Hunter-issued submit authority backing it.
-                raise RuntimeError("Canonical submit authority is disabled")
-            # Consume the canonical submit authority durably. The box (a)
-            # proves a CLAIMED state and (b) records a one-shot local
-            # execution row, so a second dispatch (lost response) cannot
-            # re-cross the irreversible boundary. We share the open parent
-            # connection so the inbox can extend the same write transaction
-            # without contending for a separate BEGIN IMMEDIATE.
-            # Constructed on demand rather than only when the receive route ran:
-            # ``_loop_service`` yields a fresh service per request, so an inbox
-            # bound during delivery would not exist on the instance that submits.
-            # The inbox is keyless and stateless (a view over ``self.database``),
-            # so building it here grants nothing extra; every authority check
-            # below still has to pass.
-            if self._authority_inbox is None:
-                self._authority_inbox = SubmitAuthorityInbox(self.database)
-            authority_proof = self._authority_inbox.consume_for_execution(
-                session_id=str(review["session_id"]),
-                now=_now(),
-                connection=connection,
-            )
-            if not authority_proof.claimed:
-                raise RuntimeError(
-                    f"Canonical submit authority is not available: {authority_proof.error}"
+                # approved state under that lock so revocation or replacement during
+                # inspection cannot authorize the cached snapshot.
+                locked_review = connection.execute(
+                    "SELECT * FROM final_application_reviews WHERE review_id=?", (review_id,)
+                ).fetchone()
+                if locked_review is None or dict(locked_review) != review:
+                    raise ValueError("Final review changed during submission inspection")
+                if (
+                    locked_review["approved_at"] is None
+                    or locked_review["invalidated_at"] is not None
+                ):
+                    raise ValueError("Final review is no longer approved")
+                locked_session = connection.execute(
+                    "SELECT * FROM complete_application_sessions WHERE session_id=?",
+                    (session["session_id"],),
+                ).fetchone()
+                if locked_session is None or dict(locked_session) != session:
+                    raise ValueError("Browser session changed during submission inspection")
+                locked_plan = connection.execute(
+                    "SELECT * FROM career_os_application_plans "
+                    "WHERE plan_id=? AND tenant_id=? AND user_id=?",
+                    (review["plan_id"], self.tenant_id, self.user_id),
+                ).fetchone()
+                if locked_plan is None:
+                    raise ValueError("Application Plan changed during submission inspection")
+                locked_plan_record = dict(locked_plan)
+                locked_plan_record["plan"] = json.loads(
+                    locked_plan_record.pop("plan_json")
                 )
-            if (
-                authority_proof.authority_digest is None
-                or authority_proof.authorization_id is None
-                or authority_proof.claim_digest is None
-            ):
-                raise RuntimeError("Canonical submit authority proof is incomplete")
-            command_id = f"submit-command-{uuid4()}"
-            command_payload = {
-                "application_id": review["application_id"],
-                "plan_id": review["plan_id"],
-                "session_id": review["session_id"],
-                "review_id": review_id,
-                "review_digest": review["review_digest"],
-                "plan_digest": review["plan_digest"],
-                "browser_form_digest": review["browser_form_digest"],
-                "resume_digest": review["resume_digest"],
-            }
+                if locked_plan_record != plan_record:
+                    raise ValueError("Application Plan changed during submission inspection")
+                if not _truthy(FINAL_SUBMIT_ENV):
+                    raise RuntimeError("Final submit authority is disabled")
+                if not _truthy(PRODUCTION_AUTHORITY_ENV):
+                    raise RuntimeError("Canonical submit authority is disabled")
+
+                # Consume the canonical submit authority durably in this same
+                # transaction. This is the exactly-once employer-action boundary.
+                if self._authority_inbox is None:
+                    self._authority_inbox = SubmitAuthorityInbox(self.database)
+                authority_proof = self._authority_inbox.consume_for_execution(
+                    session_id=str(review["session_id"]),
+                    now=_now(),
+                    connection=connection,
+                )
+                if not authority_proof.claimed:
+                    raise RuntimeError(
+                        "Canonical submit authority is not available: "
+                        f"{authority_proof.error}"
+                    )
+                if (
+                    authority_proof.authority_digest is None
+                    or authority_proof.authorization_id is None
+                    or authority_proof.claim_digest is None
+                ):
+                    raise RuntimeError("Canonical submit authority proof is incomplete")
+
+                command_id = f"submit-command-{uuid4()}"
+                command_payload = {
+                    "application_id": review["application_id"],
+                    "plan_id": review["plan_id"],
+                    "session_id": review["session_id"],
+                    "review_id": review_id,
+                    "review_digest": review["review_digest"],
+                    "plan_digest": review["plan_digest"],
+                    "browser_form_digest": review["browser_form_digest"],
+                    "resume_digest": review["resume_digest"],
+                }
                 connection.execute(
                     """INSERT INTO final_submit_commands(
                            command_id,application_id,plan_id,session_id,review_id,idempotency_key,
@@ -1524,3 +1493,158 @@ class CompleteApplicationLoopService:
         success_evidence = safe_evidence(dict(result.get("success_evidence") or {}))
         answers_snapshot = json.loads(str(review["review_json"]))["answers"]
         answers_digest = _sha(answers_snapshot)
+        self._record_event(
+            session=session,
+            event_type="SUBMISSION_OBSERVED",
+            replay_identity=f"{command_id}:observed",
+            evidence={"verification_status": final_status, "success_evidence": success_evidence},
+        )
+        with self.database.connect() as connection:
+            event_rows = connection.execute(
+                "SELECT event_id,event_type,replay_identity,evidence_json,"
+                "checkpoint_json,occurred_at "
+                "FROM complete_application_execution_events WHERE session_id=? "
+                "ORDER BY occurred_at,event_id",
+                (session["session_id"],),
+            ).fetchall()
+        execution_events = [dict(row) for row in event_rows]
+        chain_digest = self._event_chain_digest(str(session["session_id"]))
+        production_receipt: dict[str, Any] | None = None
+        if final_status == "VERIFIED":
+            provider_observation = result.get("provider_observation")
+            try:
+                production_receipt = build_verified_receipt(
+                    authorization=(
+                        self._authority_inbox
+                        or SubmitAuthorityInbox(self.database)
+                    ).authority_for_session(session_id=str(review["session_id"]))
+                    or {},
+                    claim={
+                        "status": "CLAIMED",
+                        "submission_authority": True,
+                        "authorization_id": authority_proof.authorization_id,
+                        "authority_digest": authority_proof.authority_digest,
+                        "claim_digest": authority_proof.claim_digest,
+                    },
+                    execution={
+                        "status": "COMPLETED",
+                        "claimed_submission": True,
+                        "plan_id": str(review["plan_id"]),
+                        "plan_digest": str(review["plan_digest"]),
+                        "provider": str(plan_record["provider"]),
+                        "provider_application_id": result.get("provider_application_id"),
+                        "submission_observation": {
+                            "method": success_evidence.get("submit_method"),
+                            "target": success_evidence.get("submit_action"),
+                            "provider_application_id": result.get("provider_application_id"),
+                        },
+                    },
+                    provider_observation=(
+                        provider_observation
+                        if isinstance(provider_observation, dict)
+                        else {}
+                    ),
+                    verified_at=str(result.get("verified_at") or _now()),
+                )
+            except Exception:
+                # Browser evidence without independent provider confirmation is
+                # not enough to project SUBMITTED in Hunter.
+                final_status = "SUBMISSION_UNVERIFIED"
+
+        receipt_snapshot = {
+            "application_id": review["application_id"],
+            "plan_id": review["plan_id"],
+            "review_id": review_id,
+            "session_id": review["session_id"],
+            "command_id": command_id,
+            "provider": plan_record["provider"],
+            "submitted_at": result.get("submitted_at") or _now(),
+            "submission_url": result.get("submission_url"),
+            "provider_application_id": result.get("provider_application_id"),
+            "resume_artifact_id": plan["resume"]["artifact_id"],
+            "resume_sha256": plan["resume"]["artifact_sha256"],
+            "answers_digest": answers_digest,
+            "answers_snapshot": answers_snapshot,
+            "resume_version_id": plan["resume"]["version_id"],
+            "plan_digest": plan_record["plan_digest"],
+            "review_digest": review["review_digest"],
+            "execution_events": execution_events,
+            "execution_chain_digest": chain_digest,
+            "verification_status": final_status,
+            "success_evidence": success_evidence,
+        }
+        receipt_digest = _sha(receipt_snapshot)
+        receipt_id = "submission-receipt-" + receipt_digest[:32]
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                """INSERT INTO application_submission_receipts(
+                       receipt_id,application_id,plan_id,session_id,review_id,command_id,
+                       provider,submitted_at,submission_url,provider_application_id,
+                       resume_artifact_id,resume_sha256,answers_digest,execution_chain_digest,
+                       verification_status,success_evidence_json,receipt_json,receipt_digest,created_at
+                   ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    receipt_id,
+                    review["application_id"],
+                    review["plan_id"],
+                    review["session_id"],
+                    review_id,
+                    command_id,
+                    plan_record["provider"],
+                    receipt_snapshot["submitted_at"],
+                    receipt_snapshot["submission_url"],
+                    receipt_snapshot["provider_application_id"],
+                    receipt_snapshot["resume_artifact_id"],
+                    receipt_snapshot["resume_sha256"],
+                    answers_digest,
+                    chain_digest,
+                    final_status,
+                    canonical_json(success_evidence),
+                    canonical_json(receipt_snapshot),
+                    receipt_digest,
+                    _now(),
+                ),
+            )
+            connection.execute(
+                "UPDATE final_submit_commands SET state=?,completed_at=? WHERE command_id=?",
+                (final_status, _now(), command_id),
+            )
+            connection.execute(
+                """UPDATE production_submit_authority_executions
+                   SET state=?,completed_at=?
+                   WHERE authorization_id=? AND state='SUBMITTING'""",
+                (final_status, _now(), authority_proof.authorization_id),
+            )
+            if production_receipt is not None:
+                connection.execute(
+                    """INSERT OR IGNORE INTO production_receipt_outbox(
+                           receipt_id,command_id,authorization_id,receipt_json,
+                           state,attempt_count,created_at,updated_at
+                       ) VALUES (?,?,?,?,'PENDING',0,?,?)""",
+                    (
+                        str(production_receipt["receipt_id"]),
+                        command_id,
+                        str(authority_proof.authorization_id),
+                        canonical_json(production_receipt),
+                        _now(),
+                        _now(),
+                    ),
+                )
+        session = self._transition(session, final_status)
+        self._record_event(
+            session=session,
+            event_type=final_status,
+            replay_identity=f"{command_id}:outcome:{receipt_digest}",
+            evidence={
+                "receipt_id": receipt_id,
+                "receipt_digest": receipt_digest,
+                "verification_status": final_status,
+                "success_evidence": success_evidence,
+            },
+        )
+        return self._receipt_for_command(command_id) or {
+            "receipt_id": receipt_id,
+            "verification_status": final_status,
+        }
+
