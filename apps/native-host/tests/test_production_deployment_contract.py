@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -8,7 +9,6 @@ ROOT = Path(__file__).resolve().parents[3]
 
 def test_production_compose_has_separate_api_prepare_submit_authority() -> None:
     source = (ROOT / "deploy/production/compose.yaml").read_text(encoding="utf-8")
-    assert "MUNSHI Apply" not in source or True
     assert "prepare-worker:" in source
     assert "submit-worker:" in source
     assert 'profiles: ["hosted-prepare"]' in source
@@ -63,3 +63,11 @@ def test_production_private_http_is_exact_and_default_denied() -> None:
     assert "MUNSHI_PRODUCTION_INTERNAL_BRIDGE_ENABLED" in source
     assert '"." not in host' in source
     assert "normalized != allowed" in source
+
+def test_production_shell_scripts_parse() -> None:
+    for relative in (
+        "deploy/netcup/deploy_apply_production_release.sh",
+        "deploy/netcup/verify_apply_production_runtime_contract.sh",
+        "deploy/netcup/activate_apply_production_submit.sh",
+    ):
+        subprocess.run(["bash", "-n", str(ROOT / relative)], check=True)
