@@ -175,3 +175,94 @@ def test_disabled_fallback_does_not_call_provider(tmp_path: Path) -> None:
     with pytest.raises(InteractionFallbackError, match="disabled"):
         service.propose(safe_payload())
     assert calls == []
+
+
+def test_hosted_api_mode_uses_dashboard_config_and_secret_resolvers(tmp_path: Path) -> None:
+    calls: list[dict[str, object]] = []
+    secret_calls: list[str] = []
+
+    def runner(
+        prompt: str,
+        model: str,
+        auth_mode: str,
+        max_cost_usd: float,
+        max_wall_seconds: int,
+        api_key: str | None,
+    ) -> str:
+        calls.append(
+            {
+                "prompt": prompt,
+                "model": model,
+                "auth_mode": auth_mode,
+                "max_cost_usd": max_cost_usd,
+                "max_wall_seconds": max_wall_seconds,
+                "api_key": api_key,
+            }
+        )
+        result = "MUNSHI_INTERACTION_RECOVERY=" + json.dumps(
+            {"actions": [{"type": "CLICK"}], "reason": "bounded"}
+        )
+        return json.dumps({"type": "result", "result": result})
+
+    service = InteractionFallbackService(
+        tmp_path,
+        runner=runner,
+        config_resolver=lambda: {
+            "enabled": True,
+            "authMode": "api",
+            "model": "sonnet",
+            "headless": True,
+            "maxTurns": 40,
+            "maxCostPerApplicationUsd": 1.0,
+            "allowFinalSubmit": False,
+            "challengeServiceEnabled": False,
+        },
+        api_key_resolver=lambda: secret_calls.append("called") or "dashboard-anthropic-secret",
+    )
+
+    proposal = service.propose(safe_payload())
+
+    assert proposal["provider"] == "claude"
+    assert len(secret_calls) == 1
+    assert len(calls) == 1
+    assert calls[0]["auth_mode"] == "api"
+    assert calls[0]["model"] == "sonnet"
+    assert calls[0]["api_key"] == "dashboard-anthropic-secret"
+    assert "dashboard-anthropic-secret" not in str(calls[0]["prompt"])
+
+
+def test_hosted_subscription_mode_never_resolves_dashboard_api_key(tmp_path: Path) -> None:
+    secret_calls: list[str] = []
+
+    def runner(
+        _prompt: str,
+        _model: str,
+        _auth_mode: str,
+        _max_cost_usd: float,
+        _max_wall_seconds: int,
+        api_key: str | None,
+    ) -> str:
+        assert api_key is None
+        result = "MUNSHI_INTERACTION_RECOVERY=" + json.dumps(
+            {"actions": [{"type": "CLICK"}], "reason": "bounded"}
+        )
+        return json.dumps({"type": "result", "result": result})
+
+    service = InteractionFallbackService(
+        tmp_path,
+        runner=runner,
+        config_resolver=lambda: {
+            "enabled": True,
+            "authMode": "subscription",
+            "model": "sonnet",
+            "headless": True,
+            "maxTurns": 40,
+            "maxCostPerApplicationUsd": 1.0,
+            "allowFinalSubmit": False,
+            "challengeServiceEnabled": False,
+        },
+        api_key_resolver=lambda: secret_calls.append("called") or "must-not-be-read",
+    )
+
+    service.propose(safe_payload())
+    assert secret_calls == []
