@@ -27,6 +27,16 @@ def main() -> None:
     verify = read("deploy/netcup/verify_apply_staging_runtime_contract.sh")
     installer = read("deploy/netcup/install_apply_staging_deploy_transport.sh")
     compose = read("deploy/staging/compose.yaml")
+    runtime_sources = {
+        "artifact fetch": read("apps/native-host/src/munshi_apply_native/artifact_fetch_v2.py"),
+        "hosted prepare": read("apps/native-host/src/munshi_apply_native/hosted_prepare_worker.py"),
+        "hosted submit": read("apps/native-host/src/munshi_apply_native/hosted_submit_worker.py"),
+        "hosted trust": read("apps/native-host/src/munshi_apply_native/hosted_trust_worker.py"),
+        "internal HTTP policy": read("apps/native-host/src/munshi_apply_native/internal_http_policy.py"),
+        "submit authority client": read("apps/native-host/src/munshi_apply_native/hunter_submit_authority_client_v1.py"),
+        "receipt client": read("apps/native-host/src/munshi_apply_native/production_receipt_v1.py"),
+        "mail artifact client": read("apps/native-host/src/munshi_apply_native/mail_artifact_broker.py"),
+    }
 
     require(
         workflow,
@@ -199,6 +209,18 @@ def main() -> None:
             ),
             label,
         )
+
+    legacy_runtime_tokens = (
+        "STAGING_HTTP_ENV",
+        "allow_staging_http",
+        "MUNSHI_HUNTER_EXECUTION_BRIDGE_STAGING_HTTP_ENABLED",
+        "http://hunter:8000",
+    )
+    for label, text in runtime_sources.items():
+        forbid(text, legacy_runtime_tokens, label)
+
+    forbid(compose, ("hunter_staging",), "Apply target compose")
+    forbid(verify, ("hunter_staging",), "Apply target runtime verifier")
 
     print("APPLY_TARGET_TRANSPORT_STATIC_GUARD=PASS")
 
