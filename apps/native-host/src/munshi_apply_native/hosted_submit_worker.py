@@ -454,6 +454,10 @@ def run_forever() -> None:
         bridge_secret=settings.handoff_hmac_secret,
         browser_executable=os.getenv("MUNSHI_BROWSER_EXECUTABLE") or None,
         navigation_timeout_ms=int(os.getenv("MUNSHI_APPLY_BROWSER_TIMEOUT_MS", "30000")),
+        # Rebuilding the already-reviewed form must have the same deterministic
+        # Teach -> Sonnet recovery stack as preparation. Recovery still has no
+        # submit authority; CompleteApplicationLoopService keeps that boundary.
+        runtime_root=settings.runtime_root,
     )
     runner = HostedSubmitRunner(
         database,
