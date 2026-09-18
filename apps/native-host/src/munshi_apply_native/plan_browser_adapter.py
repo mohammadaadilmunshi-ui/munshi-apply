@@ -320,7 +320,7 @@ class PlanBrowserAdapter:
             for question in described["page"]["questions"]:
                 controls = {c["controlId"]: c for c in self._scan()["page"]["controls"]}
                 control = controls.get(question["controlId"])
-                if not control or not control["visible"] or control["disabled"]:
+                if not control or control["disabled"]:
                     continue
                 if control.get("inputType") == "file":
                     identity = (
@@ -366,6 +366,8 @@ class PlanBrowserAdapter:
                             }
                         )
                         self.on_event("COVER_LETTER_UPLOADED", {"sha256": cover["artifact_sha256"]})
+                    continue
+                if not control["visible"]:
                     continue
                 if question["sensitive"] or control.get("inputType") == "password":
                     continue  # Protected execution requires a scoped resolver, never plain memory.
