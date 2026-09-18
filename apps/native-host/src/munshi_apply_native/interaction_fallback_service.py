@@ -5,6 +5,8 @@ import os
 import re
 import shutil
 import subprocess  # noqa: S404
+
+import httpx
 from collections.abc import Callable
 from pathlib import Path
 
@@ -28,6 +30,14 @@ _BLOCKED_SEMANTIC_MARKERS = {
 _BLOCKED_CONTROL_KINDS = {"FILE", "BUTTON"}
 _ALLOWED_KEYS = {"ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"}
 _ALLOWED_WAIT_STATES = {"OPTIONS_VISIBLE", "VALUE_COMMITTED"}
+
+_ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
+_ANTHROPIC_API_VERSION = "2023-06-01"
+_API_MODEL_ALIASES = {
+    "sonnet": "claude-sonnet-5",
+    "opus": "claude-opus-5",
+    "haiku": "claude-haiku-4-5-20251001",
+}
 
 Runner = Callable[[str, str, str, float, int, str | None], str]
 ConfigResolver = Callable[[], AutonomousApplyConfiguration | dict[str, object]]
@@ -114,6 +124,51 @@ def _parse_output(stdout: str) -> dict[str, object]:
     return payload
 
 
+def _anthropic_api_runner(
+    prompt: str,
+    model: str,
+    *,
+    max_wall_seconds: int,
+    api_key: str,
+) -> str:
+    resolved_model = _API_MODEL_ALIASES.get(model.strip().casefold(), model.strip())
+    if not resolved_model:
+        raise InteractionFallbackError("Anthropic API model is not configured")
+    try:
+        response = httpx.post(
+            _ANTHROPIC_MESSAGES_URL,
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": _ANTHROPIC_API_VERSION,
+                "content-type": "application/json",
+            },
+            json={
+                "model": resolved_model,
+                # Recovery output is one compact JSON action recipe. Keeping the
+                # output ceiling low makes runaway cost impossible on this call.
+                "max_tokens": 768,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+            timeout=float(max_wall_seconds),
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except (httpx.HTTPError, ValueError) as error:
+        raise InteractionFallbackError("Anthropic API interaction recovery failed") from error
+
+    content = payload.get("content") if isinstance(payload, dict) else None
+    if not isinstance(content, list):
+        raise InteractionFallbackError("Anthropic API returned no recovery content")
+    text = "\n".join(
+        str(block.get("text") or "")
+        for block in content
+        if isinstance(block, dict) and block.get("type") == "text"
+    ).strip()
+    if not text:
+        raise InteractionFallbackError("Anthropic API returned no recovery text")
+    return text
+
+
 def _default_runner(
     prompt: str,
     model: str,
@@ -122,6 +177,16 @@ def _default_runner(
     max_wall_seconds: int,
     api_key: str | None,
 ) -> str:
+    if auth_mode == "api":
+        if not api_key:
+            raise InteractionFallbackError("Anthropic API credential is unavailable")
+        return _anthropic_api_runner(
+            prompt,
+            model,
+            max_wall_seconds=max_wall_seconds,
+            api_key=api_key,
+        )
+
     claude = shutil.which("claude")
     if not claude:
         raise InteractionFallbackError("Claude CLI is unavailable for automatic recovery")
@@ -145,10 +210,8 @@ def _default_runner(
         "-",
     ]
     env = os.environ.copy()
-    if auth_mode == "subscription":
-        env.pop("ANTHROPIC_API_KEY", None)
-    elif api_key:
-        env["ANTHROPIC_API_KEY"] = api_key
+    # Subscription mode must never inherit an API key accidentally.
+    env.pop("ANTHROPIC_API_KEY", None)
     process = subprocess.run(  # noqa: S603
         command,
         input=prompt,
