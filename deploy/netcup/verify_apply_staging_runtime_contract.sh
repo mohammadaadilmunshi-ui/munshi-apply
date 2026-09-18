@@ -98,7 +98,7 @@ compose=(
   -f "$STAGING_REPO/deploy/staging/compose.yaml"
 )
 
-rendered="$(mktemp /tmp/munshi-apply-staging-rendered.XXXXXX.json)"
+rendered="$(mktemp /tmp/munshi-apply-${target}-rendered.XXXXXX.json)"
 trap 'rm -f "$rendered"' EXIT
 
 env \

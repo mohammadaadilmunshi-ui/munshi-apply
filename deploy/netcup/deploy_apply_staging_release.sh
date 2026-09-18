@@ -120,7 +120,7 @@ chmod 700 "$STAGING_ROOT/runtime" "$STAGING_ROOT/backups" "$STAGING_ROOT/receipt
 exec 9>"$LOCK_FILE"
 flock -n 9 || { echo "another Apply staging deployment is already running" >&2; exit 9; }
 
-bundle_file="$(mktemp /tmp/munshi-apply-staging-deploy.XXXXXX.bundle)"
+bundle_file="$(mktemp /tmp/munshi-apply-${target}-deploy.XXXXXX.bundle)"
 timeout 120s cat > "$bundle_file" || { echo "Apply staging deployment bundle transfer timed out" >&2; exit 10; }
 [[ -s "$bundle_file" ]] || { echo "Apply staging deployment bundle is empty" >&2; exit 11; }
 
@@ -233,7 +233,7 @@ fi
 
 git bundle verify "$bundle_file"
 bundle_ref="refs/remotes/origin/$branch"
-deploy_ref="refs/remotes/github-apply-staging-deploy/$branch"
+deploy_ref="refs/remotes/github-apply-deploy/$target/$branch"
 git fetch --no-tags "$bundle_file" "+$bundle_ref:$deploy_ref"
 git cat-file -e "$commit^{commit}"
 git merge-base --is-ancestor "$commit" "$deploy_ref" || {
@@ -245,7 +245,7 @@ echo "GITHUB_APPLY_STAGING_BUNDLE_IMPORT=PASS"
 write_receipt() {
   local result="$1"
   local active_sha="$2"
-  local receipt="$STAGING_ROOT/receipts/apply-staging-$stamp-$commit.json"
+  local receipt="$STAGING_ROOT/receipts/apply-$target-$stamp-$commit.json"
   python3 - "$receipt" "$result" "$commit" "$branch" "$active_sha" "${old_head:-}" "${rollback_tag:-}" "$db_backup" "$DEPLOY_ENVIRONMENT" "$target" <<'PY'
 import json
 import sys
@@ -345,7 +345,7 @@ bash -n deploy/netcup/verify_apply_staging_runtime_contract.sh
 bash -n deploy/netcup/github_apply_staging_deploy_gateway.sh
 python3 -m compileall -q apps/native-host/src scripts
 
-rendered="$(mktemp /tmp/munshi-apply-staging-rendered.XXXXXX.json)"
+rendered="$(mktemp /tmp/munshi-apply-${target}-rendered.XXXXXX.json)"
 env \
   MUNSHI_APPLY_DEPLOY_SHA="$commit" \
   MUNSHI_APPLY_IMAGE_TAG="$commit" \

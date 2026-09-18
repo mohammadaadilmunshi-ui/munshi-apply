@@ -143,7 +143,7 @@ else
   chmod 0600 "$STAGING_ENV"
 fi
 
-backup_dir="$(mktemp -d /tmp/munshi-apply-staging-transport-install.XXXXXX)"
+backup_dir="$(mktemp -d /tmp/munshi-apply-${TARGET}-transport-install.XXXXXX)"
 new_authorized="$(mktemp /tmp/munshi-apply-authorized-keys.XXXXXX)"
 
 deploy_had=0
