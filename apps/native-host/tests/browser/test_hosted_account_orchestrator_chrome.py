@@ -285,7 +285,7 @@ def test_account_verification_stays_in_same_chromium_session(
             context=context,
             tenant_id="tenant-browser",
             user_id="user-browser",
-            session_secret=b"browser-account-session-fixture-key",
+            session_secret=b"browser-account-session-fixture-key",  # noqa: S106
             verification_timeout_seconds=5,
             poll_interval_seconds=0.05,
         ).run()
