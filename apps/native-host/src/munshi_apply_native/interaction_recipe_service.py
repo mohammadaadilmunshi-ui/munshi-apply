@@ -31,6 +31,10 @@ _BLOCKED_SEMANTIC_MARKERS = {
     "LIVENESS",
     "TOTP",
     "SMS",
+    "OTP",
+    "PASSWORD",
+    "AUTHENTICATION",
+    "SUBMIT",
     "FINAL_SUBMIT",
 }
 _ACTIONS: dict[str, list[dict[str, object]]] = {
