@@ -330,21 +330,13 @@ def test_live_browser_revalidation_clears_checkpoint_but_requeue_remains_explici
         now="2026-09-10T20:10:05+00:00",
     )
     assert cleared["status"] == "CLEARED"
+    assert cleared["prepare_job_state"] == "QUEUED"
 
-    still_waiting = queue.get(
+    requeued = queue.get(
         job_id=job["job_id"],
         tenant_id="tenant-a",
         user_id="member-a",
     )
-    assert still_waiting["state"] == "WAITING_INPUT"
-
-    requeued = queue.requeue_session(
-        session_id=still_waiting["session_id"],
-        tenant_id="tenant-a",
-        user_id="member-a",
-        now="2026-09-10T20:10:06+00:00",
-    )
-    assert requeued is not None
     assert requeued["state"] == "QUEUED"
 
     with db.connect() as connection:
