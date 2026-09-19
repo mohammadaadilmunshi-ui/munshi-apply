@@ -288,12 +288,21 @@ class HostedAccountOrchestrator:
         answers = dict(answer_values or {})
         secrets = dict(secret_values or {})
         verifications = dict(verification_values or {})
+        current_host = str(urlsplit(str(self.page.url)).hostname or "").casefold()
+        allowed_navigation_hosts = {
+            str(host).casefold().rstrip(".")
+            for host in self.plan.get("provider_policy", {}).get("allowed_hosts", [])
+            if str(host).strip()
+        }
+        if current_host:
+            allowed_navigation_hosts.add(current_host.rstrip("."))
         executor = TrustedMechanicsExecutor(
             self.page,
             answer_resolver=lambda ref: answers[ref],
             secret_resolver=lambda ref: secrets[ref],
             verification_resolver=lambda ref: verifications[ref],
             allowed_open_hosts=set(self._mailbox_policy()[0]) if verifications else set(),
+            allowed_navigation_hosts=allowed_navigation_hosts,
             allow_submit_controls=True,
         )
         surface = executor.snapshot()
@@ -314,7 +323,8 @@ class HostedAccountOrchestrator:
         parsed = urlsplit(origin)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             return False
-        site_origin = f"{parsed.scheme}://{parsed.hostname.lower()}"
+        port = f":{parsed.port}" if parsed.port else ""
+        site_origin = f"{parsed.scheme}://{parsed.hostname.lower()}{port}"
         identity = repr(
             (
                 site_origin,
