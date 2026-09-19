@@ -118,6 +118,7 @@ class HostedAccountOrchestrator:
         bridge: HunterExecutionBridgeClient,
         page: Any,
         context: Any,
+        session_secret: bytes | None = None,
         verification_timeout_seconds: float = 120.0,
         poll_interval_seconds: float = 2.0,
         sleeper: Any = time.sleep,
@@ -132,8 +133,14 @@ class HostedAccountOrchestrator:
         self.sleeper = sleeper
         self.store = AccountStore(database)
         self.lifecycle = ATSAccountLifecycle(database)
+        resolved_session_secret = (
+            bytes(session_secret)
+            if session_secret is not None
+            else bytes(self.bridge.secret)
+        )
         self.session_store = HostedAccountSessionStore(
-            database, bridge_secret=self.bridge.secret
+            database,
+            bridge_secret=resolved_session_secret,
         )
         self.trace: list[str] = []
         self.account_id: str | None = None
