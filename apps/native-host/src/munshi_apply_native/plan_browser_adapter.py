@@ -33,19 +33,23 @@ def digest(value: Any) -> str:
     ).hexdigest()
 
 
+KNOWN_PROVIDER_RECIPES = {
+    "GREENHOUSE": ("greenhouse.io",),
+    "LEVER": ("lever.co",),
+    "ASHBY": ("ashbyhq.com",),
+    "SMARTRECRUITERS": ("smartrecruiters.com",),
+    "WORKDAY": ("myworkdayjobs.com", "myworkdaysite.com"),
+    "AGILE_ATS": ("agile-ats.com",),
+}
+
+
 def provider_for_url(url: str) -> str:
-    host = (urlsplit(url).hostname or "").lower()
-    for provider, domains in {
-        "GREENHOUSE": ("greenhouse.io",),
-        "LEVER": ("lever.co",),
-        "ASHBY": ("ashbyhq.com",),
-        "SMARTRECRUITERS": ("smartrecruiters.com",),
-        "WORKDAY": ("myworkdayjobs.com", "myworkdaysite.com"),
-        "AGILE_ATS": ("agile-ats.com",),
-    }.items():
+    """Return an optimization recipe hint, never an execution eligibility verdict."""
+    host = (urlsplit(url).hostname or "").casefold().rstrip(".")
+    for provider, domains in KNOWN_PROVIDER_RECIPES.items():
         if any(host == domain or host.endswith("." + domain) for domain in domains):
             return provider
-    return "UNSUPPORTED"
+    return "GENERIC"
 
 
 class PlanBrowserAdapter:
@@ -173,8 +177,11 @@ class PlanBrowserAdapter:
             expected.query,
         )
         scan = self._scan()["page"]
+        provider_policy = dict(plan.get("provider_policy") or {})
+        declared_provider = str(provider_policy.get("provider") or "GENERIC").upper()
         return {
-            "provider": provider_for_url(self.page.url),
+            "provider": declared_provider,
+            "provider_recipe": provider_for_url(self.page.url),
             "job_id": str(plan["job"]["id"]) if same else "",
             "current_url": self.page.url,
             "page_id": scan["pageId"],
