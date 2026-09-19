@@ -73,37 +73,122 @@ def build_verified_receipt(
         != str(auth.get("provider") or "").upper()
     ):
         raise ProductionReceiptError("Execution binding does not match authorization")
+
     observation = result.get("submission_observation")
+    if not isinstance(observation, Mapping):
+        raise ProductionReceiptError("Exact reviewed submission observation is required")
+    observed = dict(observation)
+    reviewed_destination = _text(
+        observed.get("reviewed_destination"),
+        "Reviewed destination",
+    )
+    if reviewed_destination != str(auth.get("target_url") or ""):
+        raise ProductionReceiptError("Submission destination does not match authorization")
+    submit_method = str(observed.get("method") or "").upper()
+    submit_action = _text(observed.get("action"), "Submit action")
+    response_url = _text(observed.get("response_url"), "Submit response URL")
+    response_status = observed.get("response_status")
     if (
-        not isinstance(observation, Mapping)
-        or str(observation.get("method") or "").upper() != "POST"
-        or str(observation.get("target") or "") != str(auth.get("target_url") or "")
+        submit_method != "POST"
+        or observed.get("exact_action_verified") is not True
+        or response_url != submit_action
+        or not isinstance(response_status, int)
+        or not 200 <= response_status < 400
     ):
-        raise ProductionReceiptError("Exact reviewed POST observation is required")
+        raise ProductionReceiptError("Exact reviewed POST response evidence is required")
+    action_binding_digest = _digest(
+        observed.get("action_binding_digest"),
+        "Action binding digest",
+    )
+    confirmation_evidence_digest = _digest(
+        observed.get("confirmation_evidence_digest"),
+        "Confirmation evidence digest",
+    )
+    submission_reference = _text(
+        result.get("submission_reference")
+        or observed.get("submission_reference"),
+        "Submission reference",
+    )
     provider_id = _text(
         result.get("provider_application_id")
-        or observation.get("provider_application_id"),
+        or observed.get("provider_application_id")
+        or submission_reference,
         "Provider application id",
     )
-    if (
-        proof.get("lookup_confirmed") is not True
-        or _text(proof.get("provider_application_id"), "Verified provider application id")
-        != provider_id
-        or str(proof.get("provider") or "").upper()
-        != str(auth.get("provider") or "").upper()
-        or str(proof.get("target_url") or "") != str(auth.get("target_url") or "")
-    ):
-        raise ProductionReceiptError("Independent provider lookup is not correlated")
-    evidence_material = {
-        "provider": str(proof["provider"]).upper(),
-        "provider_application_id": provider_id,
-        "target_url": str(proof["target_url"]),
-        "external_observation_id": _text(
-            proof.get("external_observation_id"), "Independent observation id"
-        ),
-        "lookup_confirmed": True,
-        "observed_status": _text(proof.get("observed_status"), "Observed provider status"),
-    }
+
+    verification_method: str
+    evidence_material: dict[str, Any]
+    if proof.get("lookup_confirmed") is True:
+        if (
+            _text(proof.get("provider_application_id"), "Verified provider application id")
+            != provider_id
+            or str(proof.get("provider") or "").upper()
+            != str(auth.get("provider") or "").upper()
+            or str(proof.get("target_url") or "") != str(auth.get("target_url") or "")
+        ):
+            raise ProductionReceiptError("Independent provider lookup is not correlated")
+        verification_method = "INDEPENDENT_PROVIDER_LOOKUP"
+        evidence_material = {
+            "verification_method": verification_method,
+            "provider": str(proof["provider"]).upper(),
+            "provider_application_id": provider_id,
+            "target_url": str(proof["target_url"]),
+            "external_observation_id": _text(
+                proof.get("external_observation_id"),
+                "Independent observation id",
+            ),
+            "lookup_confirmed": True,
+            "observed_status": _text(
+                proof.get("observed_status"),
+                "Observed provider status",
+            ),
+        }
+    else:
+        if (
+            proof.get("exact_action_confirmed") is not True
+            or str(proof.get("provider") or "").upper()
+            != str(auth.get("provider") or "").upper()
+            or str(proof.get("target_url") or "") != str(auth.get("target_url") or "")
+            or str(proof.get("submit_action") or "") != submit_action
+            or str(proof.get("submit_method") or "").upper() != submit_method
+            or str(proof.get("response_url") or "") != response_url
+            or proof.get("response_status") != response_status
+            or str(proof.get("action_binding_digest") or "").casefold()
+            != action_binding_digest
+            or str(proof.get("confirmation_evidence_digest") or "").casefold()
+            != confirmation_evidence_digest
+            or _text(
+                proof.get("provider_application_id")
+                or proof.get("submission_reference"),
+                "Verified submission reference",
+            )
+            != provider_id
+        ):
+            raise ProductionReceiptError("Exact-action browser proof is not correlated")
+        verification_method = "EXACT_APPROVED_ACTION_RESPONSE_AND_CONFIRMATION"
+        evidence_material = {
+            "verification_method": verification_method,
+            "provider": str(auth.get("provider") or "").upper(),
+            "provider_application_id": provider_id,
+            "submission_reference": submission_reference,
+            "target_url": reviewed_destination,
+            "submit_action": submit_action,
+            "submit_method": submit_method,
+            "response_status": response_status,
+            "response_url": response_url,
+            "action_binding_digest": action_binding_digest,
+            "confirmation_evidence_digest": confirmation_evidence_digest,
+            "external_observation_id": _text(
+                proof.get("external_observation_id"),
+                "Browser evidence id",
+            ),
+            "exact_action_confirmed": True,
+            "observed_status": _text(
+                proof.get("observed_status"),
+                "Observed submission status",
+            ),
+        }
+
     evidence_digest = hashlib.sha256(_canonical(evidence_material)).hexdigest()
     material = {
         "version": RECEIPT_VERSION,
@@ -121,7 +206,7 @@ def build_verified_receipt(
         "provider": str(auth.get("provider") or "").upper(),
         "provider_application_id": provider_id,
         "target_url": _text(auth.get("target_url"), "Target URL"),
-        "verification_method": "INDEPENDENT_PROVIDER_LOOKUP",
+        "verification_method": verification_method,
         "verification_evidence_digest": evidence_digest,
         "verified_at": (
             verified_at
@@ -131,8 +216,6 @@ def build_verified_receipt(
         "synthetic": False,
         "verification_status": "VERIFIED",
     }
-    # Contract shared with Hunter: digest/signature cover material excluding
-    # receipt_id; receipt_id is deterministic from that digest.
     receipt_digest = hashlib.sha256(_canonical(material)).hexdigest()
     receipt_id = "production-receipt-" + receipt_digest[:32]
     secret = str(os.getenv("MUNSHI_PRODUCTION_RECEIPT_HMAC_SECRET") or "")
