@@ -56,7 +56,7 @@ def _database(tmp_path: Path) -> Database:
 class _Bridge:
     tenant_id = "tenant-1"
     user_id = "user-1"
-    secret = b"h" * 32
+    secret = b"h" * 32  # noqa: S105 - deterministic test bridge key, not a real secret
 
     def mailbox_health(self, _plan):
         return {
