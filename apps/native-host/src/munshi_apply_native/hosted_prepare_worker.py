@@ -116,6 +116,7 @@ class HostedAdapterFactory:
         bridge_secret: str,
         browser_executable: str | None = None,
         navigation_timeout_ms: int = 30000,
+        headless: bool = True,
         bridge_factory: Any = HunterExecutionBridgeClient,
         playwright_factory: Any = sync_playwright,
         context_configurer: Any = None,
@@ -130,6 +131,7 @@ class HostedAdapterFactory:
         self.bridge_secret = bridge_secret
         self.browser_executable = resolve_browser_executable(browser_executable)
         self.navigation_timeout_ms = int(navigation_timeout_ms)
+        self.headless = bool(headless)
         self.bridge_factory = bridge_factory
         self.playwright_factory = playwright_factory
         self.context_configurer = context_configurer
@@ -192,7 +194,10 @@ class HostedAdapterFactory:
         pw = browser = context = None
         try:
             pw = self.playwright_factory().start()
-            browser = pw.chromium.launch(headless=True, executable_path=self.browser_executable)
+            browser = pw.chromium.launch(
+                headless=self.headless,
+                executable_path=self.browser_executable,
+            )
             scope_key = portal_identity(target)[1]
             session_secret = (
                 self.bridge_secret.encode("utf-8")
