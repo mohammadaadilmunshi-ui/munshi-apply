@@ -22,6 +22,7 @@ export type AccountAutomationCapabilities = {
   secureCredentialResolver?: boolean;
   candidateMailAlias?: boolean;
   ordinaryEmailVerification?: boolean;
+  mailboxRuntimeAvailable?: boolean;
   verificationKind?: AccountVerificationKind;
 };
 
@@ -191,7 +192,8 @@ function canCreateAutomatically(
   return (
     capabilities?.automatedAccountCreation === true &&
     capabilities.secureCredentialResolver === true &&
-    capabilities.candidateMailAlias === true
+    capabilities.candidateMailAlias === true &&
+    capabilities.mailboxRuntimeAvailable === true
   );
 }
 
@@ -200,6 +202,7 @@ function canConsumeOrdinaryEmailVerification(
 ): boolean {
   return (
     capabilities?.ordinaryEmailVerification === true &&
+    capabilities?.mailboxRuntimeAvailable === true &&
     capabilities.verificationKind !== null &&
     capabilities.verificationKind !== undefined &&
     capabilities.verificationKind !== "SECURITY_INTERVENTION"
@@ -388,6 +391,7 @@ export function buildAccountOrchestrationPlan(input: {
     if (
       knownAccount &&
       capabilities?.ordinaryEmailVerification === true &&
+      capabilities.mailboxRuntimeAvailable === true &&
       capabilities.verificationKind === "PASSWORD_RESET_LINK" &&
       capabilities.secureCredentialResolver === true
     ) {
@@ -428,6 +432,21 @@ export function buildAccountOrchestrationPlan(input: {
   }
 
   if (flow === "AUTH_VERIFY") {
+    if (capabilities?.mailboxRuntimeAvailable !== true) {
+      return {
+        flow,
+        state: "ISSUE",
+        scopeKey,
+        knownAccount,
+        requiresOwner: false,
+        canAutoAct: false,
+        actions: [],
+        reasons: [
+          "Mailbox automation is a mandatory runtime dependency for email verification",
+          "The account continuation must enter ISSUE rather than silently falling back to manual verification",
+        ],
+      };
+    }
     if (canConsumeOrdinaryEmailVerification(capabilities)) {
       return {
         flow,
