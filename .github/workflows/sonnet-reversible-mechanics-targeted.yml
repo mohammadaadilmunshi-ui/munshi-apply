@@ -1,0 +1,89 @@
+name: Sonnet Reversible Mechanics Targeted
+
+on:
+  push:
+    branches:
+      - feat/sonnet-reversible-mechanics-v1-20260918
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  targeted:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          python -m pip install -e './apps/native-host[dev]'
+
+      - name: Lint reversible mechanics surface
+        run: |
+          python -m ruff check \
+            apps/native-host/src/munshi_apply_native/mechanics_actions.py \
+            apps/native-host/src/munshi_apply_native/trusted_mechanics_executor.py \
+            apps/native-host/src/munshi_apply_native/mechanics_recovery_coordinator.py \
+            apps/native-host/src/munshi_apply_native/interaction_fallback_service.py \
+            apps/native-host/src/munshi_apply_native/interaction_recipe_service.py \
+            apps/native-host/src/munshi_apply_native/hosted_interaction_recovery.py \
+            apps/native-host/src/munshi_apply_native/hosted_account_orchestrator.py \
+            apps/native-host/src/munshi_apply_native/hosted_prepare_worker.py \
+            apps/native-host/tests/test_mechanics_actions.py \
+            apps/native-host/tests/test_trusted_mechanics_executor.py \
+            apps/native-host/tests/test_interaction_fallback_service.py \
+            apps/native-host/tests/test_hosted_interaction_recovery.py \
+            apps/native-host/tests/test_hosted_account_orchestrator.py
+
+      - name: Compile reversible mechanics surface
+        run: |
+          python -m py_compile \
+            apps/native-host/src/munshi_apply_native/mechanics_actions.py \
+            apps/native-host/src/munshi_apply_native/trusted_mechanics_executor.py \
+            apps/native-host/src/munshi_apply_native/mechanics_recovery_coordinator.py \
+            apps/native-host/src/munshi_apply_native/interaction_fallback_service.py \
+            apps/native-host/src/munshi_apply_native/interaction_recipe_service.py \
+            apps/native-host/src/munshi_apply_native/hosted_interaction_recovery.py \
+            apps/native-host/src/munshi_apply_native/hosted_account_orchestrator.py \
+            apps/native-host/src/munshi_apply_native/hosted_prepare_worker.py
+
+      - name: Run mechanics and account regression tests
+        run: |
+          python -m pytest -q \
+            apps/native-host/tests/test_mechanics_actions.py \
+            apps/native-host/tests/test_trusted_mechanics_executor.py \
+            apps/native-host/tests/test_interaction_fallback_service.py \
+            apps/native-host/tests/test_interaction_recipe_service.py \
+            apps/native-host/tests/test_hosted_interaction_recovery.py \
+            apps/native-host/tests/test_hosted_account_orchestrator.py \
+            apps/native-host/tests/test_hosted_prepare_worker.py
+
+      - name: Build browser runtime
+        run: npm run build
+
+      - name: Run existing real Chromium account and preparation fixtures
+        env:
+          MUNSHI_RUN_BROWSER_TESTS: "1"
+        run: |
+          MUNSHI_BROWSER_EXECUTABLE="$(
+            command -v google-chrome ||
+              command -v google-chrome-stable ||
+              command -v chromium ||
+              command -v chromium-browser ||
+              true
+          )"
+          test -n "${MUNSHI_BROWSER_EXECUTABLE}"
+          export MUNSHI_BROWSER_EXECUTABLE
+          python -m pytest -q \
+            apps/native-host/tests/browser/test_hosted_account_orchestrator_chrome.py \
+            apps/native-host/tests/browser/test_hosted_prepare_worker_chrome.py
