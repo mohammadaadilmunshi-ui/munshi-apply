@@ -74,3 +74,64 @@ def test_session_binding_prevents_cross_scope_decryption(tmp_path: Path) -> None
         )
         is None
     )
+
+
+def test_session_invalidation_prevents_reuse(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    store = HostedAccountSessionStore(database, bridge_secret=b"h" * 32)
+    store.save(
+        tenant_id="tenant-1",
+        user_id="user-1",
+        scope_key="example.com",
+        account_id="account-1",
+        storage_state={"cookies": [], "origins": []},
+    )
+    store.invalidate(
+        tenant_id="tenant-1",
+        user_id="user-1",
+        scope_key="example.com",
+        reason="ACCOUNT_LOGIN_FAILED",
+    )
+    assert store.load(
+        tenant_id="tenant-1",
+        user_id="user-1",
+        scope_key="example.com",
+    ) is None
+    with database.connect() as connection:
+        row = connection.execute(
+            "SELECT invalidated_at,invalidation_reason FROM hosted_account_sessions"
+        ).fetchone()
+    assert row is not None
+    assert row["invalidated_at"] is not None
+    assert row["invalidation_reason"] == "ACCOUNT_LOGIN_FAILED"
+
+
+def test_expired_session_is_invalidated_and_not_reused(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    store = HostedAccountSessionStore(database, bridge_secret=b"h" * 32)
+    store.save(
+        tenant_id="tenant-1",
+        user_id="user-1",
+        scope_key="example.com",
+        account_id="account-1",
+        storage_state={"cookies": [], "origins": []},
+    )
+    with database.connect() as connection:
+        connection.execute(
+            """
+            UPDATE hosted_account_sessions
+            SET expires_at='2000-01-01T00:00:00+00:00'
+            WHERE tenant_id='tenant-1' AND user_id='user-1' AND scope_key='example.com'
+            """
+        )
+    assert store.load(
+        tenant_id="tenant-1",
+        user_id="user-1",
+        scope_key="example.com",
+    ) is None
+    with database.connect() as connection:
+        row = connection.execute(
+            "SELECT invalidation_reason FROM hosted_account_sessions"
+        ).fetchone()
+    assert row is not None
+    assert row["invalidation_reason"] == "TTL_EXPIRED"
