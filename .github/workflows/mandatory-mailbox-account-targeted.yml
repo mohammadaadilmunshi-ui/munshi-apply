@@ -43,3 +43,52 @@ jobs:
       - name: Run account and migration regression tests
         run: |
           python -m pytest -q             apps/native-host/tests/test_account_store.py             apps/native-host/tests/test_ats_account_lifecycle.py             apps/native-host/tests/test_account_verification_runtime.py             apps/native-host/tests/test_account_umbrella_e2e_v1.py             apps/native-host/tests/test_hosted_account_orchestrator.py             apps/native-host/tests/test_hosted_account_session.py             apps/native-host/tests/test_hosted_prepare_worker.py             apps/native-host/tests/test_database.py             apps/native-host/tests/test_architecture_store.py             apps/native-host/tests/test_learning_analytics_store.py             apps/native-host/tests/test_outbox.py             apps/native-host/tests/test_operations.py
+
+
+  broader-diagnostics:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          npm ci
+          python -m pip install -e './apps/native-host[dev]'
+      - name: Broader full-repo diagnostics
+        shell: bash
+        run: |
+          set +e
+          python -m ruff check apps/native-host --output-format=concise > full-native-ruff.txt 2>&1
+          echo $? > full-native-ruff.exit
+          npm run check > npm-check.txt 2>&1
+          echo $? > npm-check.exit
+          MUNSHI_BROWSER_EXECUTABLE="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
+          if [ -n "${MUNSHI_BROWSER_EXECUTABLE}" ]; then
+            export MUNSHI_BROWSER_EXECUTABLE
+            MUNSHI_RUN_BROWSER_TESTS=1 python -m pytest -q apps/native-host/tests/browser > browser-fixture.txt 2>&1
+            echo $? > browser-fixture.exit
+          else
+            echo "NO_BROWSER_EXECUTABLE" > browser-fixture.txt
+            echo 127 > browser-fixture.exit
+          fi
+          exit 0
+      - name: Upload broader diagnostics
+        uses: actions/upload-artifact@v7
+        with:
+          name: mandatory-mailbox-account-broader-diagnostics
+          path: |
+            full-native-ruff.txt
+            full-native-ruff.exit
+            npm-check.txt
+            npm-check.exit
+            browser-fixture.txt
+            browser-fixture.exit
+          if-no-files-found: error
