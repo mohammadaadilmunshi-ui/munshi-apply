@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import re
 import time
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -167,24 +168,20 @@ class HostedAccountOrchestrator:
 
     def _text(self) -> str:
         parts = [str(getattr(self.page, "url", "") or "")]
-        try:
+        with suppress(Exception):
             parts.append(str(self.page.title() or ""))
-        except Exception:
-            pass
-        try:
-            parts.append(str(self.page.locator("body").inner_text(timeout=1500) or "")[:20000])
-        except Exception:
-            pass
+        with suppress(Exception):
+            parts.append(
+                str(self.page.locator("body").inner_text(timeout=1500) or "")[:20000]
+            )
         return " ".join(parts)
 
     def _visible(self, selectors: list[str]) -> Any | None:
         for selector in selectors:
-            try:
+            with suppress(Exception):
                 locator = self.page.locator(selector).first
                 if locator.count() and locator.is_visible():
                     return locator
-            except Exception:
-                continue
         return None
 
     def _account_required(self) -> bool:
@@ -235,20 +232,16 @@ class HostedAccountOrchestrator:
 
     def _click_text(self, pattern: re.Pattern[str], label: str) -> None:
         for role in ("button", "link"):
-            try:
+            with suppress(Exception):
                 locator = self.page.get_by_role(role, name=pattern).first
                 if locator.count() and locator.is_visible():
                     locator.click()
                     return
-            except Exception:
-                continue
-        try:
+        with suppress(Exception):
             locator = self.page.get_by_text(pattern).first
             if locator.count() and locator.is_visible():
                 locator.click()
                 return
-        except Exception:
-            pass
         raise HostedAccountIssue("ACCOUNT_FORM_UNSUPPORTED", f"{label} control was not found")
 
     def _wait_page(self, milliseconds: int = 800) -> None:
@@ -320,16 +313,14 @@ class HostedAccountOrchestrator:
         normalized = str(code).upper()
         self._event(ISSUE, normalized)
         if self.account_id is not None:
-            try:
+            with suppress(Exception):
                 self.session_store.invalidate(
                     tenant_id=self.bridge.tenant_id,
                     user_id=self.bridge.user_id,
                     scope_key=self.scope_key,
                     reason=normalized,
                 )
-            except Exception:
-                pass
-            try:
+            with suppress(Exception):
                 self.lifecycle.mark_issue(
                     account_id=self.account_id,
                     application_id=self.application_id,
@@ -337,8 +328,6 @@ class HostedAccountOrchestrator:
                     issue_code=normalized,
                     observed_at=_now(),
                 )
-            except Exception:
-                pass
         raise HostedAccountIssue(normalized, message)
 
     def _mailbox_ready(self) -> None:
@@ -709,24 +698,21 @@ class HostedAccountOrchestrator:
         if str(self.page.url) != self.original_url:
             self.page.goto(self.original_url, wait_until="domcontentloaded")
             self._wait_page(500)
-        try:
+        # VERIFIED is sufficient when the portal does not expose a separate
+        # authenticated landing transition.
+        with suppress(ATSAccountLifecycleError):
             self.lifecycle.mark_authenticated(account_id, self.application_id, _now())
-        except ATSAccountLifecycleError:
-            # VERIFIED is sufficient when the portal does not expose a separate
-            # authenticated landing transition.
-            pass
         if self.continuation_id:
-            try:
+            with suppress(Exception):
                 snapshot = self.lifecycle.snapshot(account_id)
                 matching = [
-                    x for x in snapshot.get("continuations", [])
-                    if str(x.get("continuation_id")) == self.continuation_id
+                    item
+                    for item in snapshot.get("continuations", [])
+                    if str(item.get("continuation_id")) == self.continuation_id
                 ]
                 if matching and str(matching[0].get("state")) == "PENDING":
                     self.lifecycle.mark_continuation_ready(self.continuation_id, _now())
                 self.lifecycle.consume_continuation(self.continuation_id, _now())
-            except Exception:
-                pass
         self._persist_session(account_id)
         return HostedAccountResult(
             state=RESUME_APPLICATION,
