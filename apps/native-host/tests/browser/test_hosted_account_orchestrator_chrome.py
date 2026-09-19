@@ -28,7 +28,7 @@ pytestmark = pytest.mark.skipif(
 REGISTER_URL = "https://careers.example.com/candidate/register"
 LOGIN_URL = "https://careers.example.com/candidate/login"
 VERIFY_URL = "https://careers.example.com/candidate/verify/browser-token"
-NOW = "2026-09-19T02:00:00+00:00"
+NOW = "2026-09-19T02:00:00+00:00"\nEXISTING_CREDENTIAL_REFERENCE = "ats-secret://account-existing-browser/password"
 
 
 def _database(tmp_path: Path, application_id: str) -> Database:
@@ -360,7 +360,7 @@ class _LoginBridge:
         secret_ref: str,
     ) -> str:
         assert account_id == "account-existing-browser"
-        assert secret_ref == "ats-secret://account-existing-browser/password"
+        assert secret_ref == EXISTING_CREDENTIAL_REFERENCE
         return "Fixture-Existing-Managed-1!"
 
     def begin_mailbox_verification(
@@ -456,7 +456,7 @@ def test_existing_account_login_uses_managed_credential_and_persists_same_sessio
         {
             "accountId": "account-existing-browser",
             "provider": "example",
-            "credentialRef": "ats-secret://account-existing-browser/password",
+            "credentialRef": EXISTING_CREDENTIAL_REFERENCE,
             "mailAlias": "u_existingbrowser0001@mail.munshi.systems",
             "observedAt": NOW,
         }
