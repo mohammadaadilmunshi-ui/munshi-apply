@@ -131,10 +131,10 @@ class HostedAccountOrchestrator:
         self.page = page
         self.context = context
         self.tenant_id = str(
-            tenant_id if tenant_id is not None else getattr(self.bridge, "tenant_id")
+            tenant_id if tenant_id is not None else self.bridge.tenant_id
         )
         self.user_id = str(
-            user_id if user_id is not None else getattr(self.bridge, "user_id")
+            user_id if user_id is not None else self.bridge.user_id
         )
         self.verification_timeout_seconds = max(5.0, float(verification_timeout_seconds))
         self.poll_interval_seconds = max(0.1, float(poll_interval_seconds))
