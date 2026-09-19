@@ -217,6 +217,7 @@ describe("account orchestration", () => {
       knownAccounts: [account()],
       capabilities: {
         ordinaryEmailVerification: true,
+        mailboxRuntimeAvailable: true,
         secureCredentialResolver: true,
         verificationKind: "PASSWORD_RESET_LINK",
       },
