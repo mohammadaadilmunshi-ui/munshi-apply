@@ -24,8 +24,28 @@ jobs:
         run: python -m ruff check apps/native-host/src/munshi_apply_native/artifact_fetch_v2.py
       - name: Lint ATS lifecycle
         run: python -m ruff check apps/native-host/src/munshi_apply_native/ats_account_lifecycle.py
+      - name: Diagnose hosted account orchestrator lint
+        id: orchestrator_lint
+        shell: bash
+        run: |
+          set +e
+          python -m ruff check \
+            apps/native-host/src/munshi_apply_native/hosted_account_orchestrator.py \
+            --output-format=concise > ruff-hosted-account-orchestrator.txt 2>&1
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Upload orchestrator lint diagnostics
+        uses: actions/upload-artifact@v7
+        with:
+          name: ruff-hosted-account-orchestrator
+          path: ruff-hosted-account-orchestrator.txt
+          if-no-files-found: error
       - name: Lint hosted account orchestrator
-        run: python -m ruff check apps/native-host/src/munshi_apply_native/hosted_account_orchestrator.py
+        if: steps.orchestrator_lint.outputs.exit_code != '0'
+        run: |
+          cat ruff-hosted-account-orchestrator.txt
+          exit 1
       - name: Lint hosted account session
         run: python -m ruff check apps/native-host/src/munshi_apply_native/hosted_account_session.py
       - name: Lint hosted prepare worker
