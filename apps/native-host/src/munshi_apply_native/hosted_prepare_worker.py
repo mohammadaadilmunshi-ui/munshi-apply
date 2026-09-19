@@ -228,6 +228,16 @@ class HostedAdapterFactory:
             page.set_default_timeout(self.navigation_timeout_ms)
             page.goto(target, wait_until="domcontentloaded", timeout=self.navigation_timeout_ms)
 
+            interaction_fallback = self.interaction_fallback_service
+            if interaction_fallback is None and self.runtime_root is not None:
+                # One Sonnet mechanics service is shared by account and application
+                # preparation. It receives only structural metadata and opaque refs.
+                interaction_fallback = InteractionFallbackService(
+                    self.runtime_root,
+                    config_resolver=lambda: bridge.autoapply_config(plan),
+                    api_key_resolver=lambda: bridge.anthropic_api_key(plan),
+                )
+
             # Account handling is part of preparation, not a separate/manual lane.
             # It runs in this exact context so login, create-account, email
             # verification, and the resumed application share one Chromium session.
@@ -240,6 +250,8 @@ class HostedAdapterFactory:
                 tenant_id=str(job["tenant_id"]),
                 user_id=str(job["user_id"]),
                 session_secret=session_secret,
+                interaction_fallback_service=interaction_fallback,
+                teach_munshi_service=self.teach_munshi_service,
             ).run()
 
             def artifact_reader(current: dict[str, Any]) -> bytes:
@@ -271,17 +283,6 @@ class HostedAdapterFactory:
                 ) != str(plan["plan_digest"]):
                     return False
                 return bridge.plan_is_current(current)
-
-            interaction_fallback = self.interaction_fallback_service
-            if interaction_fallback is None and self.runtime_root is not None:
-                # Hosted execution treats Hunter Settings + encrypted vault as the
-                # runtime authority. The API key stays server-to-server and is
-                # resolved only if dashboard auth mode is API.
-                interaction_fallback = InteractionFallbackService(
-                    self.runtime_root,
-                    config_resolver=lambda: bridge.autoapply_config(plan),
-                    api_key_resolver=lambda: bridge.anthropic_api_key(plan),
-                )
 
             return HostedPlanBrowserAdapter(
                 page,
