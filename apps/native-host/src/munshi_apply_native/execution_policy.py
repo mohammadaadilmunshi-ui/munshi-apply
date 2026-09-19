@@ -82,7 +82,9 @@ def verify_submission_observation(result: dict[str, Any], plan: dict[str, Any]) 
     ).strip().casefold()
     if not isinstance(response_status, int) or not 200 <= response_status < 400:
         return False
-    if submit_method != "POST" or not submit_action or response_url != submit_action:
+    if submit_method not in {"POST", "PUT", "PATCH"} or not submit_action:
+        return False
+    if response_url != submit_action:
         return False
     for value in (action_binding_digest, confirmation_digest):
         if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
@@ -110,8 +112,8 @@ def validate_submit_observation(
     submit_binding = observation.get("submit_binding")
     if not isinstance(submit_binding, dict):
         raise ValueError("Browser submit action is not deterministically bound")
-    if str(submit_binding.get("method") or "").upper() != "POST":
-        raise ValueError("Browser submit action must be an exact reviewed POST")
+    if str(submit_binding.get("method") or "").upper() not in {"POST", "PUT", "PATCH"}:
+        raise ValueError("Browser submit action must be an exact reviewed mutating request")
     binding_digest = str(submit_binding.get("binding_digest") or "").strip().casefold()
     if len(binding_digest) != 64 or any(
         character not in "0123456789abcdef" for character in binding_digest
