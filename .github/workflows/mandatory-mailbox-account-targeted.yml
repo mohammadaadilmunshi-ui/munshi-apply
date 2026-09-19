@@ -14,34 +14,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-          cache: pip
-      - name: Install native host
-        run: python -m pip install -e './apps/native-host[dev]'
-      - name: Lint account runtime
-        run: |
-          python -m ruff check \
-            apps/native-host/src/munshi_apply_native/artifact_fetch_v2.py \
-            apps/native-host/src/munshi_apply_native/ats_account_lifecycle.py \
-            apps/native-host/src/munshi_apply_native/hosted_account_orchestrator.py \
-            apps/native-host/src/munshi_apply_native/hosted_account_session.py \
-            apps/native-host/src/munshi_apply_native/hosted_prepare_worker.py \
-            apps/native-host/tests/test_hosted_account_orchestrator.py \
-            apps/native-host/tests/test_hosted_account_session.py
-      - name: Compile account runtime
-        run: |
-          python -m py_compile             apps/native-host/src/munshi_apply_native/artifact_fetch_v2.py             apps/native-host/src/munshi_apply_native/ats_account_lifecycle.py             apps/native-host/src/munshi_apply_native/hosted_account_orchestrator.py             apps/native-host/src/munshi_apply_native/hosted_account_session.py             apps/native-host/src/munshi_apply_native/hosted_prepare_worker.py             apps/native-host/tests/test_hosted_account_orchestrator.py             apps/native-host/tests/test_hosted_account_session.py
-      - name: Run focused account orchestration tests
-        run: |
-          python -m pytest -q             apps/native-host/tests/test_account_store.py             apps/native-host/tests/test_ats_account_lifecycle.py             apps/native-host/tests/test_account_verification_runtime.py             apps/native-host/tests/test_account_umbrella_e2e_v1.py             apps/native-host/tests/test_hosted_account_orchestrator.py             apps/native-host/tests/test_hosted_account_session.py             apps/native-host/tests/test_hosted_prepare_worker.py
-
-
-  full-regression-diagnostics:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -50,37 +22,24 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - name: Install JavaScript dependencies
-        run: npm ci
-      - name: Install native host
-        run: python -m pip install -e './apps/native-host[dev]'
-      - name: Capture npm check diagnostics
-        shell: bash
+
+      - name: Install dependencies
         run: |
-          set +e
-          npm run check > npm-check.txt 2>&1
-          echo "NPM_CHECK_EXIT=$?" >> npm-check.txt
-          exit 0
-      - name: Capture full Ruff diagnostics
-        shell: bash
+          npm ci
+          python -m pip install -e './apps/native-host[dev]'
+
+      - name: Check changed artifact formatting
         run: |
-          set +e
-          python -m ruff check apps/native-host --output-format=concise > full-ruff.txt 2>&1
-          echo "RUFF_EXIT=$?" >> full-ruff.txt
-          exit 0
-      - name: Capture migration diagnostics
-        shell: bash
+          npx prettier --check             .github/workflows/mandatory-mailbox-account-targeted.yml             packages/application-model/src/account-orchestration.ts             packages/application-model/src/account-orchestration.test.ts             packages/application-model/src/account-orchestration-automation.test.ts
+
+      - name: Lint account runtime
         run: |
-          set +e
-          python -m pytest             apps/native-host/tests/test_database.py             apps/native-host/tests/test_architecture_store.py             apps/native-host/tests/test_learning_analytics_store.py             apps/native-host/tests/test_outbox.py             apps/native-host/tests/test_operations.py             > migration-tests.txt 2>&1
-          echo "MIGRATION_TEST_EXIT=$?" >> migration-tests.txt
-          exit 0
-      - name: Upload regression diagnostics
-        uses: actions/upload-artifact@v7
-        with:
-          name: mandatory-mailbox-account-regression-diagnostics
-          path: |
-            npm-check.txt
-            full-ruff.txt
-            migration-tests.txt
-          if-no-files-found: error
+          python -m ruff check             apps/native-host/src/munshi_apply_native/artifact_fetch_v2.py             apps/native-host/src/munshi_apply_native/ats_account_lifecycle.py             apps/native-host/src/munshi_apply_native/hosted_account_orchestrator.py             apps/native-host/src/munshi_apply_native/hosted_account_session.py             apps/native-host/src/munshi_apply_native/hosted_prepare_worker.py             apps/native-host/tests/test_database.py             apps/native-host/tests/test_hosted_account_orchestrator.py             apps/native-host/tests/test_hosted_account_session.py             apps/native-host/tests/test_operations.py
+
+      - name: Compile account runtime
+        run: |
+          python -m py_compile             apps/native-host/src/munshi_apply_native/artifact_fetch_v2.py             apps/native-host/src/munshi_apply_native/ats_account_lifecycle.py             apps/native-host/src/munshi_apply_native/hosted_account_orchestrator.py             apps/native-host/src/munshi_apply_native/hosted_account_session.py             apps/native-host/src/munshi_apply_native/hosted_prepare_worker.py             apps/native-host/tests/test_database.py             apps/native-host/tests/test_hosted_account_orchestrator.py             apps/native-host/tests/test_hosted_account_session.py             apps/native-host/tests/test_operations.py
+
+      - name: Run account and migration regression tests
+        run: |
+          python -m pytest -q             apps/native-host/tests/test_account_store.py             apps/native-host/tests/test_ats_account_lifecycle.py             apps/native-host/tests/test_account_verification_runtime.py             apps/native-host/tests/test_account_umbrella_e2e_v1.py             apps/native-host/tests/test_hosted_account_orchestrator.py             apps/native-host/tests/test_hosted_account_session.py             apps/native-host/tests/test_hosted_prepare_worker.py             apps/native-host/tests/test_database.py             apps/native-host/tests/test_architecture_store.py             apps/native-host/tests/test_learning_analytics_store.py             apps/native-host/tests/test_outbox.py             apps/native-host/tests/test_operations.py
