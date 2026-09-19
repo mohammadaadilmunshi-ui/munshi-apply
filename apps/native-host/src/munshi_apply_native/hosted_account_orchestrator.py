@@ -51,7 +51,8 @@ _TERMINAL_ISSUE_CODES = {
 }
 
 _ACCOUNT_ROUTE = re.compile(
-    r"\b(login|log-in|signin|sign-in|register|signup|sign-up|create-account|candidate-account|forgot|reset|verify)\b",
+    r"\b(login|log-in|signin|sign-in|register|signup|sign-up|create-account|"
+    r"candidate-account|forgot|reset|verify)\b",
     re.IGNORECASE,
 )
 _ACCOUNT_TEXT = re.compile(
@@ -60,7 +61,8 @@ _ACCOUNT_TEXT = re.compile(
     re.IGNORECASE,
 )
 _VERIFY_TEXT = re.compile(
-    r"\b(verify (?:your )?(?:email|account)|verification code|enter the code|code we sent|check your email)\b",
+    r"\b(verify (?:your )?(?:email|account)|verification code|enter the code|"
+    r"code we sent|check your email)\b",
     re.IGNORECASE,
 )
 _CREATE_TEXT = re.compile(
@@ -410,7 +412,10 @@ class HostedAccountOrchestrator:
         except Exception:
             health = {"ready": False}
         if health.get("ready") is not True:
-            self._issue("MAILBOX_RUNTIME_UNAVAILABLE", "Mandatory mailbox runtime became unavailable")
+            self._issue(
+                "MAILBOX_RUNTIME_UNAVAILABLE",
+                "Mandatory mailbox runtime became unavailable",
+            )
         self._issue(
             "MAILBOX_VERIFICATION_TIMEOUT",
             "Timed out waiting for correlated verification email",
@@ -464,7 +469,10 @@ class HostedAccountOrchestrator:
                 "verification code",
             )
             self._click_text(
-                re.compile(r"^(verify|confirm|continue|submit)(?:\s+(?:email|code|account))?$", re.I),
+                re.compile(
+                    r"^(verify|confirm|continue|submit)(?:\s+(?:email|code|account))?$",
+                    re.I,
+                ),
                 "verification",
             )
             self._wait_page(1000)
@@ -522,7 +530,10 @@ class HostedAccountOrchestrator:
         )
         claimed_local = self.lifecycle.claim_verification(challenge_id, _now())
         if claimed_local.get("claimedNow") is not True:
-            self._issue("MAILBOX_VERIFICATION_FAILED", "Verification challenge could not be claimed")
+            self._issue(
+                "MAILBOX_VERIFICATION_FAILED",
+                "Verification challenge could not be claimed",
+            )
         try:
             verified = self._apply_verification(
                 str(claimed["artifact_kind"]), str(claimed["artifact"])
@@ -605,7 +616,10 @@ class HostedAccountOrchestrator:
         locator = self.page.locator(", ".join(passwords))
         count = locator.count()
         if count < 1:
-            raise HostedAccountIssue("ACCOUNT_FORM_UNSUPPORTED", "Account password field was not found")
+            raise HostedAccountIssue(
+                "ACCOUNT_FORM_UNSUPPORTED",
+                "Account password field was not found",
+            )
         locator.nth(0).fill(password)
         if count > 1:
             locator.nth(1).fill(password)
@@ -685,7 +699,10 @@ class HostedAccountOrchestrator:
                     storage_state=state,
                 )
         except Exception:
-            self._issue("ACCOUNT_SESSION_PERSISTENCE_FAILED", "Authenticated browser session could not be persisted")
+            self._issue(
+                "ACCOUNT_SESSION_PERSISTENCE_FAILED",
+                "Authenticated browser session could not be persisted",
+            )
 
     def _resume(self, account_id: str) -> HostedAccountResult:
         self._event(RESUME_APPLICATION)
@@ -743,12 +760,12 @@ class HostedAccountOrchestrator:
             self.account_id = str(record["accountId"])
             try:
                 snapshot = self.lifecycle.snapshot(self.account_id)
-            except Exception:
+            except Exception as error:
                 self._event(ISSUE, "ACCOUNT_CREDENTIAL_REFERENCE_MISSING")
                 raise HostedAccountIssue(
                     "ACCOUNT_CREDENTIAL_REFERENCE_MISSING",
                     "Existing ATS account lacks managed lifecycle/credential binding",
-                )
+                ) from error
             secret_ref = str(snapshot.get("credential_ref") or "")
             if not secret_ref:
                 self._issue(
@@ -760,7 +777,10 @@ class HostedAccountOrchestrator:
             password = self._password(self.account_id, secret_ref)
             try:
                 if self._is_create():
-                    self._click_text(re.compile(r"^(sign in|log in|login)$", re.I), "existing account")
+                    self._click_text(
+                        re.compile(r"^(sign in|log in|login)$", re.I),
+                        "existing account",
+                    )
                     self._wait_page(500)
                 self._login(email=str(record["email"]), password=password)
             finally:
@@ -799,12 +819,15 @@ class HostedAccountOrchestrator:
             try:
                 self._click_text(_CREATE_TEXT, "create account")
                 self._wait_page(500)
-            except HostedAccountIssue:
+            except HostedAccountIssue as error:
                 self._event(ISSUE, "ACCOUNT_CREATION_FAILED")
                 raise HostedAccountIssue(
                     "ACCOUNT_CREATION_FAILED",
-                    "No existing account exists and the ATS exposes no supported create-account path",
-                )
+                    (
+                        "No existing account exists and the ATS exposes no supported "
+                        "create-account path"
+                    ),
+                ) from error
 
         self._mailbox_ready()
         try:
@@ -814,12 +837,12 @@ class HostedAccountOrchestrator:
                 account_scope=self.scope_key,
                 label=f"{self.provider} {self.scope_key}",
             )
-        except Exception:
+        except Exception as error:
             self._event(ISSUE, "ACCOUNT_CREATION_FAILED")
             raise HostedAccountIssue(
                 "ACCOUNT_CREATION_FAILED",
                 "Hunter could not prepare managed ATS identity/credential references",
-            )
+            ) from error
         self.account_id = str(prepared["account_id"])
         email = str(prepared["application_email"])
         secret_ref = str(prepared["secret_ref"])
