@@ -17,7 +17,8 @@ ArtifactResolver = Callable[[str], dict[str, Any]]
 _CANDIDATE_SELECTOR = (
     "input,textarea,select,button,a,[role='button'],[role='combobox'],"
     "[role='listbox'],[role='option'],[role='dialog'],[contenteditable='true'],"
-    "summary,[tabindex]"
+    "summary,[tabindex],[onclick],[aria-haspopup],[aria-expanded],[aria-controls],"
+    "[data-action]"
 )
 _FINAL_SUBMIT_RE = re.compile(
     r"\b(submit application|send application|complete application|finish application|"
@@ -192,6 +193,9 @@ class TrustedMechanicsExecutor:
                             required: Boolean(element.required)
                               || element.getAttribute('aria-required') === 'true',
                             hasPopup: String(element.getAttribute('aria-haspopup') || ''),
+                            expanded: String(element.getAttribute('aria-expanded') || ''),
+                            controls: String(element.getAttribute('aria-controls') || ''),
+                            dataAction: String(element.getAttribute('data-action') || ''),
                             fileInput: tag === 'input' && inputType === 'file',
                             hrefHost: (() => {
                               if (tag !== 'a') return '';
@@ -232,6 +236,9 @@ class TrustedMechanicsExecutor:
                         "disabled": bool(meta.get("disabled")),
                         "required": bool(meta.get("required")),
                         "hasPopup": self._clean(meta.get("hasPopup"), 80),
+                        "expanded": self._clean(meta.get("expanded"), 20),
+                        "controls": self._clean(meta.get("controls"), 120),
+                        "dataAction": self._clean(meta.get("dataAction"), 120),
                         "fileInput": bool(meta.get("fileInput")),
                         "hrefHost": self._clean(meta.get("hrefHost"), 180),
                         "finalSubmitRisk": bool(meta.get("finalSubmitRisk")),
@@ -451,9 +458,19 @@ class TrustedMechanicsExecutor:
                     raise TrustedMechanicsError("Verification link cannot be filled into a control")
                 locator.fill(artifact["value"])
             elif action_type == "UPLOAD_ARTIFACT":
-                if not bool(meta.get("fileInput")):
-                    raise TrustedMechanicsError("UPLOAD_ARTIFACT requires a file input target")
-                locator.set_input_files(self._artifact(str(action["artifactRef"])))
+                self._assert_not_final_submit(meta, action_type="CLICK")
+                artifact = self._artifact(str(action["artifactRef"]))
+                if bool(meta.get("fileInput")):
+                    locator.set_input_files(artifact)
+                else:
+                    try:
+                        with self.page.expect_file_chooser(timeout=2500) as chooser_info:
+                            locator.click()
+                        chooser_info.value.set_files(artifact)
+                    except Exception as error:
+                        raise TrustedMechanicsError(
+                            "Custom uploader did not expose a trusted file chooser"
+                        ) from error
             elif action_type == "SELECT":
                 self._select(locator, self._value_ref(str(action["valueRef"])))
             elif action_type == "KEY":
