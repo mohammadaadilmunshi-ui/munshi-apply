@@ -244,6 +244,43 @@ def test_learning_metrics_preserve_teacher_provider_mix(tmp_path: Path) -> None:
     assert providers["non-model"]["count"] == 1
 
 
+
+def test_generic_teach_learns_ref_only_page_mechanics(tmp_path: Path) -> None:
+    _, teach, recipes = create_services(tmp_path)
+    target = "mt-" + "c" * 24
+    payload = lesson("page-mechanics", semantic_type="PAGE_MECHANICS")
+    payload["actions"] = [
+        {
+            "type": "UPLOAD_ARTIFACT",
+            "targetRef": target,
+            "artifactRef": "artifact:resume",
+        },
+        {"type": "NEXT", "targetRef": target},
+        {"type": "WAIT_FOR_STATE", "state": "PAGE_STABLE"},
+    ]
+
+    captured = teach.capture(payload)
+    assert captured["queued"] is True
+    assert teach.drain(limit=1)["learned"] == 1
+
+    candidate = recipes.lookup(
+        {
+            "siteOrigin": "https://jobs.example.test",
+            "componentFingerprint": "cfp-workday-country",
+            "semanticType": "PAGE_MECHANICS",
+            "atsFamily": "WORKDAY",
+            "tenantKey": "company-a",
+            "uiFingerprint": "uif-workday-country-v1",
+            "questionFingerprint": "qfp-country",
+        }
+    )
+    assert candidate is not None
+    assert candidate["state"] == "SHADOW"
+    encoded = str(candidate["actions"])
+    assert "artifact:resume" in encoded
+    assert "plaintext" not in encoded
+
+
 @pytest.mark.parametrize(
     "semantic_type",
     ["FINAL_SUBMIT", "SUBMIT_APPLICATION", "GOVERNMENT_ID", "SMS_CODE", "TOTP",
