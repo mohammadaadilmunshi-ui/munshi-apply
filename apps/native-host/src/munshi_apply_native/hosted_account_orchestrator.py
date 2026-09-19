@@ -179,16 +179,29 @@ class HostedAccountOrchestrator:
             path = urlsplit(str(self.page.url)).path
         except Exception:
             path = ""
-        if _ACCOUNT_ROUTE.search(path) or _ACCOUNT_TEXT.search(text):
+        if _ACCOUNT_ROUTE.search(path):
             return True
-        return self._visible(
+        if self._visible(
             [
                 "input[type='password']",
                 "input[autocomplete='current-password']",
                 "input[autocomplete='new-password']",
                 "input[autocomplete='one-time-code']",
             ]
-        ) is not None
+        ) is not None:
+            return True
+        # Text alone is not enough: ordinary application pages often mention
+        # sign-in/account help in footers. Require an actual candidate email
+        # control before treating textual account language as a boundary.
+        if _ACCOUNT_TEXT.search(text):
+            return self._visible(
+                [
+                    "input[type='email']",
+                    "input[autocomplete='username']",
+                    "input[name*='email' i]",
+                ]
+            ) is not None
+        return False
 
     def _is_verification(self) -> bool:
         if self._visible(
