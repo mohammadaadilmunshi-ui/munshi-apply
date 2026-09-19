@@ -117,9 +117,12 @@ class TrustedMechanicsExecutor:
             try:
                 count = min(int(locator.count()), max_targets - len(surface))
             except Exception:
+                count = 0
+            if count <= 0:
                 continue
-            for locator_index in range(max(0, count)):
+            for locator_index in range(count):
                 candidate = locator.nth(locator_index)
+                meta: object | None = None
                 try:
                     meta = candidate.evaluate(
                         """element => {
@@ -187,7 +190,7 @@ class TrustedMechanicsExecutor:
                         }"""
                     )
                 except Exception:
-                    continue
+                    meta = None
                 if not isinstance(meta, dict):
                     continue
                 if not meta.get("visible") and not meta.get("fileInput"):
