@@ -119,3 +119,40 @@ def test_unobserved_target_and_unavailable_ref_are_rejected() -> None:
             allowed_target_refs={observed},
             allowed_value_refs={"secret:account-password"},
         )
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        {
+            "type": "TYPE_ANSWER_REF",
+            "targetRef": "mt-" + "a" * 24,
+            "answerRef": "secret:account-password",
+        },
+        {
+            "type": "FILL_SECRET_REF",
+            "targetRef": "mt-" + "a" * 24,
+            "secretRef": "answer:first-name",
+        },
+        {
+            "type": "FILL_VERIFICATION_ARTIFACT",
+            "targetRef": "mt-" + "a" * 24,
+            "verificationRef": "artifact:resume",
+        },
+        {
+            "type": "UPLOAD_ARTIFACT",
+            "targetRef": "mt-" + "a" * 24,
+            "artifactRef": "verification:current",
+        },
+        {
+            "type": "SELECT",
+            "targetRef": "mt-" + "a" * 24,
+            "valueRef": "secret:account-password",
+        },
+    ],
+)
+def test_action_reference_namespaces_cannot_be_swapped(
+    action: dict[str, str],
+) -> None:
+    with pytest.raises(MechanicsActionError):
+        validate_mechanics_actions([action])
