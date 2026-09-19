@@ -1,11 +1,8 @@
-"""Hosted-only bounded interaction recovery for pre-submit preparation.
+"""Hosted reversible-mechanics recovery for pre-submit preparation.
 
-The deterministic PlanBrowserAdapter always runs first. This adapter may only
-recover reversible, non-sensitive question controls using the existing
-value-free InteractionFallbackService recipe contract. It never navigates or
-submits, and a recovery is accepted only after the normal scanner verifies the
-field as satisfied. Successful model-assisted mechanics are captured by Teach
-MUNSHI off the browser critical path.
+Ordering is deterministic Playwright -> promoted Teach recipe -> Sonnet mechanics
+-> trusted local execution -> deterministic verification -> continue. Sonnet sees
+only structural UI metadata and opaque refs; final submission is never delegated.
 """
 
 from __future__ import annotations
@@ -20,6 +17,8 @@ from uuid import uuid4
 
 from .execution_policy import prepare_permissions
 from .hunter_plan_semantic_bridge import answer_matches_question
+from .mechanics_recovery_coordinator import MechanicsRecoveryCoordinator
+from .trusted_mechanics_executor import TrustedMechanicsExecutor
 from .plan_browser_adapter import (
     NORMAL_AUTOFILL_ENV,
     PlanBrowserAdapter,
@@ -172,10 +171,27 @@ class HostedRecoveringPlanBrowserAdapter(PlanBrowserAdapter):
             return False
         if not prepare_permissions(plan)["normal_answer_autofill"]:
             return False
-        if result.get("validation_errors"):
+        try:
+            page = dict(self._scan().get("page") or {})
+        except Exception:
+            return False
+        navigation = [
+            item
+            for item in page.get("navigationCandidates", [])
+            if isinstance(item, dict) and item.get("disabled") is not True
+        ]
+        # Sonnet mechanics never operates a final-submit boundary.
+        if any(str(item.get("action") or "") == "FINAL_SUBMIT" for item in navigation):
             return False
         unresolved = result.get("unresolved")
-        return isinstance(unresolved, list) and bool(unresolved)
+        if isinstance(unresolved, list) and unresolved:
+            return True
+        if result.get("validation_errors"):
+            return True
+        if result.get("resume_uploaded") is False:
+            return True
+        next_steps = [item for item in navigation if str(item.get("action") or "") == "NEXT"]
+        return len(next_steps) != 1
 
     def _recover_unresolved(
         self,
@@ -286,7 +302,211 @@ class HostedRecoveringPlanBrowserAdapter(PlanBrowserAdapter):
                 proposal=proposal,
                 page=page,
             )
-        return any_recovered
+        if any_recovered:
+            return True
+        return self._recover_page_mechanics(
+            plan=plan,
+            result=result,
+            resolved_values=resolved_values,
+            page=page,
+        )
+
+    @staticmethod
+    def _stable_ref(prefix: str, identity: str) -> str:
+        return prefix + ":" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
+
+    def _page_answer_refs(
+        self,
+        *,
+        plan: dict[str, Any],
+        resolved_values: dict[str, Any],
+    ) -> tuple[dict[str, str], list[dict[str, str]]]:
+        values: dict[str, str] = {}
+        descriptors: list[dict[str, str]] = []
+        for key, raw in sorted(resolved_values.items(), key=lambda item: str(item[0])):
+            if raw is None:
+                continue
+            ref = self._stable_ref("answer", str(key))
+            values[ref] = str(raw)
+            descriptors.append({"ref": ref, "kind": "ANSWER"})
+        for index, answer in enumerate(plan.get("answers", [])):
+            if not isinstance(answer, dict):
+                continue
+            if answer.get("autofill_allowed") is not True:
+                continue
+            if str(answer.get("sensitivity_class") or "").upper() != "NORMAL":
+                continue
+            raw = answer.get("execution_value")
+            if raw is None:
+                continue
+            identity = str(
+                answer.get("answer_id")
+                or answer.get("question_key")
+                or answer.get("semantic_type")
+                or index
+            )
+            ref = self._stable_ref("answer", identity)
+            if ref not in values:
+                values[ref] = str(raw)
+                descriptors.append({"ref": ref, "kind": "ANSWER"})
+        return values, descriptors
+
+    def _page_artifact_refs(
+        self,
+        *,
+        plan: dict[str, Any],
+    ) -> tuple[dict[str, dict[str, Any]], list[dict[str, str]]]:
+        artifacts: dict[str, dict[str, Any]] = {}
+        descriptors: list[dict[str, str]] = []
+        resume_ref = "artifact:resume"
+        resume_bytes = self.artifact_reader(plan)
+        if hashlib.sha256(resume_bytes).hexdigest() != str(
+            plan["resume"]["artifact_sha256"]
+        ):
+            raise ValueError("Resume artifact digest mismatch")
+        artifacts[resume_ref] = {
+            "name": str(plan["resume"]["filename"]),
+            "mimeType": str(plan["resume"]["mime_type"]),
+            "buffer": resume_bytes,
+        }
+        descriptors.append({"ref": resume_ref, "kind": "RESUME"})
+        cover = plan.get("cover_letter")
+        if isinstance(cover, dict) and self.cover_letter_reader is not None:
+            cover_bytes = self.cover_letter_reader(plan)
+            if hashlib.sha256(cover_bytes).hexdigest() != str(cover["artifact_sha256"]):
+                raise ValueError("Cover-letter artifact digest mismatch")
+            cover_ref = "artifact:cover-letter"
+            artifacts[cover_ref] = {
+                "name": str(cover["filename"]),
+                "mimeType": str(cover["mime_type"]),
+                "buffer": cover_bytes,
+            }
+            descriptors.append({"ref": cover_ref, "kind": "COVER_LETTER"})
+        return artifacts, descriptors
+
+    @staticmethod
+    def _mechanics_goal(result: dict[str, Any]) -> str:
+        if result.get("unresolved"):
+            return "Resolve stalled custom application controls"
+        if result.get("validation_errors"):
+            return "Clear reversible pre-submit validation mechanics"
+        if result.get("resume_uploaded") is False:
+            return "Attach the approved resume through the page's upload mechanics"
+        return "Reach the next reversible pre-submit application state"
+
+    def _recover_page_mechanics(
+        self,
+        *,
+        plan: dict[str, Any],
+        result: dict[str, Any],
+        resolved_values: dict[str, Any],
+        page: dict[str, Any],
+    ) -> bool:
+        if self.interaction_fallback_service is None:
+            return False
+        origin = _site_origin(self.page.url)
+        answer_values, answer_refs = self._page_answer_refs(
+            plan=plan,
+            resolved_values=resolved_values,
+        )
+        artifacts, artifact_refs = self._page_artifact_refs(plan=plan)
+        executor = TrustedMechanicsExecutor(
+            self.page,
+            answer_resolver=lambda ref: answer_values[ref],
+            artifact_resolver=lambda ref: artifacts[ref],
+        )
+        surface = executor.snapshot()
+        if not surface:
+            return False
+        allowed_refs = set(answer_values) | set(artifacts)
+        page_fingerprint = str(page.get("pageFingerprint") or "")
+        surface_identity = json.dumps(
+            {
+                "origin": origin,
+                "page": page_fingerprint,
+                "targets": surface,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        component_fingerprint = "cfp-" + hashlib.sha256(
+            surface_identity.encode("utf-8")
+        ).hexdigest()[:40]
+        before = {
+            "url": str(self.page.url),
+            "page_id": str(result.get("page_id") or ""),
+            "form_digest": str(result.get("form_digest") or ""),
+            "pending": len(result.get("pending_control_ids") or []),
+            "validation": len(result.get("validation_errors") or []),
+            "resume": bool(result.get("resume_uploaded")),
+        }
+
+        def verify() -> bool:
+            after = self._observe(plan)
+            try:
+                described = self._scan()
+                after_page = dict(described.get("page") or {})
+            except Exception:
+                after_page = {}
+            if str(self.page.url) != before["url"]:
+                return True
+            if str(after.get("page_id") or "") != before["page_id"]:
+                return True
+            if str(after.get("form_digest") or "") != before["form_digest"]:
+                return True
+            if len(after.get("pending_control_ids") or []) < int(before["pending"]):
+                return True
+            if len(after.get("validation_errors") or []) < int(before["validation"]):
+                return True
+            if not before["resume"] and bool(after.get("resume_uploaded")):
+                return True
+            navigation = [
+                item
+                for item in after_page.get("navigationCandidates", [])
+                if isinstance(item, dict)
+                and item.get("disabled") is not True
+                and str(item.get("action") or "") == "NEXT"
+            ]
+            return len(navigation) == 1
+
+        payload = {
+            "siteOrigin": origin,
+            "componentFingerprint": component_fingerprint,
+            "semanticType": "PAGE_MECHANICS",
+            "controlKind": "PAGE",
+            "label": "Application pre-submit mechanics",
+            "role": None,
+            "hasPopup": None,
+            "atsFamily": provider_for_url(self.page.url),
+            "uiFingerprint": page_fingerprint or None,
+            "options": [],
+            "failureReason": self._mechanics_goal(result),
+            "goal": self._mechanics_goal(result),
+            "reversible": True,
+            "sensitive": False,
+            "authenticationBoundary": False,
+            "finalSubmit": False,
+            "secretMaterialExposed": False,
+            "verificationMaterialExposed": False,
+            "mechanicsMode": True,
+            "mechanicsSurface": surface,
+            "availableRefs": answer_refs + artifact_refs,
+        }
+        coordinator = MechanicsRecoveryCoordinator(
+            fallback_service=self.interaction_fallback_service,
+            teach_service=self.teach_munshi_service,
+            teach_dispatcher=self.teach_dispatcher,
+            on_event=self.on_event,
+        )
+        return coordinator.attempt(
+            plan=plan,
+            payload=payload,
+            executor=executor,
+            allowed_value_refs=allowed_refs,
+            verify=verify,
+            context_fingerprint=page_fingerprint,
+        ) is not None
 
     @staticmethod
     def _eligible(
