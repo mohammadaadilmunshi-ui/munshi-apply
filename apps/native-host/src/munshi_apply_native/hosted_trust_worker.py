@@ -255,10 +255,7 @@ class TrustAwareAdapterFactory:
             on_park=self._register_parked,
         )
 
-    def resume_ready_checkpoints(
-        self,
-        queue: DurablePreparationQueue,
-    ) -> int:
+    def resume_ready_checkpoints(self) -> int:
         resumed = 0
         for job_id, adapter in tuple(self._parked.items()):
             observation = adapter.live_revalidation()
@@ -267,28 +264,25 @@ class TrustAwareAdapterFactory:
             checkpoint = adapter.active_trust_checkpoint()
             if checkpoint is None:
                 continue
-            self._trust_checkpoints.clear_after_live_browser_revalidation(
-                trust_checkpoint_id=str(checkpoint["trust_checkpoint_id"]),
-                tenant_id=str(adapter._job["tenant_id"]),
-                user_id=str(adapter._job["user_id"]),
-                current_url=str(observation["current_url"]),
-                page_fingerprint=str(
-                    observation.get("page_fingerprint") or "unknown"
-                ),
+            cleared = (
+                self._trust_checkpoints.clear_after_live_browser_revalidation(
+                    trust_checkpoint_id=str(
+                        checkpoint["trust_checkpoint_id"]
+                    ),
+                    tenant_id=str(adapter._job["tenant_id"]),
+                    user_id=str(adapter._job["user_id"]),
+                    current_url=str(observation["current_url"]),
+                    page_fingerprint=str(
+                        observation.get("page_fingerprint") or "unknown"
+                    ),
+                )
             )
-            queued = queue.requeue_session(
-                session_id=str(adapter._job["session_id"]),
-                tenant_id=str(adapter._job["tenant_id"]),
-                user_id=str(adapter._job["user_id"]),
-            )
-            if queued is None or str(queued.get("state")) != "QUEUED":
+            if str(cleared.get("prepare_job_state")) != "QUEUED":
                 raise RuntimeError(
                     "Live browser revalidated but preparation was not requeued"
                 )
             adapter.mark_resume_ready()
             resumed += 1
-            if str(queued.get("job_id")) != job_id:
-                raise RuntimeError("Requeued preparation job identity changed")
         return resumed
 
 
@@ -342,7 +336,7 @@ class TrustAwareHostedPreparationRunner(HostedPreparationRunner):
         self._trust_adapter_factory = trust_adapter_factory
 
     def run_once(self, *, worker_id: str) -> Any:
-        self._trust_adapter_factory.resume_ready_checkpoints(self.queue)
+        self._trust_adapter_factory.resume_ready_checkpoints()
         return super().run_once(worker_id=worker_id)
 
 
