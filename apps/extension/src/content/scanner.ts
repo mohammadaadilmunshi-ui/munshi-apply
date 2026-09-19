@@ -927,9 +927,7 @@ function detectSecurityCheckpoint(): SecurityCheckpointKind | null {
   ) {
     return "OTP";
   }
-  if (
-    /\b(passkey|security key|webauthn|touch id|face id)\b/.test(body)
-  ) {
+  if (/\b(passkey|security key|webauthn|touch id|face id)\b/.test(body)) {
     return "AUTHENTICATION";
   }
   if (hasVisibleSecurityElement("input[type='password']")) {
