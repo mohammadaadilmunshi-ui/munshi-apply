@@ -18,13 +18,13 @@ from uuid import uuid4
 from .execution_policy import prepare_permissions
 from .hunter_plan_semantic_bridge import answer_matches_question
 from .mechanics_recovery_coordinator import MechanicsRecoveryCoordinator
-from .trusted_mechanics_executor import TrustedMechanicsExecutor
 from .plan_browser_adapter import (
     NORMAL_AUTOFILL_ENV,
     PlanBrowserAdapter,
     _enabled,
     provider_for_url,
 )
+from .trusted_mechanics_executor import TrustedMechanicsExecutor
 
 _BLOCKED_INPUT_TYPES = {
     "file",
