@@ -43,7 +43,8 @@ jobs:
             apps/native-host/tests/test_trusted_mechanics_executor.py \
             apps/native-host/tests/test_interaction_fallback_service.py \
             apps/native-host/tests/test_hosted_interaction_recovery.py \
-            apps/native-host/tests/test_hosted_account_orchestrator.py
+            apps/native-host/tests/test_hosted_account_orchestrator.py \
+            apps/native-host/tests/browser/test_sonnet_reversible_mechanics_chrome.py
 
       - name: Compile reversible mechanics surface
         run: |
@@ -86,4 +87,5 @@ jobs:
           export MUNSHI_BROWSER_EXECUTABLE
           python -m pytest -q \
             apps/native-host/tests/browser/test_hosted_account_orchestrator_chrome.py \
-            apps/native-host/tests/browser/test_hosted_prepare_worker_chrome.py
+            apps/native-host/tests/browser/test_hosted_prepare_worker_chrome.py \
+            apps/native-host/tests/browser/test_sonnet_reversible_mechanics_chrome.py
