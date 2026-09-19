@@ -250,3 +250,52 @@ def test_enter_is_restricted_to_popup_controls_outside_auth_boundary() -> None:
     )
     assert text_locator.keys == []
     assert popup_locator.keys == ["Enter"]
+
+
+def test_navigation_click_is_bound_to_provider_host_policy() -> None:
+    page = _Page()
+    allowed_target = _target_ref("1")
+    blocked_target = _target_ref("2")
+    allowed_locator = _Locator()
+    blocked_locator = _Locator()
+    executor = TrustedMechanicsExecutor(
+        page,
+        allowed_navigation_hosts={"careers.example.com"},
+    )
+    executor._targets[allowed_target] = (  # noqa: SLF001 - navigation policy fixture
+        allowed_locator,
+        {
+            "fileInput": False,
+            "finalSubmitRisk": False,
+            "type": "",
+            "role": "link",
+            "label": "Continue",
+            "hrefHost": "jobs.careers.example.com",
+            "hasPopup": "",
+        },
+    )
+    executor._targets[blocked_target] = (  # noqa: SLF001 - navigation policy fixture
+        blocked_locator,
+        {
+            "fileInput": False,
+            "finalSubmitRisk": False,
+            "type": "",
+            "role": "link",
+            "label": "Continue",
+            "hrefHost": "untrusted.example.net",
+            "hasPopup": "",
+        },
+    )
+
+    executor.execute(
+        [{"type": "CLICK", "targetRef": allowed_target}],
+        allowed_value_refs=set(),
+    )
+    with pytest.raises(TrustedMechanicsError):
+        executor.execute(
+            [{"type": "CLICK", "targetRef": blocked_target}],
+            allowed_value_refs=set(),
+        )
+
+    assert allowed_locator.clicked == 1
+    assert blocked_locator.clicked == 0
