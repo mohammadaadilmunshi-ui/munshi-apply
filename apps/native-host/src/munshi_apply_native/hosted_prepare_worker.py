@@ -237,6 +237,8 @@ class HostedAdapterFactory:
                 bridge=bridge,
                 page=page,
                 context=context,
+                tenant_id=str(job["tenant_id"]),
+                user_id=str(job["user_id"]),
                 session_secret=session_secret,
             ).run()
 
