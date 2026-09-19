@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -24,6 +25,16 @@ class MechanicsRecoveryCoordinator:
         self.on_event = on_event or (lambda _kind, _payload: None)
 
     def _recipe(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        direct_lookup = getattr(self.teach_service, "lookup_promoted", None)
+        if callable(direct_lookup):
+            try:
+                value = direct_lookup(payload)
+            except Exception:
+                return None
+            if not isinstance(value, dict) or str(value.get("state") or "").upper() != "PROMOTED":
+                return None
+            return value
+
         recipes = getattr(self.teach_service, "recipes", None)
         lookup = getattr(recipes, "lookup", None)
         if not callable(lookup):
@@ -43,10 +54,29 @@ class MechanicsRecoveryCoordinator:
         recipe: dict[str, Any],
         success: bool,
     ) -> None:
+        recipe_id = str(recipe.get("recipeId") or recipe.get("recipe_id") or "")
+        if not recipe_id:
+            return
+
+        direct_record = getattr(self.teach_service, "record_verified_outcome", None)
+        if callable(direct_record):
+            try:
+                direct_record(
+                    recipe_id,
+                    application_id=str(plan.get("application_id") or "") or None,
+                    success=bool(success),
+                    occurred_at=datetime.now(UTC).isoformat(),
+                    failure_reason=(
+                        None if success else "mechanics_recipe_failed_verification"
+                    ),
+                )
+            except Exception:
+                return
+            return
+
         recipes = getattr(self.teach_service, "recipes", None)
         record = getattr(recipes, "record_outcome", None)
-        recipe_id = str(recipe.get("recipeId") or "")
-        if not callable(record) or not recipe_id:
+        if not callable(record):
             return
         try:
             record(
@@ -84,7 +114,7 @@ class MechanicsRecoveryCoordinator:
             sort_keys=True,
             separators=(",", ":"),
         )
-        lesson = {
+        base_lesson = {
             "observationId": "obs-"
             + hashlib.sha256(identity.encode()).hexdigest()[:32],
             "applicationId": str(plan.get("application_id") or "") or None,
@@ -94,17 +124,23 @@ class MechanicsRecoveryCoordinator:
             "atsFamily": payload.get("atsFamily"),
             "tenantKey": payload.get("tenantKey"),
             "uiFingerprint": payload.get("uiFingerprint"),
-            "questionFingerprint": payload.get("questionFingerprint"),
-            "teacherKind": str(proposal.get("teacherKind") or "MODEL").upper(),
-            "teacherProvider": (
-                str(proposal.get("provider")) if proposal.get("provider") else None
-            ),
-            "sourceLane": str(
-                proposal.get("sourceLane") or "AUTOAPPLY_MECHANICS_FALLBACK"
-            ),
             "actions": actions,
             "verifiedSuccess": True,
         }
+        if callable(getattr(self.teach_service, "lookup_promoted", None)):
+            lesson = base_lesson
+        else:
+            lesson = {
+                **base_lesson,
+                "questionFingerprint": payload.get("questionFingerprint"),
+                "teacherKind": str(proposal.get("teacherKind") or "MODEL").upper(),
+                "teacherProvider": (
+                    str(proposal.get("provider")) if proposal.get("provider") else None
+                ),
+                "sourceLane": str(
+                    proposal.get("sourceLane") or "AUTOAPPLY_MECHANICS_FALLBACK"
+                ),
+            }
 
         def task() -> None:
             try:
