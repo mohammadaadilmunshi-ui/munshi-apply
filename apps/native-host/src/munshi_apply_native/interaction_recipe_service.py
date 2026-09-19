@@ -108,16 +108,24 @@ def _validate_actions(value: object) -> list[dict[str, object]]:
     try:
         if isinstance(value, list) and any(
             isinstance(item, dict)
-            and str(item.get("type") or "").upper()
-            in {
-                "NEXT",
-                "TYPE_ANSWER_REF",
-                "FILL_SECRET_REF",
-                "FILL_VERIFICATION_ARTIFACT",
-                "UPLOAD_ARTIFACT",
-                "SELECT",
-                "OPEN_LINK",
-            }
+            and (
+                "targetRef" in item
+                or "answerRef" in item
+                or "secretRef" in item
+                or "verificationRef" in item
+                or "artifactRef" in item
+                or "valueRef" in item
+                or str(item.get("type") or "").upper()
+                in {
+                    "NEXT",
+                    "TYPE_ANSWER_REF",
+                    "FILL_SECRET_REF",
+                    "FILL_VERIFICATION_ARTIFACT",
+                    "UPLOAD_ARTIFACT",
+                    "SELECT",
+                    "OPEN_LINK",
+                }
+            )
             for item in value
         ):
             return validate_mechanics_actions(value)
