@@ -186,6 +186,10 @@ class HostedRecoveringPlanBrowserAdapter(PlanBrowserAdapter):
         unresolved = result.get("unresolved")
         if isinstance(unresolved, list) and unresolved:
             return True
+        # General page-mechanics recovery requires a complete deterministic
+        # browser observation. Minimal/legacy recovery results stop here.
+        if "form_digest" not in result or "page_id" not in result:
+            return False
         if result.get("validation_errors"):
             return True
         if result.get("resume_uploaded") is False:
@@ -323,12 +327,6 @@ class HostedRecoveringPlanBrowserAdapter(PlanBrowserAdapter):
     ) -> tuple[dict[str, str], list[dict[str, str]]]:
         values: dict[str, str] = {}
         descriptors: list[dict[str, str]] = []
-        for key, raw in sorted(resolved_values.items(), key=lambda item: str(item[0])):
-            if raw is None:
-                continue
-            ref = self._stable_ref("answer", str(key))
-            values[ref] = str(raw)
-            descriptors.append({"ref": ref, "kind": "ANSWER"})
         for index, answer in enumerate(plan.get("answers", [])):
             if not isinstance(answer, dict):
                 continue
@@ -346,6 +344,17 @@ class HostedRecoveringPlanBrowserAdapter(PlanBrowserAdapter):
                 or index
             )
             ref = self._stable_ref("answer", identity)
+            values[ref] = str(raw)
+            descriptors.append({"ref": ref, "kind": "ANSWER"})
+
+        # Resolved values are admitted only when they exactly match an already
+        # approved NORMAL answer value. This prevents a sensitive resolver output
+        # from being reclassified as a generic answer ref.
+        approved_values = set(values.values())
+        for key, raw in sorted(resolved_values.items(), key=lambda item: str(item[0])):
+            if raw is None or str(raw) not in approved_values:
+                continue
+            ref = self._stable_ref("answer", str(key))
             if ref not in values:
                 values[ref] = str(raw)
                 descriptors.append({"ref": ref, "kind": "ANSWER"})
@@ -358,18 +367,20 @@ class HostedRecoveringPlanBrowserAdapter(PlanBrowserAdapter):
     ) -> tuple[dict[str, dict[str, Any]], list[dict[str, str]]]:
         artifacts: dict[str, dict[str, Any]] = {}
         descriptors: list[dict[str, str]] = []
-        resume_ref = "artifact:resume"
-        resume_bytes = self.artifact_reader(plan)
-        if hashlib.sha256(resume_bytes).hexdigest() != str(
-            plan["resume"]["artifact_sha256"]
-        ):
-            raise ValueError("Resume artifact digest mismatch")
-        artifacts[resume_ref] = {
-            "name": str(plan["resume"]["filename"]),
-            "mimeType": str(plan["resume"]["mime_type"]),
-            "buffer": resume_bytes,
-        }
-        descriptors.append({"ref": resume_ref, "kind": "RESUME"})
+        resume = plan.get("resume")
+        if isinstance(resume, dict):
+            resume_ref = "artifact:resume"
+            resume_bytes = self.artifact_reader(plan)
+            if hashlib.sha256(resume_bytes).hexdigest() != str(
+                resume["artifact_sha256"]
+            ):
+                raise ValueError("Resume artifact digest mismatch")
+            artifacts[resume_ref] = {
+                "name": str(resume["filename"]),
+                "mimeType": str(resume["mime_type"]),
+                "buffer": resume_bytes,
+            }
+            descriptors.append({"ref": resume_ref, "kind": "RESUME"})
         cover = plan.get("cover_letter")
         if isinstance(cover, dict) and self.cover_letter_reader is not None:
             cover_bytes = self.cover_letter_reader(plan)
