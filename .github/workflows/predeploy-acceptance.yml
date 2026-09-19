@@ -51,6 +51,7 @@ jobs:
             apps/native-host/tests/browser/test_plan_browser_adapter_chrome.py \
             apps/native-host/tests/browser/test_cover_letter_prepare_chrome.py \
             apps/native-host/tests/browser/test_hosted_prepare_worker_chrome.py \
+            apps/native-host/tests/browser/test_trust_checkpoint_resume_chrome.py \
             apps/native-host/tests/test_hosted_interaction_recovery.py \
             apps/native-host/tests/test_cookie_consent_runtime.py \
             apps/native-host/tests/test_account_umbrella_e2e_v1.py \
