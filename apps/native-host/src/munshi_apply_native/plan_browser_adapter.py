@@ -557,7 +557,8 @@ class PlanBrowserAdapter:
     def inspect_submission(self, *, plan: dict[str, Any]) -> dict[str, Any]:
         return {
             **self._observe(plan),
-            "supported": provider_for_url(self.page.url) == "GREENHOUSE",
+            "supported": True,
+            "execution_mode": "GENERIC_DOM_ARIA",
             "plan_current": self.current_plan(plan) is True,
         }
 
@@ -570,9 +571,9 @@ class PlanBrowserAdapter:
         observation = self.inspect_submission(plan=plan)
         validate_submit_observation(observation, plan, review)
         buttons = [
-            n
-            for n in self._scan()["page"]["navigationCandidates"]
-            if n["action"] == "FINAL_SUBMIT" and not n["disabled"]
+            item
+            for item in self._scan()["page"]["navigationCandidates"]
+            if item["action"] == "FINAL_SUBMIT" and not item["disabled"]
         ]
         if len(buttons) != 1:
             return {"action_executed": False, "verification_status": "BLOCKED"}
@@ -580,9 +581,9 @@ class PlanBrowserAdapter:
         final_observation = self.inspect_submission(plan=plan)
         validate_submit_observation(final_observation, plan, review)
         final_buttons = [
-            n
-            for n in self._scan()["page"]["navigationCandidates"]
-            if n["action"] == "FINAL_SUBMIT" and not n["disabled"]
+            item
+            for item in self._scan()["page"]["navigationCandidates"]
+            if item["action"] == "FINAL_SUBMIT" and not item["disabled"]
         ]
         if len(final_buttons) != 1 or final_buttons[0]["controlId"] != buttons[0]["controlId"]:
             return {"action_executed": False, "verification_status": "BLOCKED"}
@@ -590,11 +591,28 @@ class PlanBrowserAdapter:
         submit_binding = final_observation.get("submit_binding")
         if not isinstance(submit_binding, dict):
             return {"action_executed": False, "verification_status": "BLOCKED"}
+        expected_control_id = str(submit_binding.get("control_id") or "")
         expected_submit_url = str(submit_binding.get("action") or "")
         expected_submit_method = str(submit_binding.get("method") or "").upper()
-        if not expected_submit_url or expected_submit_method != "POST":
+        expected_binding_digest = str(submit_binding.get("binding_digest") or "")
+        if (
+            expected_control_id != str(final_buttons[0]["controlId"])
+            or expected_submit_method != "POST"
+            or not expected_submit_url
+            or not self._allowed_submit_action(plan, expected_submit_url)
+            or expected_binding_digest
+            != digest(
+                {
+                    "control_id": expected_control_id,
+                    "action": expected_submit_url,
+                    "method": expected_submit_method,
+                }
+            )
+        ):
             return {"action_executed": False, "verification_status": "BLOCKED"}
 
+        before_url = str(self.page.url)
+        before_confirmation = self._confirmation_snapshot()
         observed_responses: list[Any] = []
 
         def capture_response(response: Any) -> None:
@@ -630,7 +648,7 @@ class PlanBrowserAdapter:
                   return true;
                 }""",
                 {
-                    "controlId": final_buttons[0]["controlId"],
+                    "controlId": expected_control_id,
                     "expected": {
                         "action": expected_submit_url,
                         "method": expected_submit_method,
@@ -639,90 +657,176 @@ class PlanBrowserAdapter:
             )
             if clicked is not True:
                 return {"action_executed": False, "verification_status": "BLOCKED"}
-            try:
-                self.page.locator("#application_confirmation, .application-confirmation").wait_for(
-                    state="visible", timeout=5000
-                )
-            except Exception:
-                return {"action_executed": True, "verification_status": "SUBMISSION_UNVERIFIED"}
+
+            for _attempt in range(50):
+                confirmation = self._confirmation_snapshot()
+                if observed_responses and confirmation is not None:
+                    break
+                self.page.wait_for_timeout(100)
         finally:
             self.page.remove_listener("response", capture_response)
 
-        marker = self.page.locator("#application_confirmation, .application-confirmation").first
-        message = marker.inner_text().strip()
-        if not any(
-            phrase in message.casefold()
-            for phrase in (
-                "application has been submitted",
-                "application has been received",
-                "thank you for applying",
-                "thanks for applying",
-            )
-        ):
-            return {"action_executed": True, "verification_status": "SUBMISSION_UNVERIFIED"}
+        confirmation = self._confirmation_snapshot()
+        if confirmation is None:
+            return {
+                "action_executed": True,
+                "verification_status": "SUBMISSION_UNVERIFIED",
+                "submission_url": self.page.url,
+            }
 
-        expected_provider = str(plan["provider_policy"]["provider"])
-        expected_job_id = str(plan["job"]["id"])
-        correlated: dict[str, Any] | None = None
+        exact_response: Any | None = None
+        response_status = 0
+        response_url = ""
+        response_payload: Any = None
         for response in reversed(observed_responses):
             try:
-                response_status = int(response.status)
-                response_url = str(response.url)
-                payload = response.json()
+                candidate_status = int(response.status)
+                candidate_url = str(response.url)
             except Exception:
-                response_status = 0
-                response_url = ""
-                payload = None
-            if not 200 <= response_status < 300:
                 continue
-            if response_url != expected_submit_url:
+            if not 200 <= candidate_status < 400 or candidate_url != expected_submit_url:
                 continue
-            if provider_for_url(response_url) != expected_provider:
-                continue
-            if not isinstance(payload, dict):
-                continue
-            observed_job_id = str(payload.get("job_id") or payload.get("jobId") or "")
-            provider_application_id = str(
-                payload.get("application_id") or payload.get("applicationId") or ""
-            ).strip()
-            response_state = str(payload.get("status") or "").strip().casefold()
-            if observed_job_id != expected_job_id or not provider_application_id:
-                continue
-            if response_state not in {"submitted", "received"}:
-                continue
-            correlated = {
-                "provider_application_id": provider_application_id,
-                "response_status": response_status,
-                "response_url": response_url,
-                "submit_action": expected_submit_url,
-                "submit_method": expected_submit_method,
-                "submission_response_marker": "provider-json-application-id",
-            }
+            exact_response = response
+            response_status = candidate_status
+            response_url = candidate_url
+            try:
+                response_payload = response.json()
+            except Exception:
+                response_payload = None
             break
 
-        if correlated is None:
+        if exact_response is None:
             return {
                 "action_executed": True,
                 "verification_status": "SUBMISSION_UNVERIFIED",
                 "submission_url": self.page.url,
                 "success_evidence": {
-                    "completion_marker": "greenhouse-application-confirmation",
-                    "confirmation_message": message[:500],
-                    "provider": expected_provider,
-                    "job_id": expected_job_id,
+                    "completion_marker": confirmation["marker"],
+                    "confirmation_message": confirmation["text"][:500],
+                    "exact_action_verified": False,
                 },
             }
 
+        expected_job_id = str(plan["job"]["id"])
+        if isinstance(response_payload, dict):
+            payload_job_id = str(
+                response_payload.get("job_id") or response_payload.get("jobId") or ""
+            ).strip()
+            if payload_job_id and payload_job_id != expected_job_id:
+                return {
+                    "action_executed": True,
+                    "verification_status": "SUBMISSION_UNVERIFIED",
+                    "submission_url": self.page.url,
+                }
+            payload_state = str(
+                response_payload.get("status")
+                or response_payload.get("state")
+                or response_payload.get("result")
+                or ""
+            ).strip().casefold()
+            if payload_state in {"failed", "error", "rejected", "invalid"}:
+                return {
+                    "action_executed": True,
+                    "verification_status": "SUBMISSION_UNVERIFIED",
+                    "submission_url": self.page.url,
+                }
+
+        confirmation_changed = (
+            before_confirmation is None
+            or digest(before_confirmation) != digest(confirmation)
+        )
+        url_changed = str(self.page.url) != before_url
+        try:
+            post_candidates = [
+                item
+                for item in self._scan()["page"]["navigationCandidates"]
+                if item["action"] == "FINAL_SUBMIT" and not item["disabled"]
+            ]
+            submit_control_gone = not any(
+                str(item.get("controlId") or "") == expected_control_id
+                for item in post_candidates
+            )
+        except Exception:
+            submit_control_gone = True
+
+        if not confirmation_changed and not url_changed and not submit_control_gone:
+            return {
+                "action_executed": True,
+                "verification_status": "SUBMISSION_UNVERIFIED",
+                "submission_url": self.page.url,
+            }
+
+        provider_policy = dict(plan.get("provider_policy") or {})
+        declared_provider = str(provider_policy.get("provider") or "GENERIC").upper()
+        provider_recipe = provider_for_url(expected_submit_url)
+        external_application_id = self._payload_application_id(response_payload)
+        confirmation_digest = digest(confirmation)
+        submission_reference = "submission-ref-" + digest(
+            {
+                "job_id": expected_job_id,
+                "reviewed_destination": str(review.get("destination_url") or ""),
+                "submit_action": expected_submit_url,
+                "submit_method": expected_submit_method,
+                "action_binding_digest": expected_binding_digest,
+                "response_status": response_status,
+                "response_url": response_url,
+                "confirmation_evidence_digest": confirmation_digest,
+                "post_submit_url": str(self.page.url),
+            }
+        )[:32]
+        provider_application_id = external_application_id or submission_reference
+
+        success_evidence = {
+            "completion_marker": confirmation["marker"],
+            "confirmation_message": confirmation["text"][:500],
+            "confirmation_evidence_digest": confirmation_digest,
+            "provider": declared_provider,
+            "provider_recipe": provider_recipe,
+            "job_id": expected_job_id,
+            "provider_application_id": provider_application_id,
+            "provider_application_id_source": (
+                "EMPLOYER_RESPONSE"
+                if external_application_id
+                else "DERIVED_EXACT_ACTION_EVIDENCE"
+            ),
+            "submission_reference": submission_reference,
+            "reviewed_destination": str(review.get("destination_url") or ""),
+            "submit_action": expected_submit_url,
+            "submit_method": expected_submit_method,
+            "action_binding_digest": expected_binding_digest,
+            "response_status": response_status,
+            "response_url": response_url,
+            "submission_response_marker": "exact-approved-action-response",
+            "exact_action_verified": True,
+            "post_submit_state_changed": bool(
+                confirmation_changed or url_changed or submit_control_gone
+            ),
+        }
+        provider_observation = {
+            "verification_method": "EXACT_APPROVED_ACTION_RESPONSE_AND_CONFIRMATION",
+            "exact_action_confirmed": True,
+            "provider": declared_provider,
+            "provider_recipe": provider_recipe,
+            "provider_application_id": provider_application_id,
+            "submission_reference": submission_reference,
+            "target_url": str(review.get("destination_url") or ""),
+            "submit_action": expected_submit_url,
+            "submit_method": expected_submit_method,
+            "response_status": response_status,
+            "response_url": response_url,
+            "action_binding_digest": expected_binding_digest,
+            "confirmation_evidence_digest": confirmation_digest,
+            "external_observation_id": "browser-evidence-" + digest(success_evidence)[:32],
+            "observed_status": "submitted",
+            "lookup_confirmed": False,
+        }
         return {
             "action_executed": True,
             "verification_status": "VERIFIED",
             "submission_url": self.page.url,
-            "provider_application_id": correlated["provider_application_id"],
-            "success_evidence": {
-                "completion_marker": "greenhouse-application-confirmation",
-                "confirmation_message": message[:500],
-                "provider": expected_provider,
-                "job_id": expected_job_id,
-                **correlated,
-            },
+            "provider_application_id": provider_application_id,
+            "submission_reference": submission_reference,
+            "success_evidence": success_evidence,
+            "provider_observation": provider_observation,
         }
+
