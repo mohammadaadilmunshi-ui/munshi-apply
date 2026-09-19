@@ -294,6 +294,7 @@ class HostedAccountOrchestrator:
             secret_resolver=lambda ref: secrets[ref],
             verification_resolver=lambda ref: verifications[ref],
             allowed_open_hosts=set(self._mailbox_policy()[0]) if verifications else set(),
+            allow_submit_controls=True,
         )
         surface = executor.snapshot()
         if not surface:
