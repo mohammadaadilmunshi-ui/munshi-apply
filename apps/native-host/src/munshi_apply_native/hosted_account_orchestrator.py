@@ -316,8 +316,8 @@ class HostedAccountOrchestrator:
                 expected_sender_domains=senders,
                 ttl_minutes=30,
             )
-        except HostedAccountIssue:
-            raise
+        except HostedAccountIssue as error:
+            self._issue(error.issue_code, str(error))
         except Exception:
             self._issue(
                 "MAILBOX_RUNTIME_UNAVAILABLE",
@@ -593,8 +593,8 @@ class HostedAccountOrchestrator:
                 "save new password",
             )
             self._wait_page(800)
-        except HostedAccountIssue:
-            raise
+        except HostedAccountIssue as error:
+            self._issue(error.issue_code, str(error))
         except Exception:
             self._issue("ACCOUNT_RECOVERY_FAILED", "Account recovery failed")
 
@@ -688,6 +688,8 @@ class HostedAccountOrchestrator:
                     self._click_text(re.compile(r"^(sign in|log in|login)$", re.I), "existing account")
                     self._wait_page(500)
                 self._login(email=str(record["email"]), password=password)
+            except HostedAccountIssue as error:
+                self._issue(error.issue_code, str(error))
             finally:
                 password = ""
             if self._is_verification():
@@ -716,6 +718,7 @@ class HostedAccountOrchestrator:
                     mailbox_request=mailbox_request,
                     account_id=self.account_id,
                 )
+                self._event(VERIFIED)
             return self._resume(self.account_id)
 
         # No account exists for this exact provider/domain scope.
@@ -795,4 +798,5 @@ class HostedAccountOrchestrator:
                 mailbox_request=mailbox_request,
                 account_id=self.account_id,
             )
+            self._event(VERIFIED)
         return self._resume(self.account_id)
