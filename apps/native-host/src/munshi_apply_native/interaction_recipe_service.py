@@ -9,6 +9,11 @@ from urllib.parse import urlparse
 from .database import Database
 from .interaction_knowledge_store import InteractionKnowledgeStore, normalized_context
 from .learning_analytics_store import LearningAnalyticsStore
+from .mechanics_actions import (
+    MechanicsActionError,
+    validate_legacy_actions,
+    validate_mechanics_actions,
+)
 
 _ALLOWED_STRATEGIES = {
     "ARIA_COMBOBOX",
@@ -18,18 +23,16 @@ _ALLOWED_STRATEGIES = {
     "CUSTOM_MULTI_SELECT",
 }
 _BLOCKED_SEMANTIC_MARKERS = {
-    "PASSWORD",
-    "OTP",
     "MFA",
     "CAPTCHA",
     "IDENTITY_VERIFICATION",
-    "AUTHENTICATION",
-    "SUBMIT",
     "GOVERNMENT_ID",
+    "BIOMETRIC",
+    "LIVENESS",
+    "TOTP",
     "SMS",
+    "FINAL_SUBMIT",
 }
-_ALLOWED_KEYS = {"ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"}
-_ALLOWED_WAIT_STATES = {"OPTIONS_VISIBLE", "VALUE_COMMITTED"}
 _ACTIONS: dict[str, list[dict[str, object]]] = {
     "ARIA_COMBOBOX": [
         {"type": "FOCUS"},
@@ -102,27 +105,25 @@ def _strategy(payload: dict[str, Any]) -> str:
 
 
 def _validate_actions(value: object) -> list[dict[str, object]]:
-    if not isinstance(value, list) or not value or len(value) > 16:
-        raise ValueError("Taught recipe requires 1-16 actions")
-    result: list[dict[str, object]] = []
-    for raw in value:
-        if not isinstance(raw, dict):
-            raise ValueError("Taught recipe actions must be objects")
-        action_type = raw.get("type")
-        if action_type in {"FOCUS", "CLICK", "SELECT_EXACT_OPTION"}:
-            result.append({"type": action_type})
-            continue
-        if action_type == "TYPE" and raw.get("valueSource") == "ANSWER":
-            result.append({"type": "TYPE", "valueSource": "ANSWER"})
-            continue
-        if action_type == "KEY" and raw.get("key") in _ALLOWED_KEYS:
-            result.append({"type": "KEY", "key": raw["key"]})
-            continue
-        if action_type == "WAIT_FOR_STATE" and raw.get("state") in _ALLOWED_WAIT_STATES:
-            result.append({"type": "WAIT_FOR_STATE", "state": raw["state"]})
-            continue
-        raise ValueError("Taught recipe contains an unsupported or value-bearing action")
-    return result
+    try:
+        if isinstance(value, list) and any(
+            isinstance(item, dict)
+            and str(item.get("type") or "").upper()
+            in {
+                "NEXT",
+                "TYPE_ANSWER_REF",
+                "FILL_SECRET_REF",
+                "FILL_VERIFICATION_ARTIFACT",
+                "UPLOAD_ARTIFACT",
+                "SELECT",
+                "OPEN_LINK",
+            }
+            for item in value
+        ):
+            return validate_mechanics_actions(value)
+        return validate_legacy_actions(value)
+    except MechanicsActionError as error:
+        raise ValueError(str(error)) from error
 
 
 def _context_identity(payload: dict[str, Any]) -> str:
