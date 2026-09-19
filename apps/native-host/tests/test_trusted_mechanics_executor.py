@@ -181,3 +181,72 @@ def test_submit_type_click_is_allowed_only_inside_explicit_auth_boundary() -> No
         allowed_value_refs=set(),
     )
     assert auth_locator.clicked == 1
+
+
+def test_next_cannot_use_submit_type_control_outside_auth_boundary() -> None:
+    page = _Page()
+    target = _target_ref("d")
+    locator = _Locator()
+    executor = TrustedMechanicsExecutor(page)
+    executor._targets[target] = (  # noqa: SLF001 - submission-boundary fixture
+        locator,
+        {
+            "fileInput": False,
+            "finalSubmitRisk": False,
+            "type": "submit",
+            "role": "button",
+            "label": "Continue",
+            "hasPopup": "",
+        },
+    )
+
+    with pytest.raises(TrustedMechanicsError):
+        executor.execute(
+            [{"type": "NEXT", "targetRef": target}],
+            allowed_value_refs=set(),
+        )
+    assert locator.clicked == 0
+
+
+def test_enter_is_restricted_to_popup_controls_outside_auth_boundary() -> None:
+    page = _Page()
+    text_target = _target_ref("e")
+    popup_target = _target_ref("f")
+    executor = TrustedMechanicsExecutor(page)
+    text_locator = _Locator()
+    popup_locator = _Locator()
+    executor._targets[text_target] = (  # noqa: SLF001 - keyboard safety fixture
+        text_locator,
+        {
+            "fileInput": False,
+            "finalSubmitRisk": False,
+            "type": "text",
+            "role": "textbox",
+            "label": "Name",
+            "hasPopup": "",
+        },
+    )
+    executor._targets[popup_target] = (  # noqa: SLF001 - keyboard safety fixture
+        popup_locator,
+        {
+            "fileInput": False,
+            "finalSubmitRisk": False,
+            "type": "text",
+            "role": "combobox",
+            "label": "Country",
+            "hasPopup": "listbox",
+        },
+    )
+
+    with pytest.raises(TrustedMechanicsError):
+        executor.execute(
+            [{"type": "KEY", "targetRef": text_target, "key": "Enter"}],
+            allowed_value_refs=set(),
+        )
+
+    executor.execute(
+        [{"type": "KEY", "targetRef": popup_target, "key": "Enter"}],
+        allowed_value_refs=set(),
+    )
+    assert text_locator.keys == []
+    assert popup_locator.keys == ["Enter"]
