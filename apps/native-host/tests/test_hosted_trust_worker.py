@@ -39,6 +39,7 @@ class _TrustStore:
         self.cleared.append(kwargs)
         cleared = dict(self.active or {})
         cleared["status"] = "CLEARED"
+        cleared["prepare_job_state"] = "QUEUED"
         self.active = None
         return cleared
 
@@ -218,7 +219,6 @@ def test_live_browser_checkpoint_retention_revalidates_and_reuses_same_adapter(
     scenario,
 ):
     trust = _TrustStore()
-    queue = _Queue()
     delegate = _DelegateAdapter(initial_checkpoint=checkpoint_kind)
     factory = TrustAwareAdapterFactory(lambda _job: delegate, trust)
     wrapped = factory(_job())
@@ -240,15 +240,8 @@ def test_live_browser_checkpoint_retention_revalidates_and_reuses_same_adapter(
     # SMS MFA and passkey are never solved by MUNSHI; this only models the
     # post-user-action observation that the challenge has disappeared.
     delegate.initial_checkpoint = None
-    assert factory.resume_ready_checkpoints(queue) == 1
+    assert factory.resume_ready_checkpoints() == 1
     assert trust.cleared
-    assert queue.requeued == [
-        {
-            "session_id": "session-1",
-            "tenant_id": "tenant-a",
-            "user_id": "member-a",
-        }
-    ]
 
     resumed = factory(_job())
     assert resumed is wrapped
