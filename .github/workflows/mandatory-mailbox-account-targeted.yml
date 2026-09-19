@@ -55,17 +55,23 @@ jobs:
         shell: bash
         run: |
           set +e
-          python -m ruff check \
-            apps/native-host/tests/test_hosted_account_orchestrator.py \
-            --output-format=concise > ruff-hosted-account-orchestrator-tests.txt 2>&1
+          target=apps/native-host/tests/test_hosted_account_orchestrator.py
+          python -m ruff check "$target" --output-format=concise \
+            > ruff-hosted-account-orchestrator-tests.txt 2>&1
           code=$?
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          cp "$target" /tmp/orchestrator-test-before.py
+          python -m ruff check "$target" --fix >/dev/null 2>&1 || true
+          git diff -- "$target" > ruff-hosted-account-orchestrator-tests-fix.diff
+          cp /tmp/orchestrator-test-before.py "$target"
           exit 0
       - name: Upload orchestrator tests lint diagnostics
         uses: actions/upload-artifact@v7
         with:
           name: ruff-hosted-account-orchestrator-tests
-          path: ruff-hosted-account-orchestrator-tests.txt
+          path: |
+            ruff-hosted-account-orchestrator-tests.txt
+            ruff-hosted-account-orchestrator-tests-fix.diff
           if-no-files-found: error
       - name: Lint orchestrator tests
         if: steps.orchestrator_tests_lint.outputs.exit_code != '0'
