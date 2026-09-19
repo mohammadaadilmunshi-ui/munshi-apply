@@ -28,7 +28,8 @@ pytestmark = pytest.mark.skipif(
 REGISTER_URL = "https://careers.example.com/candidate/register"
 LOGIN_URL = "https://careers.example.com/candidate/login"
 VERIFY_URL = "https://careers.example.com/candidate/verify/browser-token"
-NOW = "2026-09-19T02:00:00+00:00"\nEXISTING_CREDENTIAL_REFERENCE = "ats-secret://account-existing-browser/password"
+NOW = "2026-09-19T02:00:00+00:00"
+EXISTING_CREDENTIAL_REFERENCE = "ats-secret://account-existing-browser/password"
 
 
 def _database(tmp_path: Path, application_id: str) -> Database:
