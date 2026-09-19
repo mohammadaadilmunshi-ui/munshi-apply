@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -109,7 +110,7 @@ def test_production_helpers_leave_inherited_directory_before_compose(tmp_path) -
     # /tmp may be mounted noexec in the deployment's read-only test container.
     # This fixture only checks that the helper validates an executable verifier;
     # it never invokes the verifier, so use the existing harmless system binary.
-    verifier = Path("/bin/true")
+    verifier = Path(shutil.which("true") or "/usr/bin/true")
     inherited = tmp_path / "unrelated-ssh-directory"
     inherited.mkdir()
     env = dict(
