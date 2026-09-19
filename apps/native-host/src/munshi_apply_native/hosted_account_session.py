@@ -68,6 +68,7 @@ class HostedAccountSessionStore:
         tenant_id: str,
         user_id: str,
         scope_key: str,
+        expected_account_id: str | None = None,
     ) -> dict[str, Any] | None:
         with self.database.connect() as connection:
             row = connection.execute(
@@ -78,6 +79,10 @@ class HostedAccountSessionStore:
                 (tenant_id, user_id, scope_key),
             ).fetchone()
         if row is None:
+            return None
+        if expected_account_id is not None and str(row["account_id"] or "") != str(
+            expected_account_id
+        ):
             return None
         keys = set(row.keys())
         if "invalidated_at" in keys and row["invalidated_at"] is not None:
