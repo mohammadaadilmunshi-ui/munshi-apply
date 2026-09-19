@@ -304,7 +304,7 @@ class TrustedMechanicsExecutor:
             initial = self._initial_url
             self.page.wait_for_function(
                 "initial => location.href !== initial",
-                initial,
+                arg=initial,
                 timeout=timeout_ms,
             )
             self._initial_url = str(self.page.url)
@@ -325,17 +325,20 @@ class TrustedMechanicsExecutor:
             self.page.get_by_role("option").first.wait_for(state="visible", timeout=timeout_ms)
             return
         if state == "VALUE_COMMITTED":
-            self.page.wait_for_function(
-                """element => {
-                  if (!element || !element.isConnected) return false;
-                  if ('value' in element) return String(element.value || '').length > 0;
-                  return element.getAttribute('aria-checked') === 'true'
-                    || element.getAttribute('aria-selected') === 'true';
-                }""",
-                locator,
-                timeout=timeout_ms,
-            )
-            return
+            attempts = max(1, int(timeout_ms / 50))
+            for _attempt in range(attempts):
+                committed = locator.evaluate(
+                    """element => {
+                      if (!element || !element.isConnected) return false;
+                      if ('value' in element) return String(element.value || '').length > 0;
+                      return element.getAttribute('aria-checked') === 'true'
+                        || element.getAttribute('aria-selected') === 'true';
+                    }"""
+                )
+                if committed is True:
+                    return
+                self.page.wait_for_timeout(50)
+            raise TrustedMechanicsError("Mechanics value did not commit")
         if state == "FILE_ATTACHED":
             attached = locator.evaluate(
                 "element => Boolean(element.files && element.files.length)"
@@ -409,7 +412,10 @@ class TrustedMechanicsExecutor:
                     parsed.scheme not in {"http", "https"}
                     or not host
                     or self.allowed_open_hosts
-                    and host not in self.allowed_open_hosts
+                    and not any(
+                        host == suffix or host.endswith("." + suffix)
+                        for suffix in self.allowed_open_hosts
+                    )
                 ):
                     raise TrustedMechanicsError("Verification link host is not allowed")
                 self.page.goto(artifact["value"], wait_until="domcontentloaded")
