@@ -76,6 +76,22 @@ describe("AutoPilot page-state scanner", () => {
     expect(actions).toEqual(["NEXT", "REVIEW"]);
   });
 
+  it("maps SMS code prompts and passkey prompts into protected checkpoints", () => {
+    document.body.innerHTML = `
+      <p>We sent an SMS verification code to your mobile phone.</p>
+      <input autocomplete="one-time-code">
+    `;
+    expect(scanDocument().securityCheckpoint).toBe("OTP");
+
+    document.body.innerHTML = `
+      <main>
+        <h1>Sign in with your passkey</h1>
+        <button type="button">Use security key</button>
+      </main>
+    `;
+    expect(scanDocument().securityCheckpoint).toBe("AUTHENTICATION");
+  });
+
   it("ignores passive reCAPTCHA integration until a challenge is active", () => {
     document.body.innerHTML = `
       <label for="resume">Upload CV</label>
