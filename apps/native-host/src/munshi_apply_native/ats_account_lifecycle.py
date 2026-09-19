@@ -47,6 +47,7 @@ _SECRET_MARKERS = (
     "verification_code",
 )
 _CREDENTIAL_REF_RE = re.compile(r"^credref:v1:[A-Za-z0-9_-]{16,128}$")
+_HUNTER_ATS_SECRET_REF_RE = re.compile(r"^ats-secret://[A-Za-z0-9_-]{8,128}/password$")
 _MAIL_ALIAS_RE = re.compile(
     r"^(?:u|a)_[A-Za-z0-9_-]{16,64}@mail\.munshi\.systems$",
     re.IGNORECASE,
@@ -110,9 +111,12 @@ def _credential_ref(value: object | None) -> str | None:
     if value is None:
         return None
     normalized = _required(value, "credentialRef")
-    if not _CREDENTIAL_REF_RE.fullmatch(normalized):
+    if not (
+        _CREDENTIAL_REF_RE.fullmatch(normalized)
+        or _HUNTER_ATS_SECRET_REF_RE.fullmatch(normalized)
+    ):
         raise ATSAccountLifecycleError(
-            "credentialRef must be an opaque credref:v1 reference; secret material is forbidden"
+            "credentialRef must be an opaque account credential reference; secret material is forbidden"
         )
     return normalized
 
