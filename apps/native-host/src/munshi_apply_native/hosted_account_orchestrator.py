@@ -568,37 +568,60 @@ class HostedAccountOrchestrator:
         return False
 
     def _apply_verification(self, artifact_kind: str, artifact: str) -> bool:
-        if artifact_kind == "EMAIL_VERIFICATION_CODE":
-            self._fill_first(
-                [
-                    "input[autocomplete='one-time-code']",
-                    "input[name*='verification' i]",
-                    "input[name*='code' i]",
-                    "input[name*='otp' i]",
-                    "input[id*='verification' i]",
-                    "input[id*='otp' i]",
-                ],
-                artifact,
-                "verification code",
-            )
-            self._click_text(
-                re.compile(
-                    r"^(verify|confirm|continue|submit)(?:\s+(?:email|code|account))?$",
-                    re.I,
-                ),
-                "verification",
-            )
-            self._wait_page(1000)
-            return self._verification_confirmed(artifact_kind)
+        deterministic_error: Exception | None = None
+        try:
+            if artifact_kind == "EMAIL_VERIFICATION_CODE":
+                self._fill_first(
+                    [
+                        "input[autocomplete='one-time-code']",
+                        "input[name*='verification' i]",
+                        "input[name*='code' i]",
+                        "input[name*='otp' i]",
+                        "input[id*='verification' i]",
+                        "input[id*='otp' i]",
+                    ],
+                    artifact,
+                    "verification code",
+                )
+                self._click_text(
+                    re.compile(
+                        r"^(verify|confirm|continue|submit)(?:\s+(?:email|code|account))?$",
+                        re.I,
+                    ),
+                    "verification",
+                )
+                self._wait_page(1000)
+                if self._verification_confirmed(artifact_kind):
+                    return True
+            elif artifact_kind in {
+                "EMAIL_VERIFICATION_LINK",
+                "PASSWORD_RESET_LINK",
+                "MAGIC_LOGIN_LINK",
+            }:
+                self.page.goto(artifact, wait_until="domcontentloaded")
+                self._wait_page(800)
+                if self._verification_confirmed(artifact_kind):
+                    return True
+            else:
+                return False
+        except Exception as error:
+            deterministic_error = error
 
-        if artifact_kind in {
-            "EMAIL_VERIFICATION_LINK",
-            "PASSWORD_RESET_LINK",
-            "MAGIC_LOGIN_LINK",
-        }:
-            self.page.goto(artifact, wait_until="domcontentloaded")
-            self._wait_page(800)
-            return self._verification_confirmed(artifact_kind)
+        recovered = self._mechanics_recover(
+            goal="Complete candidate-controlled email verification mechanics",
+            semantic_type="EMAIL_VERIFICATION_MECHANICS",
+            verification_values={
+                "verification:current": {
+                    "kind": artifact_kind,
+                    "value": artifact,
+                }
+            },
+            verify=lambda: self._verification_confirmed(artifact_kind),
+        )
+        if recovered:
+            return True
+        if deterministic_error is not None:
+            raise deterministic_error
         return False
 
     def _verify_with_mailbox(
@@ -690,57 +713,86 @@ class HostedAccountOrchestrator:
     def _login(self, *, email: str, password: str) -> None:
         self._event(LOGIN)
         login_id = self._login_identifier(email)
-        self._fill_first(
-            [
-                "input[type='email']",
-                "input[autocomplete='username']",
-                "input[name*='email' i]",
-                "input[id*='email' i]",
-                "input[name*='user' i]",
-            ],
-            login_id,
-            "account email or username",
-        )
-        self._fill_first(
-            ["input[autocomplete='current-password']", "input[type='password']"],
-            password,
-            "account password",
-        )
-        self._click_text(re.compile(r"^(sign in|log in|login|continue)$", re.I), "login")
-        self._wait_page(1000)
+        try:
+            self._fill_first(
+                [
+                    "input[type='email']",
+                    "input[autocomplete='username']",
+                    "input[name*='email' i]",
+                    "input[id*='email' i]",
+                    "input[name*='user' i]",
+                ],
+                login_id,
+                "account email or username",
+            )
+            self._fill_first(
+                ["input[autocomplete='current-password']", "input[type='password']"],
+                password,
+                "account password",
+            )
+            self._click_text(
+                re.compile(r"^(sign in|log in|login|continue)$", re.I),
+                "login",
+            )
+            self._wait_page(1000)
+            return
+        except Exception as error:
+            recovered = self._mechanics_recover(
+                goal="Complete the existing-account login mechanics",
+                semantic_type="AUTH_LOGIN_MECHANICS",
+                answer_values={"answer:account-identifier": login_id},
+                secret_values={"secret:account-password": password},
+                verify=lambda: not self._is_login(),
+            )
+            if recovered:
+                return
+            raise error
 
     def _create(self, *, email: str, password: str) -> None:
         self._event(CREATE_ACCOUNT)
         login_id = self._login_identifier(email)
-        self._fill_first(
-            [
-                "input[type='email']",
-                "input[autocomplete='username']",
-                "input[name*='email' i]",
-                "input[id*='email' i]",
-            ],
-            login_id,
-            "account email or username",
-        )
-        passwords = [
-            "input[autocomplete='new-password']",
-            "input[type='password']",
-        ]
-        locator = self.page.locator(", ".join(passwords))
-        count = locator.count()
-        if count < 1:
-            raise HostedAccountIssue(
-                "ACCOUNT_FORM_UNSUPPORTED",
-                "Account password field was not found",
+        try:
+            self._fill_first(
+                [
+                    "input[type='email']",
+                    "input[autocomplete='username']",
+                    "input[name*='email' i]",
+                    "input[id*='email' i]",
+                ],
+                login_id,
+                "account email or username",
             )
-        locator.nth(0).fill(password)
-        if count > 1:
-            locator.nth(1).fill(password)
-        self._click_text(
-            re.compile(r"^(create (?:my )?account|register|sign up|continue)$", re.I),
-            "create account",
-        )
-        self._wait_page(1000)
+            passwords = [
+                "input[autocomplete='new-password']",
+                "input[type='password']",
+            ]
+            locator = self.page.locator(", ".join(passwords))
+            count = locator.count()
+            if count < 1:
+                raise HostedAccountIssue(
+                    "ACCOUNT_FORM_UNSUPPORTED",
+                    "Account password field was not found",
+                )
+            locator.nth(0).fill(password)
+            if count > 1:
+                locator.nth(1).fill(password)
+            self._click_text(
+                re.compile(r"^(create (?:my )?account|register|sign up|continue)$", re.I),
+                "create account",
+            )
+            self._wait_page(1000)
+            return
+        except Exception as error:
+            recovered = self._mechanics_recover(
+                goal="Complete reversible candidate account creation mechanics",
+                semantic_type="AUTH_CREATE_MECHANICS",
+                answer_values={"answer:account-identifier": login_id},
+                secret_values={"secret:account-password": password},
+                verify=lambda: not self._is_create() or self._is_verification(),
+            )
+            if recovered:
+                return
+            raise error
 
     def _recovery(
         self,
