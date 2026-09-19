@@ -21,6 +21,7 @@ from uuid import uuid4
 
 from playwright.sync_api import sync_playwright
 
+from .account_store import AccountStore, portal_identity
 from .artifact_fetch_v2 import HunterExecutionBridgeClient
 from .account_store import portal_identity
 from .hosted_account_orchestrator import HostedAccountOrchestrator
@@ -198,10 +199,19 @@ class HostedAdapterFactory:
             session_store = HostedAccountSessionStore(
                 self.database, bridge_secret=bridge.secret
             )
-            stored_state = session_store.load(
-                tenant_id=str(job["tenant_id"]),
-                user_id=str(job["user_id"]),
-                scope_key=scope_key,
+            account_records = AccountStore(self.database).lookup({"portalUrl": target})
+            expected_account_id = (
+                str(account_records[0]["accountId"]) if len(account_records) == 1 else None
+            )
+            stored_state = (
+                session_store.load(
+                    tenant_id=str(job["tenant_id"]),
+                    user_id=str(job["user_id"]),
+                    scope_key=scope_key,
+                    expected_account_id=expected_account_id,
+                )
+                if expected_account_id is not None
+                else None
             )
             context_options: dict[str, Any] = {"accept_downloads": False}
             if stored_state is not None:
