@@ -1,0 +1,81 @@
+name: Integrated AutoApply Readiness
+
+on:
+  push:
+    branches:
+      - feat/provider-neutral-browser-executor-v1-20260919
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integrated:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          python -m pip install -e './apps/native-host[dev]'
+
+      - name: Build browser runtime
+        run: npm run build
+
+      - name: Account and mailbox consumer regressions
+        run: |
+          python -m pytest -q \
+            apps/native-host/tests/test_account_store.py \
+            apps/native-host/tests/test_ats_account_lifecycle.py \
+            apps/native-host/tests/test_account_verification_runtime.py \
+            apps/native-host/tests/test_account_umbrella_e2e_v1.py \
+            apps/native-host/tests/test_hosted_account_orchestrator.py \
+            apps/native-host/tests/test_hosted_account_session.py \
+            apps/native-host/tests/test_hosted_prepare_worker.py
+
+      - name: Sonnet mechanics and Teach regressions
+        run: |
+          python -m pytest -q \
+            apps/native-host/tests/test_mechanics_actions.py \
+            apps/native-host/tests/test_trusted_mechanics_executor.py \
+            apps/native-host/tests/test_interaction_fallback_service.py \
+            apps/native-host/tests/test_interaction_recipe_service.py \
+            apps/native-host/tests/test_hosted_interaction_recovery.py \
+            apps/native-host/tests/test_teach_munshi_service.py
+
+      - name: Provider-neutral and exactly-once regressions
+        run: |
+          python -m pytest -q \
+            apps/native-host/tests/test_application_plan_handoff_v2.py \
+            apps/native-host/tests/test_complete_application_loop.py \
+            apps/native-host/tests/test_production_submission_verification_determinism.py \
+            apps/native-host/tests/test_submit_atomic_review.py \
+            apps/native-host/tests/test_submit_authority_inbox.py \
+            apps/native-host/tests/test_submit_authority_rollover_consume.py
+
+      - name: Real Chromium integrated fixtures
+        env:
+          MUNSHI_RUN_BROWSER_TESTS: "1"
+        run: |
+          MUNSHI_BROWSER_EXECUTABLE="$(
+            command -v google-chrome ||
+              command -v google-chrome-stable ||
+              command -v chromium ||
+              command -v chromium-browser ||
+              true
+          )"
+          test -n "${MUNSHI_BROWSER_EXECUTABLE}"
+          export MUNSHI_BROWSER_EXECUTABLE
+          python -m pytest -q \
+            apps/native-host/tests/browser/test_hosted_account_orchestrator_chrome.py \
+            apps/native-host/tests/browser/test_sonnet_reversible_mechanics_chrome.py \
+            apps/native-host/tests/browser/test_plan_browser_adapter_chrome.py
