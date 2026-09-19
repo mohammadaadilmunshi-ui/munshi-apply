@@ -55,6 +55,7 @@ class TrustedMechanicsExecutor:
         verification_resolver: VerificationResolver | None = None,
         artifact_resolver: ArtifactResolver | None = None,
         allowed_open_hosts: set[str] | None = None,
+        allowed_navigation_hosts: set[str] | None = None,
         allow_submit_controls: bool = False,
     ) -> None:
         self.page = page
@@ -63,6 +64,11 @@ class TrustedMechanicsExecutor:
         self.verification_resolver = verification_resolver
         self.artifact_resolver = artifact_resolver
         self.allow_submit_controls = bool(allow_submit_controls)
+        self.allowed_navigation_hosts = {
+            str(host).strip().casefold().rstrip(".")
+            for host in (allowed_navigation_hosts or set())
+            if str(host).strip()
+        }
         self.allowed_open_hosts = {
             str(host).strip().casefold().rstrip(".")
             for host in (allowed_open_hosts or set())
@@ -135,7 +141,8 @@ class TrustedMechanicsExecutor:
                         r"""element => {
                           const tag = String(element.tagName || '').toLowerCase();
                           const inputType = String(
-                            element.getAttribute('type') || ''
+                            element.getAttribute('type')
+                            || (typeof element.type === 'string' ? element.type : '')
                           ).toLowerCase();
                           const role = String(element.getAttribute('role') || '').toLowerCase();
                           const text = String(
@@ -226,6 +233,7 @@ class TrustedMechanicsExecutor:
                         "required": bool(meta.get("required")),
                         "hasPopup": self._clean(meta.get("hasPopup"), 80),
                         "fileInput": bool(meta.get("fileInput")),
+                        "hrefHost": self._clean(meta.get("hrefHost"), 180),
                         "finalSubmitRisk": bool(meta.get("finalSubmitRisk")),
                     }
                 )
@@ -257,6 +265,18 @@ class TrustedMechanicsExecutor:
         ):
             raise TrustedMechanicsError(
                 "Submit-type controls require the trusted navigation/final-submit boundary"
+            )
+
+    def _assert_navigation_host(self, meta: dict[str, Any]) -> None:
+        host = str(meta.get("hrefHost") or "").casefold().rstrip(".")
+        if not host or not self.allowed_navigation_hosts:
+            return
+        if not any(
+            host == suffix or host.endswith("." + suffix)
+            for suffix in self.allowed_navigation_hosts
+        ):
+            raise TrustedMechanicsError(
+                "Sonnet mechanics cannot navigate outside provider host policy"
             )
 
     @staticmethod
@@ -407,9 +427,11 @@ class TrustedMechanicsExecutor:
                 locator.focus()
             elif action_type == "CLICK":
                 self._assert_not_final_submit(meta, action_type="CLICK")
+                self._assert_navigation_host(meta)
                 locator.click()
             elif action_type == "NEXT":
                 self._assert_not_final_submit(meta, action_type="NEXT")
+                self._assert_navigation_host(meta)
                 label = " ".join(
                     str(meta.get(key) or "")
                     for key in ("label", "ariaLabel", "title", "name")
