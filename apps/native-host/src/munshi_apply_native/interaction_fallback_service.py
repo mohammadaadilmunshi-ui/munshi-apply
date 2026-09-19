@@ -358,7 +358,12 @@ class InteractionFallbackService:
                         "visible": bool(raw_target.get("visible")),
                         "disabled": bool(raw_target.get("disabled")),
                         "required": bool(raw_target.get("required")),
+                        "hasPopup": str(raw_target.get("hasPopup") or "")[:80],
+                        "expanded": str(raw_target.get("expanded") or "")[:20],
+                        "controls": str(raw_target.get("controls") or "")[:120],
+                        "dataAction": str(raw_target.get("dataAction") or "")[:120],
                         "fileInput": bool(raw_target.get("fileInput")),
+                        "hrefHost": str(raw_target.get("hrefHost") or "")[:180],
                         "finalSubmitRisk": bool(raw_target.get("finalSubmitRisk")),
                     }
                 )
