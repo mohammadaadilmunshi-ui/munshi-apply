@@ -460,10 +460,19 @@ class HostedRecoveringPlanBrowserAdapter(PlanBrowserAdapter):
             artifacts, artifact_refs = self._page_artifact_refs(plan=plan)
         else:
             artifacts, artifact_refs = {}, []
+        parsed_current = urlsplit(str(self.page.url))
+        allowed_navigation_hosts = {
+            str(host).casefold().rstrip(".")
+            for host in plan.get("provider_policy", {}).get("allowed_hosts", [])
+            if str(host).strip()
+        }
+        if parsed_current.hostname:
+            allowed_navigation_hosts.add(parsed_current.hostname.casefold().rstrip("."))
         executor = TrustedMechanicsExecutor(
             self.page,
             answer_resolver=lambda ref: answer_values[ref],
             artifact_resolver=lambda ref: artifacts[ref],
+            allowed_navigation_hosts=allowed_navigation_hosts,
         )
         surface = executor.snapshot()
         if not surface:
