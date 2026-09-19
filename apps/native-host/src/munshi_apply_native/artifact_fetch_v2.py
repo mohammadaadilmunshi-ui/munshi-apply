@@ -28,6 +28,7 @@ PURPOSE_MAILBOX_HEALTH = "MAILBOX_HEALTH"
 PURPOSE_MAILBOX_BEGIN = "MAILBOX_VERIFICATION_BEGIN"
 PURPOSE_MAILBOX_CLAIM = "MAILBOX_VERIFICATION_CLAIM"
 PURPOSE_MAILBOX_CONSUME = "MAILBOX_VERIFICATION_CONSUME"
+PURPOSE_MAILBOX_CANCEL = "MAILBOX_VERIFICATION_CANCEL"
 
 
 class HunterExecutionBridgeClient:
@@ -554,6 +555,27 @@ class HunterExecutionBridgeClient:
         ):
             raise RuntimeError("Hunter mailbox consume response binding mismatch")
         return dict(result)
+
+    def cancel_mailbox_verification(
+        self,
+        plan: dict[str, Any],
+        *,
+        request_id: str,
+        account_id: str,
+        reason_code: str = "VERIFICATION_NOT_REQUIRED",
+    ) -> dict[str, Any]:
+        result, _request = self._control_call(
+            plan,
+            purpose=PURPOSE_MAILBOX_CANCEL,
+            endpoint="/api/application-execution/mailbox/cancel",
+            payload={
+                "request_id": request_id,
+                "account_id": account_id,
+                "application_key": str(plan["application_id"]),
+                "reason_code": reason_code,
+            },
+        )
+        return result
 
     def close(self) -> None:
         self.client.close()
