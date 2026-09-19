@@ -1,0 +1,68 @@
+name: Predeploy AutoApply Acceptance
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          python -m pip install -e './apps/native-host[dev]'
+
+      - name: Full static and unit gates
+        run: |
+          npm run check
+          python -m ruff check apps/native-host
+          python -m pytest -q apps/native-host
+
+      - name: Real Chromium acceptance matrix including controlled submission
+        env:
+          MUNSHI_RUN_BROWSER_TESTS: "1"
+        run: |
+          MUNSHI_BROWSER_EXECUTABLE="$(
+            command -v google-chrome ||
+              command -v google-chrome-stable ||
+              command -v chromium ||
+              command -v chromium-browser ||
+              true
+          )"
+          test -n "${MUNSHI_BROWSER_EXECUTABLE}"
+          export MUNSHI_BROWSER_EXECUTABLE
+          python -m pytest -q \
+            apps/native-host/tests/browser/test_hosted_account_orchestrator_chrome.py \
+            apps/native-host/tests/browser/test_sonnet_reversible_mechanics_chrome.py \
+            apps/native-host/tests/browser/test_plan_browser_adapter_chrome.py \
+            apps/native-host/tests/browser/test_cover_letter_prepare_chrome.py \
+            apps/native-host/tests/browser/test_hosted_prepare_worker_chrome.py \
+            apps/native-host/tests/test_hosted_interaction_recovery.py \
+            apps/native-host/tests/test_cookie_consent_runtime.py \
+            apps/native-host/tests/test_account_umbrella_e2e_v1.py \
+            apps/native-host/tests/test_trust_checkpoint_store.py \
+            apps/native-host/tests/test_complete_application_loop.py \
+            apps/native-host/tests/test_submit_atomic_review.py
+
+      - name: Require private repository before release
+        env:
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          test "${REPOSITORY_PRIVATE}" = "true" || {
+            echo "PREDEPLOY_BLOCKED: munshi-apply must be private before release."
+            exit 1
+          }

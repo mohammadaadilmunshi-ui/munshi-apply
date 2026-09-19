@@ -1,10 +1,14 @@
-from __future__ import annotations
+# ruff: noqa: I001\nfrom __future__ import annotations
 
-from pathlib import Path
+import os
+import re
+import shlex
 import subprocess
+from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[3]
+BASH = "/bin/bash"
 
 
 def test_production_compose_has_separate_api_prepare_submit_authority() -> None:
@@ -26,9 +30,9 @@ def test_production_transport_is_rollback_guarded_and_staging_is_protected() -> 
     deploy = (ROOT / "deploy/netcup/deploy_apply_production_release.sh").read_text(
         encoding="utf-8"
     )
-    verify = (ROOT / "deploy/netcup/verify_apply_production_runtime_contract.sh").read_text(
-        encoding="utf-8"
-    )
+    verify = (
+        ROOT / "deploy/netcup/verify_apply_production_runtime_contract.sh"
+    ).read_text(encoding="utf-8")
     activate = (ROOT / "deploy/netcup/activate_apply_production_submit.sh").read_text(
         encoding="utf-8"
     )
@@ -42,15 +46,14 @@ def test_production_transport_is_rollback_guarded_and_staging_is_protected() -> 
     assert "APPLY_PRODUCTION_SUBMIT_WORKER_ACTIVE=NO" in verify
     assert "APPLY_PRODUCTION_SUBMIT_WORKER_ACTIVE=YES" in verify
     assert "ROLLBACK APPLY FULL-SUBMIT ACTIVATION" in activate
-    assert 'safe.directory=$REPO' in verify
-    assert 'safe.directory=$REPO' in activate
+    assert "safe.directory=$REPO" in verify
+    assert "safe.directory=$REPO" in activate
     assert "APPLY_PRODUCTION_FINAL_SUBMIT=ENABLED" in activate
 
 
 def test_hosted_submit_worker_delivers_verified_production_receipt() -> None:
     source = (
-        ROOT
-        / "apps/native-host/src/munshi_apply_native/hosted_submit_worker.py"
+        ROOT / "apps/native-host/src/munshi_apply_native/hosted_submit_worker.py"
     ).read_text(encoding="utf-8")
     assert "ProductionReceiptClient" in source
     assert "ProductionReceiptClient.from_environment()" in source
@@ -59,12 +62,12 @@ def test_hosted_submit_worker_delivers_verified_production_receipt() -> None:
 
 def test_production_private_http_is_exact_and_default_denied() -> None:
     source = (
-        ROOT
-        / "apps/native-host/src/munshi_apply_native/internal_http_policy.py"
+        ROOT / "apps/native-host/src/munshi_apply_native/internal_http_policy.py"
     ).read_text(encoding="utf-8")
     assert "MUNSHI_PRODUCTION_INTERNAL_BRIDGE_ENABLED" in source
     assert '"." not in host' in source
     assert "normalized != allowed" in source
+
 
 def test_production_shell_scripts_parse() -> None:
     for relative in (
@@ -72,14 +75,19 @@ def test_production_shell_scripts_parse() -> None:
         "deploy/netcup/verify_apply_production_runtime_contract.sh",
         "deploy/netcup/activate_apply_production_submit.sh",
     ):
-        subprocess.run(["bash", "-n", str(ROOT / relative)], check=True)
+        subprocess.run(  # noqa: S603 - fixed local shell syntax-check command
+            [BASH, "-n", str(ROOT / relative)],
+            check=True,
+        )
+
 
 def test_docker_python_heredocs_keep_stdin_open() -> None:
     # Without -i Docker gives Python EOF and returns success without executing
     # the health check, queue gate, backup, or restore supplied on stdin.
-    import re
-    import shlex
-    for relative in ("deploy/netcup/activate_apply_production_submit.sh", "deploy/netcup/deploy_apply_production_release.sh"):
+    for relative in (
+        "deploy/netcup/activate_apply_production_submit.sh",
+        "deploy/netcup/deploy_apply_production_release.sh",
+    ):
         source = (ROOT / relative).read_text(encoding="utf-8")
         logical = source.replace("\\\n", " ")
         commands = re.findall(r"docker (?:exec|run) [^\n]*<<[^\n]*", logical)
@@ -90,8 +98,6 @@ def test_docker_python_heredocs_keep_stdin_open() -> None:
 
 
 def test_production_helpers_leave_inherited_directory_before_compose(tmp_path) -> None:
-    import os
-
     root = tmp_path / "production"
     repo = root / "repo"
     (repo / ".git").mkdir(parents=True)
@@ -105,11 +111,16 @@ def test_production_helpers_leave_inherited_directory_before_compose(tmp_path) -
     verifier = Path("/bin/true")
     inherited = tmp_path / "unrelated-ssh-directory"
     inherited.mkdir()
-    env = dict(os.environ, MUNSHI_APPLY_PRODUCTION_ROOT=str(root),
-               MUNSHI_APPLY_PRODUCTION_VERIFY=str(verifier))
-    for name in ("deploy_apply_production_release.sh",
-                 "verify_apply_production_runtime_contract.sh",
-                 "activate_apply_production_submit.sh"):
+    env = dict(
+        os.environ,
+        MUNSHI_APPLY_PRODUCTION_ROOT=str(root),
+        MUNSHI_APPLY_PRODUCTION_VERIFY=str(verifier),
+    )
+    for name in (
+        "deploy_apply_production_release.sh",
+        "verify_apply_production_runtime_contract.sh",
+        "activate_apply_production_submit.sh",
+    ):
         source = (ROOT / "deploy/netcup" / name).read_text()
         anchor = 'cd -- "$REPO"'
         assert source.count(anchor) == 1
@@ -117,18 +128,38 @@ def test_production_helpers_leave_inherited_directory_before_compose(tmp_path) -
         assert source.index(anchor) < source.index("docker ")
         # Execute the real argument/validation prefix from a foreign cwd.
         # No Docker, production state, or network is involved in this fixture.
-        prefix = source.split(anchor, 1)[0] + anchor + '\nprintf "CWD=%s\\n" "$PWD"\n'
-        args = ["--commit", "a" * 40, "--branch", "release/fixture"] if name.startswith("deploy_") else []
-        result = subprocess.run(["bash", "-s", "--", *args], input=prefix,
-                                text=True, capture_output=True, cwd=inherited,
-                                env=env, check=True)
+        prefix = (
+            source.split(anchor, 1)[0]
+            + anchor
+            + '\nprintf "CWD=%s\\n" "$PWD"\n'
+        )
+        args = (
+            ["--commit", "a" * 40, "--branch", "release/fixture"]
+            if name.startswith("deploy_")
+            else []
+        )
+        result = subprocess.run(  # noqa: S603 - fixed local test harness command
+            [BASH, "-s", "--", *args],
+            input=prefix,
+            text=True,
+            capture_output=True,
+            cwd=inherited,
+            env=env,
+            check=True,
+        )
         assert f"CWD={repo}\n" in result.stdout
 
 
 def test_deploy_time_regression_uses_disposable_writable_data() -> None:
     deploy = (ROOT / "deploy/netcup/deploy_apply_production_release.sh").read_text()
-    command = deploy.split('echo "=== RUN EXACT-IMAGE APPLY', 1)[1].split('echo "APPLY_PRODUCTION_EXACT_IMAGE_TESTS=PASS"', 1)[0]
+    command = deploy.split('echo "=== RUN EXACT-IMAGE APPLY', 1)[1].split(
+        'echo "APPLY_PRODUCTION_EXACT_IMAGE_TESTS=PASS"',
+        1,
+    )[0]
     assert "--network none" in command
     assert "--read-only" in command
-    assert "--tmpfs /data:rw,nosuid,nodev,size=256m,uid=10001,gid=10001,mode=0700" in command
+    assert (
+        "--tmpfs /data:rw,nosuid,nodev,size=256m,uid=10001,gid=10001,mode=0700"
+        in command
+    )
     assert "--mount" not in command and "--volume" not in command

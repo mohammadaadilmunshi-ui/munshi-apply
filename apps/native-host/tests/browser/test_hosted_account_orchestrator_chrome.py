@@ -7,10 +7,14 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import sync_playwright
 
+from munshi_apply_native.account_store import AccountStore
+from munshi_apply_native.ats_account_lifecycle import ATSAccountLifecycle
 from munshi_apply_native.browser_runtime import resolve_browser_executable
 from munshi_apply_native.database import Database
 from munshi_apply_native.hosted_account_orchestrator import (
     EMAIL_VERIFICATION,
+    EXISTING_ACCOUNT,
+    LOGIN,
     RESUME_APPLICATION,
     VERIFIED,
     HostedAccountOrchestrator,
@@ -22,8 +26,9 @@ pytestmark = pytest.mark.skipif(
 )
 
 REGISTER_URL = "https://careers.example.com/candidate/register"
+LOGIN_URL = "https://careers.example.com/candidate/login"
 VERIFY_URL = "https://careers.example.com/candidate/verify/browser-token"
-NOW = "2026-09-19T02:00:00+00:00"
+NOW = "2026-09-19T02:00:00+00:00"\nEXISTING_CREDENTIAL_REFERENCE = "ats-secret://account-existing-browser/password"
 
 
 def _database(tmp_path: Path, application_id: str) -> Database:
@@ -325,6 +330,197 @@ def test_account_verification_stays_in_same_chromium_session(
         assert account["authenticated_at"]
         assert persisted is not None
         assert persisted["account_id"] == f"account-browser-{mode}"
+        assert bytes(persisted["ciphertext"])
+        assert persisted["expires_at"]
+        assert persisted["invalidated_at"] is None
+
+        context.close()
+        browser.close()
+
+
+
+class _LoginBridge:
+    def __init__(self) -> None:
+        self.cancelled: list[str] = []
+
+    def mailbox_health(self, _plan: dict[str, object]) -> dict[str, object]:
+        return {
+            "ready": True,
+            "mandatory": True,
+            "relay_ready": True,
+            "signing_ready": True,
+            "encryption_ready": True,
+        }
+
+    def account_password(
+        self,
+        _plan: dict[str, object],
+        *,
+        account_id: str,
+        secret_ref: str,
+    ) -> str:
+        assert account_id == "account-existing-browser"
+        assert secret_ref == EXISTING_CREDENTIAL_REFERENCE
+        return "Fixture-Existing-Managed-1!"
+
+    def begin_mailbox_verification(
+        self,
+        _plan: dict[str, object],
+        *,
+        account_id: str,
+        provider: str,
+        expected_link_hosts: list[str],
+        expected_sender_domains: list[str],
+        ttl_minutes: int = 30,
+    ) -> dict[str, object]:
+        assert account_id == "account-existing-browser"
+        assert provider == "EXAMPLE"
+        assert expected_link_hosts == ["careers.example.com"]
+        assert expected_sender_domains == ["mail.example.com"]
+        assert ttl_minutes == 30
+        return {"request_id": "request-existing-login", "mail_relay_ready": True}
+
+    def cancel_mailbox_verification(
+        self,
+        _plan: dict[str, object],
+        *,
+        request_id: str,
+        account_id: str,
+        reason_code: str,
+    ) -> dict[str, str]:
+        assert request_id == "request-existing-login"
+        assert account_id == "account-existing-browser"
+        self.cancelled.append(reason_code)
+        return {"request_id": request_id, "state": "CANCELLED"}
+
+
+def _existing_login_plan(application_id: str) -> dict[str, object]:
+    plan = _plan(application_id)
+    plan["job"] = {
+        "apply_url": LOGIN_URL,
+        "job_url": LOGIN_URL,
+        "company": "Browser Fixture",
+    }
+    return plan
+
+
+def _existing_login_html() -> str:
+    return """<!doctype html>
+<html>
+  <body>
+    <h1>Returning candidate login</h1>
+    <form id="login">
+      <input type="email" autocomplete="username" name="email" />
+      <input type="password" autocomplete="current-password" name="password" />
+      <button type="submit">Sign in</button>
+    </form>
+    <script>
+      document.querySelector("#login").addEventListener("submit", (event) => {
+        event.preventDefault();
+        const email = document.querySelector("input[type=email]").value;
+        const password = document.querySelector("input[type=password]").value;
+        if (
+          email === "u_existingbrowser0001@mail.munshi.systems" &&
+          password === "Fixture-Existing-Managed-1!"
+        ) {
+          sessionStorage.setItem("munshi-existing-login", "same-context");
+          document.body.innerHTML =
+            "<h1>Candidate dashboard</h1><p>Application can resume.</p>";
+        }
+      });
+    </script>
+  </body>
+</html>"""
+
+
+def test_existing_account_login_uses_managed_credential_and_persists_same_session(
+    tmp_path: Path,
+) -> None:
+    application_id = "app-browser-existing-login"
+    database = _database(tmp_path, application_id)
+    plan = _existing_login_plan(application_id)
+    bridge = _LoginBridge()
+
+    AccountStore(database).upsert(
+        {
+            "accountId": "account-existing-browser",
+            "employer": "Browser Fixture",
+            "portalUrl": LOGIN_URL,
+            "email": "u_existingbrowser0001@mail.munshi.systems",
+            "exists": True,
+            "applicationId": application_id,
+            "observedAt": NOW,
+        }
+    )
+    ATSAccountLifecycle(database).provision(
+        {
+            "accountId": "account-existing-browser",
+            "provider": "example",
+            "credentialRef": EXISTING_CREDENTIAL_REFERENCE,
+            "mailAlias": "u_existingbrowser0001@mail.munshi.systems",
+            "observedAt": NOW,
+        }
+    )
+
+    browser_path = resolve_browser_executable()
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(
+            headless=True,
+            executable_path=browser_path,
+        )
+        context = browser.new_context()
+
+        def handler(route: object) -> None:
+            request = route.request
+            if request.url == LOGIN_URL and request.method == "GET":
+                route.fulfill(
+                    status=200,
+                    content_type="text/html",
+                    body=_existing_login_html(),
+                )
+                return
+            route.abort()
+
+        context.route("**/*", handler)
+        page = context.new_page()
+        page.goto(LOGIN_URL, wait_until="domcontentloaded")
+
+        result = HostedAccountOrchestrator(
+            database,
+            plan=plan,
+            bridge=bridge,
+            page=page,
+            context=context,
+            tenant_id="tenant-browser",
+            user_id="user-browser",
+            session_secret=b"browser-existing-login-session-fixture",
+            verification_timeout_seconds=5,
+            poll_interval_seconds=0.05,
+        ).run()
+
+        assert result.state == RESUME_APPLICATION
+        assert EXISTING_ACCOUNT in result.trace
+        assert LOGIN in result.trace
+        assert result.trace[-1] == RESUME_APPLICATION
+        assert bridge.cancelled == ["VERIFICATION_NOT_REQUIRED"]
+        assert (
+            page.evaluate("sessionStorage.getItem('munshi-existing-login')")
+            == "same-context"
+        )
+
+        with database.connect() as connection:
+            persisted = connection.execute(
+                """
+                SELECT account_id,ciphertext,expires_at,invalidated_at
+                FROM hosted_account_sessions
+                WHERE tenant_id='tenant-browser'
+                  AND user_id='user-browser'
+                  AND scope_key='careers.example.com'
+                """
+            ).fetchone()
+
+        assert persisted is not None
+        assert persisted["account_id"] == "account-existing-browser"
         assert bytes(persisted["ciphertext"])
         assert persisted["expires_at"]
         assert persisted["invalidated_at"] is None
