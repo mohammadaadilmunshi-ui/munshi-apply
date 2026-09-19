@@ -327,6 +327,7 @@ class HostedRecoveringPlanBrowserAdapter(PlanBrowserAdapter):
     ) -> tuple[dict[str, str], list[dict[str, str]]]:
         values: dict[str, str] = {}
         descriptors: list[dict[str, str]] = []
+        approved_by_value: dict[str, dict[str, str]] = {}
         for index, answer in enumerate(plan.get("answers", [])):
             if not isinstance(answer, dict):
                 continue
@@ -344,20 +345,38 @@ class HostedRecoveringPlanBrowserAdapter(PlanBrowserAdapter):
                 or index
             )
             ref = self._stable_ref("answer", identity)
+            semantic = str(answer.get("semantic_type") or "NORMAL_ANSWER").upper()
+            question_key = str(answer.get("question_key") or identity)[:120]
             values[ref] = str(raw)
-            descriptors.append({"ref": ref, "kind": "ANSWER"})
+            descriptor = {
+                "ref": ref,
+                "kind": "ANSWER",
+                "semanticType": semantic[:120],
+                "label": question_key,
+            }
+            descriptors.append(descriptor)
+            approved_by_value.setdefault(str(raw), descriptor)
 
         # Resolved values are admitted only when they exactly match an already
         # approved NORMAL answer value. This prevents a sensitive resolver output
         # from being reclassified as a generic answer ref.
-        approved_values = set(values.values())
         for key, raw in sorted(resolved_values.items(), key=lambda item: str(item[0])):
-            if raw is None or str(raw) not in approved_values:
+            if raw is None:
+                continue
+            approved = approved_by_value.get(str(raw))
+            if approved is None:
                 continue
             ref = self._stable_ref("answer", str(key))
             if ref not in values:
                 values[ref] = str(raw)
-                descriptors.append({"ref": ref, "kind": "ANSWER"})
+                descriptors.append(
+                    {
+                        "ref": ref,
+                        "kind": "ANSWER",
+                        "semanticType": approved["semanticType"],
+                        "label": str(key)[:120],
+                    }
+                )
         return values, descriptors
 
     def _page_artifact_refs(
