@@ -46,6 +46,8 @@ _TERMINAL_ISSUE_CODES = {
     "ACCOUNT_CREATION_FAILED",
     "ACCOUNT_RECOVERY_FAILED",
     "DUPLICATE_ACCOUNT_DETECTED",
+    "ACCOUNT_USERNAME_POLICY_UNSUPPORTED",
+    "ACCOUNT_SESSION_PERSISTENCE_FAILED",
 }
 
 _ACCOUNT_ROUTE = re.compile(
@@ -68,6 +70,16 @@ _CREATE_TEXT = re.compile(
 _LOGIN_TEXT = re.compile(r"\b(sign in|log in|login|returning candidate)\b", re.IGNORECASE)
 _RECOVERY_TEXT = re.compile(
     r"\b(forgot (?:your )?(?:password|username)|reset (?:your )?password|account recovery)\b",
+    re.IGNORECASE,
+)
+_VERIFICATION_SUCCESS_TEXT = re.compile(
+    r"\b(email (?:has been )?verified|email verified|account verified|verification complete|"
+    r"successfully verified|account activated|email confirmed|verification successful)\b",
+    re.IGNORECASE,
+)
+_VERIFICATION_FAILURE_TEXT = re.compile(
+    r"\b(invalid (?:verification )?(?:link|code)|expired (?:verification )?(?:link|code)|"
+    r"verification failed|unable to verify|link has expired|code is incorrect|incorrect code)\b",
     re.IGNORECASE,
 )
 
@@ -243,6 +255,28 @@ class HostedAccountOrchestrator:
         except Exception:
             self.sleeper(milliseconds / 1000.0)
 
+    def _login_identifier(self, email: str) -> str:
+        policy = dict(self.plan.get("provider_policy") or {})
+        account_policy = policy.get("account_identity")
+        if not isinstance(account_policy, dict):
+            account_policy = {}
+        mode = str(
+            account_policy.get("username_policy")
+            or policy.get("username_policy")
+            or "EMAIL"
+        ).strip().upper()
+        if mode in {"EMAIL", "APPLICATION_EMAIL", "MAIL_ALIAS"}:
+            return email
+        if mode == "EMAIL_LOCAL_PART":
+            local, separator, _domain = email.partition("@")
+            if separator and local:
+                return local
+        self._issue(
+            "ACCOUNT_USERNAME_POLICY_UNSUPPORTED",
+            f"Unsupported ATS username policy: {mode}",
+        )
+        raise AssertionError("unreachable")
+
     def _mailbox_policy(self) -> tuple[list[str], list[str]]:
         policy = dict(self.plan.get("provider_policy") or {})
         mailbox = policy.get("mailbox_verification")
@@ -285,6 +319,15 @@ class HostedAccountOrchestrator:
         self._event(ISSUE, normalized)
         if self.account_id is not None:
             try:
+                self.session_store.invalidate(
+                    tenant_id=self.bridge.tenant_id,
+                    user_id=self.bridge.user_id,
+                    scope_key=self.scope_key,
+                    reason=normalized,
+                )
+            except Exception:
+                pass
+            try:
                 self.lifecycle.mark_issue(
                     account_id=self.account_id,
                     application_id=self.application_id,
@@ -324,6 +367,27 @@ class HostedAccountOrchestrator:
                 "Mandatory mailbox verification could not be armed",
             )
         raise AssertionError("unreachable")
+
+    def _cancel_mailbox_request(
+        self,
+        *,
+        mailbox_request: dict[str, Any] | None,
+        account_id: str,
+        reason_code: str = "VERIFICATION_NOT_REQUIRED",
+    ) -> None:
+        if not mailbox_request or not mailbox_request.get("request_id"):
+            return
+        try:
+            self.bridge.cancel_mailbox_verification(
+                self.plan,
+                request_id=str(mailbox_request["request_id"]),
+                account_id=account_id,
+                reason_code=reason_code,
+            )
+        except Exception:
+            # Cancellation is cleanup only. A request still has its Hunter TTL,
+            # and failure to cancel must not turn a completed login into ISSUE.
+            return
 
     def _claim_mail(
         self, *, request_id: str, account_id: str, expected_kind: str
@@ -367,6 +431,24 @@ class HostedAccountOrchestrator:
             return "EMAIL_VERIFICATION_CODE"
         return "EMAIL_VERIFICATION_LINK"
 
+    def _verification_confirmed(self, artifact_kind: str) -> bool:
+        text = self._text()
+        if _VERIFICATION_FAILURE_TEXT.search(text):
+            return False
+        if artifact_kind == "PASSWORD_RESET_LINK":
+            return self._visible(
+                ["input[autocomplete='new-password']", "input[type='password']"]
+            ) is not None
+        if _VERIFICATION_SUCCESS_TEXT.search(text):
+            return True
+        if artifact_kind == "EMAIL_VERIFICATION_CODE":
+            return not self._is_verification()
+        if artifact_kind == "MAGIC_LOGIN_LINK":
+            return not self._is_login() and not self._is_verification()
+        # For ordinary email links, require an explicit success marker instead
+        # of treating HTTP navigation itself as proof.
+        return False
+
     def _apply_verification(self, artifact_kind: str, artifact: str) -> bool:
         if artifact_kind == "EMAIL_VERIFICATION_CODE":
             self._fill_first(
@@ -386,7 +468,7 @@ class HostedAccountOrchestrator:
                 "verification",
             )
             self._wait_page(1000)
-            return not self._is_verification()
+            return self._verification_confirmed(artifact_kind)
 
         if artifact_kind in {
             "EMAIL_VERIFICATION_LINK",
@@ -395,7 +477,7 @@ class HostedAccountOrchestrator:
         }:
             self.page.goto(artifact, wait_until="domcontentloaded")
             self._wait_page(800)
-            return True
+            return self._verification_confirmed(artifact_kind)
         return False
 
     def _verify_with_mailbox(
@@ -481,6 +563,7 @@ class HostedAccountOrchestrator:
 
     def _login(self, *, email: str, password: str) -> None:
         self._event(LOGIN)
+        login_id = self._login_identifier(email)
         self._fill_first(
             [
                 "input[type='email']",
@@ -489,8 +572,8 @@ class HostedAccountOrchestrator:
                 "input[id*='email' i]",
                 "input[name*='user' i]",
             ],
-            email,
-            "account email",
+            login_id,
+            "account email or username",
         )
         self._fill_first(
             ["input[autocomplete='current-password']", "input[type='password']"],
@@ -502,6 +585,7 @@ class HostedAccountOrchestrator:
 
     def _create(self, *, email: str, password: str) -> None:
         self._event(CREATE_ACCOUNT)
+        login_id = self._login_identifier(email)
         self._fill_first(
             [
                 "input[type='email']",
@@ -509,8 +593,8 @@ class HostedAccountOrchestrator:
                 "input[name*='email' i]",
                 "input[id*='email' i]",
             ],
-            email,
-            "account email",
+            login_id,
+            "account email or username",
         )
         passwords = [
             "input[autocomplete='new-password']",
@@ -545,8 +629,8 @@ class HostedAccountOrchestrator:
                     "input[autocomplete='username']",
                     "input[name*='email' i]",
                 ],
-                email,
-                "recovery email",
+                self._login_identifier(email),
+                "recovery email or username",
             )
             mailbox_request = self._arm_mailbox(account_id)
             self._click_text(
@@ -676,6 +760,11 @@ class HostedAccountOrchestrator:
                     mailbox_request=mailbox_request,
                 )
             elif self._is_login():
+                self._cancel_mailbox_request(
+                    mailbox_request=mailbox_request,
+                    account_id=self.account_id,
+                    reason_code="LOGIN_RECOVERY_REQUIRED",
+                )
                 password = self._password(self.account_id, secret_ref)
                 try:
                     self._recovery(
@@ -687,6 +776,11 @@ class HostedAccountOrchestrator:
                     password = ""
                 if self._is_login():
                     self._issue("ACCOUNT_LOGIN_FAILED", "ATS login remained unresolved")
+            else:
+                self._cancel_mailbox_request(
+                    mailbox_request=mailbox_request,
+                    account_id=self.account_id,
+                )
             return self._resume(self.account_id)
 
         # No account exists for this exact provider/domain scope.
@@ -760,5 +854,10 @@ class HostedAccountOrchestrator:
             self._verify_with_mailbox(
                 account_id=self.account_id,
                 mailbox_request=mailbox_request,
+            )
+        else:
+            self._cancel_mailbox_request(
+                mailbox_request=mailbox_request,
+                account_id=self.account_id,
             )
         return self._resume(self.account_id)
