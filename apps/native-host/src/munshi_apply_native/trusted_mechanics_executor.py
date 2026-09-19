@@ -326,7 +326,14 @@ class TrustedMechanicsExecutor:
             return self._verification(ref)["value"]
         raise TrustedMechanicsError("Unsupported mechanics value reference")
 
-    def _select(self, locator: Any, value: str) -> None:
+    def _frame_scope(self, meta: dict[str, Any]) -> Any:
+        frames = list(getattr(self.page, "frames", []) or [])
+        frame_index = int(meta.get("frameIndex") or 0)
+        if 0 <= frame_index < len(frames):
+            return frames[frame_index]
+        return self.page
+
+    def _select(self, locator: Any, value: str, meta: dict[str, Any]) -> None:
         try:
             tag = str(locator.evaluate("element => element.tagName.toLowerCase()"))
         except Exception as error:
@@ -346,7 +353,11 @@ class TrustedMechanicsExecutor:
             locator.select_option(value=str(matched))
             return
         locator.click()
-        option = self.page.get_by_role("option", name=value, exact=True)
+        option = self._frame_scope(meta).get_by_role(
+            "option",
+            name=value,
+            exact=True,
+        )
         if option.count() != 1:
             raise TrustedMechanicsError("Exact custom option is missing or ambiguous")
         option.click()
@@ -384,7 +395,11 @@ class TrustedMechanicsExecutor:
             locator.wait_for(state="hidden", timeout=timeout_ms)
             return
         if state == "OPTIONS_VISIBLE":
-            self.page.get_by_role("option").first.wait_for(state="visible", timeout=timeout_ms)
+            _locator, meta = self._target(target_ref)
+            self._frame_scope(meta).get_by_role("option").first.wait_for(
+                state="visible",
+                timeout=timeout_ms,
+            )
             return
         if state == "VALUE_COMMITTED":
             attempts = max(1, int(timeout_ms / 50))
@@ -472,7 +487,11 @@ class TrustedMechanicsExecutor:
                             "Custom uploader did not expose a trusted file chooser"
                         ) from error
             elif action_type == "SELECT":
-                self._select(locator, self._value_ref(str(action["valueRef"])))
+                self._select(
+                    locator,
+                    self._value_ref(str(action["valueRef"])),
+                    meta,
+                )
             elif action_type == "KEY":
                 self._assert_not_final_submit(meta, action_type="KEY")
                 key = str(action["key"])
