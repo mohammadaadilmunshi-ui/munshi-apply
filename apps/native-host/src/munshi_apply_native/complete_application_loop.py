@@ -1528,10 +1528,33 @@ class CompleteApplicationLoopService:
                         "plan_digest": str(review["plan_digest"]),
                         "provider": str(plan_record["provider"]),
                         "provider_application_id": result.get("provider_application_id"),
+                        "submission_reference": (
+                            result.get("submission_reference")
+                            or success_evidence.get("submission_reference")
+                        ),
                         "submission_observation": {
+                            "reviewed_destination": json.loads(
+                                str(review["review_json"])
+                            ).get("destination_url"),
                             "method": success_evidence.get("submit_method"),
-                            "target": success_evidence.get("submit_action"),
-                            "provider_application_id": result.get("provider_application_id"),
+                            "action": success_evidence.get("submit_action"),
+                            "response_status": success_evidence.get("response_status"),
+                            "response_url": success_evidence.get("response_url"),
+                            "exact_action_verified": success_evidence.get(
+                                "exact_action_verified"
+                            ),
+                            "action_binding_digest": success_evidence.get(
+                                "action_binding_digest"
+                            ),
+                            "confirmation_evidence_digest": success_evidence.get(
+                                "confirmation_evidence_digest"
+                            ),
+                            "submission_reference": success_evidence.get(
+                                "submission_reference"
+                            ),
+                            "provider_application_id": result.get(
+                                "provider_application_id"
+                            ),
                         },
                     },
                     provider_observation=(
