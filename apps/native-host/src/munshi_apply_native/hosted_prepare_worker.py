@@ -32,7 +32,6 @@ from .hosted_account_orchestrator import HostedAccountOrchestrator
 from .hosted_account_session import HostedAccountSessionStore
 from .hosted_interaction_recovery import HostedRecoveringPlanBrowserAdapter
 from .interaction_fallback_service import InteractionFallbackService
-from .plan_browser_adapter import provider_for_url
 from .settings import Settings
 from .teach_munshi_service import TeachMunshiService
 
