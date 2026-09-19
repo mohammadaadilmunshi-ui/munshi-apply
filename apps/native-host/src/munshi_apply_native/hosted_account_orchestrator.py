@@ -342,7 +342,7 @@ class HostedAccountOrchestrator:
     def _mailbox_ready(self) -> None:
         try:
             health = self.bridge.mailbox_health(self.plan)
-        except Exception as error:
+        except Exception:
             self._issue("MAILBOX_RUNTIME_UNAVAILABLE", "Mandatory mailbox runtime is unavailable")
         if health.get("ready") is not True or health.get("mandatory") is not True:
             self._issue("MAILBOX_RUNTIME_UNAVAILABLE", "Mandatory mailbox runtime is unavailable")
@@ -486,6 +486,7 @@ class HostedAccountOrchestrator:
         account_id: str,
         mailbox_request: dict[str, Any],
         artifact_kind: str | None = None,
+        advance_account_state: bool = True,
     ) -> None:
         self._event(EMAIL_VERIFICATION)
         kind = artifact_kind or self._verification_kind()
@@ -543,10 +544,11 @@ class HostedAccountOrchestrator:
                 "MAILBOX_VERIFICATION_FAILED",
                 "Verification succeeded but one-time artifact consumption was ambiguous",
             )
-        self.lifecycle.mark_verified(account_id, self.application_id, _now())
         self.lifecycle.consume_verification(challenge_id, _now())
-        self.lifecycle.mark_continuation_ready(str(self.continuation_id), _now())
-        self._event(VERIFIED)
+        if advance_account_state:
+            self.lifecycle.mark_verified(account_id, self.application_id, _now())
+            self.lifecycle.mark_continuation_ready(str(self.continuation_id), _now())
+            self._event(VERIFIED)
 
     def _password(self, account_id: str, secret_ref: str) -> str:
         self._event(PASSWORD_CREATION)
@@ -641,6 +643,7 @@ class HostedAccountOrchestrator:
                 account_id=account_id,
                 mailbox_request=mailbox_request,
                 artifact_kind="PASSWORD_RESET_LINK",
+                advance_account_state=False,
             )
             self._fill_first(
                 ["input[autocomplete='new-password']", "input[type='password']"],
@@ -657,6 +660,14 @@ class HostedAccountOrchestrator:
                 "save new password",
             )
             self._wait_page(800)
+            if self._is_login():
+                self._login(email=email, password=password)
+                if self._is_login():
+                    self._issue(
+                        "ACCOUNT_RECOVERY_FAILED",
+                        "Password reset completed but managed login was not confirmed",
+                    )
+            self._event(VERIFIED)
         except HostedAccountIssue:
             raise
         except Exception:
