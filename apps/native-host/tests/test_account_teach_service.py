@@ -190,3 +190,67 @@ def test_unverified_or_security_challenge_never_enters_account_teach(tmp_path: P
 
     with database.connect() as connection:
         assert connection.execute("SELECT COUNT(*) FROM ats_teach_lessons").fetchone()[0] == 0
+
+
+
+def test_ref_only_sonnet_login_mechanics_promote_without_secret_values(
+    tmp_path: Path,
+) -> None:
+    _, teach = service(tmp_path)
+    target = "mt-" + "a" * 24
+    actions = [
+        {
+            "type": "FILL_SECRET_REF",
+            "targetRef": target,
+            "secretRef": "secret:account-password",
+        },
+        {"type": "CLICK", "targetRef": target},
+        {"type": "WAIT_FOR_STATE", "state": "AUTH_STATE_CHANGED"},
+    ]
+    for index in range(3):
+        captured = teach.capture(
+            lesson(
+                f"auth-mechanics-{index}",
+                "AUTH_LOGIN_MECHANICS",
+                actions,
+            )
+        )
+        assert captured["containsSecretMaterial"] is False
+        assert teach.drain(limit=1)["learned"] == 1
+
+    promoted = teach.lookup_promoted(
+        {
+            "siteOrigin": "https://wd5.myworkdayjobs.com",
+            "componentFingerprint": "cfp-account-control",
+            "semanticType": "AUTH_LOGIN_MECHANICS",
+            "atsFamily": "WORKDAY",
+            "tenantKey": "example",
+            "uiFingerprint": "account-ui-v1",
+        }
+    )
+    assert promoted is not None
+    assert promoted["state"] == "PROMOTED"
+    encoded = str(promoted["actions"])
+    assert "secret:account-password" in encoded
+    assert "password123" not in encoded
+
+
+def test_ref_only_account_mechanics_reject_literal_secret_material(
+    tmp_path: Path,
+) -> None:
+    _, teach = service(tmp_path)
+    target = "mt-" + "b" * 24
+    payload = lesson(
+        "auth-literal-secret",
+        "AUTH_LOGIN_MECHANICS",
+        [
+            {
+                "type": "FILL_SECRET_REF",
+                "targetRef": target,
+                "secretRef": "secret:account-password",
+                "value": "plaintext-password",
+            }
+        ],
+    )
+    with pytest.raises(AccountTeachError):
+        teach.capture(payload)
