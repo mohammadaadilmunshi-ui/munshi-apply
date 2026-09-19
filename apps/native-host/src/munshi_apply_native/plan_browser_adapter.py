@@ -204,7 +204,8 @@ class PlanBrowserAdapter:
         ]
         if len(candidates) != 1:
             return None
-        return self._element(candidates[0]["controlId"]).evaluate(
+        control_id = str(candidates[0]["controlId"])
+        observed = self._element(control_id).evaluate(
             """element => {
               const form = element.form || element.closest('form');
               if (!form) return null;
@@ -224,6 +225,133 @@ class PlanBrowserAdapter:
               };
             }"""
         )
+        if not isinstance(observed, dict):
+            return None
+        binding = {
+            "control_id": control_id,
+            "action": str(observed.get("action") or ""),
+            "method": str(observed.get("method") or "").upper(),
+        }
+        binding["binding_digest"] = digest(binding)
+        return binding
+
+    @staticmethod
+    def _allowed_submit_action(plan: dict[str, Any], action: str) -> bool:
+        parsed = urlsplit(action)
+        host = (parsed.hostname or "").casefold().rstrip(".")
+        if (
+            parsed.scheme.casefold() != "https"
+            or not host
+            or parsed.username
+            or parsed.password
+            or parsed.fragment
+        ):
+            return False
+        policy = dict(plan.get("provider_policy") or {})
+        allowed = {
+            str(value).casefold().rstrip(".")
+            for value in policy.get("allowed_hosts") or []
+            if str(value).strip()
+        }
+        target = str(
+            dict(plan.get("job") or {}).get("apply_url")
+            or dict(plan.get("job") or {}).get("job_url")
+            or ""
+        )
+        target_host = (urlsplit(target).hostname or "").casefold().rstrip(".")
+        if target_host:
+            allowed.add(target_host)
+        return not allowed or any(
+            host == suffix or host.endswith("." + suffix) for suffix in allowed
+        )
+
+    def _confirmation_snapshot(self) -> dict[str, str] | None:
+        result = self.page.evaluate(
+            r"""() => {
+              const visible = element => {
+                if (!(element instanceof HTMLElement)) return false;
+                const style = getComputedStyle(element);
+                const rect = element.getBoundingClientRect();
+                return style.display !== 'none'
+                  && style.visibility !== 'hidden'
+                  && Number(style.opacity || 1) !== 0
+                  && rect.width > 0 && rect.height > 0;
+              };
+              const patterns = [
+                ['application-submitted', /\bapplication\b.{0,80}\bsubmitted\b/i],
+                ['application-received', /\bapplication\b.{0,80}\breceived\b/i],
+                ['thank-you-applying', /\bthank(?:s| you)\b.{0,80}\bapply(?:ing|ied)\b/i],
+                ['successfully-submitted', /\bsuccessfully\b.{0,40}\bsubmitted\b/i],
+                ['application-complete', /\bapplication\b.{0,40}\bcomplete(?:d)?\b/i],
+              ];
+              const selectors = [
+                '#application_confirmation',
+                '.application-confirmation',
+                '[id*="confirmation" i]',
+                '[class*="confirmation" i]',
+                '[data-testid*="confirmation" i]',
+                '[data-qa*="confirmation" i]',
+                '[role="status"]',
+                '[role="alert"]',
+                'main',
+                'body',
+              ];
+              const seen = new Set();
+              for (const selector of selectors) {
+                for (const element of Array.from(document.querySelectorAll(selector)).slice(0, 80)) {
+                  if (seen.has(element) || !visible(element)) continue;
+                  seen.add(element);
+                  const text = String(element.innerText || '')
+                    .replace(/\s+/g, ' ').trim();
+                  if (!text) continue;
+                  for (const [marker, pattern] of patterns) {
+                    if (pattern.test(text)) {
+                      return {
+                        marker,
+                        text: text.slice(0, 1000),
+                      };
+                    }
+                  }
+                }
+              }
+              return null;
+            }"""
+        )
+        if not isinstance(result, dict):
+            return None
+        marker = str(result.get("marker") or "").strip()
+        text = str(result.get("text") or "").strip()
+        if not marker or not text:
+            return None
+        return {"marker": marker, "text": text}
+
+    @staticmethod
+    def _payload_application_id(payload: Any) -> str:
+        if not isinstance(payload, dict):
+            return ""
+        queue: list[tuple[dict[str, Any], int]] = [(payload, 0)]
+        while queue:
+            current, depth = queue.pop(0)
+            for key, value in current.items():
+                normalized = "".join(character for character in str(key).casefold() if character.isalnum())
+                if (
+                    isinstance(value, (str, int))
+                    and (
+                        normalized in {
+                            "applicationid",
+                            "candidateapplicationid",
+                            "submissionid",
+                            "applicationsubmissionid",
+                        }
+                        or ("application" in normalized and normalized.endswith("id"))
+                    )
+                ):
+                    candidate = str(value).strip()
+                    if candidate:
+                        return candidate[:240]
+                if depth < 3 and isinstance(value, dict):
+                    queue.append((value, depth + 1))
+        return ""
 
     def _observe(self, plan: dict[str, Any]) -> dict[str, Any]:
         described = self._scan()
