@@ -39,7 +39,7 @@ class _Fallback:
             "actions": [
                 {
                     "type": "UPLOAD_ARTIFACT",
-                    "targetRef": targets["Resume upload"],
+                    "targetRef": targets["Choose resume"],
                     "artifactRef": refs["RESUME"],
                 },
                 {
@@ -111,6 +111,9 @@ def _html() -> str:
   </button>
 
   <script>
+    document.querySelector("#upload-button").addEventListener("click", () => {
+      document.querySelector("#resume-file").click();
+    });
     const host = document.querySelector("#shadow-host");
     const root = host.attachShadow({mode: "open"});
     root.innerHTML =
@@ -186,6 +189,7 @@ def test_sonnet_mechanics_handles_hidden_upload_shadow_select_and_next_without_s
         )
         surface = executor.snapshot()
         assert any(item["label"] == "Resume upload" for item in surface)
+        assert any(item["label"] == "Choose resume" for item in surface)
         assert any(item["label"] == "Country picker" for item in surface)
         assert any(item["label"] == "Continue" for item in surface)
         iframe_target = next(
