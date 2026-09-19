@@ -67,9 +67,6 @@ def _target_url(plan: dict[str, Any]) -> str:
         or parsed.fragment
     ):
         raise ValueError("Application target URL is not a safe HTTPS destination")
-    expected_provider = str(policy["provider"]).upper()
-    if provider_for_url(target) != expected_provider:
-        raise ValueError("Application target URL conflicts with provider binding")
     allowed = [str(value).casefold().rstrip(".") for value in policy.get("allowed_hosts") or []]
     if allowed and not any(host == suffix or host.endswith("." + suffix) for suffix in allowed):
         raise ValueError("Application target host is outside provider policy")
