@@ -184,6 +184,7 @@ class TrustedMechanicsExecutor:
                               || element.getAttribute('aria-disabled') === 'true',
                             required: Boolean(element.required)
                               || element.getAttribute('aria-required') === 'true',
+                            hasPopup: String(element.getAttribute('aria-haspopup') || ''),
                             fileInput: tag === 'input' && inputType === 'file',
                             hrefHost: (() => {
                               if (tag !== 'a') return '';
@@ -223,6 +224,7 @@ class TrustedMechanicsExecutor:
                         "visible": bool(meta.get("visible")),
                         "disabled": bool(meta.get("disabled")),
                         "required": bool(meta.get("required")),
+                        "hasPopup": self._clean(meta.get("hasPopup"), 80),
                         "fileInput": bool(meta.get("fileInput")),
                         "finalSubmitRisk": bool(meta.get("finalSubmitRisk")),
                     }
@@ -251,7 +253,7 @@ class TrustedMechanicsExecutor:
         if (
             not self.allow_submit_controls
             and str(meta.get("type") or "").casefold() == "submit"
-            and action_type in {"CLICK", "KEY"}
+            and action_type in {"CLICK", "KEY", "NEXT"}
         ):
             raise TrustedMechanicsError(
                 "Submit-type controls require the trusted navigation/final-submit boundary"
@@ -434,7 +436,19 @@ class TrustedMechanicsExecutor:
                 self._select(locator, self._value_ref(str(action["valueRef"])))
             elif action_type == "KEY":
                 self._assert_not_final_submit(meta, action_type="KEY")
-                locator.press(str(action["key"]))
+                key = str(action["key"])
+                role = str(meta.get("role") or "").casefold()
+                popup = str(meta.get("hasPopup") or "").casefold()
+                if (
+                    not self.allow_submit_controls
+                    and key == "Enter"
+                    and role not in {"combobox", "listbox"}
+                    and popup in {"", "false", "none"}
+                ):
+                    raise TrustedMechanicsError(
+                        "Enter is restricted to popup controls outside auth mechanics"
+                    )
+                locator.press(key)
             elif action_type == "OPEN_LINK":
                 artifact = self._verification(str(action["verificationRef"]))
                 if "LINK" not in artifact["kind"]:
