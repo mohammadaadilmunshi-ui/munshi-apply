@@ -625,11 +625,11 @@ class CompleteApplicationLoopService:
         if observation.get("security_checkpoint"):
             session = self._transition(session, "BLOCKED")
             return self._result(session, "BLOCKED")
-        provider = str(observation.get("provider") or "").upper()
-        expected_provider = str(plan_record["provider"]).upper()
+        provider = str(plan_record["provider"]).upper()
+        provider_recipe = str(observation.get("provider_recipe") or "GENERIC").upper()
         expected_job = str(plan["job"]["id"])
         observed_job = str(observation.get("job_id") or "")
-        if provider != expected_provider or observed_job != expected_job:
+        if observed_job != expected_job:
             if session["state"] != "BLOCKED":
                 session = self._transition(
                     session,
@@ -640,11 +640,11 @@ class CompleteApplicationLoopService:
             self._record_event(
                 session=session,
                 event_type="BLOCKED",
-                replay_identity=f"{session_id}:wrong-job:{provider}:{observed_job}",
+                replay_identity=f"{session_id}:wrong-job:{observed_job}",
                 evidence={
-                    "reason": "wrong_job_or_provider",
-                    "expected_provider": expected_provider,
-                    "observed_provider": provider,
+                    "reason": "wrong_job",
+                    "declared_provider": provider,
+                    "provider_recipe": provider_recipe,
                     "expected_job_id": expected_job,
                     "observed_job_id": observed_job,
                 },
@@ -661,8 +661,12 @@ class CompleteApplicationLoopService:
             self._record_event(
                 session=session,
                 event_type="JOB_VERIFIED",
-                replay_identity=f"{session_id}:job-verified:{provider}:{observed_job}",
-                evidence={"provider": provider, "job_id": observed_job},
+                replay_identity=f"{session_id}:job-verified:{observed_job}",
+                evidence={
+                    "provider": provider,
+                    "provider_recipe": provider_recipe,
+                    "job_id": observed_job,
+                },
             )
         if session["state"] == "JOB_VERIFIED":
             session = self._transition(session, "FORM_DISCOVERED")
@@ -687,15 +691,6 @@ class CompleteApplicationLoopService:
             checkpoint=latest,
             resolved_values=self._resolved_values(str(session["application_id"]), session_id),
         )
-        if str(prepared.get("provider") or "").upper() != expected_provider:
-            session = self._transition(session, "BLOCKED")
-            self._record_event(
-                session=session,
-                event_type="BLOCKED",
-                replay_identity=f"{session_id}:provider-changed:{prepared.get('provider')}",
-                evidence={"reason": "provider_changed_during_prepare"},
-            )
-            return self._result(session, "BLOCKED")
         if str(prepared.get("job_id") or "") != expected_job:
             session = self._transition(session, "BLOCKED")
             self._record_event(
