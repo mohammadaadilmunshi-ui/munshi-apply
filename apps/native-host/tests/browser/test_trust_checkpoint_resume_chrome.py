@@ -41,6 +41,7 @@ class _TrustStore:
         self.cleared.append(dict(kwargs))
         cleared = dict(self.active or {})
         cleared["status"] = "CLEARED"
+        cleared["prepare_job_state"] = "QUEUED"
         self.active = None
         return cleared
 
@@ -116,7 +117,6 @@ def test_security_checkpoint_resumes_only_in_same_revalidated_chromium_context(
 ) -> None:
     browser_path = resolve_browser_executable()
     trust = _TrustStore()
-    queue = _Queue()
     plan = _plan()
     job = _job()
 
@@ -166,15 +166,8 @@ def test_security_checkpoint_resumes_only_in_same_revalidated_chromium_context(
             }"""
         )
 
-        assert factory.resume_ready_checkpoints(queue) == 1
+        assert factory.resume_ready_checkpoints() == 1
         assert trust.cleared
-        assert queue.requeued == [
-            {
-                "session_id": "session-browser-1",
-                "tenant_id": "tenant-browser",
-                "user_id": "user-browser",
-            }
-        ]
 
         resumed = factory(job)
         assert resumed is wrapped
