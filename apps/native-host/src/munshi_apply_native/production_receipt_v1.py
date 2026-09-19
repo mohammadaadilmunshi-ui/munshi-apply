@@ -89,13 +89,15 @@ def build_verified_receipt(
     response_url = _text(observed.get("response_url"), "Submit response URL")
     response_status = observed.get("response_status")
     if (
-        submit_method != "POST"
+        submit_method not in {"POST", "PUT", "PATCH"}
         or observed.get("exact_action_verified") is not True
         or response_url != submit_action
         or not isinstance(response_status, int)
         or not 200 <= response_status < 400
     ):
-        raise ProductionReceiptError("Exact reviewed POST response evidence is required")
+        raise ProductionReceiptError(
+            "Exact reviewed mutating response evidence is required"
+        )
     action_binding_digest = _digest(
         observed.get("action_binding_digest"),
         "Action binding digest",
