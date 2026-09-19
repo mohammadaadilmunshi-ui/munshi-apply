@@ -135,3 +135,27 @@ def test_expired_session_is_invalidated_and_not_reused(tmp_path: Path) -> None:
         ).fetchone()
     assert row is not None
     assert row["invalidation_reason"] == "TTL_EXPIRED"
+
+
+def test_session_binding_prevents_cross_account_reuse(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    store = HostedAccountSessionStore(database, bridge_secret=b"h" * 32)
+    store.save(
+        tenant_id="tenant-1",
+        user_id="user-1",
+        scope_key="example.com",
+        account_id="account-1",
+        storage_state={"cookies": [], "origins": []},
+    )
+    assert store.load(
+        tenant_id="tenant-1",
+        user_id="user-1",
+        scope_key="example.com",
+        expected_account_id="account-2",
+    ) is None
+    assert store.load(
+        tenant_id="tenant-1",
+        user_id="user-1",
+        scope_key="example.com",
+        expected_account_id="account-1",
+    ) == {"cookies": [], "origins": []}
