@@ -325,6 +325,26 @@ class HostedAccountOrchestrator:
             )
         raise AssertionError("unreachable")
 
+    def _cancel_mailbox(
+        self,
+        *,
+        mailbox_request: dict[str, Any],
+        account_id: str,
+        reason_code: str = "VERIFICATION_NOT_REQUIRED",
+    ) -> None:
+        try:
+            self.bridge.cancel_mailbox_verification(
+                self.plan,
+                request_id=str(mailbox_request["request_id"]),
+                account_id=account_id,
+                reason_code=reason_code,
+            )
+        except Exception:
+            # A cancellation ambiguity is fail-safe for execution: no later mail
+            # artifact is consumed by this continuation, and Hunter TTL expires
+            # the request. Do not convert a successful login into manual fallback.
+            return
+
     def _claim_mail(
         self, *, request_id: str, account_id: str, expected_kind: str
     ) -> dict[str, Any]:
@@ -676,6 +696,10 @@ class HostedAccountOrchestrator:
                     mailbox_request=mailbox_request,
                 )
             elif self._is_login():
+                self._cancel_mailbox(
+                    mailbox_request=mailbox_request,
+                    account_id=self.account_id,
+                )
                 password = self._password(self.account_id, secret_ref)
                 try:
                     self._recovery(
@@ -687,6 +711,11 @@ class HostedAccountOrchestrator:
                     password = ""
                 if self._is_login():
                     self._issue("ACCOUNT_LOGIN_FAILED", "ATS login remained unresolved")
+            else:
+                self._cancel_mailbox(
+                    mailbox_request=mailbox_request,
+                    account_id=self.account_id,
+                )
             return self._resume(self.account_id)
 
         # No account exists for this exact provider/domain scope.
@@ -760,5 +789,10 @@ class HostedAccountOrchestrator:
             self._verify_with_mailbox(
                 account_id=self.account_id,
                 mailbox_request=mailbox_request,
+            )
+        else:
+            self._cancel_mailbox(
+                mailbox_request=mailbox_request,
+                account_id=self.account_id,
             )
         return self._resume(self.account_id)
