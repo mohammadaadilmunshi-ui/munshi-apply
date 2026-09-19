@@ -36,6 +36,12 @@ jobs:
         run: |
           python -m ruff check             apps/native-host/src/munshi_apply_native/artifact_fetch_v2.py             apps/native-host/src/munshi_apply_native/ats_account_lifecycle.py             apps/native-host/src/munshi_apply_native/hosted_account_orchestrator.py             apps/native-host/src/munshi_apply_native/hosted_account_session.py             apps/native-host/src/munshi_apply_native/hosted_prepare_worker.py             apps/native-host/tests/test_database.py             apps/native-host/tests/test_hosted_account_orchestrator.py             apps/native-host/tests/test_hosted_account_session.py             apps/native-host/tests/test_operations.py
 
+      - name: Run TypeScript account orchestration tests
+        run: |
+          ./node_modules/.bin/vitest run \
+            packages/application-model/src/account-orchestration.test.ts \
+            packages/application-model/src/account-orchestration-automation.test.ts
+
       - name: Compile account runtime
         run: |
           python -m py_compile             apps/native-host/src/munshi_apply_native/artifact_fetch_v2.py             apps/native-host/src/munshi_apply_native/ats_account_lifecycle.py             apps/native-host/src/munshi_apply_native/hosted_account_orchestrator.py             apps/native-host/src/munshi_apply_native/hosted_account_session.py             apps/native-host/src/munshi_apply_native/hosted_prepare_worker.py             apps/native-host/tests/test_database.py             apps/native-host/tests/test_hosted_account_orchestrator.py             apps/native-host/tests/test_hosted_account_session.py             apps/native-host/tests/test_operations.py
@@ -70,8 +76,14 @@ jobs:
           echo $? > full-native-ruff.exit
           npm run check > npm-check.txt 2>&1
           echo $? > npm-check.exit
+          npm run build > browser-build.txt 2>&1
+          build_code=$?
+          echo $build_code > browser-build.exit
           MUNSHI_BROWSER_EXECUTABLE="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
-          if [ -n "${MUNSHI_BROWSER_EXECUTABLE}" ]; then
+          if [ "$build_code" -ne 0 ]; then
+            echo "BUILD_FAILED" > browser-fixture.txt
+            echo "$build_code" > browser-fixture.exit
+          elif [ -n "${MUNSHI_BROWSER_EXECUTABLE}" ]; then
             export MUNSHI_BROWSER_EXECUTABLE
             MUNSHI_RUN_BROWSER_TESTS=1 python -m pytest -q apps/native-host/tests/browser > browser-fixture.txt 2>&1
             echo $? > browser-fixture.exit
@@ -89,6 +101,8 @@ jobs:
             full-native-ruff.exit
             npm-check.txt
             npm-check.exit
+            browser-build.txt
+            browser-build.exit
             browser-fixture.txt
             browser-fixture.exit
           if-no-files-found: error
