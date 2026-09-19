@@ -52,12 +52,18 @@ class _Fallback:
                     "valueRef": refs["ANSWER"],
                 },
                 {
+                    "type": "CLICK",
+                    "targetRef": targets["Iframe confirmation"],
+                },
+                {
                     "type": "NEXT",
                     "targetRef": targets["Continue"],
                 },
                 {"type": "WAIT_FOR_STATE", "state": "PAGE_STABLE"},
             ],
-            "reason": "Use the hidden uploader, custom country picker, then continue",
+            "reason": (
+                "Use the hidden uploader, shadow picker, iframe control, then continue"
+            ),
         }
 
 
@@ -91,6 +97,14 @@ def _html() -> str:
 
   <div id="shadow-host"></div>
 
+  <iframe id="mechanics-frame"
+    srcdoc="<!doctype html><html><body>
+      <button type='button' aria-label='Iframe confirmation'
+        onclick='document.body.dataset.confirmed=&quot;yes&quot;'>
+        Confirm iframe mechanics
+      </button>
+    </body></html>"></iframe>
+
   <button id="continue" type="button" aria-label="Continue">Continue</button>
   <button id="final-submit" type="submit" aria-label="Submit application">
     Submit application
@@ -121,7 +135,10 @@ def _html() -> str:
     document.querySelector("#continue").addEventListener("click", () => {
       const file = document.querySelector("#resume-file").files[0];
       const country = root.querySelector("#selected-country").value;
-      if (file && country === "United States") {
+      const frame = document.querySelector("#mechanics-frame");
+      const frameConfirmed =
+        frame.contentDocument.body.getAttribute("data-confirmed") === "yes";
+      if (file && country === "United States" && frameConfirmed) {
         document.body.setAttribute("data-step", "review");
         document.querySelector("#continue").remove();
       }
@@ -171,6 +188,10 @@ def test_sonnet_mechanics_handles_hidden_upload_shadow_select_and_next_without_s
         assert any(item["label"] == "Resume upload" for item in surface)
         assert any(item["label"] == "Country picker" for item in surface)
         assert any(item["label"] == "Continue" for item in surface)
+        iframe_target = next(
+            item for item in surface if item["label"] == "Iframe confirmation"
+        )
+        assert int(iframe_target["frameIndex"]) > 0
         final_target = next(
             item for item in surface if item["label"] == "Submit application"
         )
@@ -184,7 +205,9 @@ def test_sonnet_mechanics_handles_hidden_upload_shadow_select_and_next_without_s
             "label": "Synthetic application mechanics",
             "atsFamily": "GENERIC",
             "failureReason": "Deterministic mechanics did not advance",
-            "goal": "Attach resume, select country, and continue",
+            "goal": (
+                "Attach resume, select country, confirm the iframe control, and continue"
+            ),
             "reversible": True,
             "sensitive": False,
             "authenticationBoundary": False,
