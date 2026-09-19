@@ -61,6 +61,13 @@ def _ref(value: object, field: str) -> str:
     return value.strip()
 
 
+def _typed_ref(value: object, field: str, prefix: str) -> str:
+    normalized = _ref(value, field)
+    if not normalized.startswith(prefix):
+        raise MechanicsActionError(f"{field} must use the {prefix} reference namespace")
+    return normalized
+
+
 def _target(value: object) -> str:
     if not isinstance(value, str) or not _TARGET_RE.fullmatch(value.strip()):
         raise MechanicsActionError("targetRef must reference an observed mechanics target")
@@ -98,13 +105,19 @@ def validate_mechanics_actions(
             item: dict[str, object] = {"type": action_type, "targetRef": target_ref}
         elif action_type in REFERENCE_FIELDS:
             ref_field = REFERENCE_FIELDS[action_type]
-            ref_value = _ref(raw.get(ref_field), ref_field)
+            prefix = {
+                "answerRef": "answer:",
+                "secretRef": "secret:",
+                "verificationRef": "verification:",
+                "artifactRef": "artifact:",
+            }[ref_field]
+            ref_value = _typed_ref(raw.get(ref_field), ref_field, prefix)
             item = {"type": action_type, ref_field: ref_value}
             if action_type != "OPEN_LINK":
                 item["targetRef"] = _target(raw.get("targetRef"))
         elif action_type == "SELECT":
             target_ref = _target(raw.get("targetRef"))
-            value_ref = _ref(raw.get("valueRef"), "valueRef")
+            value_ref = _typed_ref(raw.get("valueRef"), "valueRef", "answer:")
             item = {"type": "SELECT", "targetRef": target_ref, "valueRef": value_ref}
         elif action_type == "KEY":
             target_ref = _target(raw.get("targetRef"))
