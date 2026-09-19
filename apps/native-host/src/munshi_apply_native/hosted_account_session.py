@@ -5,7 +5,7 @@ import hashlib
 import hmac
 import json
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -13,6 +13,8 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from .database import Database
 
 _ALGORITHM = "aes-gcm-v1"
+_DEFAULT_TTL_SECONDS = 7 * 24 * 60 * 60
+_MAX_TTL_SECONDS = 30 * 24 * 60 * 60
 
 
 class HostedAccountSessionError(RuntimeError):
@@ -49,9 +51,16 @@ def _aad(*, tenant_id: str, user_id: str, scope_key: str, account_id: str | None
 
 
 class HostedAccountSessionStore:
-    def __init__(self, database: Database, *, bridge_secret: bytes) -> None:
+    def __init__(
+        self,
+        database: Database,
+        *,
+        bridge_secret: bytes,
+        ttl_seconds: int = _DEFAULT_TTL_SECONDS,
+    ) -> None:
         self.database = database
         self.bridge_secret = bytes(bridge_secret)
+        self.ttl_seconds = max(300, min(int(ttl_seconds), _MAX_TTL_SECONDS))
 
     def load(
         self,
@@ -70,6 +79,28 @@ class HostedAccountSessionStore:
             ).fetchone()
         if row is None:
             return None
+        keys = set(row.keys())
+        if "invalidated_at" in keys and row["invalidated_at"] is not None:
+            return None
+        if "expires_at" in keys and row["expires_at"]:
+            try:
+                expires_at = datetime.fromisoformat(
+                    str(row["expires_at"]).replace("Z", "+00:00")
+                )
+                if expires_at.tzinfo is None:
+                    expires_at = expires_at.replace(tzinfo=UTC)
+            except ValueError as error:
+                raise HostedAccountSessionError(
+                    "Hosted account session expiry is invalid"
+                ) from error
+            if expires_at <= datetime.now(UTC):
+                self.invalidate(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    scope_key=scope_key,
+                    reason="TTL_EXPIRED",
+                )
+                return None
         if str(row["algorithm"]) != _ALGORITHM:
             raise HostedAccountSessionError("Hosted account session algorithm is unsupported")
         try:
@@ -140,21 +171,27 @@ class HostedAccountSessionStore:
                 account_id=account_id,
             ),
         )
-        now = _now()
+        now_dt = datetime.now(UTC)
+        now = now_dt.isoformat()
+        expires_at = (now_dt + timedelta(seconds=self.ttl_seconds)).isoformat()
         with self.database.connect() as connection:
             connection.execute(
                 """
                 INSERT INTO hosted_account_sessions(
                   tenant_id,user_id,scope_key,account_id,ciphertext,nonce,
-                  algorithm,state_sha256,created_at,updated_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?)
+                  algorithm,state_sha256,created_at,updated_at,expires_at,
+                  invalidated_at,invalidation_reason
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,NULL,NULL)
                 ON CONFLICT(tenant_id,user_id,scope_key) DO UPDATE SET
                   account_id=excluded.account_id,
                   ciphertext=excluded.ciphertext,
                   nonce=excluded.nonce,
                   algorithm=excluded.algorithm,
                   state_sha256=excluded.state_sha256,
-                  updated_at=excluded.updated_at
+                  updated_at=excluded.updated_at,
+                  expires_at=excluded.expires_at,
+                  invalidated_at=NULL,
+                  invalidation_reason=NULL
                 """,
                 (
                     tenant_id,
@@ -167,7 +204,28 @@ class HostedAccountSessionStore:
                     hashlib.sha256(plaintext).hexdigest(),
                     now,
                     now,
+                    expires_at,
                 ),
+            )
+
+    def invalidate(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        scope_key: str,
+        reason: str = "INVALIDATED",
+    ) -> None:
+        normalized = str(reason or "INVALIDATED").strip().upper()[:120]
+        with self.database.connect() as connection:
+            connection.execute(
+                """
+                UPDATE hosted_account_sessions
+                SET invalidated_at=?,invalidation_reason=?,updated_at=?
+                WHERE tenant_id=? AND user_id=? AND scope_key=?
+                  AND invalidated_at IS NULL
+                """,
+                (_now(), normalized, _now(), tenant_id, user_id, scope_key),
             )
 
     def delete(self, *, tenant_id: str, user_id: str, scope_key: str) -> None:
