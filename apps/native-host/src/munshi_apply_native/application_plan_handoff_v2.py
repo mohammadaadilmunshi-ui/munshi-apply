@@ -27,7 +27,11 @@ SUPERSESSION_VERSION = "munshi-application-plan-supersession-v1"
 PLAN_VERSION = "munshi-application-plan-v2"
 LIVE_HANDOFF_ENV = "MUNSHI_APPLY_LIVE_HANDOFF_ENABLED"
 RUNTIME_SUPERSESSION_ENV = "MUNSHI_APPLY_PLAN_SUPERSESSION_ENABLED"
-SUPPORTED_PROVIDERS = frozenset({"GREENHOUSE", "LEVER", "ASHBY", "SMARTRECRUITERS", "WORKDAY", "AGILE_ATS"})
+KNOWN_PROVIDER_RECIPES = frozenset(
+    {"GREENHOUSE", "LEVER", "ASHBY", "SMARTRECRUITERS", "WORKDAY", "AGILE_ATS"}
+)
+# Compatibility export only. Provider recognition is no longer an eligibility gate.
+SUPPORTED_PROVIDERS = KNOWN_PROVIDER_RECIPES
 
 
 def live_handoff_enabled() -> bool:
@@ -136,8 +140,6 @@ class ApplicationPlanEnvelope(BaseModel):
 
     @model_validator(mode="after")
     def validate_plan_contract(self) -> ApplicationPlanEnvelope:
-        if self.provider.upper() not in SUPPORTED_PROVIDERS:
-            raise ValueError("Application Plan provider is not supported by this contract")
         plan = self.plan
         if plan.get("version") != PLAN_VERSION:
             raise ValueError("Application Plan version is unsupported")
