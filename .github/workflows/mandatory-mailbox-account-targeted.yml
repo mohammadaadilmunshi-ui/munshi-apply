@@ -49,11 +49,31 @@ jobs:
             apps/native-host/tests/test_hosted_account_session.py \
             apps/native-host/tests/test_operations.py
 
-      - name: Run TypeScript account orchestration tests
+      - name: Diagnose TypeScript account orchestration tests
+        shell: bash
         run: |
+          set +e
           ./node_modules/.bin/vitest run \
             packages/application-model/src/account-orchestration.test.ts \
-            packages/application-model/src/account-orchestration-automation.test.ts
+            packages/application-model/src/account-orchestration-automation.test.ts \
+            > account-orchestration-vitest.txt 2>&1
+          code=$?
+          echo "$code" > account-orchestration-vitest.exit
+          exit 0
+
+      - name: Upload TypeScript account diagnostics
+        uses: actions/upload-artifact@v7
+        with:
+          name: account-orchestration-vitest-diagnostics
+          path: |
+            account-orchestration-vitest.txt
+            account-orchestration-vitest.exit
+          if-no-files-found: error
+
+      - name: Run TypeScript account orchestration tests
+        run: |
+          cat account-orchestration-vitest.txt
+          test "$(cat account-orchestration-vitest.exit)" = "0"
 
       - name: Compile account runtime
         run: |
