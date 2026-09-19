@@ -20,6 +20,7 @@ from .hunter_plan_semantic_bridge import answer_matches_question
 from .mechanics_recovery_coordinator import MechanicsRecoveryCoordinator
 from .plan_browser_adapter import (
     NORMAL_AUTOFILL_ENV,
+    RESUME_UPLOAD_ENV,
     PlanBrowserAdapter,
     _enabled,
     provider_for_url,
@@ -167,10 +168,11 @@ class HostedRecoveringPlanBrowserAdapter(PlanBrowserAdapter):
     ) -> bool:
         if self.interaction_fallback_service is None:
             return False
-        if not _enabled(NORMAL_AUTOFILL_ENV):
-            return False
-        if not prepare_permissions(plan)["normal_answer_autofill"]:
-            return False
+        permissions = prepare_permissions(plan)
+        normal_answers_allowed = (
+            _enabled(NORMAL_AUTOFILL_ENV)
+            and permissions["normal_answer_autofill"]
+        )
         try:
             page = dict(self._scan().get("page") or {})
         except Exception:
@@ -184,7 +186,7 @@ class HostedRecoveringPlanBrowserAdapter(PlanBrowserAdapter):
         if any(str(item.get("action") or "") == "FINAL_SUBMIT" for item in navigation):
             return False
         unresolved = result.get("unresolved")
-        if isinstance(unresolved, list) and unresolved:
+        if isinstance(unresolved, list) and unresolved and normal_answers_allowed:
             return True
         # General page-mechanics recovery requires a complete deterministic
         # browser observation. Minimal/legacy recovery results stop here.
@@ -192,10 +194,13 @@ class HostedRecoveringPlanBrowserAdapter(PlanBrowserAdapter):
             return False
         if result.get("validation_errors"):
             return True
-        if result.get("resume_uploaded") is False:
+        if result.get("resume_uploaded") is False and _enabled(RESUME_UPLOAD_ENV):
             return True
-        next_steps = [item for item in navigation if str(item.get("action") or "") == "NEXT"]
-        return len(next_steps) != 1
+        # If deterministic preparation returned a complete observation before a
+        # final-submit boundary, it either could not choose/activate navigation
+        # or another reversible mechanic prevented progress. Sonnet may diagnose
+        # that mechanic, but deterministic verification remains authoritative.
+        return True
 
     def _recover_unresolved(
         self,
@@ -223,6 +228,11 @@ class HostedRecoveringPlanBrowserAdapter(PlanBrowserAdapter):
             for item in page.get("navigationCandidates", [])
             if isinstance(item, dict) and item.get("controlId")
         }
+        permissions = prepare_permissions(plan)
+        normal_answers_allowed = (
+            _enabled(NORMAL_AUTOFILL_ENV)
+            and permissions["normal_answer_autofill"]
+        )
         any_recovered = False
         for unresolved in result.get("unresolved", []):
             if not isinstance(unresolved, dict):
@@ -230,7 +240,10 @@ class HostedRecoveringPlanBrowserAdapter(PlanBrowserAdapter):
             control_id = str(unresolved.get("control_id") or "")
             control = controls.get(control_id)
             question = questions.get(control_id)
-            if not self._eligible(control_id, control, question, navigation_ids):
+            if (
+                not normal_answers_allowed
+                or not self._eligible(control_id, control, question, navigation_ids)
+            ):
                 continue
             value = self._answer_value(
                 plan=plan,
@@ -435,11 +448,18 @@ class HostedRecoveringPlanBrowserAdapter(PlanBrowserAdapter):
         if self.interaction_fallback_service is None:
             return False
         origin = _site_origin(self.page.url)
-        answer_values, answer_refs = self._page_answer_refs(
-            plan=plan,
-            resolved_values=resolved_values,
-        )
-        artifacts, artifact_refs = self._page_artifact_refs(plan=plan)
+        permissions = prepare_permissions(plan)
+        if _enabled(NORMAL_AUTOFILL_ENV) and permissions["normal_answer_autofill"]:
+            answer_values, answer_refs = self._page_answer_refs(
+                plan=plan,
+                resolved_values=resolved_values,
+            )
+        else:
+            answer_values, answer_refs = {}, []
+        if _enabled(RESUME_UPLOAD_ENV):
+            artifacts, artifact_refs = self._page_artifact_refs(plan=plan)
+        else:
+            artifacts, artifact_refs = {}, []
         executor = TrustedMechanicsExecutor(
             self.page,
             answer_resolver=lambda ref: answer_values[ref],
