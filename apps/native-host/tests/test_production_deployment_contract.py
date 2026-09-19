@@ -1,4 +1,5 @@
-# ruff: noqa: I001\nfrom __future__ import annotations
+# ruff: noqa: I001
+from __future__ import annotations
 
 import os
 import re
