@@ -20,66 +20,16 @@ jobs:
           cache: pip
       - name: Install native host
         run: python -m pip install -e './apps/native-host[dev]'
-      - name: Lint artifact bridge
-        run: python -m ruff check apps/native-host/src/munshi_apply_native/artifact_fetch_v2.py
-      - name: Lint ATS lifecycle
-        run: python -m ruff check apps/native-host/src/munshi_apply_native/ats_account_lifecycle.py
-      - name: Diagnose hosted account orchestrator lint
-        id: orchestrator_lint
-        shell: bash
+      - name: Lint account runtime
         run: |
-          set +e
           python -m ruff check \
+            apps/native-host/src/munshi_apply_native/artifact_fetch_v2.py \
+            apps/native-host/src/munshi_apply_native/ats_account_lifecycle.py \
             apps/native-host/src/munshi_apply_native/hosted_account_orchestrator.py \
-            --output-format=concise > ruff-hosted-account-orchestrator.txt 2>&1
-          code=$?
-          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
-          exit 0
-      - name: Upload orchestrator lint diagnostics
-        uses: actions/upload-artifact@v7
-        with:
-          name: ruff-hosted-account-orchestrator
-          path: ruff-hosted-account-orchestrator.txt
-          if-no-files-found: error
-      - name: Lint hosted account orchestrator
-        if: steps.orchestrator_lint.outputs.exit_code != '0'
-        run: |
-          cat ruff-hosted-account-orchestrator.txt
-          exit 1
-      - name: Lint hosted account session
-        run: python -m ruff check apps/native-host/src/munshi_apply_native/hosted_account_session.py
-      - name: Lint hosted prepare worker
-        run: python -m ruff check apps/native-host/src/munshi_apply_native/hosted_prepare_worker.py
-      - name: Diagnose orchestrator tests lint
-        id: orchestrator_tests_lint
-        shell: bash
-        run: |
-          set +e
-          target=apps/native-host/tests/test_hosted_account_orchestrator.py
-          python -m ruff check "$target" --output-format=concise \
-            > ruff-hosted-account-orchestrator-tests.txt 2>&1
-          code=$?
-          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
-          cp "$target" /tmp/orchestrator-test-before.py
-          python -m ruff check "$target" --fix >/dev/null 2>&1 || true
-          git diff -- "$target" > ruff-hosted-account-orchestrator-tests-fix.diff
-          cp /tmp/orchestrator-test-before.py "$target"
-          exit 0
-      - name: Upload orchestrator tests lint diagnostics
-        uses: actions/upload-artifact@v7
-        with:
-          name: ruff-hosted-account-orchestrator-tests
-          path: |
-            ruff-hosted-account-orchestrator-tests.txt
-            ruff-hosted-account-orchestrator-tests-fix.diff
-          if-no-files-found: error
-      - name: Lint orchestrator tests
-        if: steps.orchestrator_tests_lint.outputs.exit_code != '0'
-        run: |
-          cat ruff-hosted-account-orchestrator-tests.txt
-          exit 1
-      - name: Lint session tests
-        run: python -m ruff check apps/native-host/tests/test_hosted_account_session.py
+            apps/native-host/src/munshi_apply_native/hosted_account_session.py \
+            apps/native-host/src/munshi_apply_native/hosted_prepare_worker.py \
+            apps/native-host/tests/test_hosted_account_orchestrator.py \
+            apps/native-host/tests/test_hosted_account_session.py
       - name: Compile account runtime
         run: |
           python -m py_compile             apps/native-host/src/munshi_apply_native/artifact_fetch_v2.py             apps/native-host/src/munshi_apply_native/ats_account_lifecycle.py             apps/native-host/src/munshi_apply_native/hosted_account_orchestrator.py             apps/native-host/src/munshi_apply_native/hosted_account_session.py             apps/native-host/src/munshi_apply_native/hosted_prepare_worker.py             apps/native-host/tests/test_hosted_account_orchestrator.py             apps/native-host/tests/test_hosted_account_session.py
