@@ -360,10 +360,7 @@ class HostedAccountOrchestrator:
             fallback_service=self.interaction_fallback_service,
             teach_service=self.teach_munshi_service,
             teach_dispatcher=self.teach_dispatcher,
-            on_event=lambda kind, event: self._event(
-                kind,
-                str(event.get("source") or "") or None,
-            ),
+            on_event=lambda kind, _event: self._event(kind),
         )
         return coordinator.attempt(
             plan=self.plan,
@@ -802,43 +799,101 @@ class HostedAccountOrchestrator:
         password: str,
     ) -> None:
         self._event(LOGIN)
+        login_id = self._login_identifier(email)
+        mailbox_request = self._arm_mailbox(account_id)
+
+        def reset_requested() -> bool:
+            text = self._text().casefold()
+            return (
+                "check your email" in text
+                or "reset link" in text
+                or "email sent" in text
+                or "reset email" in text
+                or self._is_verification()
+            )
+
         try:
-            self._click_text(_RECOVERY_TEXT, "password recovery")
-            self._fill_first(
-                [
-                    "input[type='email']",
-                    "input[autocomplete='username']",
-                    "input[name*='email' i]",
-                ],
-                self._login_identifier(email),
-                "recovery email or username",
-            )
-            mailbox_request = self._arm_mailbox(account_id)
-            self._click_text(
-                re.compile(r"^(send|continue|reset password|email me|submit)$", re.I),
-                "send reset email",
-            )
+            try:
+                self._click_text(_RECOVERY_TEXT, "password recovery")
+                self._fill_first(
+                    [
+                        "input[type='email']",
+                        "input[autocomplete='username']",
+                        "input[name*='email' i]",
+                    ],
+                    login_id,
+                    "recovery email or username",
+                )
+                self._click_text(
+                    re.compile(r"^(send|continue|reset password|email me|submit)$", re.I),
+                    "send reset email",
+                )
+                self._wait_page(500)
+                if not reset_requested():
+                    raise HostedAccountIssue(
+                        "ACCOUNT_FORM_UNSUPPORTED",
+                        "Password recovery request was not confirmed",
+                    )
+            except Exception as error:
+                recovered = self._mechanics_recover(
+                    goal="Request a password-reset email for the existing candidate account",
+                    semantic_type="AUTH_RECOVERY_REQUEST_MECHANICS",
+                    answer_values={"answer:account-identifier": login_id},
+                    verify=reset_requested,
+                )
+                if not recovered:
+                    raise error
+
             self._verify_with_mailbox(
                 account_id=account_id,
                 mailbox_request=mailbox_request,
                 artifact_kind="PASSWORD_RESET_LINK",
                 advance_account_state=False,
             )
-            self._fill_first(
-                ["input[autocomplete='new-password']", "input[type='password']"],
-                password,
-                "new password",
-            )
-            password_inputs = self.page.locator(
-                "input[autocomplete='new-password'], input[type='password']"
-            )
-            if password_inputs.count() > 1:
-                password_inputs.nth(1).fill(password)
-            self._click_text(
-                re.compile(r"^(save|reset password|set password|continue|submit)$", re.I),
-                "save new password",
-            )
-            self._wait_page(800)
+
+            def password_reset_completed() -> bool:
+                return (
+                    self._is_login()
+                    or self._visible(
+                        ["input[autocomplete='new-password']"]
+                    )
+                    is None
+                )
+
+            try:
+                self._fill_first(
+                    ["input[autocomplete='new-password']", "input[type='password']"],
+                    password,
+                    "new password",
+                )
+                password_inputs = self.page.locator(
+                    "input[autocomplete='new-password'], input[type='password']"
+                )
+                if password_inputs.count() > 1:
+                    password_inputs.nth(1).fill(password)
+                self._click_text(
+                    re.compile(
+                        r"^(save|reset password|set password|continue|submit)$",
+                        re.I,
+                    ),
+                    "save new password",
+                )
+                self._wait_page(800)
+                if not password_reset_completed():
+                    raise HostedAccountIssue(
+                        "ACCOUNT_FORM_UNSUPPORTED",
+                        "Password reset did not reach a confirmed next state",
+                    )
+            except Exception as error:
+                recovered = self._mechanics_recover(
+                    goal="Set and confirm the managed replacement password",
+                    semantic_type="AUTH_PASSWORD_RESET_MECHANICS",
+                    secret_values={"secret:account-password": password},
+                    verify=password_reset_completed,
+                )
+                if not recovered:
+                    raise error
+
             if self._is_login():
                 self._login(email=email, password=password)
                 if self._is_login():
@@ -939,11 +994,20 @@ class HostedAccountOrchestrator:
             password = self._password(self.account_id, secret_ref)
             try:
                 if self._is_create():
-                    self._click_text(
-                        re.compile(r"^(sign in|log in|login)$", re.I),
-                        "existing account",
-                    )
-                    self._wait_page(500)
+                    try:
+                        self._click_text(
+                            re.compile(r"^(sign in|log in|login)$", re.I),
+                            "existing account",
+                        )
+                        self._wait_page(500)
+                    except Exception as error:
+                        recovered = self._mechanics_recover(
+                            goal="Switch from account creation to existing-account login",
+                            semantic_type="AUTH_SWITCH_LOGIN_MECHANICS",
+                            verify=self._is_login,
+                        )
+                        if not recovered:
+                            raise error
                 self._login(email=str(record["email"]), password=password)
             finally:
                 password = ""
@@ -979,9 +1043,18 @@ class HostedAccountOrchestrator:
         # No account exists for this exact provider/domain scope.
         if self._is_login() and not self._is_create():
             try:
-                self._click_text(_CREATE_TEXT, "create account")
-                self._wait_page(500)
-            except HostedAccountIssue as error:
+                try:
+                    self._click_text(_CREATE_TEXT, "create account")
+                    self._wait_page(500)
+                except Exception as error:
+                    recovered = self._mechanics_recover(
+                        goal="Switch from login to candidate account creation",
+                        semantic_type="AUTH_SWITCH_CREATE_MECHANICS",
+                        verify=self._is_create,
+                    )
+                    if not recovered:
+                        raise error
+            except Exception as error:
                 self._event(ISSUE, "ACCOUNT_CREATION_FAILED")
                 raise HostedAccountIssue(
                     "ACCOUNT_CREATION_FAILED",
