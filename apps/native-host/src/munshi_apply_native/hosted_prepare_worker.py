@@ -22,6 +22,9 @@ from uuid import uuid4
 from playwright.sync_api import sync_playwright
 
 from .artifact_fetch_v2 import HunterExecutionBridgeClient
+from .account_store import portal_identity
+from .hosted_account_orchestrator import HostedAccountOrchestrator
+from .hosted_account_session import HostedAccountSessionStore
 from .background_prepare_queue import DurablePreparationQueue, PreparationRunResult
 from .browser_runtime import resolve_browser_executable
 from .complete_application_loop import BACKGROUND_PREPARE_ENV, CompleteApplicationLoopService
@@ -191,12 +194,35 @@ class HostedAdapterFactory:
         try:
             pw = self.playwright_factory().start()
             browser = pw.chromium.launch(headless=True, executable_path=self.browser_executable)
-            context = browser.new_context(accept_downloads=False)
+            scope_key = portal_identity(target)[1]
+            session_store = HostedAccountSessionStore(
+                self.database, bridge_secret=bridge.secret
+            )
+            stored_state = session_store.load(
+                tenant_id=str(job["tenant_id"]),
+                user_id=str(job["user_id"]),
+                scope_key=scope_key,
+            )
+            context_options: dict[str, Any] = {"accept_downloads": False}
+            if stored_state is not None:
+                context_options["storage_state"] = stored_state
+            context = browser.new_context(**context_options)
             if self.context_configurer is not None:
                 self.context_configurer(context, plan)
             page = context.new_page()
             page.set_default_timeout(self.navigation_timeout_ms)
             page.goto(target, wait_until="domcontentloaded", timeout=self.navigation_timeout_ms)
+
+            # Account handling is part of preparation, not a separate/manual lane.
+            # It runs in this exact context so login, create-account, email
+            # verification, and the resumed application share one Chromium session.
+            HostedAccountOrchestrator(
+                self.database,
+                plan=plan,
+                bridge=bridge,
+                page=page,
+                context=context,
+            ).run()
 
             def artifact_reader(current: dict[str, Any]) -> bytes:
                 if str(current.get("plan_id")) != str(plan["plan_id"]) or str(
