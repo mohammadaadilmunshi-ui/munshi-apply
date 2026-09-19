@@ -118,6 +118,8 @@ class HostedAccountOrchestrator:
         bridge: HunterExecutionBridgeClient,
         page: Any,
         context: Any,
+        tenant_id: str | None = None,
+        user_id: str | None = None,
         session_secret: bytes | None = None,
         verification_timeout_seconds: float = 120.0,
         poll_interval_seconds: float = 2.0,
@@ -128,6 +130,12 @@ class HostedAccountOrchestrator:
         self.bridge = bridge
         self.page = page
         self.context = context
+        self.tenant_id = str(
+            tenant_id if tenant_id is not None else getattr(self.bridge, "tenant_id")
+        )
+        self.user_id = str(
+            user_id if user_id is not None else getattr(self.bridge, "user_id")
+        )
         self.verification_timeout_seconds = max(5.0, float(verification_timeout_seconds))
         self.poll_interval_seconds = max(0.1, float(poll_interval_seconds))
         self.sleeper = sleeper
@@ -162,8 +170,8 @@ class HostedAccountOrchestrator:
                 """,
                 (
                     f"acctevt_{uuid4().hex}",
-                    self.bridge.tenant_id,
-                    self.bridge.user_id,
+                    self.tenant_id,
+                    self.user_id,
                     self.application_id,
                     self.account_id,
                     self.continuation_id,
@@ -322,8 +330,8 @@ class HostedAccountOrchestrator:
         if self.account_id is not None:
             with suppress(Exception):
                 self.session_store.invalidate(
-                    tenant_id=self.bridge.tenant_id,
-                    user_id=self.bridge.user_id,
+                    tenant_id=self.tenant_id,
+                    user_id=self.user_id,
                     scope_key=self.scope_key,
                     reason=normalized,
                 )
@@ -688,8 +696,8 @@ class HostedAccountOrchestrator:
             state = self.context.storage_state()
             if isinstance(state, dict):
                 self.session_store.save(
-                    tenant_id=self.bridge.tenant_id,
-                    user_id=self.bridge.user_id,
+                    tenant_id=self.tenant_id,
+                    user_id=self.user_id,
                     scope_key=self.scope_key,
                     account_id=account_id,
                     storage_state=state,
