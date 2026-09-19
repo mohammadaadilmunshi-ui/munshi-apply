@@ -25,6 +25,8 @@ from .artifact_fetch_v2 import HunterExecutionBridgeClient
 from .ats_account_lifecycle import ATSAccountLifecycle, ATSAccountLifecycleError
 from .database import Database
 from .hosted_account_session import HostedAccountSessionStore
+from .mechanics_recovery_coordinator import MechanicsRecoveryCoordinator
+from .trusted_mechanics_executor import TrustedMechanicsExecutor
 
 ACCOUNT_REQUIRED = "ACCOUNT_REQUIRED"
 EXISTING_ACCOUNT = "EXISTING_ACCOUNT"
@@ -121,6 +123,9 @@ class HostedAccountOrchestrator:
         tenant_id: str | None = None,
         user_id: str | None = None,
         session_secret: bytes | None = None,
+        interaction_fallback_service: Any = None,
+        teach_munshi_service: Any = None,
+        teach_dispatcher: Any = None,
         verification_timeout_seconds: float = 120.0,
         poll_interval_seconds: float = 2.0,
         sleeper: Any = time.sleep,
@@ -136,6 +141,9 @@ class HostedAccountOrchestrator:
         self.user_id = str(
             user_id if user_id is not None else self.bridge.user_id
         )
+        self.interaction_fallback_service = interaction_fallback_service
+        self.teach_munshi_service = teach_munshi_service
+        self.teach_dispatcher = teach_dispatcher
         self.verification_timeout_seconds = max(5.0, float(verification_timeout_seconds))
         self.poll_interval_seconds = max(0.1, float(poll_interval_seconds))
         self.sleeper = sleeper
@@ -264,6 +272,107 @@ class HostedAccountOrchestrator:
             self.page.wait_for_timeout(milliseconds)
         except Exception:
             self.sleeper(milliseconds / 1000.0)
+
+    def _mechanics_recover(
+        self,
+        *,
+        goal: str,
+        semantic_type: str,
+        answer_values: dict[str, str] | None = None,
+        secret_values: dict[str, str] | None = None,
+        verification_values: dict[str, dict[str, str]] | None = None,
+        verify: Any,
+    ) -> bool:
+        if self.interaction_fallback_service is None:
+            return False
+        answers = dict(answer_values or {})
+        secrets = dict(secret_values or {})
+        verifications = dict(verification_values or {})
+        executor = TrustedMechanicsExecutor(
+            self.page,
+            answer_resolver=lambda ref: answers[ref],
+            secret_resolver=lambda ref: secrets[ref],
+            verification_resolver=lambda ref: verifications[ref],
+            allowed_open_hosts=set(self._mailbox_policy()[0]) if verifications else set(),
+        )
+        surface = executor.snapshot()
+        if not surface:
+            return False
+        refs = (
+            [{"ref": ref, "kind": "ANSWER"} for ref in answers]
+            + [{"ref": ref, "kind": "SECRET"} for ref in secrets]
+            + [
+                {
+                    "ref": ref,
+                    "kind": str(payload.get("kind") or "VERIFICATION"),
+                }
+                for ref, payload in verifications.items()
+            ]
+        )
+        origin = str(getattr(self.page, "url", "") or "")
+        parsed = urlsplit(origin)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            return False
+        site_origin = f"{parsed.scheme}://{parsed.hostname.lower()}"
+        identity = repr(
+            (
+                site_origin,
+                semantic_type,
+                goal,
+                tuple(
+                    (
+                        item.get("targetRef"),
+                        item.get("tag"),
+                        item.get("type"),
+                        item.get("role"),
+                        item.get("label"),
+                    )
+                    for item in surface
+                ),
+            )
+        )
+        component_fingerprint = "cfp-" + hashlib.sha256(
+            identity.encode("utf-8")
+        ).hexdigest()[:40]
+        payload = {
+            "siteOrigin": site_origin,
+            "componentFingerprint": component_fingerprint,
+            "semanticType": semantic_type,
+            "controlKind": "ACCOUNT_PAGE",
+            "label": goal,
+            "role": None,
+            "hasPopup": None,
+            "atsFamily": self.provider,
+            "options": [],
+            "failureReason": goal,
+            "goal": goal,
+            "reversible": True,
+            "sensitive": bool(secrets or verifications),
+            "authenticationBoundary": True,
+            "finalSubmit": False,
+            "secretMaterialExposed": False,
+            "verificationMaterialExposed": False,
+            "mechanicsMode": True,
+            "mechanicsSurface": surface,
+            "availableRefs": refs,
+        }
+        coordinator = MechanicsRecoveryCoordinator(
+            fallback_service=self.interaction_fallback_service,
+            teach_service=self.teach_munshi_service,
+            teach_dispatcher=self.teach_dispatcher,
+            on_event=lambda kind, event: self._event(
+                kind,
+                str(event.get("source") or "") or None,
+            ),
+        )
+        return coordinator.attempt(
+            plan=self.plan,
+            payload=payload,
+            executor=executor,
+            allowed_value_refs=set(answers) | set(secrets) | set(verifications),
+            verify=verify,
+            context_fingerprint=self.scope_key,
+        ) is not None
 
     def _login_identifier(self, email: str) -> str:
         policy = dict(self.plan.get("provider_policy") or {})
