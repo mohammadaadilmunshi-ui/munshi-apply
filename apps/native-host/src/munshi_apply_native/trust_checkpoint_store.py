@@ -445,6 +445,20 @@ class TrustCheckpointStore:
             )
             if cursor.rowcount != 1:
                 raise ValueError("Trust checkpoint clearance lost its atomic claim")
+
+            requeue = connection.execute(
+                """UPDATE complete_application_prepare_jobs
+                   SET state='QUEUED',available_at=?,last_error=NULL,
+                       finished_at=NULL,updated_at=?
+                   WHERE job_id=? AND state='WAITING_INPUT'
+                     AND cancel_requested_at IS NULL""",
+                (timestamp, timestamp, job["job_id"]),
+            )
+            if requeue.rowcount != 1:
+                raise ValueError(
+                    "Trust checkpoint cleared without an atomic preparation requeue"
+                )
+
             self._append_event_locked(
                 connection,
                 checkpoint_id=trust_checkpoint_id,
@@ -454,6 +468,7 @@ class TrustCheckpointStore:
                     "post_auth_origin": origin,
                     "post_auth_path_sha256": path_sha256,
                     "post_auth_page_fingerprint_sha256": fingerprint_sha256,
+                    "prepare_job_requeued": True,
                     "raw_url_persisted": False,
                     "browser_secrets_persisted": False,
                 },
@@ -464,8 +479,15 @@ class TrustCheckpointStore:
                    WHERE trust_checkpoint_id=?""",
                 (trust_checkpoint_id,),
             ).fetchone()
-            assert row is not None
-            return dict(row)
+            queued = connection.execute(
+                """SELECT * FROM complete_application_prepare_jobs
+                   WHERE job_id=?""",
+                (job["job_id"],),
+            ).fetchone()
+            assert row is not None and queued is not None
+            result = dict(row)
+            result["prepare_job_state"] = str(queued["state"])
+            return result
 
     def clear_after_verified_user_auth(
         self,
