@@ -22,6 +22,7 @@ from uuid import uuid4
 from playwright.sync_api import sync_playwright
 
 from .account_store import AccountStore, portal_identity
+from .account_teach_service import AccountTeachService
 from .artifact_fetch_v2 import HunterExecutionBridgeClient
 from .background_prepare_queue import DurablePreparationQueue, PreparationRunResult
 from .browser_runtime import resolve_browser_executable
@@ -121,6 +122,7 @@ class HostedAdapterFactory:
         runtime_root: Path | None = None,
         interaction_fallback_service: Any = None,
         teach_munshi_service: Any = None,
+        account_teach_service: Any = None,
     ) -> None:
         self.database = database
         self.queue = queue
@@ -134,6 +136,7 @@ class HostedAdapterFactory:
         self.runtime_root = runtime_root
         self.interaction_fallback_service = interaction_fallback_service
         self.teach_munshi_service = teach_munshi_service or TeachMunshiService(database)
+        self.account_teach_service = account_teach_service or AccountTeachService(database)
 
     def _plan(self, job: dict[str, Any]) -> dict[str, Any]:
         with self.database.connect() as connection:
@@ -247,7 +250,7 @@ class HostedAdapterFactory:
                 user_id=str(job["user_id"]),
                 session_secret=session_secret,
                 interaction_fallback_service=interaction_fallback,
-                teach_munshi_service=self.teach_munshi_service,
+                teach_munshi_service=self.account_teach_service,
             ).run()
 
             def artifact_reader(current: dict[str, Any]) -> bytes:
