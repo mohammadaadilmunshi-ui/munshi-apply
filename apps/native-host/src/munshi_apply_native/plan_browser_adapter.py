@@ -21,6 +21,7 @@ from .hunter_plan_semantic_bridge import answer_matches_question
 
 RESUME_UPLOAD_ENV = "MUNSHI_APPLY_RESUME_UPLOAD_ENABLED"
 NORMAL_AUTOFILL_ENV = "MUNSHI_APPLY_NORMAL_ANSWER_AUTOFILL_ENABLED"
+SUBMIT_MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH"})
 
 
 def _enabled(name: str) -> bool:
@@ -196,6 +197,15 @@ class PlanBrowserAdapter:
             raise ValueError("Observed control disappeared")
         return element
 
+    @staticmethod
+    def _binding_material(binding: dict[str, Any]) -> dict[str, str]:
+        return {
+            "binding_type": str(binding.get("binding_type") or ""),
+            "control_id": str(binding.get("control_id") or ""),
+            "action": str(binding.get("action") or ""),
+            "method": str(binding.get("method") or "").upper(),
+        }
+
     def _submit_binding(self) -> dict[str, str] | None:
         candidates = [
             item
@@ -206,20 +216,44 @@ class PlanBrowserAdapter:
             return None
         control_id = str(candidates[0]["controlId"])
         observed = self._element(control_id).evaluate(
-            """element => {
+            r"""element => {
               const form = element.form || element.closest('form');
-              if (!form) return null;
-              const method = (
-                element.getAttribute('formmethod')
-                || form.getAttribute('method')
-                || 'get'
-              ).trim().toUpperCase();
+              if (form) {
+                const method = (
+                  element.getAttribute('formmethod')
+                  || form.getAttribute('method')
+                  || 'get'
+                ).trim().toUpperCase();
+                const rawAction = (
+                  element.getAttribute('formaction')
+                  || form.getAttribute('action')
+                  || document.URL
+                );
+                return {
+                  binding_type: 'NATIVE_FORM',
+                  action: new URL(rawAction, document.baseURI).href,
+                  method,
+                };
+              }
+
               const rawAction = (
-                element.getAttribute('formaction')
-                || form.getAttribute('action')
-                || document.URL
-              );
+                element.getAttribute('data-submit-url')
+                || element.getAttribute('data-submit-endpoint')
+                || element.getAttribute('data-endpoint')
+                || element.getAttribute('data-action')
+                || element.getAttribute('data-url')
+                || element.getAttribute('href')
+                || ''
+              ).trim();
+              if (!rawAction) return null;
+              const method = (
+                element.getAttribute('data-method')
+                || element.getAttribute('data-http-method')
+                || element.getAttribute('formmethod')
+                || 'POST'
+              ).trim().toUpperCase();
               return {
+                binding_type: 'DECLARATIVE_CONTROL',
                 action: new URL(rawAction, document.baseURI).href,
                 method,
               };
@@ -227,13 +261,22 @@ class PlanBrowserAdapter:
         )
         if not isinstance(observed, dict):
             return None
-        binding = {
-            "control_id": control_id,
-            "action": str(observed.get("action") or ""),
-            "method": str(observed.get("method") or "").upper(),
+        material = self._binding_material(
+            {
+                **observed,
+                "control_id": control_id,
+            }
+        )
+        if (
+            material["binding_type"] not in {"NATIVE_FORM", "DECLARATIVE_CONTROL"}
+            or material["method"] not in SUBMIT_MUTATING_METHODS
+            or not material["action"]
+        ):
+            return None
+        return {
+            **material,
+            "binding_digest": digest(material),
         }
-        binding["binding_digest"] = digest(binding)
-        return binding
 
     @staticmethod
     def _allowed_submit_action(plan: dict[str, Any], action: str) -> bool:
@@ -591,23 +634,19 @@ class PlanBrowserAdapter:
         submit_binding = final_observation.get("submit_binding")
         if not isinstance(submit_binding, dict):
             return {"action_executed": False, "verification_status": "BLOCKED"}
+        expected_binding_type = str(submit_binding.get("binding_type") or "")
         expected_control_id = str(submit_binding.get("control_id") or "")
         expected_submit_url = str(submit_binding.get("action") or "")
         expected_submit_method = str(submit_binding.get("method") or "").upper()
         expected_binding_digest = str(submit_binding.get("binding_digest") or "")
+        expected_material = self._binding_material(submit_binding)
         if (
-            expected_control_id != str(final_buttons[0]["controlId"])
-            or expected_submit_method != "POST"
+            expected_binding_type not in {"NATIVE_FORM", "DECLARATIVE_CONTROL"}
+            or expected_control_id != str(final_buttons[0]["controlId"])
+            or expected_submit_method not in SUBMIT_MUTATING_METHODS
             or not expected_submit_url
             or not self._allowed_submit_action(plan, expected_submit_url)
-            or expected_binding_digest
-            != digest(
-                {
-                    "control_id": expected_control_id,
-                    "action": expected_submit_url,
-                    "method": expected_submit_method,
-                }
-            )
+            or expected_binding_digest != digest(expected_material)
         ):
             return {"action_executed": False, "verification_status": "BLOCKED"}
 
@@ -627,29 +666,65 @@ class PlanBrowserAdapter:
         self.page.on("response", capture_response)
         try:
             clicked = self.page.evaluate(
-                """({ controlId, expected }) => {
+                r"""({ controlId, expected }) => {
                   const element = MunshiPlanRuntime.element(controlId);
                   if (!element) return false;
-                  const form = element.form || element.closest('form');
-                  if (!form) return false;
-                  const method = (
-                    element.getAttribute('formmethod')
-                    || form.getAttribute('method')
-                    || 'get'
-                  ).trim().toUpperCase();
-                  const rawAction = (
-                    element.getAttribute('formaction')
-                    || form.getAttribute('action')
-                    || document.URL
-                  );
-                  const action = new URL(rawAction, document.baseURI).href;
-                  if (method !== expected.method || action !== expected.action) return false;
+
+                  const binding = (() => {
+                    const form = element.form || element.closest('form');
+                    if (form) {
+                      const method = (
+                        element.getAttribute('formmethod')
+                        || form.getAttribute('method')
+                        || 'get'
+                      ).trim().toUpperCase();
+                      const rawAction = (
+                        element.getAttribute('formaction')
+                        || form.getAttribute('action')
+                        || document.URL
+                      );
+                      return {
+                        binding_type: 'NATIVE_FORM',
+                        action: new URL(rawAction, document.baseURI).href,
+                        method,
+                      };
+                    }
+                    const rawAction = (
+                      element.getAttribute('data-submit-url')
+                      || element.getAttribute('data-submit-endpoint')
+                      || element.getAttribute('data-endpoint')
+                      || element.getAttribute('data-action')
+                      || element.getAttribute('data-url')
+                      || element.getAttribute('href')
+                      || ''
+                    ).trim();
+                    if (!rawAction) return null;
+                    const method = (
+                      element.getAttribute('data-method')
+                      || element.getAttribute('data-http-method')
+                      || element.getAttribute('formmethod')
+                      || 'POST'
+                    ).trim().toUpperCase();
+                    return {
+                      binding_type: 'DECLARATIVE_CONTROL',
+                      action: new URL(rawAction, document.baseURI).href,
+                      method,
+                    };
+                  })();
+
+                  if (
+                    !binding
+                    || binding.binding_type !== expected.binding_type
+                    || binding.method !== expected.method
+                    || binding.action !== expected.action
+                  ) return false;
                   element.click();
                   return true;
                 }""",
                 {
                     "controlId": expected_control_id,
                     "expected": {
+                        "binding_type": expected_binding_type,
                         "action": expected_submit_url,
                         "method": expected_submit_method,
                     },
