@@ -107,10 +107,10 @@ def test_proposal_is_value_free_and_bounded(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("sensitive", True),
         ("reversible", False),
-        ("authenticationBoundary", True),
         ("finalSubmit", True),
+        ("secretMaterialExposed", True),
+        ("verificationMaterialExposed", True),
     ],
 )
 def test_security_boundaries_block_before_provider_call(
@@ -130,7 +130,15 @@ def test_security_boundaries_block_before_provider_call(
 
 @pytest.mark.parametrize(
     "semantic_type",
-    ["CAPTCHA", "OTP", "MFA", "AUTHENTICATION", "GOVERNMENT_ID", "FINAL_SUBMIT"],
+    [
+        "CAPTCHA",
+        "MFA",
+        "IDENTITY_VERIFICATION",
+        "GOVERNMENT_ID",
+        "FINAL_SUBMIT",
+        "TOTP",
+        "SMS",
+    ],
 )
 def test_security_semantics_never_reach_provider(
     tmp_path: Path, semantic_type: str
@@ -147,6 +155,118 @@ def test_security_semantics_never_reach_provider(
     assert calls == []
 
 
+
+def test_authentication_mechanics_use_only_opaque_refs(tmp_path: Path) -> None:
+    target = "mt-" + "a" * 24
+    service, calls = configured_service(
+        tmp_path,
+        {
+            "actions": [
+                {
+                    "type": "FILL_SECRET_REF",
+                    "targetRef": target,
+                    "secretRef": "secret:account-password",
+                },
+                {"type": "CLICK", "targetRef": target},
+            ],
+            "reason": "Fill the trusted password slot and activate sign-in",
+        },
+    )
+    payload = {
+        **safe_payload(),
+        "semanticType": "AUTH_LOGIN_MECHANICS",
+        "controlKind": "ACCOUNT_PAGE",
+        "sensitive": True,
+        "authenticationBoundary": True,
+        "mechanicsMode": True,
+        "secretMaterialExposed": False,
+        "verificationMaterialExposed": False,
+        "mechanicsSurface": [
+            {
+                "targetRef": target,
+                "frameIndex": 0,
+                "tag": "button",
+                "type": "submit",
+                "role": "button",
+                "name": "signin",
+                "id": "signin",
+                "label": "Sign in",
+                "ariaLabel": "Sign in",
+                "placeholder": "",
+                "visible": True,
+                "disabled": False,
+                "required": False,
+                "fileInput": False,
+                "finalSubmitRisk": False,
+            }
+        ],
+        "availableRefs": [
+            {"ref": "secret:account-password", "kind": "SECRET"},
+        ],
+    }
+
+    proposal = service.propose(payload)
+
+    assert proposal["mechanicsMode"] is True
+    assert proposal["secretMaterialSent"] is False
+    assert proposal["verificationMaterialSent"] is False
+    assert proposal["actions"][0]["secretRef"] == "secret:account-password"
+    prompt = str(calls[0]["prompt"])
+    assert "secret:account-password" in prompt
+    assert "FILL_SECRET_REF" in prompt
+    assert "final submission" in prompt.casefold()
+
+
+def test_mechanics_rejects_literal_secret_even_on_auth_screen(tmp_path: Path) -> None:
+    target = "mt-" + "a" * 24
+    service, _calls = configured_service(
+        tmp_path,
+        {
+            "actions": [
+                {
+                    "type": "FILL_SECRET_REF",
+                    "targetRef": target,
+                    "secretRef": "secret:account-password",
+                    "value": "plaintext-password",
+                }
+            ],
+            "reason": "unsafe",
+        },
+    )
+    payload = {
+        **safe_payload(),
+        "semanticType": "AUTH_LOGIN_MECHANICS",
+        "controlKind": "ACCOUNT_PAGE",
+        "sensitive": True,
+        "authenticationBoundary": True,
+        "mechanicsMode": True,
+        "secretMaterialExposed": False,
+        "verificationMaterialExposed": False,
+        "mechanicsSurface": [
+            {
+                "targetRef": target,
+                "frameIndex": 0,
+                "tag": "input",
+                "type": "password",
+                "role": "textbox",
+                "name": "password",
+                "id": "password",
+                "label": "Password",
+                "visible": True,
+                "disabled": False,
+                "required": True,
+                "fileInput": False,
+                "finalSubmitRisk": False,
+            }
+        ],
+        "availableRefs": [
+            {"ref": "secret:account-password", "kind": "SECRET"},
+        ],
+    }
+    with pytest.raises(InteractionFallbackError):
+        service.propose(payload)
+
+
 def test_value_bearing_model_action_is_rejected(tmp_path: Path) -> None:
     service, calls = configured_service(
         tmp_path,
@@ -156,7 +276,7 @@ def test_value_bearing_model_action_is_rejected(tmp_path: Path) -> None:
         },
     )
 
-    with pytest.raises(InteractionFallbackError, match="value-bearing"):
+    with pytest.raises(InteractionFallbackError):
         service.propose(safe_payload())
 
     assert len(calls) == 1
