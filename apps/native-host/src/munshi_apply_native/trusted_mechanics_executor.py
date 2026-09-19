@@ -54,12 +54,14 @@ class TrustedMechanicsExecutor:
         verification_resolver: VerificationResolver | None = None,
         artifact_resolver: ArtifactResolver | None = None,
         allowed_open_hosts: set[str] | None = None,
+        allow_submit_controls: bool = False,
     ) -> None:
         self.page = page
         self.answer_resolver = answer_resolver
         self.secret_resolver = secret_resolver
         self.verification_resolver = verification_resolver
         self.artifact_resolver = artifact_resolver
+        self.allow_submit_controls = bool(allow_submit_controls)
         self.allowed_open_hosts = {
             str(host).strip().casefold().rstrip(".")
             for host in (allowed_open_hosts or set())
@@ -70,7 +72,15 @@ class TrustedMechanicsExecutor:
 
     @staticmethod
     def _clean(value: object, limit: int = 220) -> str:
-        return re.sub(r"\s+", " ", str(value or "")).strip()[:limit]
+        clean = re.sub(r"\s+", " ", str(value or "")).strip()
+        clean = re.sub(
+            r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b",
+            "[redacted-email]",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        clean = re.sub(r"\b(?:\+?\d[\d .()/-]{7,}\d)\b", "[redacted-number]", clean)
+        return clean[:limit]
 
     @classmethod
     def _target_ref(cls, frame_index: int, locator_index: int, meta: dict[str, Any]) -> str:
@@ -219,10 +229,22 @@ class TrustedMechanicsExecutor:
             raise TrustedMechanicsError("Mechanics target is stale or unobserved")
         return target
 
-    @staticmethod
-    def _assert_not_final_submit(meta: dict[str, Any]) -> None:
+    def _assert_not_final_submit(
+        self,
+        meta: dict[str, Any],
+        *,
+        action_type: str,
+    ) -> None:
         if meta.get("finalSubmitRisk") is True:
             raise TrustedMechanicsError("Sonnet mechanics cannot operate final-submit controls")
+        if (
+            not self.allow_submit_controls
+            and str(meta.get("type") or "").casefold() == "submit"
+            and action_type in {"CLICK", "KEY"}
+        ):
+            raise TrustedMechanicsError(
+                "Submit-type controls require the trusted navigation/final-submit boundary"
+            )
 
     @staticmethod
     def _ensure_ref_resolver(resolver: Any, kind: str) -> Any:
@@ -371,10 +393,10 @@ class TrustedMechanicsExecutor:
             if action_type == "FOCUS":
                 locator.focus()
             elif action_type == "CLICK":
-                self._assert_not_final_submit(meta)
+                self._assert_not_final_submit(meta, action_type="CLICK")
                 locator.click()
             elif action_type == "NEXT":
-                self._assert_not_final_submit(meta)
+                self._assert_not_final_submit(meta, action_type="NEXT")
                 label = " ".join(
                     str(meta.get(key) or "")
                     for key in ("label", "ariaLabel", "title", "name")
@@ -400,7 +422,7 @@ class TrustedMechanicsExecutor:
             elif action_type == "SELECT":
                 self._select(locator, self._value_ref(str(action["valueRef"])))
             elif action_type == "KEY":
-                self._assert_not_final_submit(meta)
+                self._assert_not_final_submit(meta, action_type="KEY")
                 locator.press(str(action["key"]))
             elif action_type == "OPEN_LINK":
                 artifact = self._verification(str(action["verificationRef"]))
