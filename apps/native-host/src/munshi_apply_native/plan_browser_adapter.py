@@ -341,7 +341,10 @@ class PlanBrowserAdapter:
               ];
               const seen = new Set();
               for (const selector of selectors) {
-                for (const element of Array.from(document.querySelectorAll(selector)).slice(0, 80)) {
+                const elements = Array.from(
+                  document.querySelectorAll(selector)
+                ).slice(0, 80);
+                for (const element of elements) {
                   if (seen.has(element) || !visible(element)) continue;
                   seen.add(element);
                   const text = String(element.innerText || '')
@@ -376,7 +379,11 @@ class PlanBrowserAdapter:
         while queue:
             current, depth = queue.pop(0)
             for key, value in current.items():
-                normalized = "".join(character for character in str(key).casefold() if character.isalnum())
+                normalized = "".join(
+                    character
+                    for character in str(key).casefold()
+                    if character.isalnum()
+                )
                 if (
                     isinstance(value, (str, int))
                     and (
@@ -758,7 +765,8 @@ class PlanBrowserAdapter:
                 candidate_status = int(response.status)
                 candidate_url = str(response.url)
             except Exception:
-                continue
+                candidate_status = 0
+                candidate_url = ""
             if not 200 <= candidate_status < 400 or candidate_url != expected_submit_url:
                 continue
             exact_response = response
