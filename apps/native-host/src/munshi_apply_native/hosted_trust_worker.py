@@ -257,7 +257,7 @@ class TrustAwareAdapterFactory:
 
     def resume_ready_checkpoints(self) -> int:
         resumed = 0
-        for job_id, adapter in tuple(self._parked.items()):
+        for _job_id, adapter in tuple(self._parked.items()):
             observation = adapter.live_revalidation()
             if observation is None:
                 continue
