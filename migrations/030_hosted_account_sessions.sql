@@ -19,3 +19,21 @@ CREATE TABLE IF NOT EXISTS hosted_account_sessions (
 
 CREATE INDEX IF NOT EXISTS idx_hosted_account_sessions_account
     ON hosted_account_sessions(account_id, updated_at);
+
+
+CREATE TABLE IF NOT EXISTS hosted_account_orchestration_events (
+    event_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    application_id TEXT NOT NULL,
+    account_id TEXT,
+    continuation_id TEXT,
+    state TEXT NOT NULL,
+    issue_code TEXT,
+    occurred_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_hosted_account_orchestration_application
+    ON hosted_account_orchestration_events(
+        tenant_id,user_id,application_id,occurred_at
+    );
