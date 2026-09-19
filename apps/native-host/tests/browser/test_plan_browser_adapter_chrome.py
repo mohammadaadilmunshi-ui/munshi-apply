@@ -271,11 +271,13 @@ def test_dedicated_submit_requires_correlated_provider_response_for_verified():
         assert evidence["job_id"] == "fixture-job-001"
         assert evidence["provider_application_id"] == "fixture-application-001"
         assert evidence["response_status"] == 201
-        assert evidence["submission_response_marker"] == "provider-json-application-id"
+        assert evidence["submission_response_marker"] == "exact-approved-action-response"
+        assert evidence["exact_action_verified"] is True
+        assert evidence["post_submit_state_changed"] is True
         browser.close()
 
 
-def test_generic_thank_you_without_correlated_application_id_is_unverified():
+def test_exact_action_and_confirmation_verify_without_provider_specific_application_id():
     browser_path = resolve_browser_executable()
     with playwright.sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True, executable_path=browser_path)
@@ -284,11 +286,15 @@ def test_generic_thank_you_without_correlated_application_id_is_unverified():
         result = adapter.submit(plan=plan, review=_review(prepared))
 
         assert result["action_executed"] is True
-        assert result["verification_status"] == "SUBMISSION_UNVERIFIED"
+        assert result["verification_status"] == "VERIFIED"
+        assert result["provider_application_id"].startswith("submission-ref-")
+        assert result["success_evidence"]["provider_application_id_source"] == (
+            "DERIVED_EXACT_ACTION_EVIDENCE"
+        )
         browser.close()
 
 
-def test_unrelated_same_provider_post_cannot_verify_submission():
+def test_unrelated_same_provider_post_does_not_replace_exact_submit_evidence():
     browser_path = resolve_browser_executable()
     with playwright.sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True, executable_path=browser_path)
@@ -299,8 +305,9 @@ def test_unrelated_same_provider_post_cannot_verify_submission():
         result = adapter.submit(plan=plan, review=_review(prepared))
 
         assert result["action_executed"] is True
-        assert result["verification_status"] == "SUBMISSION_UNVERIFIED"
-        assert "provider_application_id" not in result
+        assert result["verification_status"] == "VERIFIED"
+        assert result["provider_application_id"].startswith("submission-ref-")
+        assert result["success_evidence"]["response_url"] == SUBMIT_URL
         browser.close()
 
 
@@ -312,7 +319,12 @@ def test_form_action_and_method_are_bound_into_review_digest():
         plan, adapter, prepared = _prepare(page, correlated=True)
 
         before = prepared["form_digest"]
-        assert prepared["submit_binding"] == {"action": SUBMIT_URL, "method": "POST"}
+        binding = prepared["submit_binding"]
+        assert binding["binding_type"] == "NATIVE_FORM"
+        assert binding["action"] == SUBMIT_URL
+        assert binding["method"] == "POST"
+        assert len(binding["binding_digest"]) == 64
+        assert binding["control_id"]
         page.locator("#application-form").evaluate(
             """form => {
               form.action = '/munshi-fixture/changed-submit';
@@ -329,7 +341,7 @@ def test_form_action_and_method_are_bound_into_review_digest():
         browser.close()
 
 
-def test_generic_id_and_created_status_are_not_provider_submission_proof():
+def test_generic_created_response_uses_derived_exact_action_reference():
     browser_path = resolve_browser_executable()
     with playwright.sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True, executable_path=browser_path)
@@ -340,8 +352,11 @@ def test_generic_id_and_created_status_are_not_provider_submission_proof():
         result = adapter.submit(plan=plan, review=_review(prepared))
 
         assert result["action_executed"] is True
-        assert result["verification_status"] == "SUBMISSION_UNVERIFIED"
-        assert "provider_application_id" not in result
+        assert result["verification_status"] == "VERIFIED"
+        assert result["provider_application_id"].startswith("submission-ref-")
+        assert result["success_evidence"]["provider_application_id_source"] == (
+            "DERIVED_EXACT_ACTION_EVIDENCE"
+        )
         browser.close()
 
 
@@ -370,4 +385,147 @@ def test_submit_target_race_after_final_observation_is_blocked_before_click():
         assert result == {"action_executed": False, "verification_status": "BLOCKED"}
         assert page.locator("#application-form").is_visible()
         assert not page.locator("#application_confirmation").is_visible()
+        browser.close()
+
+
+UNKNOWN_JOB_URL = "https://jobs.unknown-ats.example/apply/fixture-job-777"
+UNKNOWN_SUBMIT_URL = "https://jobs.unknown-ats.example/api/applications/fixture-job-777"
+
+
+def _unknown_provider_plan() -> dict:
+    return {
+        "job": {
+            "id": "fixture-job-777",
+            "company": "Unknown ATS Fixture",
+            "title": "People Data Analyst",
+            "job_url": UNKNOWN_JOB_URL,
+            "apply_url": UNKNOWN_JOB_URL,
+        },
+        "provider_policy": {
+            "provider": "GENERIC",
+            "permitted": True,
+            "allowed_hosts": ["unknown-ats.example"],
+        },
+        "resume": {
+            "artifact_id": "fixture-resume-artifact",
+            "version_id": "fixture-resume-version",
+            "version_number": 1,
+            "filename": "munshi-fixture-resume.pdf",
+            "mime_type": "application/pdf",
+            "artifact_sha256": RESUME_SHA,
+        },
+        "answers": [],
+        "permissions": {
+            "background_prepare": True,
+            "resume_upload": True,
+            "normal_answer_autofill": True,
+        },
+    }
+
+
+def _unknown_provider_html() -> str:
+    return """<!doctype html>
+<html>
+<body>
+  <main>
+    <h1>People Data Analyst</h1>
+    <label for="resume">Resume</label>
+    <input id="resume" name="resume" type="file" required />
+    <button
+      id="send-application"
+      type="button"
+      data-submit-url="/api/applications/fixture-job-777"
+      data-method="PUT"
+      aria-label="Submit application"
+    >Submit application</button>
+    <section id="application_confirmation" hidden role="status">
+      Application received. Thank you for applying.
+    </section>
+  </main>
+  <script>
+    document.querySelector("#send-application").addEventListener("click", async () => {
+      const response = await fetch("/api/applications/fixture-job-777", {
+        method: "PUT",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({job_id: "fixture-job-777"}),
+      });
+      if (response.ok) {
+        document.querySelector("#send-application").remove();
+        document.querySelector("#application_confirmation").hidden = false;
+      }
+    });
+  </script>
+</body>
+</html>"""
+
+
+def test_unknown_provider_uses_generic_dom_and_declarative_put_submit_binding():
+    browser_path = resolve_browser_executable()
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True, executable_path=browser_path)
+        page = browser.new_page()
+        plan = _unknown_provider_plan()
+
+        def handler(route):
+            request = route.request
+            if request.url == UNKNOWN_JOB_URL and request.method == "GET":
+                route.fulfill(
+                    status=200,
+                    content_type="text/html",
+                    body=_unknown_provider_html(),
+                )
+                return
+            if request.url == UNKNOWN_SUBMIT_URL and request.method == "PUT":
+                route.fulfill(
+                    status=202,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "status": "submitted",
+                            "job_id": "fixture-job-777",
+                        }
+                    ),
+                )
+                return
+            route.abort()
+
+        page.route("**/*", handler)
+        page.goto(UNKNOWN_JOB_URL, wait_until="domcontentloaded")
+        adapter = _adapter(page, plan)
+
+        prepared = adapter.prepare_form(
+            plan=plan,
+            checkpoint=None,
+            resolved_values={},
+        )
+
+        assert prepared["provider"] == "GENERIC"
+        assert prepared["provider_recipe"] == "GENERIC"
+        assert prepared["job_id"] == "fixture-job-777"
+        assert prepared["resume_uploaded"] is True
+        binding = prepared["submit_binding"]
+        assert binding["binding_type"] == "DECLARATIVE_CONTROL"
+        assert binding["method"] == "PUT"
+        assert binding["action"] == UNKNOWN_SUBMIT_URL
+        assert binding["control_id"]
+
+        result = adapter.submit(
+            plan=plan,
+            review={
+                "destination_url": UNKNOWN_JOB_URL,
+                "browser_verification": {"form_digest": prepared["form_digest"]},
+            },
+        )
+
+        assert result["action_executed"] is True
+        assert result["verification_status"] == "VERIFIED"
+        assert result["provider_application_id"].startswith("submission-ref-")
+        evidence = result["success_evidence"]
+        assert evidence["provider"] == "GENERIC"
+        assert evidence["provider_recipe"] == "GENERIC"
+        assert evidence["submit_method"] == "PUT"
+        assert evidence["submit_action"] == UNKNOWN_SUBMIT_URL
+        assert evidence["response_url"] == UNKNOWN_SUBMIT_URL
+        assert evidence["exact_action_verified"] is True
+        assert evidence["post_submit_state_changed"] is True
         browser.close()
