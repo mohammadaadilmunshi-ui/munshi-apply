@@ -287,11 +287,15 @@ class InteractionFallbackService:
         if not isinstance(payload, dict):
             raise InteractionFallbackError("Interaction recovery payload must be an object")
         if payload.get("reversible") is not True:
-            raise InteractionFallbackError("Automatic recovery requires reversible pre-submit mechanics")
+            raise InteractionFallbackError(
+                "Automatic recovery requires reversible pre-submit mechanics"
+            )
         if payload.get("finalSubmit") is not False:
             raise InteractionFallbackError("Final submission cannot use model recovery")
         if payload.get("secretMaterialExposed", False) is not False:
-            raise InteractionFallbackError("Secret material must never be exposed to model recovery")
+            raise InteractionFallbackError(
+                "Secret material must never be exposed to model recovery"
+            )
         if payload.get("verificationMaterialExposed", False) is not False:
             raise InteractionFallbackError(
                 "Verification artifacts must never be exposed to model recovery"
