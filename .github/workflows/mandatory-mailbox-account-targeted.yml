@@ -1,0 +1,28 @@
+name: Mandatory Mailbox Account Targeted
+
+on:
+  push:
+    branches:
+      - feat/mandatory-mailbox-account-orchestrator-finalize-20260918
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  targeted:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install native host
+        run: python -m pip install -e './apps/native-host[dev]'
+      - name: Compile account runtime
+        run: |
+          python -m py_compile             apps/native-host/src/munshi_apply_native/artifact_fetch_v2.py             apps/native-host/src/munshi_apply_native/ats_account_lifecycle.py             apps/native-host/src/munshi_apply_native/hosted_account_orchestrator.py             apps/native-host/src/munshi_apply_native/hosted_account_session.py             apps/native-host/src/munshi_apply_native/hosted_prepare_worker.py             apps/native-host/tests/test_hosted_account_orchestrator.py             apps/native-host/tests/test_hosted_account_session.py
+      - name: Run focused account orchestration tests
+        run: |
+          python -m pytest -q             apps/native-host/tests/test_account_store.py             apps/native-host/tests/test_ats_account_lifecycle.py             apps/native-host/tests/test_account_verification_runtime.py             apps/native-host/tests/test_account_umbrella_e2e_v1.py             apps/native-host/tests/test_hosted_account_orchestrator.py             apps/native-host/tests/test_hosted_account_session.py             apps/native-host/tests/test_hosted_prepare_worker.py
