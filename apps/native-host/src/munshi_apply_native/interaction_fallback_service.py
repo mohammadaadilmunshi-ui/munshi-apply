@@ -14,22 +14,24 @@ from .autonomous_apply_credentials import (
     AutonomousApplyConfiguration,
     AutonomousApplyCredentialStore,
 )
+from .mechanics_actions import (
+    MechanicsActionError,
+    validate_legacy_actions,
+    validate_mechanics_actions,
+)
 
 _RESULT_PREFIX = "MUNSHI_INTERACTION_RECOVERY="
 _BLOCKED_SEMANTIC_MARKERS = {
-    "PASSWORD",
-    "OTP",
     "MFA",
     "CAPTCHA",
     "IDENTITY_VERIFICATION",
-    "AUTHENTICATION",
-    "SUBMIT",
     "GOVERNMENT_ID",
+    "BIOMETRIC",
+    "LIVENESS",
+    "TOTP",
     "SMS",
+    "FINAL_SUBMIT",
 }
-_BLOCKED_CONTROL_KINDS = {"FILE", "BUTTON"}
-_ALLOWED_KEYS = {"ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"}
-_ALLOWED_WAIT_STATES = {"OPTIONS_VISIBLE", "VALUE_COMMITTED"}
 
 _ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 _ANTHROPIC_API_VERSION = "2023-06-01"
@@ -63,30 +65,23 @@ def _optional_text(value: object, label: str, *, limit: int = 500) -> str | None
     return _required_text(value, label, limit=limit)
 
 
-def _validate_actions(value: object) -> list[dict[str, object]]:
-    if not isinstance(value, list) or not value or len(value) > 16:
-        raise InteractionFallbackError("Fallback must return 1-16 bounded actions")
-    result: list[dict[str, object]] = []
-    for raw in value:
-        if not isinstance(raw, dict):
-            raise InteractionFallbackError("Fallback actions must be objects")
-        action_type = raw.get("type")
-        if action_type in {"FOCUS", "CLICK", "SELECT_EXACT_OPTION"}:
-            result.append({"type": str(action_type)})
-            continue
-        if action_type == "TYPE" and raw.get("valueSource") == "ANSWER":
-            result.append({"type": "TYPE", "valueSource": "ANSWER"})
-            continue
-        if action_type == "KEY" and raw.get("key") in _ALLOWED_KEYS:
-            result.append({"type": "KEY", "key": str(raw["key"])})
-            continue
-        if action_type == "WAIT_FOR_STATE" and raw.get("state") in _ALLOWED_WAIT_STATES:
-            result.append({"type": "WAIT_FOR_STATE", "state": str(raw["state"])})
-            continue
-        raise InteractionFallbackError(
-            "Fallback proposed an unsupported or value-bearing action"
-        )
-    return result
+def _validate_actions(
+    value: object,
+    *,
+    mechanics_mode: bool,
+    allowed_target_refs: set[str] | None = None,
+    allowed_value_refs: set[str] | None = None,
+) -> list[dict[str, object]]:
+    try:
+        if mechanics_mode:
+            return validate_mechanics_actions(
+                value,
+                allowed_target_refs=allowed_target_refs,
+                allowed_value_refs=allowed_value_refs,
+            )
+        return validate_legacy_actions(value)
+    except MechanicsActionError as error:
+        raise InteractionFallbackError(str(error)) from error
 
 
 def _parse_output(stdout: str) -> dict[str, object]:
@@ -292,13 +287,15 @@ class InteractionFallbackService:
         if not isinstance(payload, dict):
             raise InteractionFallbackError("Interaction recovery payload must be an object")
         if payload.get("reversible") is not True:
-            raise InteractionFallbackError("Automatic recovery requires a reversible control")
-        if payload.get("sensitive") is not False:
-            raise InteractionFallbackError("Sensitive controls cannot use model recovery")
-        if payload.get("authenticationBoundary") is not False:
-            raise InteractionFallbackError("Authentication boundaries cannot use model recovery")
+            raise InteractionFallbackError("Automatic recovery requires reversible pre-submit mechanics")
         if payload.get("finalSubmit") is not False:
             raise InteractionFallbackError("Final submission cannot use model recovery")
+        if payload.get("secretMaterialExposed", False) is not False:
+            raise InteractionFallbackError("Secret material must never be exposed to model recovery")
+        if payload.get("verificationMaterialExposed", False) is not False:
+            raise InteractionFallbackError(
+                "Verification artifacts must never be exposed to model recovery"
+            )
 
         component_fingerprint = _required_text(
             payload.get("componentFingerprint"), "componentFingerprint", limit=240
@@ -313,10 +310,7 @@ class InteractionFallbackService:
         control_kind = _required_text(
             payload.get("controlKind"), "controlKind", limit=80
         ).upper()
-        if control_kind in _BLOCKED_CONTROL_KINDS:
-            raise InteractionFallbackError(
-                "This control kind is not eligible for mechanics recovery"
-            )
+        mechanics_mode = payload.get("mechanicsMode") is True
 
         config = self._configuration()
         if not config.enabled:
@@ -325,6 +319,59 @@ class InteractionFallbackService:
         if not model:
             raise InteractionFallbackError("Autonomous Apply fallback model is not configured")
         api_key = self._anthropic_api_key() if config.auth_mode == "api" else None
+
+        surface_value = payload.get("mechanicsSurface")
+        mechanics_surface: list[dict[str, object]] = []
+        allowed_target_refs: set[str] = set()
+        if mechanics_mode:
+            if not isinstance(surface_value, list) or not surface_value:
+                raise InteractionFallbackError(
+                    "Mechanics mode requires an observed mechanics surface"
+                )
+            if len(surface_value) > 180:
+                raise InteractionFallbackError("Mechanics surface is too large")
+            for raw_target in surface_value:
+                if not isinstance(raw_target, dict):
+                    raise InteractionFallbackError("Mechanics targets must be objects")
+                target_ref = _required_text(
+                    raw_target.get("targetRef"), "targetRef", limit=96
+                )
+                if not target_ref.startswith("mt-"):
+                    raise InteractionFallbackError("Mechanics target ref is invalid")
+                allowed_target_refs.add(target_ref)
+                mechanics_surface.append(
+                    {
+                        "targetRef": target_ref,
+                        "frameIndex": int(raw_target.get("frameIndex") or 0),
+                        "tag": str(raw_target.get("tag") or "")[:40],
+                        "type": str(raw_target.get("type") or "")[:80],
+                        "role": str(raw_target.get("role") or "")[:80],
+                        "name": str(raw_target.get("name") or "")[:120],
+                        "id": str(raw_target.get("id") or "")[:120],
+                        "label": str(raw_target.get("label") or "")[:180],
+                        "ariaLabel": str(raw_target.get("ariaLabel") or "")[:180],
+                        "placeholder": str(raw_target.get("placeholder") or "")[:180],
+                        "visible": bool(raw_target.get("visible")),
+                        "disabled": bool(raw_target.get("disabled")),
+                        "required": bool(raw_target.get("required")),
+                        "fileInput": bool(raw_target.get("fileInput")),
+                        "finalSubmitRisk": bool(raw_target.get("finalSubmitRisk")),
+                    }
+                )
+
+        refs_value = payload.get("availableRefs")
+        available_refs: list[dict[str, str]] = []
+        allowed_value_refs: set[str] = set()
+        if mechanics_mode:
+            if refs_value is not None and not isinstance(refs_value, list):
+                raise InteractionFallbackError("availableRefs must be a list")
+            for raw_ref in (refs_value or [])[:120]:
+                if not isinstance(raw_ref, dict):
+                    raise InteractionFallbackError("Mechanics value refs must be objects")
+                ref_value = _required_text(raw_ref.get("ref"), "ref", limit=224)
+                kind = _required_text(raw_ref.get("kind"), "kind", limit=80).upper()
+                allowed_value_refs.add(ref_value)
+                available_refs.append({"ref": ref_value, "kind": kind})
 
         safe_context = {
             "siteOrigin": _required_text(
@@ -347,25 +394,46 @@ class InteractionFallbackService:
             "failureReason": _optional_text(
                 payload.get("failureReason"), "failureReason", limit=500
             ),
+            "goal": _optional_text(payload.get("goal"), "goal", limit=240),
+            "authenticationBoundary": bool(payload.get("authenticationBoundary")),
+            "mechanicsSurface": mechanics_surface,
+            "availableRefs": available_refs,
         }
-        prompt = (
-            "You are the bounded interaction-mechanics fallback for MUNSHI "
-            "AutoApply. "
-            "The deterministic executor already failed on one reversible, "
-            "non-sensitive form control. "
-            "Return ONLY a value-free action recipe; never invent or repeat the "
-            "candidate's answer, credentials, OTPs, secrets, identity data, or "
-            "submission actions. The extension supplies the approved answer at "
-            "runtime when TYPE(valueSource=ANSWER) or SELECT_EXACT_OPTION is used. "
-            "Allowed actions: FOCUS, CLICK, TYPE with valueSource ANSWER, "
-            "SELECT_EXACT_OPTION, KEY with ArrowDown/ArrowUp/Enter/Tab/Escape, "
-            "WAIT_FOR_STATE with OPTIONS_VISIBLE/VALUE_COMMITTED. Do not navigate, "
-            "submit, bypass authentication, solve CAPTCHA, or interact with "
-            "government ID. Keep the sequence minimal and bounded.\nCONTROL="
-            + json.dumps(safe_context, ensure_ascii=False, separators=(",", ":"))
-            + f"\nOutput exactly one line: {_RESULT_PREFIX}"
-            + '{"actions":[...],"reason":"short mechanics rationale"}'
-        )
+        if mechanics_mode:
+            prompt = (
+                "You are MUNSHI's bounded pre-submit mechanics fallback. "
+                "The deterministic Playwright path and promoted Teach recipe have already "
+                "failed. You may solve arbitrary REVERSIBLE mechanics before final submit, "
+                "including hidden/custom file uploaders, custom dropdowns, buttons, NEXT "
+                "navigation, dialogs, date pickers, account/signup/login screens, iframes, "
+                "open shadow DOM, expandable panels, cookie dialogs, and unfamiliar ATS UI. "
+                "NEVER decide or trigger final submission. NEVER return literal candidate "
+                "answers, passwords, secrets, verification codes, verification URLs, CSS/XPath "
+                "selectors, or JavaScript. Use only targetRef values from mechanicsSurface and "
+                "opaque refs from availableRefs. The trusted executor resolves all values locally. "
+                "Allowed actions: FOCUS(targetRef), CLICK(targetRef), NEXT(targetRef), "
+                "TYPE_ANSWER_REF(targetRef,answerRef), FILL_SECRET_REF(targetRef,secretRef), "
+                "FILL_VERIFICATION_ARTIFACT(targetRef,verificationRef), "
+                "UPLOAD_ARTIFACT(targetRef,artifactRef), SELECT(targetRef,valueRef), "
+                "KEY(targetRef,key), WAIT_FOR_STATE(state,targetRef optional), and "
+                "OPEN_LINK(verificationRef). Do not solve CAPTCHA/MFA/TOTP/SMS/biometric/"
+                "government-ID challenges. Keep the sequence minimal and bounded.\nMECHANICS="
+                + json.dumps(safe_context, ensure_ascii=False, separators=(",", ":"))
+                + f"\nOutput exactly one line: {_RESULT_PREFIX}"
+                + '{"actions":[...],"reason":"short mechanics rationale"}'
+            )
+        else:
+            prompt = (
+                "You are the bounded interaction-mechanics fallback for MUNSHI AutoApply. "
+                "The deterministic executor already failed on one reversible form control. "
+                "Return ONLY a value-free action recipe; never invent or repeat the candidate's "
+                "answer or submission actions. The trusted executor supplies the approved answer "
+                "at runtime. Allowed legacy actions: FOCUS, CLICK, TYPE with valueSource ANSWER, "
+                "SELECT_EXACT_OPTION, KEY, WAIT_FOR_STATE. Keep the sequence minimal.\nCONTROL="
+                + json.dumps(safe_context, ensure_ascii=False, separators=(",", ":"))
+                + f"\nOutput exactly one line: {_RESULT_PREFIX}"
+                + '{"actions":[...],"reason":"short mechanics rationale"}'
+            )
         stdout = self.runner(
             prompt,
             model,
@@ -375,7 +443,12 @@ class InteractionFallbackService:
             api_key,
         )
         proposed = _parse_output(stdout)
-        actions = _validate_actions(proposed.get("actions"))
+        actions = _validate_actions(
+            proposed.get("actions"),
+            mechanics_mode=mechanics_mode,
+            allowed_target_refs=allowed_target_refs if mechanics_mode else None,
+            allowed_value_refs=allowed_value_refs if mechanics_mode else None,
+        )
         reason = _optional_text(proposed.get("reason"), "reason", limit=500)
         return {
             "actions": actions,
@@ -386,4 +459,7 @@ class InteractionFallbackService:
             "sourceLane": "AUTOAPPLY_FALLBACK",
             "providerCallMade": True,
             "valueBearingInputSent": False,
+            "secretMaterialSent": False,
+            "verificationMaterialSent": False,
+            "mechanicsMode": mechanics_mode,
         }
