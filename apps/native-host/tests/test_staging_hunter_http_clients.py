@@ -17,7 +17,7 @@ from munshi_apply_native.production_receipt_v1 import (
 )
 
 TEST_HMAC_KEY_MATERIAL = "target-http-test-material-0123456789abcdef"
-TARGET_URL = "http://hunter-target.internal:8123"
+TARGET_URL = "http://hunter-target:8123"
 
 
 def _enable_internal_target_http(monkeypatch: pytest.MonkeyPatch) -> None:

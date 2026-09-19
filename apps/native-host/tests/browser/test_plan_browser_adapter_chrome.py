@@ -529,3 +529,68 @@ def test_unknown_provider_uses_generic_dom_and_declarative_put_submit_binding():
         assert evidence["exact_action_verified"] is True
         assert evidence["post_submit_state_changed"] is True
         browser.close()
+
+
+
+def test_real_chrome_prepares_two_step_application_before_final_submit():
+    browser_path = resolve_browser_executable()
+    plan = _plan()
+    html = """<!doctype html>
+<html>
+  <body data-step="one">
+    <form id="application-form" action="/munshi-fixture/applications" method="post">
+      <section id="step-one">
+        <label for="first_name">First name</label>
+        <input id="first_name" name="first_name" type="text" required />
+        <label for="resume">Resume</label>
+        <input id="resume" name="resume" type="file" required />
+        <button id="continue" type="button">Continue</button>
+      </section>
+      <section id="step-two" hidden>
+        <label for="last_name">Last name</label>
+        <input id="last_name" name="last_name" type="text" required />
+        <button id="submit-app" type="submit">Submit application</button>
+      </section>
+    </form>
+    <div id="application_confirmation" hidden>
+      Your application has been submitted.
+    </div>
+    <script>
+      document.querySelector("#continue").addEventListener("click", () => {
+        document.querySelector("#step-one").hidden = true;
+        document.querySelector("#step-two").hidden = false;
+        document.body.dataset.step = "two";
+      });
+      document.querySelector("#application-form").addEventListener(
+        "submit",
+        (event) => {
+          event.preventDefault();
+          document.body.dataset.submitted = "true";
+        },
+      );
+    </script>
+  </body>
+</html>"""
+
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch(
+            headless=True,
+            executable_path=browser_path,
+        )
+        page = browser.new_page()
+        _route(page, html, correlated=True)
+        page.goto(JOB_URL, wait_until="domcontentloaded")
+        adapter = _adapter(page, plan)
+
+        prepared = adapter.prepare_form(
+            plan=plan,
+            checkpoint=None,
+            resolved_values={},
+        )
+
+        assert page.locator("body").get_attribute("data-step") == "two"
+        assert page.locator("#last_name").input_value() == "Munshi"
+        assert page.locator("body").get_attribute("data-submitted") is None
+        assert prepared["resume_uploaded"] is True
+        assert prepared["unresolved"] == []
+        browser.close()

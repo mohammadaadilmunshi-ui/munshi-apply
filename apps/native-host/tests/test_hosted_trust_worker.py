@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from munshi_apply_native.hosted_trust_worker import (
+    TrustAwareAdapterFactory,
     TrustAwareCompleteApplicationLoopService,
     TrustAwareHostedPlanBrowserAdapter,
     UserAuthRequired,
@@ -13,6 +16,7 @@ class _TrustStore:
     def __init__(self):
         self.observations = []
         self.waiting = []
+        self.cleared = []
         self.active = None
 
     def observe(self, **kwargs):
@@ -30,6 +34,23 @@ class _TrustStore:
     def record_waiting_for_user_auth(self, **kwargs):
         self.waiting.append(kwargs)
         return dict(self.active or {})
+
+    def clear_after_live_browser_revalidation(self, **kwargs):
+        self.cleared.append(kwargs)
+        cleared = dict(self.active or {})
+        cleared["status"] = "CLEARED"
+        cleared["prepare_job_state"] = "QUEUED"
+        self.active = None
+        return cleared
+
+
+class _Queue:
+    def __init__(self):
+        self.requeued = []
+
+    def requeue_session(self, **kwargs):
+        self.requeued.append(kwargs)
+        return {"job_id": "prepare-job-1", "state": "QUEUED"}
 
 
 class _DelegateAdapter:
@@ -181,3 +202,49 @@ def test_normal_delegate_outcome_is_preserved():
     result = proxy.prepare_session(session_id="session-1", adapter=object())
     assert result.state == "READY_FOR_REVIEW"
     assert trust.waiting == []
+
+
+
+@pytest.mark.parametrize(
+    ("checkpoint_kind", "scenario"),
+    [
+        ("CAPTCHA", "captcha"),
+        ("MFA", "sms-mfa"),
+        ("OTP", "sms-code"),
+        ("AUTHENTICATION", "passkey"),
+    ],
+)
+def test_live_browser_checkpoint_retention_revalidates_and_reuses_same_adapter(
+    checkpoint_kind,
+    scenario,
+):
+    trust = _TrustStore()
+    delegate = _DelegateAdapter(initial_checkpoint=checkpoint_kind)
+    factory = TrustAwareAdapterFactory(lambda _job: delegate, trust)
+    wrapped = factory(_job())
+
+    with pytest.raises(UserAuthRequired) as raised:
+        wrapped.inspect_job(plan=_plan())
+    assert raised.value.checkpoint["checkpoint_kind"] == checkpoint_kind
+
+    trust.record_waiting_for_user_auth(
+        trust_checkpoint_id="trust-1",
+        tenant_id="tenant-a",
+        user_id="member-a",
+    )
+    wrapped.park_for_user_auth(raised.value.checkpoint)
+    wrapped.close()
+    assert delegate.closed is False
+
+    # Simulate legitimate user completion in the SAME retained browser context.
+    # SMS MFA and passkey are never solved by MUNSHI; this only models the
+    # post-user-action observation that the challenge has disappeared.
+    delegate.initial_checkpoint = None
+    assert factory.resume_ready_checkpoints() == 1
+    assert trust.cleared
+
+    resumed = factory(_job())
+    assert resumed is wrapped
+    resumed.close()
+    assert delegate.closed is True
+    assert scenario in {"captcha", "sms-mfa", "sms-code", "passkey"}

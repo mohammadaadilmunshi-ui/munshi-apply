@@ -185,7 +185,7 @@ def test_tampered_response_fails_closed(monkeypatch):
 
 
 def test_plain_http_requires_exact_configured_internal_target(monkeypatch: pytest.MonkeyPatch):
-    target = "http://hunter-target.internal:8123"
+    target = "http://hunter-target:8123"
     with pytest.raises(ValueError, match="HTTPS"):
         HunterExecutionBridgeClient(
             base_url=target, secret=SECRET, tenant_id="tenant-a", user_id="member-a"
