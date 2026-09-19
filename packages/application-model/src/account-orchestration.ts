@@ -496,8 +496,9 @@ export function buildAccountOrchestrationPlan(input: {
 export function accountPreflightItem(
   plan: AccountOrchestrationPlan,
 ): PreflightGateItem {
-  if (plan.canAutoAct)
+  if (plan.canAutoAct) {
     return { id: `account:${plan.scopeKey}`, state: "READY" };
+  }
   const hardBlocked =
     plan.state === "ISSUE" ||
     plan.state === "DUPLICATE_RISK" ||
