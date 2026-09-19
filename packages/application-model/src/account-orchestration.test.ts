@@ -175,7 +175,9 @@ describe("account orchestration", () => {
     });
     expect(detectAccountFlow(verification)).toBe("AUTH_VERIFY");
     const plan = buildAccountOrchestrationPlan({ page: verification });
-    expect(plan.actions).toEqual(["VERIFY_ACCOUNT"]);
+    expect(plan.state).toBe("ISSUE");
+    expect(plan.actions).toEqual([]);
+    expect(plan.requiresOwner).toBe(false);
     expect(plan.canAutoAct).toBe(false);
     expect(accountPreflightItem(plan).state).toBe("BLOCKED");
   });
