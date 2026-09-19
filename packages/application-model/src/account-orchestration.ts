@@ -506,6 +506,6 @@ export function accountPreflightItem(
     plan.flow === "AUTH_UNKNOWN";
   return {
     id: `account:${plan.scopeKey}`,
-    state: !plan.requiresOwner ? "READY" : hardBlocked ? "BLOCKED" : "REVIEW",
+    state: hardBlocked ? "BLOCKED" : !plan.requiresOwner ? "READY" : "REVIEW",
   };
 }
