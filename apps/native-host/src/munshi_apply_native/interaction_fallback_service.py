@@ -375,7 +375,14 @@ class InteractionFallbackService:
                 ref_value = _required_text(raw_ref.get("ref"), "ref", limit=224)
                 kind = _required_text(raw_ref.get("kind"), "kind", limit=80).upper()
                 allowed_value_refs.add(ref_value)
-                available_refs.append({"ref": ref_value, "kind": kind})
+                descriptor = {"ref": ref_value, "kind": kind}
+                semantic = raw_ref.get("semanticType")
+                label = raw_ref.get("label")
+                if isinstance(semantic, str) and semantic.strip():
+                    descriptor["semanticType"] = semantic.strip()[:120]
+                if isinstance(label, str) and label.strip():
+                    descriptor["label"] = label.strip()[:160]
+                available_refs.append(descriptor)
 
         safe_context = {
             "siteOrigin": _required_text(
