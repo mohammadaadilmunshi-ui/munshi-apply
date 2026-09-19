@@ -23,13 +23,13 @@ from playwright.sync_api import sync_playwright
 
 from .account_store import AccountStore, portal_identity
 from .artifact_fetch_v2 import HunterExecutionBridgeClient
-from .hosted_account_orchestrator import HostedAccountOrchestrator
-from .hosted_account_session import HostedAccountSessionStore
 from .background_prepare_queue import DurablePreparationQueue, PreparationRunResult
 from .browser_runtime import resolve_browser_executable
 from .complete_application_loop import BACKGROUND_PREPARE_ENV, CompleteApplicationLoopService
 from .database import Database
 from .execution_policy import prepare_permissions
+from .hosted_account_orchestrator import HostedAccountOrchestrator
+from .hosted_account_session import HostedAccountSessionStore
 from .hosted_interaction_recovery import HostedRecoveringPlanBrowserAdapter
 from .interaction_fallback_service import InteractionFallbackService
 from .plan_browser_adapter import provider_for_url
@@ -327,7 +327,7 @@ class HostedPreparationRunner:
         if job is None:
             return None
         stop = threading.Event()
-        heartbeat_errors: list[BaseException] = []
+        heartbeat_errors: list[Exception] = []
 
         def heartbeat_loop() -> None:
             while not stop.wait(self.heartbeat_interval):
@@ -337,7 +337,7 @@ class HostedPreparationRunner:
                         worker_id=worker_id,
                         lease_seconds=self.lease_seconds,
                     )
-                except BaseException as error:
+                except Exception as error:
                     heartbeat_errors.append(error)
                     return
 
