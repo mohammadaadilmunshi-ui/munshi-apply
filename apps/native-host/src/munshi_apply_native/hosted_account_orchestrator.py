@@ -513,7 +513,6 @@ class HostedAccountOrchestrator:
         raise AssertionError("unreachable")
 
     def _login(self, *, email: str, password: str) -> None:
-        self._event(LOGIN)
         self._fill_first(
             [
                 "input[type='email']",
@@ -534,7 +533,6 @@ class HostedAccountOrchestrator:
         self._wait_page(1000)
 
     def _create(self, *, email: str, password: str) -> None:
-        self._event(CREATE_ACCOUNT)
         self._fill_first(
             [
                 "input[type='email']",
@@ -695,6 +693,7 @@ class HostedAccountOrchestrator:
                 )
             self._bind_continuation(self.account_id)
             mailbox_request = self._arm_mailbox(self.account_id)
+            self._event(LOGIN)
             password = self._password(self.account_id, secret_ref)
             try:
                 if self._is_create():
@@ -786,6 +785,7 @@ class HostedAccountOrchestrator:
         self._bind_continuation(self.account_id)
         self.lifecycle.begin_creation(self.account_id, _now())
         mailbox_request = self._arm_mailbox(self.account_id)
+        self._event(CREATE_ACCOUNT)
         password = self._password(self.account_id, secret_ref)
         try:
             self._create(email=email, password=password)
