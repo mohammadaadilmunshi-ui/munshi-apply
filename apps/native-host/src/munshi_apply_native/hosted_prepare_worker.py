@@ -195,8 +195,14 @@ class HostedAdapterFactory:
             pw = self.playwright_factory().start()
             browser = pw.chromium.launch(headless=True, executable_path=self.browser_executable)
             scope_key = portal_identity(target)[1]
+            session_secret = (
+                self.bridge_secret.encode("utf-8")
+                if isinstance(self.bridge_secret, str)
+                else bytes(self.bridge_secret)
+            )
             session_store = HostedAccountSessionStore(
-                self.database, bridge_secret=bridge.secret
+                self.database,
+                bridge_secret=session_secret,
             )
             account_records = AccountStore(self.database).lookup({"portalUrl": target})
             expected_account_id = (
@@ -231,6 +237,7 @@ class HostedAdapterFactory:
                 bridge=bridge,
                 page=page,
                 context=context,
+                session_secret=session_secret,
             ).run()
 
             def artifact_reader(current: dict[str, Any]) -> bytes:
