@@ -155,7 +155,9 @@ def _orchestrator_for_direct_checks(tmp_path: Path, plan=None) -> HostedAccountO
 
 def test_email_verification_link_requires_positive_confirmation(tmp_path: Path) -> None:
     orchestrator = _orchestrator_for_direct_checks(tmp_path)
-    orchestrator._text = lambda: "Email verified. Your account is now active."  # type: ignore[method-assign]
+    orchestrator._text = (  # type: ignore[method-assign]
+        lambda: "Email verified. Your account is now active."
+    )
     orchestrator._visible = lambda _selectors: None  # type: ignore[method-assign]
     assert orchestrator._apply_verification(
         "EMAIL_VERIFICATION_LINK",
@@ -172,7 +174,9 @@ def test_email_verification_link_rejects_navigation_only_or_failure_page(tmp_pat
         "https://careers.example.com/candidate/verify/token",
     ) is False
 
-    orchestrator._text = lambda: "This verification link has expired."  # type: ignore[method-assign]
+    orchestrator._text = (  # type: ignore[method-assign]
+        lambda: "This verification link has expired."
+    )
     assert orchestrator._apply_verification(
         "EMAIL_VERIFICATION_LINK",
         "https://careers.example.com/candidate/verify/token",
