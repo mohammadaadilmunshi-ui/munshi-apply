@@ -111,7 +111,14 @@ class TrustedMechanicsExecutor:
     def snapshot(self, *, max_targets: int = 180) -> list[dict[str, Any]]:
         self._targets.clear()
         surface: list[dict[str, Any]] = []
-        frames = list(getattr(self.page, "frames", []) or [self.page.main_frame])
+        observed_frames = getattr(self.page, "frames", None)
+        if observed_frames:
+            frames = list(observed_frames)
+        else:
+            main_frame = getattr(self.page, "main_frame", None)
+            frames = [main_frame] if main_frame is not None else []
+        if not frames:
+            return surface
         for frame_index, frame in enumerate(frames[:24]):
             locator = frame.locator(_CANDIDATE_SELECTOR)
             try:
@@ -125,7 +132,7 @@ class TrustedMechanicsExecutor:
                 meta: object | None = None
                 try:
                     meta = candidate.evaluate(
-                        """element => {
+                        r"""element => {
                           const tag = String(element.tagName || '').toLowerCase();
                           const inputType = String(
                             element.getAttribute('type') || ''
