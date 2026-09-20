@@ -64,6 +64,7 @@ def _safe_task(task: Any) -> dict[str, Any]:
 
 class RuntimeResolutionReadModel:
     def __init__(self, database: Database) -> None:
+        self.database = database
         self.queue = DurablePreparationQueue(database)
         self.tasks = ResolutionTaskStore(database)
 
@@ -87,6 +88,19 @@ class RuntimeResolutionReadModel:
                 str(row.get("task_id") or ""),
             )
         )
+        with self.database.connect() as connection:
+            session = connection.execute(
+                """SELECT browser_form_digest,checkpoint_id,state
+                   FROM complete_application_sessions
+                   WHERE session_id=? AND application_id=? AND plan_id=?""",
+                (session_id, application_id, str(job["plan_id"])),
+            ).fetchone()
+        if session is None:
+            raise RuntimeError("Resolution task session ledger is unavailable")
+        browser_form_digest = str(session["browser_form_digest"] or "")
+        checkpoint_id = str(session["checkpoint_id"] or "")
+        if safe and (len(browser_form_digest) != 64 or not checkpoint_id):
+            raise RuntimeError("Resolution task session is missing browser binding evidence")
         return {
             "version": READ_MODEL_VERSION,
             "job_id": str(job["job_id"]),
@@ -95,6 +109,8 @@ class RuntimeResolutionReadModel:
             "plan_id": str(job["plan_id"]),
             "provider": str(job["provider"]),
             "prepare_state": str(job["state"]),
+            "browser_form_digest": browser_form_digest,
+            "checkpoint_id": checkpoint_id or None,
             "resolution_tasks": safe,
             "open_task_count": len(safe),
             "resolution_values_exposed": False,

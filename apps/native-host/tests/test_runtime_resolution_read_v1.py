@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from contextlib import contextmanager
 
 from munshi_apply_native.runtime_resolution_read_v1 import (
     OPEN_STATUSES,
@@ -84,6 +85,23 @@ class FakeQueue:
         return dict(self.row)
 
 
+class FakeDatabase:
+    @contextmanager
+    def connect(self):
+        class Connection:
+            def execute(self, _sql, _params):
+                class Cursor:
+                    @staticmethod
+                    def fetchone():
+                        return {
+                            "browser_form_digest": "a" * 64,
+                            "checkpoint_id": "checkpoint-1",
+                            "state": "NEEDS_INPUT",
+                        }
+                return Cursor()
+        yield Connection()
+
+
 class FakeStore:
     def __init__(self, tasks):
         self.rows = list(tasks)
@@ -96,6 +114,7 @@ class FakeStore:
 
 def model(tasks, queue=None):
     obj = object.__new__(RuntimeResolutionReadModel)
+    obj.database = FakeDatabase()
     obj.queue = queue or FakeQueue()
     obj.tasks = FakeStore(tasks)
     return obj
@@ -109,8 +128,12 @@ def test_exact_session_open_tasks_are_sanitized_and_resolution_value_is_omitted(
         job_id="prepare-job-1", tenant_id="tenant-a", user_id="user-a"
     )
     assert view["open_task_count"] == 1
+    assert view["browser_form_digest"] == "a" * 64
+    assert view["checkpoint_id"] == "checkpoint-1"
     assert view["resolution_values_exposed"] is False
     assert view["submission_authority"] is False
+    assert view["browser_form_digest"] == "a" * 64
+    assert view["checkpoint_id"] == "checkpoint-1"
     task = view["resolution_tasks"][0]
     assert task["task_id"] == "task-current"
     assert task["sensitivity_class"] == "NORMAL"
