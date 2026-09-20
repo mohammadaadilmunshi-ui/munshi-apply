@@ -122,16 +122,30 @@ def logical_field_fingerprint(
 ) -> str | None:
     """Mirror Hunter's provider-neutral logical-field fingerprint.
 
-    DOM/control IDs and browser semantic classifications are deliberately absent,
-    so a safe binding survives rerenders and semantic degradation. Repeated rows
-    require an explicit index and remain independently scoped.
+    Prefer the scanner's canonical logicalFieldFingerprintInputs object. This
+    prevents Hunter/Apply reconstruction drift when a browser control has an
+    empty observed inputType but the DOM element has a more specific native type.
     """
-    repeat_group = question.get("repeatGroupId")
-    if repeat_group is None:
-        repeat_group = control.get("repeatGroupId")
-    repeat_index = question.get("repeatIndex")
-    if repeat_index is None:
-        repeat_index = control.get("repeatIndex")
+    raw_inputs = question.get("logicalFieldFingerprintInputs")
+    if not isinstance(raw_inputs, Mapping):
+        raw_inputs = question.get("logical_field_fingerprint_inputs")
+    scanner_inputs = dict(raw_inputs) if isinstance(raw_inputs, Mapping) else {}
+
+    def scanner_or(key: str, fallback: Any) -> Any:
+        return scanner_inputs[key] if key in scanner_inputs else fallback
+
+    repeat_group = scanner_or(
+        "repeatGroupId",
+        question.get("repeatGroupId")
+        if question.get("repeatGroupId") is not None
+        else control.get("repeatGroupId"),
+    )
+    repeat_index = scanner_or(
+        "repeatIndex",
+        question.get("repeatIndex")
+        if question.get("repeatIndex") is not None
+        else control.get("repeatIndex"),
+    )
     if repeat_group is not None and repeat_index is None:
         return None
     try:
@@ -141,31 +155,55 @@ def logical_field_fingerprint(
 
     question_identity = {
         "raw_question": _fingerprint_norm(question.get("rawText") or question.get("question")),
-        "label": _fingerprint_norm(question.get("label") or control.get("label")),
+        "label": _fingerprint_norm(
+            scanner_or("label", question.get("label") or control.get("label"))
+        ),
         "placeholder": _fingerprint_norm(
             question.get("placeholder") or control.get("placeholder")
         ),
         "name": _fingerprint_norm(
-            question.get("fieldName") or question.get("name") or control.get("name")
+            scanner_or(
+                "fieldName",
+                question.get("fieldName") or question.get("name") or control.get("name"),
+            )
         ),
     }
     previous = question.get("previousLabels") or []
     next_values = question.get("nextLabels") or []
     section_identity = {
-        "section": _fingerprint_norm(question.get("sectionHeading")),
+        "section": _fingerprint_norm(
+            scanner_or("sectionHeading", question.get("sectionHeading"))
+        ),
         "previous": [_fingerprint_norm(item) for item in previous if _fingerprint_norm(item)],
         "next": [_fingerprint_norm(item) for item in next_values if _fingerprint_norm(item)],
     }
-    options = _sha_json(_option_texts(question, control))
+    scanner_option_signature = _fingerprint_norm(scanner_inputs.get("optionSignature"))
+    options = (
+        _sha_json({"scanner_option_signature": scanner_option_signature})
+        if scanner_option_signature
+        else _sha_json(_option_texts(question, control))
+    )
     logical = {
         "question": question_identity,
         "section": section_identity,
         "input_type": _fingerprint_norm(
-            question.get("inputType") or control.get("inputType")
+            scanner_or(
+                "inputType",
+                question.get("inputType")
+                if question.get("inputType") is not None
+                else control.get("inputType"),
+            )
         ),
-        "role": _fingerprint_norm(question.get("role") or control.get("role")),
+        "role": _fingerprint_norm(
+            scanner_or("role", question.get("role") or control.get("role"))
+        ),
         "autocomplete": _fingerprint_norm(
-            question.get("autocomplete") or control.get("autocomplete")
+            scanner_or(
+                "autocomplete",
+                question.get("autocomplete")
+                if question.get("autocomplete") is not None
+                else control.get("autocomplete"),
+            )
         ),
         "option_signature": options,
         "repeat_group": _fingerprint_norm(repeat_group),

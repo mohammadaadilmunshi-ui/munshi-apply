@@ -255,6 +255,9 @@ def _observation_as_scan_question(observation: dict[str, object]) -> dict[str, o
         "semanticType": "UNKNOWN",
         "repeatGroupId": observation.get("repeat_group"),
         "repeatIndex": observation.get("repeat_index"),
+        "logicalFieldFingerprintInputs": observation.get(
+            "logical_field_fingerprint_inputs"
+        ),
     }
 
 
