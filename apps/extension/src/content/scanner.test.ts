@@ -240,6 +240,32 @@ describe("AutoPilot page-state scanner", () => {
     expect(JSON.stringify(question)).not.toContain("candidate answer");
   });
 
+  it("keeps repeated employment rows semantically isolated despite identical labels", () => {
+    document.body.innerHTML = `
+      <section aria-label="Work history">
+        <div class="employment-row">
+          <label for="employer-0">Employer</label>
+          <input id="employer-0" name="employment[0].employer" required />
+        </div>
+        <div class="employment-row">
+          <label for="employer-1">Employer</label>
+          <input id="employer-1" name="employment[1].employer" required />
+        </div>
+      </section>
+    `;
+    const employers = scanDocument().questions.filter(
+      (candidate) => candidate.label === "Employer",
+    );
+    expect(employers).toHaveLength(2);
+    expect(employers[0]?.repeatGroupId).toBe(employers[1]?.repeatGroupId);
+    expect(employers[0]?.repeatGroupId).toContain("[#]");
+    expect(employers.map((item) => item.repeatIndex)).toEqual([0, 1]);
+    expect(
+      employers.map((item) => item.logicalFieldFingerprintInputs?.repeatIndex),
+    ).toEqual([0, 1]);
+    expect(employers[0]?.controlId).not.toBe(employers[1]?.controlId);
+  });
+
   it("discovers a focusable select shell without native or ARIA select semantics", () => {
     document.body.innerHTML = `
     <div class="application-field">

@@ -1312,20 +1312,35 @@ export function repeatMetadataFor(element: Element): {
   groupId: string | null;
   index: number | null;
 } {
-  const source = [
+  const parts = [
     element.getAttribute("name"),
     element.id,
     element.getAttribute("data-testid"),
     element.getAttribute("data-automation-id"),
-  ]
-    .filter((value): value is string => Boolean(value))
-    .join("|");
-  const match = source.match(/(?:\[|[_.-])(\d{1,3})(?:\]|[_.-]|$)/);
-  if (!match) return { groupId: null, index: null };
-  const index = Number(match[1]);
-  if (!Number.isSafeInteger(index) || index < 0)
-    return { groupId: null, index: null };
-  const groupId = source.replace(match[0], "[#]");
+  ].filter((value): value is string => Boolean(value));
+  if (!parts.length) return { groupId: null, index: null };
+
+  const indexes: number[] = [];
+  for (const part of parts) {
+    for (const match of part.matchAll(
+      /\[(\d{1,3})\]|(?:^|[_.-])(\d{1,3})(?=[_.-]|$)/g,
+    )) {
+      const raw = match[1] ?? match[2];
+      const value = Number(raw);
+      if (Number.isSafeInteger(value) && value >= 0) indexes.push(value);
+    }
+  }
+  if (!indexes.length) return { groupId: null, index: null };
+  const unique = [...new Set(indexes)];
+  // A single control exposing conflicting row indices is not safe to bind to a
+  // one-dimensional repeat identity. Fail closed instead of choosing one.
+  if (unique.length !== 1) return { groupId: null, index: null };
+  const index = unique[0]!;
+  const normalize = (value: string): string =>
+    value
+      .replace(/\[(\d{1,3})\]/g, "[#]")
+      .replace(/([_.-])(\d{1,3})(?=[_.-]|$)/g, "$1#");
+  const groupId = parts.map(normalize).join("|");
   return { groupId: groupId || null, index };
 }
 
