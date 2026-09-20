@@ -1493,18 +1493,22 @@ The `chrome.scripting` API supports runtime script injection, while extension/na
 
 # 51. SECURITY CHECKPOINT BOUNDARY
 
-MUNSHI Apply does not attempt to defeat:
+Ordinary candidate-controlled email verification is **not** a manual security
+checkpoint. MUNSHI uses the mandatory managed mailbox to correlate and consume
+ordinary email verification codes or links in the same browser session.
+
+MUNSHI Apply does not attempt to defeat genuine security or identity controls:
 
 ```text
 CAPTCHA
-MFA
-OTP
+SMS or authenticator MFA / OTP
+Passkey / WebAuthn
+Biometric verification
 Identity verification
-Authentication protection
 Anti-abuse controls
 ```
 
-Instead:
+For those protected controls:
 
 ```text
 SECURITY CHECKPOINT
@@ -1517,7 +1521,7 @@ User completes checkpoint
        ↓
 Detect completion
        ↓
-Resume application
+Resume the same application session
 ```
 
 ---
@@ -1941,23 +1945,39 @@ Login     Create
 
 ---
 
-# 72. EMAIL/MFA VERIFICATION
+# 72. EMAIL / ACCOUNT VERIFICATION
 
-V1:
+The managed mailbox is a **mandatory runtime dependency** for ordinary account
+email verification. It is not an optional enhancement.
+
+Normal path:
 
 ```text
-Verification required
+Account verification required
        ↓
-AutoPilot paused
+Hunter arms a plan/account-bound mailbox request
        ↓
-User completes email/MFA verification
+Managed mailbox receives and uniquely correlates the message
        ↓
-Extension rescans
+Sender domain + verification-link host are checked against plan policy
        ↓
-Continue
+Verification code/link is encrypted and leased once
+       ↓
+Apply consumes it in the same Chromium session
+       ↓
+ATS verification outcome is independently confirmed
+       ↓
+Artifact is consumed once
+       ↓
+Application continues automatically
 ```
 
-Mailbox automation remains optional.
+Raw passwords, codes and single-use links are never exposed to the model.
+Teach/Sonnet may propose only mechanics using opaque local references.
+
+CAPTCHA, SMS/authenticator MFA or OTP, passkeys/biometrics and identity
+verification remain human security checkpoints. Ordinary email verification
+codes/links do not.
 
 ---
 
@@ -3111,9 +3131,11 @@ Build:
 ```text
 Account detection
 Account registry
-Registration assistance
-Credential-manager handoff
-Verification pause/resume
+Autonomous registration/login mechanics
+Managed credential references
+Mandatory mailbox verification
+Same-session verification and continuation
+Protected security checkpoint/resume
 ```
 
 ---
@@ -3409,8 +3431,8 @@ Manual handoff remains appropriate for:
 
 ```text
 CAPTCHA
-MFA
-OTP
+SMS/authenticator MFA or OTP
+Passkey / WebAuthn / biometric verification
 Identity verification
 Unknown consequential legal statements
 Unknown personal facts

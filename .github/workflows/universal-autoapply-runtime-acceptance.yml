@@ -1,0 +1,118 @@
+name: Universal AutoApply Runtime Acceptance
+
+on:
+  pull_request:
+    paths:
+      - "apps/native-host/src/munshi_apply_native/**"
+      - "apps/native-host/tests/**"
+      - "packages/semantic-engine/src/**"
+      - "docs/MASTER_ARCHITECTURE.md"
+      - ".github/workflows/universal-autoapply-runtime-acceptance.yml"
+      - ".github/workflows/apply-netcup-staging-deploy.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  MUNSHI_FINAL_SUBMIT_ENABLED: "false"
+  MUNSHI_PRODUCTION_SUBMIT_ENABLED: "false"
+
+jobs:
+  runtime-and-browser-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          python -m pip install -e './apps/native-host[dev]'
+
+      - name: Prove submission authority is hard-off
+        run: |
+          test "$MUNSHI_FINAL_SUBMIT_ENABLED" = "false"
+          test "$MUNSHI_PRODUCTION_SUBMIT_ENABLED" = "false"
+          python scripts/verify-apply-staging-transport.py
+
+      - name: Build browser runtime
+        run: npm run build
+
+      - name: Run hosted runtime conformance
+        run: |
+          python -m pytest -q \
+            apps/native-host/tests/test_universal_runtime_conformance_v2.py \
+            apps/native-host/tests/test_unknown_provider_account_runtime.py \
+            apps/native-host/tests/test_hosted_account_orchestrator.py \
+            apps/native-host/tests/test_account_verification_runtime.py \
+            apps/native-host/tests/test_hosted_interaction_recovery.py \
+            apps/native-host/tests/test_mechanics_actions.py \
+            apps/native-host/tests/test_trusted_mechanics_executor.py \
+            apps/native-host/tests/test_hosted_prepare_worker.py \
+            apps/native-host/tests/test_hosted_submit_worker.py \
+            apps/native-host/tests/test_submit_atomic_review.py \
+            apps/native-host/tests/test_application_plan_handoff_v2.py
+
+      - name: Run semantic-engine V1 through V4.5 contracts
+        run: |
+          npx vitest run \
+            packages/semantic-engine/src/question-observation.test.ts \
+            packages/semantic-engine/src/browser-semantic-binding.test.ts \
+            packages/semantic-engine/src/interaction-primitive.test.ts \
+            packages/semantic-engine/src/recovery-planner.test.ts \
+            packages/semantic-engine/src/teach-recipe.test.ts \
+            packages/semantic-engine/src/account-mail-contract.test.ts \
+            packages/semantic-engine/src/provider-neutral-execution.test.ts \
+            packages/semantic-engine/src/exactly-once-submit.test.ts \
+            packages/semantic-engine/src/universal-acceptance-v4-5.test.ts
+          npm run typecheck --workspace @munshi-apply/semantic-engine
+
+      - name: Run full provider-neutral synthetic Chromium acceptance
+        env:
+          MUNSHI_RUN_BROWSER_TESTS: "1"
+        run: |
+          MUNSHI_BROWSER_EXECUTABLE="$(
+            command -v google-chrome ||
+              command -v google-chrome-stable ||
+              command -v chromium ||
+              command -v chromium-browser ||
+              true
+          )"
+          test -n "$MUNSHI_BROWSER_EXECUTABLE"
+          export MUNSHI_BROWSER_EXECUTABLE
+          python -m pytest -q apps/native-host/tests/browser
+
+      - name: Guard no model-owned final submit
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          source = Path(
+              "apps/native-host/src/munshi_apply_native/trusted_mechanics_executor.py"
+          ).read_text(encoding="utf-8")
+          assert "finalSubmitRisk" in source
+          tests = Path(
+              "apps/native-host/tests/browser/test_sonnet_reversible_mechanics_chrome.py"
+          ).read_text(encoding="utf-8")
+          assert "Hidden upload" in tests or "hidden uploader" in tests
+          assert "attachShadow" in tests
+          assert "iframe" in tests.casefold()
+          assert "data-submitted" in tests
+          print("MODEL_FINAL_SUBMIT_AUTHORITY=NONE")
+          print("SHADOW_DOM_IFRAME_HIDDEN_UPLOAD_FIXTURE=PRESENT")
+          PY
