@@ -40,7 +40,11 @@ KNOWN_PROVIDER_RECIPES = {
     "LEVER": ("lever.co",),
     "ASHBY": ("ashbyhq.com",),
     "SMARTRECRUITERS": ("smartrecruiters.com",),
-    "WORKDAY": ("myworkdayjobs.com", "myworkdaysite.com"),
+    "WORKDAY": (
+        "myworkdayjobs.com",
+        "myworkdaysite.com",
+        "workdayjobs.com",
+    ),
     "AGILE_ATS": ("agile-ats.com",),
 }
 
