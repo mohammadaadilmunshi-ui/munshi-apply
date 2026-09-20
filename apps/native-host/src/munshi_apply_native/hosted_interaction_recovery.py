@@ -351,15 +351,28 @@ class HostedRecoveringPlanBrowserAdapter(PlanBrowserAdapter):
             raw = answer.get("execution_value")
             if raw is None:
                 continue
+            # Universal Brain value refs are opaque Hunter identities. They are
+            # ideal local-ref seeds because they preserve semantic/value lineage
+            # without exposing the candidate value to Sonnet or Teach. Legacy
+            # answer IDs/keys remain compatibility fallbacks.
             identity = str(
-                answer.get("answer_id")
+                answer.get("universal_value_ref")
+                or answer.get("answer_id")
                 or answer.get("question_key")
                 or answer.get("semantic_type")
                 or index
             )
             ref = self._stable_ref("answer", identity)
-            semantic = str(answer.get("semantic_type") or "NORMAL_ANSWER").upper()
-            question_key = str(answer.get("question_key") or identity)[:120]
+            semantic = str(
+                answer.get("universal_concept_id")
+                or answer.get("semantic_type")
+                or "NORMAL_ANSWER"
+            ).upper()
+            question_key = str(
+                answer.get("universal_concept_id")
+                or answer.get("question_key")
+                or identity
+            )[:120]
             values[ref] = str(raw)
             descriptor = {
                 "ref": ref,

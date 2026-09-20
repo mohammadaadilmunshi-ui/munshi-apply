@@ -13,6 +13,9 @@ through this bridge.
 """
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -84,6 +87,93 @@ def _normalized(value: Any) -> str:
     return " ".join(str(value or "").split()).casefold()
 
 
+def _fingerprint_norm(value: Any) -> str:
+    text = str(value or "").strip().casefold()
+    text = re.sub(r"[^a-z0-9+/#. _-]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _sha_json(value: Any) -> str:
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _option_texts(question: Mapping[str, Any], control: Mapping[str, Any]) -> list[str]:
+    raw = question.get("options")
+    if not isinstance(raw, list):
+        raw = control.get("options")
+    if not isinstance(raw, list):
+        return []
+    values: list[str] = []
+    for item in raw[:250]:
+        if isinstance(item, Mapping):
+            value = item.get("label") or item.get("text") or item.get("value")
+        else:
+            value = item
+        normalized = _fingerprint_norm(value)
+        if normalized:
+            values.append(normalized)
+    return values
+
+
+def logical_field_fingerprint(
+    question: Mapping[str, Any],
+    control: Mapping[str, Any],
+) -> str | None:
+    """Mirror Hunter's provider-neutral logical-field fingerprint.
+
+    DOM/control IDs and browser semantic classifications are deliberately absent,
+    so a safe binding survives rerenders and semantic degradation. Repeated rows
+    require an explicit index and remain independently scoped.
+    """
+    repeat_group = question.get("repeatGroupId")
+    if repeat_group is None:
+        repeat_group = control.get("repeatGroupId")
+    repeat_index = question.get("repeatIndex")
+    if repeat_index is None:
+        repeat_index = control.get("repeatIndex")
+    if repeat_group is not None and repeat_index is None:
+        return None
+    try:
+        repeat_index_value = int(repeat_index) if repeat_index is not None else None
+    except (TypeError, ValueError):
+        return None
+
+    question_identity = {
+        "raw_question": _fingerprint_norm(question.get("rawText") or question.get("question")),
+        "label": _fingerprint_norm(question.get("label") or control.get("label")),
+        "placeholder": _fingerprint_norm(
+            question.get("placeholder") or control.get("placeholder")
+        ),
+        "name": _fingerprint_norm(
+            question.get("fieldName") or question.get("name") or control.get("name")
+        ),
+    }
+    previous = question.get("previousLabels") or []
+    next_values = question.get("nextLabels") or []
+    section_identity = {
+        "section": _fingerprint_norm(question.get("sectionHeading")),
+        "previous": [_fingerprint_norm(item) for item in previous if _fingerprint_norm(item)],
+        "next": [_fingerprint_norm(item) for item in next_values if _fingerprint_norm(item)],
+    }
+    options = _sha_json(_option_texts(question, control))
+    logical = {
+        "question": question_identity,
+        "section": section_identity,
+        "input_type": _fingerprint_norm(
+            question.get("inputType") or control.get("inputType")
+        ),
+        "role": _fingerprint_norm(question.get("role") or control.get("role")),
+        "autocomplete": _fingerprint_norm(
+            question.get("autocomplete") or control.get("autocomplete")
+        ),
+        "option_signature": options,
+        "repeat_group": _fingerprint_norm(repeat_group),
+        "repeat_index": repeat_index_value,
+    }
+    return _sha_json(logical)
+
+
 def semantic_keys(semantic_type: Any) -> frozenset[str]:
     """Return safe Hunter aliases for one Apply semantic type."""
     semantic = str(semantic_type or "").strip().upper()
@@ -125,6 +215,14 @@ def answer_matches_question(
     if normalized_question and raw_text and normalized_question == raw_text:
         return True
 
+    binding = str(answer.get("universal_binding_fingerprint") or "").strip().lower()
+    if binding:
+        if str(answer.get("sensitivity_class") or "NORMAL").upper() != "NORMAL":
+            return False
+        observed_binding = logical_field_fingerprint(question, control)
+        if observed_binding and observed_binding == binding:
+            return True
+
     if _has_repeat_binding(question, control):
         return False
 
@@ -142,4 +240,5 @@ def bridge_status() -> dict[str, Any]:
         "protected_semantic_type_count": len(PROTECTED_SEMANTIC_TYPES),
         "candidate_value_authority": "hunter_application_plan",
         "browser_semantic_authority": "munshi_apply_semantic_engine",
+        "universal_binding_authority": "hunter_application_plan",
     }

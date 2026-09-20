@@ -497,3 +497,54 @@ def test_enter_is_only_allowed_for_popup_controls():
     assert HostedRecoveringPlanBrowserAdapter._enter_is_safe(
         {"hasPopup": "listbox"}
     ) is True
+
+
+def test_page_answer_refs_prefer_universal_opaque_identity_without_value_leak() -> None:
+    adapter = _adapter(_Fallback())
+    plan = _plan()
+    plan["answers"] = [
+        {
+            "question_key": "unknown.runtime.region",
+            "universal_concept_id": "contact.region",
+            "universal_value_ref": "hunter-value://universal-brain/opaque-region-ref",
+            "sensitivity_class": "NORMAL",
+            "autofill_allowed": True,
+            "execution_value": "New Jersey",
+        }
+    ]
+    values, refs = adapter._page_answer_refs(plan=plan, resolved_values={})
+    assert len(values) == 1
+    assert list(values.values()) == ["New Jersey"]
+    assert len(refs) == 1
+    descriptor = refs[0]
+    assert descriptor["ref"].startswith("answer:")
+    assert descriptor["semanticType"] == "CONTACT.REGION"
+    assert descriptor["label"] == "contact.region"
+    assert "New Jersey" not in json.dumps(refs, sort_keys=True)
+    assert "hunter-value://" not in json.dumps(refs, sort_keys=True)
+
+
+def test_page_answer_refs_never_admit_unapproved_or_protected_universal_values() -> None:
+    adapter = _adapter(_Fallback())
+    plan = _plan()
+    plan["answers"] = [
+        {
+            "question_key": "protected.work_auth",
+            "universal_concept_id": "work.authorization.us",
+            "universal_value_ref": "hunter-value://protected/ref",
+            "sensitivity_class": "PROTECTED",
+            "autofill_allowed": True,
+            "execution_value": "Yes",
+        },
+        {
+            "question_key": "contact.city",
+            "universal_concept_id": "contact.city",
+            "universal_value_ref": "hunter-value://city/ref",
+            "sensitivity_class": "NORMAL",
+            "autofill_allowed": False,
+            "execution_value": "Philadelphia",
+        },
+    ]
+    values, refs = adapter._page_answer_refs(plan=plan, resolved_values={})
+    assert values == {}
+    assert refs == []
