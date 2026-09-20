@@ -18,6 +18,11 @@ from .database import Database
 from .models import EventEnvelope, HealthResponse
 from .outbox import OutboxWorker, run_outbox_worker
 from .runtime_resolution_read_v1 import RuntimeResolutionReadModel
+from .universal_semantic_interpreter_v1 import (
+    UniversalSemanticInterpretationError,
+    UniversalSemanticInterpretationService,
+    model_semantics_enabled,
+)
 from .settings import Settings
 from .teach_munshi_telegram import (
     TeachMunshiTelegramWorker,
@@ -106,6 +111,10 @@ class StartLoopSessionRequest(BaseModel):
 class ResolveLoopTaskRequest(BaseModel):
     value: Any
     approved_by_user: bool = True
+
+
+class UniversalSemanticInterpretationRequest(BaseModel):
+    payload: dict[str, Any]
 
 
 class HealthResponseWithTeach(HealthResponse):
@@ -253,6 +262,30 @@ def resolve_complete_loop_task(
             "replacement Application Plan."
         ),
     )
+
+
+@app.post("/v1/universal-brain/semantic-interpretation")
+def interpret_universal_semantics(
+    request: UniversalSemanticInterpretationRequest,
+    service: CompleteApplicationLoopService = Depends(_loop_service),  # noqa: B008
+) -> dict[str, Any]:
+    """Value-free Claude semantic fallback for Hunter's Universal Brain.
+
+    The authenticated owner boundary is reused only for access control. Candidate
+    data is intentionally not fetched from Apply or Hunter by this endpoint.
+    """
+    del service
+    if not model_semantics_enabled():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Universal model semantics are disabled",
+        )
+    try:
+        return UniversalSemanticInterpretationService(settings.runtime_root).interpret(
+            request.payload
+        )
+    except UniversalSemanticInterpretationError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
 
 
 # Phase 1C-A durable preparation job API
