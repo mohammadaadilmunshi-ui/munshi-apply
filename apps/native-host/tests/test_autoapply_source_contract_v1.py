@@ -133,3 +133,9 @@ def test_observe_uses_plan_bound_verified_upload_after_spa_element_replacement(
 
     assert observed["resume_uploaded"] is True
     assert observed["resume_sha256"] == "b" * 64
+
+
+def test_production_enables_runtime_plan_supersession() -> None:
+    compose = (ROOT / "deploy/production/compose.yaml").read_text(encoding="utf-8")
+    assert "MUNSHI_APPLY_PLAN_SUPERSESSION_ENABLED" in compose
+    assert "${MUNSHI_APPLY_PLAN_SUPERSESSION_ENABLED:-true}" in compose
