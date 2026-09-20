@@ -717,10 +717,13 @@ class CompleteApplicationLoopService:
             dict(plan["cover_letter"]) if isinstance(plan.get("cover_letter"), dict) else None
         )
         if cover_letter is not None:
+            cover_field_present = prepared.get("cover_letter_field_present") is True
             cover_matches = str(prepared.get("cover_letter_sha256") or "") == str(
                 cover_letter["artifact_sha256"]
             )
-            if prepared.get("cover_letter_uploaded") is not True or not cover_matches:
+            if cover_field_present and (
+                prepared.get("cover_letter_uploaded") is not True or not cover_matches
+            ):
                 session = self._transition(session, "FAILED_SAFELY")
                 self._record_event(
                     session=session,
@@ -774,8 +777,17 @@ class CompleteApplicationLoopService:
             "review_fields": review_fields,
         }
         if cover_letter is not None:
-            event_evidence["cover_letter_uploaded"] = True
-            event_evidence["cover_letter_sha256"] = cover_letter["artifact_sha256"]
+            event_evidence["cover_letter_field_present"] = (
+                prepared.get("cover_letter_field_present") is True
+            )
+            event_evidence["cover_letter_uploaded"] = (
+                prepared.get("cover_letter_uploaded") is True
+            )
+            event_evidence["cover_letter_sha256"] = (
+                cover_letter["artifact_sha256"]
+                if prepared.get("cover_letter_uploaded") is True
+                else None
+            )
         self._record_event(
             session=session,
             event_type="FORM_PREPARED",
@@ -932,6 +944,7 @@ class CompleteApplicationLoopService:
                         "artifact_id": cover_letter["artifact_id"],
                         "filename": cover_letter["filename"],
                         "sha256": cover_letter["artifact_sha256"],
+                        "field_present": prepared.get("cover_letter_field_present") is True,
                         "uploaded": prepared.get("cover_letter_uploaded") is True,
                     }
                 }
@@ -1033,9 +1046,12 @@ class CompleteApplicationLoopService:
         elif not isinstance(reviewed_cover, dict) or (
             reviewed_cover.get("artifact_id") != current_cover.get("artifact_id")
             or reviewed_cover.get("sha256") != current_cover.get("artifact_sha256")
-            or reviewed_cover.get("uploaded") is not True
+            or (
+                reviewed_cover.get("field_present") is True
+                and reviewed_cover.get("uploaded") is not True
+            )
         ):
-            raise ValueError("Cover letter changed after review was created")
+            raise ValueError("Cover letter changed after internal review was created")
         open_tasks = [
             task
             for task in self.resolutions.list(application_id=str(session["application_id"]))
@@ -1308,9 +1324,12 @@ class CompleteApplicationLoopService:
         elif not isinstance(reviewed_cover, dict) or (
             reviewed_cover.get("artifact_id") != current_cover.get("artifact_id")
             or reviewed_cover.get("sha256") != current_cover.get("artifact_sha256")
-            or reviewed_cover.get("uploaded") is not True
+            or (
+                reviewed_cover.get("field_present") is True
+                and reviewed_cover.get("uploaded") is not True
+            )
         ):
-            raise ValueError("Cover letter changed after final review approval")
+            raise ValueError("Cover letter changed after internal integrity approval")
 
         current_observation = adapter.inspect_submission(plan=plan)
         try:

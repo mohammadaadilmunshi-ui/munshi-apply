@@ -195,3 +195,29 @@ def test_supersession_rejects_stale_browser_context_without_partial_write(
         ).fetchone()
     assert stored["plan_id"] == prior["plan_id"]
     assert stored["state"] == "NEEDS_INPUT"
+
+
+def test_supersession_allows_semantic_question_key_to_differ_from_browser_group_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    consumer, database, _queue, prior, session, job, task = _waiting_fixture(
+        tmp_path, monkeypatch
+    )
+    replacement, envelope = _replacement_envelope(prior, session, task)
+    envelope["supersession"]["unresolved_questions"][0]["question_key"] = (
+        "contact.first_name"
+    )
+    body, headers = H._signed(envelope, timestamp=1001)
+
+    accepted = consumer.accept(body, headers, now=1001)
+
+    assert accepted.accepted is True
+    assert accepted.resumed_session_id == session.session_id
+    assert accepted.preparation_job_id == job["job_id"]
+    with database.connect() as connection:
+        rebound = connection.execute(
+            "SELECT plan_id,state FROM complete_application_sessions WHERE session_id=?",
+            (session.session_id,),
+        ).fetchone()
+    assert rebound["plan_id"] == replacement["plan_id"]
+    assert rebound["state"] == "NEEDS_INPUT"

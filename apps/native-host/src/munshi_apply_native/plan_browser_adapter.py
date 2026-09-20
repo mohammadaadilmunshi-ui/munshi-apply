@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
@@ -69,6 +70,10 @@ class PlanBrowserAdapter:
         self.current_plan = current_plan
         self.runtime_path = runtime_path
         self.on_event: Callable[[str, dict[str, Any]], None] = lambda _kind, _evidence: None
+        # Exact browser-verified upload evidence survives SPA element replacement
+        # within this adapter/session.  It is always plan-bound and never sourced
+        # from provider text, filenames, or optimistic DOM state.
+        self._verified_uploads: dict[tuple[str, str], str] = {}
 
     def _scan(self) -> dict[str, Any]:
         if not self.page.evaluate("typeof MunshiPlanRuntime !== 'undefined'"):
@@ -196,6 +201,111 @@ class PlanBrowserAdapter:
         if element is None:
             raise ValueError("Observed control disappeared")
         return element
+
+    def _file_sha256(self, control_id: str) -> str:
+        data = self._element(control_id).evaluate("""async element => {
+          if (!element.files || element.files.length !== 1) return null;
+          const file = element.files[0];
+          const bytes = await file.arrayBuffer();
+          const hash = await crypto.subtle.digest('SHA-256', bytes);
+          return Array.from(new Uint8Array(hash),
+            byte => byte.toString(16).padStart(2, '0')).join('');
+        }""")
+        return str(data or "").strip().lower()
+
+    @staticmethod
+    def _upload_key(plan: dict[str, Any], role: str) -> tuple[str, str]:
+        return (str(plan.get("plan_id") or ""), str(role))
+
+    def _remember_verified_upload(
+        self, *, plan: dict[str, Any], role: str, expected_sha256: str
+    ) -> None:
+        if self.current_plan(plan) is not True:
+            raise ValueError("Hunter plan is stale")
+        self._verified_uploads[self._upload_key(plan, role)] = str(
+            expected_sha256
+        ).strip().lower()
+
+    def _remembered_upload(self, *, plan: dict[str, Any], role: str) -> str:
+        if self.current_plan(plan) is not True:
+            return ""
+        return self._verified_uploads.get(self._upload_key(plan, role), "")
+
+    def _advance_application_entry_surface(self, plan: dict[str, Any]) -> bool:
+        """Enter a generic application surface from a job-details shell.
+
+        This is intentionally provider-neutral.  It runs only when the scanner
+        sees no application questions and no final-submit boundary, and only one
+        visible button has an exact, non-destructive application-entry label.
+        """
+        if self.current_plan(plan) is not True:
+            raise ValueError("Hunter plan is stale")
+        described = self._scan()
+        page = described["page"]
+        controls = {
+            str(item.get("controlId") or ""): item
+            for item in page.get("controls") or []
+            if isinstance(item, dict)
+        }
+        visible_editable_questions = [
+            question
+            for question in page.get("questions") or []
+            if isinstance(question, dict)
+            and isinstance(controls.get(str(question.get("controlId") or "")), dict)
+            and controls[str(question.get("controlId") or "")].get("visible") is True
+            and controls[str(question.get("controlId") or "")].get("disabled") is not True
+            and str(controls[str(question.get("controlId") or "")].get("kind") or "")
+            != "BUTTON"
+        ]
+        if visible_editable_questions:
+            return False
+        if any(
+            item.get("action") == "FINAL_SUBMIT" and not item.get("disabled")
+            for item in page.get("navigationCandidates") or []
+        ):
+            return False
+        result = self.page.evaluate(
+            r"""() => {
+              const visible = element => {
+                if (!(element instanceof HTMLElement)) return false;
+                const style = getComputedStyle(element);
+                const rect = element.getBoundingClientRect();
+                return style.display !== 'none'
+                  && style.visibility !== 'hidden'
+                  && Number(style.opacity || 1) !== 0
+                  && rect.width > 0 && rect.height > 0;
+              };
+              const normalized = element => String(
+                element.innerText
+                || element.value
+                || element.getAttribute('aria-label')
+                || element.getAttribute('title')
+                || ''
+              ).replace(/\s+/g, ' ').trim().toLowerCase();
+              const allowed = new Set([
+                'apply',
+                'apply now',
+                'start application',
+                'begin application',
+                'start my application',
+              ]);
+              const candidates = Array.from(document.querySelectorAll(
+                'button,[role="button"],input[type="button"],a'
+              )).filter(element => visible(element) && allowed.has(normalized(element)));
+              if (candidates.length !== 1) return { advanced: false, count: candidates.length };
+              candidates[0].click();
+              return { advanced: true, label: normalized(candidates[0]) };
+            }"""
+        )
+        if not isinstance(result, dict) or result.get("advanced") is not True:
+            return False
+        self.on_event(
+            "APPLICATION_ENTRY_ADVANCED",
+            {"strategy": "unique_safe_entry_label", "label": str(result.get("label") or "")[:80]},
+        )
+        with suppress(Exception):
+            self.page.wait_for_timeout(150)
+        return True
 
     @staticmethod
     def _binding_material(binding: dict[str, Any]) -> dict[str, str]:
@@ -409,27 +519,42 @@ class PlanBrowserAdapter:
         files = [c for c in page["controls"] if c.get("inputType") == "file"]
         resume_sha = ""
         cover_letter_sha = ""
+        cover_letter_field_present = False
         expected_cover = (
             dict(plan["cover_letter"]) if isinstance(plan.get("cover_letter"), dict) else None
         )
         for control in files:
+            identity = (
+                str(control.get("name") or "")
+                + " "
+                + str(control.get("label") or "")
+                + " "
+                + str(control.get("ariaLabel") or "")
+            ).casefold()
+            if "cover" in identity:
+                cover_letter_field_present = True
             # Independently hash the actual File bytes in the browser.
-            data = self._element(control["controlId"]).evaluate("""async element => {
-              if (!element.files || element.files.length !== 1) return null;
-              const file = element.files[0];
-              const bytes = await file.arrayBuffer();
-              const hash = await crypto.subtle.digest('SHA-256', bytes);
-              return { name: file.name, sha: Array.from(new Uint8Array(hash),
-                byte => byte.toString(16).padStart(2, '0')).join('') };
-            }""")
-            if data and data["sha"] == plan["resume"]["artifact_sha256"]:
-                resume_sha = data["sha"]
+            file_sha = self._file_sha256(control["controlId"])
+            if file_sha and file_sha == plan["resume"]["artifact_sha256"]:
+                resume_sha = file_sha
+                self._remember_verified_upload(
+                    plan=plan, role="resume", expected_sha256=file_sha
+                )
             elif (
-                data
+                file_sha
                 and expected_cover is not None
-                and data["sha"] == expected_cover["artifact_sha256"]
+                and file_sha == expected_cover["artifact_sha256"]
             ):
-                cover_letter_sha = data["sha"]
+                cover_letter_sha = file_sha
+                self._remember_verified_upload(
+                    plan=plan, role="cover_letter", expected_sha256=file_sha
+                )
+        if not resume_sha:
+            resume_sha = self._remembered_upload(plan=plan, role="resume")
+        if expected_cover is not None and not cover_letter_sha:
+            cover_letter_sha = self._remembered_upload(
+                plan=plan, role="cover_letter"
+            )
         required = [f for f in fields if f["required"]]
         unresolved = [
             {
@@ -463,6 +588,7 @@ class PlanBrowserAdapter:
             "resume_sha256": resume_sha,
             **(
                 {
+                    "cover_letter_field_present": cover_letter_field_present,
                     "cover_letter_uploaded": bool(cover_letter_sha),
                     "cover_letter_sha256": cover_letter_sha,
                 }
@@ -497,6 +623,7 @@ class PlanBrowserAdapter:
             self._dismiss_cookie_consent()
             if self.current_plan(plan) is not True:
                 raise ValueError("Hunter plan is stale")
+            self._advance_application_entry_surface(plan)
             observed = self.inspect_job(plan=plan)
             if observed["security_checkpoint"] or not observed["job_id"]:
                 raise ValueError("Browser identity or security checkpoint blocks preparation")
@@ -511,7 +638,20 @@ class PlanBrowserAdapter:
                     identity = (
                         str(control.get("name") or "") + " " + str(control.get("label") or "")
                     ).casefold()
-                    if "resume" in identity:
+                    file_controls = [
+                        item
+                        for item in controls.values()
+                        if item.get("inputType") == "file" and not item.get("disabled")
+                    ]
+                    resume_role = bool(
+                        any(token in identity for token in ("resume", "curriculum vitae"))
+                        or re.search(r"(^|\W)cv($|\W)", identity)
+                        or (
+                            len(file_controls) == 1
+                            and not isinstance(plan.get("cover_letter"), dict)
+                        )
+                    )
+                    if resume_role:
                         if not _enabled(RESUME_UPLOAD_ENV):
                             raise ValueError("Resume upload is disabled")
                         if self.current_plan(plan) is not True:
@@ -526,8 +666,16 @@ class PlanBrowserAdapter:
                                 "buffer": data,
                             }
                         )
+                        observed_sha = self._file_sha256(control["controlId"])
+                        if observed_sha != plan["resume"]["artifact_sha256"]:
+                            raise ValueError("Resume upload browser digest mismatch")
+                        self._remember_verified_upload(
+                            plan=plan,
+                            role="resume",
+                            expected_sha256=observed_sha,
+                        )
                         self.on_event(
-                            "RESUME_UPLOADED", {"sha256": plan["resume"]["artifact_sha256"]}
+                            "RESUME_UPLOADED", {"sha256": observed_sha}
                         )
                         continue
                     if (
@@ -550,7 +698,15 @@ class PlanBrowserAdapter:
                                 "buffer": data,
                             }
                         )
-                        self.on_event("COVER_LETTER_UPLOADED", {"sha256": cover["artifact_sha256"]})
+                        observed_sha = self._file_sha256(control["controlId"])
+                        if observed_sha != cover["artifact_sha256"]:
+                            raise ValueError("Cover-letter upload browser digest mismatch")
+                        self._remember_verified_upload(
+                            plan=plan,
+                            role="cover_letter",
+                            expected_sha256=observed_sha,
+                        )
+                        self.on_event("COVER_LETTER_UPLOADED", {"sha256": observed_sha})
                     continue
                 if not control["visible"]:
                     continue
