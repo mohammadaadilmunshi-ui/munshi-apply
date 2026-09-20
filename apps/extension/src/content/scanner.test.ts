@@ -204,6 +204,42 @@ describe("AutoPilot page-state scanner", () => {
     });
   });
 
+  it("emits a value-free Universal Brain question observation", () => {
+    document.body.innerHTML = `
+      <section aria-label="Contact Address">
+        <p>Residence details</p>
+        <label for="state">State / Province *</label>
+        <select id="state" name="candidate_region" autocomplete="address-level1" required>
+          <option>New Jersey</option>
+          <option>New York</option>
+        </select>
+        <label for="zip">Postal code</label>
+        <input id="zip" name="postal" autocomplete="postal-code" />
+      </section>
+    `;
+    const result = scanDocument();
+    const question = result.questions.find(
+      (candidate) => candidate.semanticType === "STATE_PROVINCE",
+    );
+    expect(question).toMatchObject({
+      label: "State / Province *",
+      sectionHeading: "Contact Address",
+      fieldName: "candidate_region",
+      elementId: "state",
+      autocomplete: "address-level1",
+      options: ["New Jersey", "New York"],
+      semanticConfidence: expect.any(Number),
+      optionSignature: expect.any(String),
+      inputConstraints: expect.objectContaining({ required: true }),
+      logicalFieldFingerprintInputs: expect.objectContaining({
+        sectionHeading: "Contact Address",
+        fieldName: "candidate_region",
+        optionSignature: expect.any(String),
+      }),
+    });
+    expect(JSON.stringify(question)).not.toContain("candidate answer");
+  });
+
   it("discovers a focusable select shell without native or ARIA select semantics", () => {
     document.body.innerHTML = `
     <div class="application-field">

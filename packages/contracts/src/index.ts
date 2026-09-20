@@ -308,6 +308,47 @@ export const QuestionSchema = z.object({
   requiresReview: z.boolean(),
   repeatGroupId: z.string().nullable().optional(),
   repeatIndex: z.number().int().nonnegative().nullable().optional(),
+  // Universal Brain observation metadata. These fields are structural only and
+  // must never contain candidate answers, secrets, OTPs, CAPTCHA material, or
+  // protected self-identification values.
+  label: z.string().optional(),
+  sectionHeading: z.string().optional(),
+  nearbyText: z.string().optional(),
+  placeholder: z.string().optional(),
+  fieldName: z.string().optional(),
+  elementId: z.string().optional(),
+  autocomplete: z.string().optional(),
+  inputType: z.string().optional(),
+  role: z.string().optional(),
+  options: z.array(z.string()).max(250).optional(),
+  semanticConfidence: z.number().min(0).max(1).optional(),
+  previousLabels: z.array(z.string()).max(20).optional(),
+  nextLabels: z.array(z.string()).max(20).optional(),
+  optionSignature: z.string().optional(),
+  inputConstraints: z
+    .object({
+      required: z.boolean().optional(),
+      multiple: z.boolean().optional(),
+      readOnly: z.boolean().optional(),
+      maxLength: z.number().int().optional(),
+      minLength: z.number().int().optional(),
+      pattern: z.string().optional(),
+      accept: z.string().optional(),
+    })
+    .optional(),
+  logicalFieldFingerprintInputs: z
+    .object({
+      label: z.string(),
+      sectionHeading: z.string(),
+      fieldName: z.string(),
+      autocomplete: z.string(),
+      inputType: z.string(),
+      role: z.string(),
+      optionSignature: z.string(),
+      repeatGroupId: z.string().nullable(),
+      repeatIndex: z.number().int().nonnegative().nullable(),
+    })
+    .optional(),
 });
 export type Question = z.infer<typeof QuestionSchema>;
 

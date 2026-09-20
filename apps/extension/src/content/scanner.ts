@@ -720,6 +720,41 @@ function scanControlEntries(): ControlEntry[] {
   return entries;
 }
 
+function nearbyStructuralLabels(element: Element): {
+  previousLabels: string[];
+  nextLabels: string[];
+} {
+  const collect = (start: Element | null, direction: "previous" | "next") => {
+    const result: string[] = [];
+    let current = start;
+    for (let hops = 0; current && hops < 4 && result.length < 3; hops += 1) {
+      const candidates = current.matches(
+        "label, legend, h1, h2, h3, h4, h5, h6, [role='heading'], p",
+      )
+        ? [current]
+        : Array.from(
+            current.querySelectorAll(
+              ":scope > label, :scope > legend, :scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > [role='heading'], :scope > p",
+            ),
+          );
+      for (const candidate of candidates.slice(0, 3)) {
+        const value = usablePromptText(candidate.textContent ?? "");
+        if (value && value.length <= 240 && !result.includes(value))
+          result.push(value);
+      }
+      current =
+        direction === "previous"
+          ? current.previousElementSibling
+          : current.nextElementSibling;
+    }
+    return result;
+  };
+  return {
+    previousLabels: collect(element.previousElementSibling, "previous"),
+    nextLabels: collect(element.nextElementSibling, "next"),
+  };
+}
+
 function createQuestion(entry: ControlEntry): Question | null {
   const { control, element } = entry;
   if (control.kind === "BUTTON") return null;
@@ -740,6 +775,11 @@ function createQuestion(entry: ControlEntry): Question | null {
       .join(" "),
   );
   const classification = classifyQuestion(rawText, contextText);
+  const neighbors = nearbyStructuralLabels(element);
+  const optionSignature = hash(
+    control.options.map((option) => normalized(option)).join("\u001f"),
+  );
+  const sectionHeading = sectionContext;
   return {
     questionId: `q-${control.controlId}`,
     controlId: control.controlId,
@@ -751,6 +791,42 @@ function createQuestion(entry: ControlEntry): Question | null {
     requiresReview: classification.requiresReview,
     repeatGroupId: control.repeatGroupId,
     repeatIndex: control.repeatIndex,
+    label: control.label,
+    sectionHeading,
+    nearbyText: compactText(
+      [...neighbors.previousLabels, ...neighbors.nextLabels].join(" "),
+    ),
+    placeholder: control.placeholder,
+    fieldName: control.name,
+    elementId: compactText(element.id),
+    autocomplete: control.autocomplete,
+    inputType: control.inputType ?? "",
+    role: control.role ?? "",
+    options: control.options.slice(0, 250),
+    semanticConfidence: classification.confidence,
+    previousLabels: neighbors.previousLabels,
+    nextLabels: neighbors.nextLabels,
+    optionSignature,
+    inputConstraints: {
+      required: control.required,
+      multiple: control.multiple,
+      readOnly: control.readOnly,
+      maxLength: control.maxLength,
+      minLength: control.minLength,
+      pattern: control.pattern,
+      accept: control.accept,
+    },
+    logicalFieldFingerprintInputs: {
+      label: control.label,
+      sectionHeading,
+      fieldName: control.name,
+      autocomplete: control.autocomplete,
+      inputType: control.inputType ?? "",
+      role: control.role ?? "",
+      optionSignature,
+      repeatGroupId: control.repeatGroupId ?? null,
+      repeatIndex: control.repeatIndex ?? null,
+    },
   };
 }
 
