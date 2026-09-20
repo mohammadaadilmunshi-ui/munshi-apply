@@ -519,10 +519,20 @@ class PlanBrowserAdapter:
         files = [c for c in page["controls"] if c.get("inputType") == "file"]
         resume_sha = ""
         cover_letter_sha = ""
+        cover_letter_field_present = False
         expected_cover = (
             dict(plan["cover_letter"]) if isinstance(plan.get("cover_letter"), dict) else None
         )
         for control in files:
+            identity = (
+                str(control.get("name") or "")
+                + " "
+                + str(control.get("label") or "")
+                + " "
+                + str(control.get("ariaLabel") or "")
+            ).casefold()
+            if "cover" in identity:
+                cover_letter_field_present = True
             # Independently hash the actual File bytes in the browser.
             file_sha = self._file_sha256(control["controlId"])
             if file_sha and file_sha == plan["resume"]["artifact_sha256"]:
@@ -578,6 +588,7 @@ class PlanBrowserAdapter:
             "resume_sha256": resume_sha,
             **(
                 {
+                    "cover_letter_field_present": cover_letter_field_present,
                     "cover_letter_uploaded": bool(cover_letter_sha),
                     "cover_letter_sha256": cover_letter_sha,
                 }
