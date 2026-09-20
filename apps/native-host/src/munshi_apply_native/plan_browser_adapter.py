@@ -242,7 +242,22 @@ class PlanBrowserAdapter:
             raise ValueError("Hunter plan is stale")
         described = self._scan()
         page = described["page"]
-        if page.get("questions"):
+        controls = {
+            str(item.get("controlId") or ""): item
+            for item in page.get("controls") or []
+            if isinstance(item, dict)
+        }
+        visible_editable_questions = [
+            question
+            for question in page.get("questions") or []
+            if isinstance(question, dict)
+            and isinstance(controls.get(str(question.get("controlId") or "")), dict)
+            and controls[str(question.get("controlId") or "")].get("visible") is True
+            and controls[str(question.get("controlId") or "")].get("disabled") is not True
+            and str(controls[str(question.get("controlId") or "")].get("kind") or "")
+            != "BUTTON"
+        ]
+        if visible_editable_questions:
             return False
         if any(
             item.get("action") == "FINAL_SUBMIT" and not item.get("disabled")
