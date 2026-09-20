@@ -19,6 +19,10 @@ on:
 permissions:
   contents: read
 
+env:
+  MUNSHI_FINAL_SUBMIT_ENABLED: "false"
+  MUNSHI_PRODUCTION_SUBMIT_ENABLED: "false"
+
 concurrency:
   group: munshi-apply-netcup-${{ inputs.deploy_target }}
   cancel-in-progress: false
@@ -86,6 +90,39 @@ jobs:
       - run: npm run check
       - run: python -m ruff check apps/native-host
       - run: python -m pytest apps/native-host
+
+      - name: Run Universal AutoApply semantic contracts
+        run: |
+          npx vitest run \
+            packages/semantic-engine/src/question-observation.test.ts \
+            packages/semantic-engine/src/browser-semantic-binding.test.ts \
+            packages/semantic-engine/src/interaction-primitive.test.ts \
+            packages/semantic-engine/src/recovery-planner.test.ts \
+            packages/semantic-engine/src/teach-recipe.test.ts \
+            packages/semantic-engine/src/account-mail-contract.test.ts \
+            packages/semantic-engine/src/provider-neutral-execution.test.ts \
+            packages/semantic-engine/src/exactly-once-submit.test.ts \
+            packages/semantic-engine/src/universal-acceptance-v4-5.test.ts
+          npm run typecheck --workspace @munshi-apply/semantic-engine
+
+      - name: Run full synthetic Chromium acceptance
+        env:
+          MUNSHI_RUN_BROWSER_TESTS: "1"
+        run: |
+          npm run build
+          MUNSHI_BROWSER_EXECUTABLE="$(
+            command -v google-chrome ||
+              command -v google-chrome-stable ||
+              command -v chromium ||
+              command -v chromium-browser ||
+              true
+          )"
+          test -n "$MUNSHI_BROWSER_EXECUTABLE"
+          export MUNSHI_BROWSER_EXECUTABLE
+          test "$MUNSHI_FINAL_SUBMIT_ENABLED" = "false"
+          test "$MUNSHI_PRODUCTION_SUBMIT_ENABLED" = "false"
+          python -m pytest -q apps/native-host/tests/browser
+
       - run: python scripts/verify-apply-staging-transport.py
       - name: Validate deployment shell syntax
         shell: bash
