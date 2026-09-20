@@ -39,6 +39,7 @@ EXPECTED_MIGRATIONS = [
     "029_ats_account_teach_queue.sql",
     "030_hosted_account_sessions.sql",
     "031_hosted_account_session_lifecycle.sql",
+    "032_resolution_task_question_observation.sql",
 ]
 
 
@@ -49,8 +50,8 @@ def test_migrations_are_idempotent(tmp_path: Path) -> None:
     assert database.migrate() == []
     health = database.health()
     assert health["status"] == "healthy"
-    assert health["migration_count"] == 31
-    assert health["schema_version"] == "031_hosted_account_session_lifecycle.sql"
+    assert health["migration_count"] == 32
+    assert health["schema_version"] == "032_resolution_task_question_observation.sql"
 
 
 def test_architecture_tables_are_created_with_integrity_constraints(tmp_path: Path) -> None:

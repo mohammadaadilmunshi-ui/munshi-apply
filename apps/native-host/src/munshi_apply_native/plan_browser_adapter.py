@@ -562,7 +562,9 @@ class PlanBrowserAdapter:
                 "control_id": f["control_id"],
                 "question": f["question"],
                 "semantic_type": f["semantic_type"],
+                "semantic_confidence": f.get("semantic_confidence", 0.0),
                 "sensitivity": f["sensitivity_class"],
+                "question_observation": dict(f.get("question_observation") or {}),
                 "reason": "Required answer is unresolved",
             }
             for f in required

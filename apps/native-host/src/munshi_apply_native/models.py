@@ -246,6 +246,9 @@ class ResolutionTaskPayload(BaseModel):
     question_id: str | None = Field(alias="questionId", default=None, max_length=128)
     question: str | None = Field(default=None, max_length=2_000)
     semantic_type: str | None = Field(alias="semanticType", default=None, max_length=128)
+    question_observation: dict[str, Any] | None = Field(
+        alias="questionObservation", default=None
+    )
     category: ResolutionTaskCategory
     status: ResolutionTaskStatus
     risk_level: ResolutionRiskLevel = Field(alias="riskLevel")
@@ -262,6 +265,44 @@ class ResolutionTaskPayload(BaseModel):
     resolution: ResolutionTaskResolutionPayload | None = None
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
+
+    @field_validator("question_observation")
+    @classmethod
+    def validate_question_observation(
+        cls, value: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        forbidden = {
+            "value", "display_value", "value_digest", "execution_value",
+            "canonical_answer", "answer", "password", "passcode", "otp",
+            "captcha", "secret", "secure_resolver_ref",
+        }
+
+        def inspect(item: Any, path: str = "questionObservation") -> None:
+            if isinstance(item, dict):
+                for raw_key, nested in item.items():
+                    key = str(raw_key).strip().casefold()
+                    if key in forbidden:
+                        raise ValueError(
+                            f"{path} must not contain candidate values or secrets ({raw_key})"
+                        )
+                    inspect(nested, f"{path}.{raw_key}")
+            elif isinstance(item, list):
+                if len(item) > 250:
+                    raise ValueError("questionObservation list fields are too large")
+                for index, nested in enumerate(item):
+                    inspect(nested, f"{path}[{index}]")
+            elif isinstance(item, str) and len(item) > 4_000:
+                raise ValueError("questionObservation text fields are too large")
+
+        inspect(value)
+        import json
+
+        encoded = json.dumps(value, sort_keys=True, separators=(",", ":"))
+        if len(encoded) > 40_000:
+            raise ValueError("questionObservation payload is too large")
+        return value
 
     @field_validator("task_id", "application_id", "reason")
     @classmethod
@@ -353,6 +394,11 @@ class ResolutionTaskPayload(BaseModel):
             "question_id": self.question_id,
             "question": self.question,
             "semantic_type": self.semantic_type,
+            "question_observation": (
+                dict(self.question_observation)
+                if self.question_observation is not None
+                else None
+            ),
             "category": self.category,
             "status": self.status,
             "risk_level": self.risk_level,

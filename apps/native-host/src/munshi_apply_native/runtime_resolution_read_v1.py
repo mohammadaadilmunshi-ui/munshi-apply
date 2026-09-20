@@ -26,6 +26,7 @@ _SAFE_FIELDS = (
     "question_id",
     "question",
     "semantic_type",
+    "question_observation",
     "category",
     "sensitivity_class",
     "status",

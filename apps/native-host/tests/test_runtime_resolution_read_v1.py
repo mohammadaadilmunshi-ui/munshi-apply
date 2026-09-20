@@ -34,6 +34,14 @@ class FakeTask:
             "question_id": "portfolio",
             "question": "Portfolio URL",
             "semantic_type": "URL",
+            "question_observation": {
+                "raw_question": "Portfolio URL",
+                "label": "Portfolio URL",
+                "section_heading": "Links",
+                "apply_semantic_type": "UNKNOWN",
+                "control_id": "control-1",
+                "options": [],
+            },
             "category": "NORMAL",
             "status": status,
             "risk_level": "LOW",
@@ -106,6 +114,14 @@ def test_exact_session_open_tasks_are_sanitized_and_resolution_value_is_omitted(
     task = view["resolution_tasks"][0]
     assert task["task_id"] == "task-current"
     assert task["sensitivity_class"] == "NORMAL"
+    assert task["question_observation"] == {
+        "raw_question": "Portfolio URL",
+        "label": "Portfolio URL",
+        "section_heading": "Links",
+        "apply_semantic_type": "UNKNOWN",
+        "control_id": "control-1",
+        "options": [],
+    }
     assert "resolution" not in task
     assert "source_refs" not in task
     assert "evidence_refs" not in task

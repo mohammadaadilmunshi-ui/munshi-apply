@@ -496,6 +496,9 @@ class CompleteApplicationLoopService:
                 "questionId": unresolved.get("question_id"),
                 "question": unresolved.get("question") or question_key,
                 "semanticType": semantic,
+                "questionObservation": (
+                    dict(unresolved.get("question_observation") or {}) or None
+                ),
                 "category": category,
                 "status": "WAITING_FOR_USER",
                 "riskLevel": risk,

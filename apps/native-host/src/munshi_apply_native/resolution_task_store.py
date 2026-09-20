@@ -70,6 +70,12 @@ def _row_to_payload(row: Any) -> ResolutionTaskPayload:
             "question_id": row["question_id"],
             "question": row["question"],
             "semantic_type": row["semantic_type"],
+            "question_observation": (
+                json.loads(row["question_observation_json"])
+                if "question_observation_json" in row.keys()
+                and row["question_observation_json"]
+                else None
+            ),
             "category": row["category"],
             "status": row["status"],
             "risk_level": row["risk_level"],
@@ -106,12 +112,12 @@ class ResolutionTaskStore:
                     INSERT INTO resolution_tasks (
                         task_id, schema_version, application_id, session_id,
                         checkpoint_id, page_id, control_id, question_id, question,
-                        semantic_type, category, status, risk_level, auto_resolvable,
+                        semantic_type, question_observation_json, category, status, risk_level, auto_resolvable,
                         requires_user, grouping_scope, group_key, source_refs_json,
                         evidence_refs_json, attempted_resolvers_json, reason,
                         resolution_json, created_at, updated_at
                     ) VALUES (
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                     )
                     """,
                     (
@@ -125,6 +131,9 @@ class ResolutionTaskStore:
                         record["question_id"],
                         record["question"],
                         record["semantic_type"],
+                        canonical_json(record["question_observation"])
+                        if record["question_observation"] is not None
+                        else None,
                         record["category"],
                         record["status"],
                         record["risk_level"],
@@ -167,7 +176,7 @@ class ResolutionTaskStore:
                 """
                 UPDATE resolution_tasks
                 SET session_id = ?, checkpoint_id = ?, page_id = ?, control_id = ?,
-                    question_id = ?, category = ?, status = ?, risk_level = ?,
+                    question_id = ?, question_observation_json = ?, category = ?, status = ?, risk_level = ?,
                     auto_resolvable = ?, requires_user = ?, grouping_scope = ?,
                     group_key = ?, evidence_refs_json = ?, attempted_resolvers_json = ?,
                     reason = ?, resolution_json = ?, updated_at = ?
@@ -179,6 +188,9 @@ class ResolutionTaskStore:
                     record["page_id"],
                     record["control_id"],
                     record["question_id"],
+                    canonical_json(record["question_observation"])
+                    if record["question_observation"] is not None
+                    else None,
                     record["category"],
                     record["status"],
                     record["risk_level"],
