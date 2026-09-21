@@ -132,9 +132,9 @@ def test_all_screenshot_ats_families_use_shared_verified_browser_engine(
             plan = _plan(provider, url)
             page = browser.new_page()
 
-            def handler(route, expected_url=url) -> None:
+            def handler(route) -> None:
                 request = route.request
-                if request.url == expected_url and request.method == "GET":
+                if request.method == "GET" and request.is_navigation_request():
                     route.fulfill(
                         status=200,
                         content_type="text/html",
