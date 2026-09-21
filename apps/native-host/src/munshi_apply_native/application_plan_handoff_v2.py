@@ -28,7 +28,42 @@ PLAN_VERSION = "munshi-application-plan-v2"
 LIVE_HANDOFF_ENV = "MUNSHI_APPLY_LIVE_HANDOFF_ENABLED"
 RUNTIME_SUPERSESSION_ENV = "MUNSHI_APPLY_PLAN_SUPERSESSION_ENABLED"
 KNOWN_PROVIDER_RECIPES = frozenset(
-    {"GREENHOUSE", "LEVER", "ASHBY", "SMARTRECRUITERS", "WORKDAY", "AGILE_ATS"}
+    {
+        "GREENHOUSE",
+        "WORKDAY",
+        "NAUKRI",
+        "INDEED",
+        "LEVER",
+        "ASHBY",
+        "RIPPLING",
+        "ICIMS",
+        "BRASSRING",
+        "BAMBOOHR",
+        "WORKABLE",
+        "JAZZHR",
+        "JOBVITE",
+        "BREEZYHR",
+        "ORACLE_RECRUITING",
+        "TALEO",
+        "PAYLOCITY",
+        "SMARTRECRUITERS",
+        "UKG_ULTIPRO",
+        "ZOHO_RECRUIT",
+        "ADP",
+        "DOVER",
+        "GEM",
+        "SAP_SUCCESSFACTORS",
+        "RECRUITEE",
+        "PINPOINT",
+        "TEAMTAILOR",
+        "POLYMER",
+        "PHENOM",
+        "DAYFORCE",
+        "JOIN",
+        "CAREERPLUG",
+        "HIREOLOGY",
+        "AGILE_ATS",
+    }
 )
 # Compatibility export only. Provider recognition is no longer an eligibility gate.
 SUPPORTED_PROVIDERS = KNOWN_PROVIDER_RECIPES
