@@ -111,9 +111,18 @@ class PlanBrowserAdapter:
             except Exception:
                 # Some ATS pages enforce a strict Content Security Policy that
                 # rejects inline <script> elements. Playwright evaluation runs
-                # through the browser automation channel instead of weakening
-                # or bypassing the page's CSP and keeps the same runtime code.
-                self.page.evaluate(runtime_source)
+                # through the browser automation channel, but top-level `var`
+                # declarations are scoped to that evaluation call. Promote only
+                # the generated runtime export to globalThis so later scanner
+                # calls see the same persistent API as a normal script tag.
+                fallback_source = runtime_source.replace(
+                    "var MunshiPlanRuntime =",
+                    "globalThis.MunshiPlanRuntime =",
+                    1,
+                )
+                if fallback_source == runtime_source:
+                    raise ValueError("MUNSHI browser runtime export not found")
+                self.page.evaluate(fallback_source)
             if not self.page.evaluate("typeof MunshiPlanRuntime !== 'undefined'"):
                 raise ValueError("MUNSHI browser runtime injection failed")
         return self.page.evaluate("MunshiPlanRuntime.describeForm()")
