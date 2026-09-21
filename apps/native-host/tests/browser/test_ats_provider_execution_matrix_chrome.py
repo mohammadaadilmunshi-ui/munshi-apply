@@ -21,12 +21,38 @@ from munshi_apply_native.plan_browser_adapter import (  # noqa: E402
 playwright = pytest.importorskip("playwright.sync_api")
 
 SCREENSHOT_PROVIDERS = (
-    "GREENHOUSE", "WORKDAY", "NAUKRI", "INDEED", "LEVER", "ASHBY",
-    "RIPPLING", "ICIMS", "BRASSRING", "BAMBOOHR", "WORKABLE", "JAZZHR",
-    "JOBVITE", "BREEZYHR", "ORACLE_RECRUITING", "PAYLOCITY",
-    "SMARTRECRUITERS", "UKG_ULTIPRO", "ZOHO_RECRUIT", "ADP", "DOVER",
-    "GEM", "SAP_SUCCESSFACTORS", "RECRUITEE", "PINPOINT", "TEAMTAILOR",
-    "POLYMER", "PHENOM", "DAYFORCE", "JOIN", "CAREERPLUG", "HIREOLOGY",
+    "GREENHOUSE",
+    "WORKDAY",
+    "NAUKRI",
+    "INDEED",
+    "LEVER",
+    "ASHBY",
+    "RIPPLING",
+    "ICIMS",
+    "BRASSRING",
+    "BAMBOOHR",
+    "WORKABLE",
+    "JAZZHR",
+    "JOBVITE",
+    "BREEZYHR",
+    "ORACLE_RECRUITING",
+    "PAYLOCITY",
+    "SMARTRECRUITERS",
+    "UKG_ULTIPRO",
+    "ZOHO_RECRUIT",
+    "ADP",
+    "DOVER",
+    "GEM",
+    "SAP_SUCCESSFACTORS",
+    "RECRUITEE",
+    "PINPOINT",
+    "TEAMTAILOR",
+    "POLYMER",
+    "PHENOM",
+    "DAYFORCE",
+    "JOIN",
+    "CAREERPLUG",
+    "HIREOLOGY",
 )
 
 RESUME_BYTES = (
@@ -43,7 +69,7 @@ def _root() -> Path:
 def _plan(provider: str, url: str) -> dict:
     return {
         "job": {
-            "id": f"fixture-{provider.lower()}",
+            "id": "fixture-job-001",
             "company": "MUNSHI Synthetic Employer",
             "title": "People Analytics Specialist",
             "job_url": url,
@@ -106,10 +132,14 @@ def test_all_screenshot_ats_families_use_shared_verified_browser_engine(
             plan = _plan(provider, url)
             page = browser.new_page()
 
-            def handler(route, expected_url=url):
+            def handler(route, expected_url=url) -> None:
                 request = route.request
                 if request.url == expected_url and request.method == "GET":
-                    route.fulfill(status=200, content_type="text/html", body=html)
+                    route.fulfill(
+                        status=200,
+                        content_type="text/html",
+                        body=html,
+                    )
                 else:
                     route.abort()
 
@@ -134,6 +164,10 @@ def test_all_screenshot_ats_families_use_shared_verified_browser_engine(
             assert prepared["provider"] == provider
             assert prepared["resume_uploaded"] is True
             assert prepared["resume_sha256"] == RESUME_SHA
+            assert (
+                prepared["completed_required_fields"]
+                == prepared["required_fields"]
+            )
             assert prepared["unresolved"] == []
             assert prepared["validation_errors"] == []
             assert page.locator("#first_name").input_value() == "Aadil"
@@ -151,6 +185,8 @@ def test_all_screenshot_ats_families_use_shared_verified_browser_engine(
                 final_submit[0]["controlId"],
             )
             assert refused["status"] == "REFUSED"
+            assert page.locator("#application-form").is_visible()
+            assert not page.locator("#application_confirmation").is_visible()
             page.close()
         browser.close()
 
