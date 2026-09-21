@@ -27,9 +27,9 @@ describe("ATS provider bundle", () => {
       "CAREERPLUG",
       "HIREOLOGY",
     ]) {
-      expect(ApplicationPageSchema.shape.atsFamily.safeParse(family).success).toBe(
-        true,
-      );
+      expect(
+        ApplicationPageSchema.shape.atsFamily.safeParse(family).success,
+      ).toBe(true);
     }
   });
 
