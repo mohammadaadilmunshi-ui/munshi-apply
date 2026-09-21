@@ -19,7 +19,44 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from .database import Database, canonical_json
 from .n8n import verify_signature
 
-SUPPORTED_PROVIDERS = frozenset({"greenhouse", "lever", "ashby", "smartrecruiters", "workday"})
+SUPPORTED_PROVIDERS = frozenset(
+    {
+        "greenhouse",
+        "workday",
+        "naukri",
+        "indeed",
+        "lever",
+        "ashby",
+        "rippling",
+        "icims",
+        "brassring",
+        "bamboohr",
+        "workable",
+        "jazzhr",
+        "jobvite",
+        "breezyhr",
+        "oracle_recruiting",
+        "taleo",
+        "paylocity",
+        "smartrecruiters",
+        "ukg_ultipro",
+        "zoho_recruit",
+        "adp",
+        "dover",
+        "gem",
+        "sap_successfactors",
+        "recruitee",
+        "pinpoint",
+        "teamtailor",
+        "polymer",
+        "phenom",
+        "dayforce",
+        "join",
+        "careerplug",
+        "hireology",
+        "agile_ats",
+    }
+)
 HandoffState = Literal["PREPARED", "NEEDS_INPUT", "READY_TO_APPLY"]
 
 
