@@ -274,6 +274,8 @@ def test_local_semantic_fallback_is_value_free_and_closed_candidate_set(
     assert isinstance(request_body, dict)
     prompt = str(request_body["prompt"])
     assert '"candidate_values":null' in prompt
+    assert '"score":' not in prompt
+    assert "Judge confidence independently" in prompt
     assert "canonical_answer" not in prompt
     assert "execution_value" not in prompt
     assert "password" not in prompt.casefold()

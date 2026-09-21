@@ -274,8 +274,19 @@ class UniversalSemanticInterpretationService:
             timeout = float(os.getenv(LOCAL_SEMANTIC_TIMEOUT_ENV) or "25")
         except ValueError:
             timeout = 25.0
+        # Keep local model confidence independent from deterministic/embedding
+        # retrieval scores. The model sees concept identity/meaning but not the
+        # numeric score it could simply echo back as its own confidence.
+        local_cleaned = dict(cleaned)
+        local_cleaned["ontology_candidates"] = [
+            {key: value for key, value in dict(row).items() if key != "score"}
+            for row in cleaned["ontology_candidates"]
+            if isinstance(row, Mapping)
+        ]
         prompt = (
-            self._prompt(cleaned, candidate_ids)
+            self._prompt(local_cleaned, candidate_ids)
+            + "\nJudge confidence independently from retrieval ranking. "
+            + "Use confidence >=0.92 only when the field meaning is unambiguous. "
             + '\nReturn JSON only: {"concept_id":"allowed-id-or-empty",'
             '"confidence":0.0,"reason_code":"SHORT_CODE"}'
         )
