@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from munshi_apply_native import main
+from munshi_apply_native import universal_semantic_interpreter_v1 as semantic_module
 from munshi_apply_native.autonomous_apply_credentials import AutonomousApplyConfiguration
 from munshi_apply_native.database import Database
 from munshi_apply_native.settings import Settings
@@ -211,3 +212,123 @@ def test_semantic_http_endpoint_reuses_owner_auth_and_returns_value_free_result(
     assert body["concept_id"] == "contact.region"
     assert body["candidate_values_sent"] is False
     assert "value" not in body
+
+
+class _DisabledInteraction(_Interaction):
+    def _configuration(self):
+        return AutonomousApplyConfiguration(
+            enabled=False,
+            model="sonnet",
+            auth_mode="subscription",
+        )
+
+
+class _FakeHttpResponse:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self._payload = payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict[str, object]:
+        return self._payload
+
+
+def test_local_semantic_fallback_is_value_free_and_closed_candidate_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MUNSHI_UNIVERSAL_MODEL_SEMANTICS_ENABLED", "true")
+    monkeypatch.setenv("MUNSHI_UNIVERSAL_LOCAL_SEMANTICS_ENABLED", "true")
+    monkeypatch.setenv("MUNSHI_UNIVERSAL_LOCAL_SEMANTICS_MODEL", "gemma3:4b")
+    interaction = _DisabledInteraction({})
+    calls: list[dict[str, object]] = []
+
+    def fake_post(url, *, json, timeout):
+        calls.append({"url": url, "json": json, "timeout": timeout})
+        return _FakeHttpResponse(
+            {
+                "response": semantic_module.json.dumps(
+                    {
+                        "concept_id": "contact.region",
+                        "confidence": 0.95,
+                        "reason_code": "HOME_JURISDICTION_REGION",
+                    }
+                )
+            }
+        )
+
+    monkeypatch.setattr(semantic_module.httpx, "post", fake_post)
+    service = UniversalSemanticInterpretationService(
+        tmp_path, interaction_service=interaction  # type: ignore[arg-type]
+    )
+    result = service.interpret(_payload())
+    assert result["provider"] == "ollama-local"
+    assert result["model"] == "gemma3:4b"
+    assert result["concept_id"] == "contact.region"
+    assert result["confidence"] == 0.95
+    assert result["candidate_values_sent"] is False
+    assert result["secret_material_sent"] is False
+    assert result["protected_values_sent"] is False
+    assert len(calls) == 1
+    request_body = calls[0]["json"]
+    assert isinstance(request_body, dict)
+    prompt = str(request_body["prompt"])
+    assert '"candidate_values":null' in prompt
+    assert "canonical_answer" not in prompt
+    assert "execution_value" not in prompt
+    assert "password" not in prompt.casefold()
+    assert calls[0]["url"] == "http://ollama:11434/api/generate"
+
+
+def test_local_semantic_fallback_rejects_concept_outside_hunter_candidates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MUNSHI_UNIVERSAL_MODEL_SEMANTICS_ENABLED", "true")
+    monkeypatch.setenv("MUNSHI_UNIVERSAL_LOCAL_SEMANTICS_ENABLED", "true")
+    interaction = _DisabledInteraction({})
+
+    def fake_post(url, *, json, timeout):
+        return _FakeHttpResponse(
+            {
+                "response": semantic_module.json.dumps(
+                    {
+                        "concept_id": "work.authorization.us",
+                        "confidence": 0.99,
+                        "reason_code": "OUTSIDE_SET",
+                    }
+                )
+            }
+        )
+
+    monkeypatch.setattr(semantic_module.httpx, "post", fake_post)
+    service = UniversalSemanticInterpretationService(
+        tmp_path, interaction_service=interaction  # type: ignore[arg-type]
+    )
+    with pytest.raises(UniversalSemanticInterpretationError, match="outside"):
+        service.interpret(_payload())
+
+
+def test_claude_remains_preferred_when_local_fallback_is_also_enabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MUNSHI_UNIVERSAL_MODEL_SEMANTICS_ENABLED", "true")
+    monkeypatch.setenv("MUNSHI_UNIVERSAL_LOCAL_SEMANTICS_ENABLED", "true")
+    interaction = _Interaction(
+        {
+            "concept_id": "contact.region",
+            "confidence": 0.96,
+            "reason_code": "CLAUDE_PRIMARY",
+        }
+    )
+
+    def unexpected_post(*args, **kwargs):
+        raise AssertionError("Local fallback must not run when Claude succeeds")
+
+    monkeypatch.setattr(semantic_module.httpx, "post", unexpected_post)
+    service = UniversalSemanticInterpretationService(
+        tmp_path, interaction_service=interaction  # type: ignore[arg-type]
+    )
+    result = service.interpret(_payload())
+    assert result["provider"] == "claude"
+    assert result["concept_id"] == "contact.region"
+    assert len(interaction.calls) == 1
