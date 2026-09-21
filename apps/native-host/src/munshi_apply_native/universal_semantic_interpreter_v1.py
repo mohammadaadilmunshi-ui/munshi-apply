@@ -231,10 +231,16 @@ class UniversalSemanticInterpretationService:
             raise UniversalSemanticInterpretationError(
                 "Semantic confidence is outside 0..1"
             )
-        reason_code = _safe_text(
-            result.get("reason_code") or "MODEL_SEMANTIC_INTERPRETATION",
-            limit=120,
+        # reason_code is value-free observability metadata, not answer
+        # authority. Models sometimes return a short explanation instead of a
+        # literal code; normalize it deterministically rather than discarding an
+        # otherwise valid closed-set concept decision.
+        raw_reason = " ".join(
+            str(result.get("reason_code") or "MODEL_SEMANTIC_INTERPRETATION").split()
         )
+        reason_code = re.sub(r"[^A-Za-z0-9._:-]+", "_", raw_reason).strip("_")[:120]
+        if not reason_code:
+            reason_code = "MODEL_SEMANTIC_INTERPRETATION"
         return {
             "version": SEMANTIC_INTERPRETER_VERSION,
             "concept_id": concept_id,

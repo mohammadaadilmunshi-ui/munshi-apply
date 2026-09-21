@@ -332,3 +332,34 @@ def test_claude_remains_preferred_when_local_fallback_is_also_enabled(
     assert result["provider"] == "claude"
     assert result["concept_id"] == "contact.region"
     assert len(interaction.calls) == 1
+
+
+def test_local_semantic_reason_text_is_bounded_observability_not_authority(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MUNSHI_UNIVERSAL_MODEL_SEMANTICS_ENABLED", "true")
+    monkeypatch.setenv("MUNSHI_UNIVERSAL_LOCAL_SEMANTICS_ENABLED", "true")
+    interaction = _DisabledInteraction({})
+
+    def fake_post(url, *, json, timeout):
+        return _FakeHttpResponse(
+            {
+                "response": semantic_module.json.dumps(
+                    {
+                        "concept_id": "contact.region",
+                        "confidence": 0.94,
+                        "reason_code": "This field is asking for the candidate state or province of residence " * 8,
+                    }
+                )
+            }
+        )
+
+    monkeypatch.setattr(semantic_module.httpx, "post", fake_post)
+    result = UniversalSemanticInterpretationService(
+        tmp_path, interaction_service=interaction  # type: ignore[arg-type]
+    ).interpret(_payload())
+    assert result["concept_id"] == "contact.region"
+    assert result["confidence"] == 0.94
+    assert 1 <= len(str(result["reason_code"])) <= 120
+    assert " " not in str(result["reason_code"])
+    assert result["candidate_values_sent"] is False
