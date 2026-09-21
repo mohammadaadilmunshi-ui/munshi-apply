@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 from .database import Database
 from .interaction_recipe_service import InteractionRecipeService
+from .mechanics_actions import MechanicsActionError, validate_mechanics_actions
 
 _TEACHER_KINDS = {
     "MODEL",
@@ -72,6 +73,23 @@ def _semantic(value: object) -> str:
 
 
 def _actions(value: object) -> list[dict[str, object]]:
+    if isinstance(value, list) and any(
+        isinstance(item, dict)
+        and (
+            "targetRef" in item
+            or "answerRef" in item
+            or "artifactRef" in item
+            or "valueRef" in item
+            or str(item.get("type") or "").upper()
+            in {"NEXT", "TYPE_ANSWER_REF", "UPLOAD_ARTIFACT", "SELECT"}
+        )
+        for item in value
+    ):
+        try:
+            return validate_mechanics_actions(value)
+        except MechanicsActionError as error:
+            raise TeachMunshiError(str(error)) from error
+
     if not isinstance(value, list) or not value or len(value) > 16:
         raise TeachMunshiError("Teach MUNSHI requires 1-16 bounded actions")
     normalized: list[dict[str, object]] = []
@@ -97,7 +115,6 @@ def _actions(value: object) -> list[dict[str, object]]:
             "Teach MUNSHI rejects unsupported or value-bearing actions"
         )
     return normalized
-
 
 def _context(payload: dict[str, Any]) -> dict[str, str | None]:
     ats_family = _optional_text(payload.get("atsFamily"), "atsFamily", limit=80)

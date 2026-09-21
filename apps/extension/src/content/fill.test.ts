@@ -384,6 +384,28 @@ describe("guarded field filling", () => {
     expect(input.value).toBe("2026-12-17");
   });
 
+  it("fills a native select before custom combobox mechanics even with role=combobox", async () => {
+    document.body.innerHTML =
+      '<label for="jurisdiction">Primary domicile jurisdiction</label>' +
+      '<select id="jurisdiction" name="home_jurisdiction" role="combobox" required>' +
+      '<option value="">Choose one</option><option>New Jersey</option>' +
+      '<option>New York</option><option>Pennsylvania</option></select>';
+    const question = scanDocument().questions[0]!;
+    const result = await applyFillInstructions([
+      {
+        controlId: question.controlId,
+        frameId: 0,
+        value: "New Jersey",
+        sensitive: false,
+        approved: true,
+      },
+    ]);
+    const select = document.getElementById("jurisdiction") as HTMLSelectElement;
+    expect(result[0]?.status).toBe("FILLED");
+    expect(select.value).toBe("New Jersey");
+    expect(select.validity.valid).toBe(true);
+  });
+
   it("fails closed when a native select has duplicate exact labels", async () => {
     document.body.innerHTML = `
       <label for="state">State</label>

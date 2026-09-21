@@ -69,10 +69,24 @@ class FixtureBrowser:
         return self.last_form
 
     def inspect_submission(self, *, plan):
+        submit_binding = {
+            "binding_type": "NATIVE_FORM",
+            "control_id": "fixture-submit",
+            "action": plan["job"]["apply_url"],
+            "method": "POST",
+        }
+        submit_binding["binding_digest"] = hashlib.sha256(
+            json.dumps(
+                submit_binding,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
         return {
             **self.last_form,
             **self.inspect_job(plan=plan),
             "form_digest": "0" * 64 if self.changed else self.last_form["form_digest"],
+            "submit_binding": submit_binding,
             "supported": True,
             "plan_current": True,
         }
@@ -110,11 +124,18 @@ class FixtureBrowser:
                         "provider": "GREENHOUSE",
                         "job_id": str(plan["job"]["id"]),
                         "provider_application_id": "fixture-001",
+                        "submission_reference": "fixture-001",
                         "response_status": 201,
                         "response_url": plan["job"]["apply_url"],
                         "submit_action": plan["job"]["apply_url"],
                         "submit_method": "POST",
-                        "submission_response_marker": "provider-json-application-id",
+                        "action_binding_digest": self.inspect_submission(
+                            plan=plan
+                        )["submit_binding"]["binding_digest"],
+                        "confirmation_evidence_digest": "a" * 64,
+                        "submission_response_marker": "exact-approved-action-response",
+                        "exact_action_verified": True,
+                        "post_submit_state_changed": True,
                     }
                 )
             ),

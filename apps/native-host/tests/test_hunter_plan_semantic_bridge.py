@@ -6,6 +6,7 @@ from munshi_apply_native.hunter_plan_semantic_bridge import (
     PROTECTED_SEMANTIC_TYPES,
     answer_matches_question,
     bridge_status,
+    logical_field_fingerprint,
     semantic_keys,
 )
 
@@ -129,3 +130,149 @@ def test_plan_browser_adapter_is_wired_to_semantic_bridge() -> None:
     ).read_text(encoding="utf-8")
     assert "from .hunter_plan_semantic_bridge import answer_matches_question" in source
     assert "and answer_matches_question(a, question, control)" in source
+
+
+def _rich_question(
+    *,
+    semantic_type: str = "STATE_PROVINCE",
+    raw_text: str = "State / Province",
+    label: str = "State",
+    repeat_group_id: str | None = None,
+    repeat_index: int | None = None,
+) -> dict[str, object]:
+    return {
+        "semanticType": semantic_type,
+        "rawText": raw_text,
+        "label": label,
+        "placeholder": "Select state",
+        "fieldName": "candidate_region",
+        "sectionHeading": "Contact Information",
+        "previousLabels": ["City"],
+        "nextLabels": ["Postal code"],
+        "inputType": "select-one",
+        "role": "combobox",
+        "autocomplete": "address-level1",
+        "options": ["New Jersey", "New York", "Pennsylvania"],
+        "repeatGroupId": repeat_group_id,
+        "repeatIndex": repeat_index,
+    }
+
+
+def _rich_control(
+    *,
+    control_id: str = "ctl-state-v1",
+    repeat_group_id: str | None = None,
+    repeat_index: int | None = None,
+) -> dict[str, object]:
+    return {
+        "controlId": control_id,
+        "name": "candidate_region",
+        "label": "State",
+        "placeholder": "Select state",
+        "inputType": "select-one",
+        "role": "combobox",
+        "autocomplete": "address-level1",
+        "options": ["New Jersey", "New York", "Pennsylvania"],
+        "repeatGroupId": repeat_group_id,
+        "repeatIndex": repeat_index,
+    }
+
+
+def test_universal_binding_matches_after_control_id_and_semantic_change() -> None:
+    original_question = _rich_question(semantic_type="STATE_PROVINCE")
+    original_control = _rich_control(control_id="ctl-state-v1")
+    fingerprint = logical_field_fingerprint(original_question, original_control)
+    assert fingerprint is not None and len(fingerprint) == 64
+
+    answer = {
+        **_answer("unknown.runtime.region"),
+        "universal_concept_id": "contact.region",
+        "universal_binding_fingerprint": fingerprint,
+    }
+    rerendered_question = _rich_question(semantic_type="UNKNOWN")
+    rerendered_control = _rich_control(control_id="ctl-state-v2")
+    assert answer_matches_question(answer, rerendered_question, rerendered_control) is True
+
+
+def test_universal_binding_does_not_cross_repeated_rows() -> None:
+    row_one_question = _rich_question(
+        semantic_type="UNKNOWN",
+        raw_text="Employer",
+        label="Employer",
+        repeat_group_id="employment",
+        repeat_index=1,
+    )
+    row_one_control = {
+        **_rich_control(
+            control_id="employer-row-1",
+            repeat_group_id="employment",
+            repeat_index=1,
+        ),
+        "name": "employer",
+        "label": "Employer",
+        "placeholder": "",
+        "autocomplete": "",
+        "options": [],
+        "inputType": "text",
+        "role": "textbox",
+    }
+    row_one_question.update(
+        {
+            "placeholder": "",
+            "fieldName": "employer",
+            "sectionHeading": "Work Experience",
+            "previousLabels": ["Job title"],
+            "nextLabels": ["Start date"],
+            "inputType": "text",
+            "role": "textbox",
+            "autocomplete": "",
+            "options": [],
+        }
+    )
+    fingerprint = logical_field_fingerprint(row_one_question, row_one_control)
+    assert fingerprint is not None
+    answer = {
+        **_answer("experience.1.employer"),
+        "universal_binding_fingerprint": fingerprint,
+    }
+
+    row_two_question = dict(row_one_question)
+    row_two_question["repeatIndex"] = 2
+    row_two_control = dict(row_one_control)
+    row_two_control["repeatIndex"] = 2
+    row_two_control["controlId"] = "employer-row-2"
+    assert answer_matches_question(answer, row_two_question, row_two_control) is False
+
+
+def test_universal_binding_rejects_unscoped_repeated_control() -> None:
+    question = _rich_question(
+        semantic_type="UNKNOWN",
+        raw_text="Employer",
+        label="Employer",
+        repeat_group_id="employment",
+        repeat_index=None,
+    )
+    control = _rich_control(
+        control_id="employer-unscoped",
+        repeat_group_id="employment",
+        repeat_index=None,
+    )
+    assert logical_field_fingerprint(question, control) is None
+
+
+def test_matching_universal_fingerprint_cannot_bypass_protected_boundary() -> None:
+    question = _rich_question(semantic_type="UNKNOWN")
+    control = _rich_control()
+    fingerprint = logical_field_fingerprint(question, control)
+    assert fingerprint is not None
+    protected_answer = {
+        **_answer("eligibility.work_authorized_us"),
+        "sensitivity_class": "PROTECTED",
+        "universal_binding_fingerprint": fingerprint,
+    }
+    assert answer_matches_question(protected_answer, question, control) is False
+
+
+def test_bridge_reports_universal_binding_authority() -> None:
+    status = bridge_status()
+    assert status["universal_binding_authority"] == "hunter_application_plan"

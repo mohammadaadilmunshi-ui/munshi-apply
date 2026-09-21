@@ -47,6 +47,7 @@ _SECRET_MARKERS = (
     "verification_code",
 )
 _CREDENTIAL_REF_RE = re.compile(r"^credref:v1:[A-Za-z0-9_-]{16,128}$")
+_HUNTER_ATS_SECRET_REF_RE = re.compile(r"^ats-secret://[A-Za-z0-9_-]{8,128}/password$")
 _MAIL_ALIAS_RE = re.compile(
     r"^(?:u|a)_[A-Za-z0-9_-]{16,64}@mail\.munshi\.systems$",
     re.IGNORECASE,
@@ -110,9 +111,12 @@ def _credential_ref(value: object | None) -> str | None:
     if value is None:
         return None
     normalized = _required(value, "credentialRef")
-    if not _CREDENTIAL_REF_RE.fullmatch(normalized):
+    if not (
+        _CREDENTIAL_REF_RE.fullmatch(normalized)
+        or _HUNTER_ATS_SECRET_REF_RE.fullmatch(normalized)
+    ):
         raise ATSAccountLifecycleError(
-            "credentialRef must be an opaque credref:v1 reference; secret material is forbidden"
+            "credentialRef must be an opaque account credential reference; secret material is forbidden"
         )
     return normalized
 
@@ -725,6 +729,53 @@ class ATSAccountLifecycle:
                 event_type="ATS_ACCOUNT_ISSUE",
                 occurred_at=observed_at,
                 metadata={"challengeKind": challenge_kind},
+            )
+        return self.snapshot(account_id)
+
+    def mark_issue(
+        self,
+        *,
+        account_id: str,
+        application_id: str,
+        continuation_id: str | None,
+        issue_code: str,
+        observed_at: str,
+    ) -> dict[str, object]:
+        account_id = _required(account_id, "accountId")
+        application_id = _required(application_id, "applicationId")
+        observed_at = _timestamp(observed_at, "observedAt")
+        code = _required(issue_code, "issueCode").upper()
+        if len(code) > 120 or not re.fullmatch(r"[A-Z0-9_]+", code):
+            raise ATSAccountLifecycleError("issueCode is invalid")
+        with self.database.connect() as connection:
+            self._require_account(connection, account_id)
+            self._require_application(connection, application_id)
+            connection.execute(
+                """
+                UPDATE ats_account_state
+                SET state='FAILED_SAFE',issue_code=?,issue_detail=NULL,
+                    version=version+1,updated_at=?
+                WHERE account_id=?
+                """,
+                (code, observed_at, account_id),
+            )
+            if continuation_id is not None:
+                connection.execute(
+                    """
+                    UPDATE ats_account_continuations
+                    SET state='ISSUE',issue_code=?,updated_at=?
+                    WHERE continuation_id=? AND account_id=? AND application_id=?
+                      AND state IN ('PENDING','READY')
+                    """,
+                    (code, observed_at, continuation_id, account_id, application_id),
+                )
+            self._event(
+                connection,
+                account_id=account_id,
+                application_id=application_id,
+                event_type="ATS_ACCOUNT_ISSUE",
+                occurred_at=observed_at,
+                metadata={"issueCode": code},
             )
         return self.snapshot(account_id)
 

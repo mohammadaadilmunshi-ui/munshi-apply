@@ -21,15 +21,18 @@ from uuid import uuid4
 
 from playwright.sync_api import sync_playwright
 
+from .account_store import AccountStore, portal_identity
+from .account_teach_service import AccountTeachService
 from .artifact_fetch_v2 import HunterExecutionBridgeClient
 from .background_prepare_queue import DurablePreparationQueue, PreparationRunResult
 from .browser_runtime import resolve_browser_executable
 from .complete_application_loop import BACKGROUND_PREPARE_ENV, CompleteApplicationLoopService
 from .database import Database
 from .execution_policy import prepare_permissions
+from .hosted_account_orchestrator import HostedAccountOrchestrator
+from .hosted_account_session import HostedAccountSessionStore
 from .hosted_interaction_recovery import HostedRecoveringPlanBrowserAdapter
 from .interaction_fallback_service import InteractionFallbackService
-from .plan_browser_adapter import provider_for_url
 from .settings import Settings
 from .teach_munshi_service import TeachMunshiService
 
@@ -64,9 +67,6 @@ def _target_url(plan: dict[str, Any]) -> str:
         or parsed.fragment
     ):
         raise ValueError("Application target URL is not a safe HTTPS destination")
-    expected_provider = str(policy["provider"]).upper()
-    if provider_for_url(target) != expected_provider:
-        raise ValueError("Application target URL conflicts with provider binding")
     allowed = [str(value).casefold().rstrip(".") for value in policy.get("allowed_hosts") or []]
     if allowed and not any(host == suffix or host.endswith("." + suffix) for suffix in allowed):
         raise ValueError("Application target host is outside provider policy")
@@ -116,12 +116,14 @@ class HostedAdapterFactory:
         bridge_secret: str,
         browser_executable: str | None = None,
         navigation_timeout_ms: int = 30000,
+        headless: bool = True,
         bridge_factory: Any = HunterExecutionBridgeClient,
         playwright_factory: Any = sync_playwright,
         context_configurer: Any = None,
         runtime_root: Path | None = None,
         interaction_fallback_service: Any = None,
         teach_munshi_service: Any = None,
+        account_teach_service: Any = None,
     ) -> None:
         self.database = database
         self.queue = queue
@@ -129,12 +131,14 @@ class HostedAdapterFactory:
         self.bridge_secret = bridge_secret
         self.browser_executable = resolve_browser_executable(browser_executable)
         self.navigation_timeout_ms = int(navigation_timeout_ms)
+        self.headless = bool(headless)
         self.bridge_factory = bridge_factory
         self.playwright_factory = playwright_factory
         self.context_configurer = context_configurer
         self.runtime_root = runtime_root
         self.interaction_fallback_service = interaction_fallback_service
         self.teach_munshi_service = teach_munshi_service or TeachMunshiService(database)
+        self.account_teach_service = account_teach_service or AccountTeachService(database)
 
     def _plan(self, job: dict[str, Any]) -> dict[str, Any]:
         with self.database.connect() as connection:
@@ -190,13 +194,69 @@ class HostedAdapterFactory:
         pw = browser = context = None
         try:
             pw = self.playwright_factory().start()
-            browser = pw.chromium.launch(headless=True, executable_path=self.browser_executable)
-            context = browser.new_context(accept_downloads=False)
+            browser = pw.chromium.launch(
+                headless=self.headless,
+                executable_path=self.browser_executable,
+            )
+            scope_key = portal_identity(target)[1]
+            session_secret = (
+                self.bridge_secret.encode("utf-8")
+                if isinstance(self.bridge_secret, str)
+                else bytes(self.bridge_secret)
+            )
+            session_store = HostedAccountSessionStore(
+                self.database,
+                bridge_secret=session_secret,
+            )
+            account_records = AccountStore(self.database).lookup({"portalUrl": target})
+            expected_account_id = (
+                str(account_records[0]["accountId"]) if len(account_records) == 1 else None
+            )
+            stored_state = (
+                session_store.load(
+                    tenant_id=str(job["tenant_id"]),
+                    user_id=str(job["user_id"]),
+                    scope_key=scope_key,
+                    expected_account_id=expected_account_id,
+                )
+                if expected_account_id is not None
+                else None
+            )
+            context_options: dict[str, Any] = {"accept_downloads": False}
+            if stored_state is not None:
+                context_options["storage_state"] = stored_state
+            context = browser.new_context(**context_options)
             if self.context_configurer is not None:
                 self.context_configurer(context, plan)
             page = context.new_page()
             page.set_default_timeout(self.navigation_timeout_ms)
             page.goto(target, wait_until="domcontentloaded", timeout=self.navigation_timeout_ms)
+
+            interaction_fallback = self.interaction_fallback_service
+            if interaction_fallback is None and self.runtime_root is not None:
+                # One Sonnet mechanics service is shared by account and application
+                # preparation. It receives only structural metadata and opaque refs.
+                interaction_fallback = InteractionFallbackService(
+                    self.runtime_root,
+                    config_resolver=lambda: bridge.autoapply_config(plan),
+                    api_key_resolver=lambda: bridge.anthropic_api_key(plan),
+                )
+
+            # Account handling is part of preparation, not a separate/manual lane.
+            # It runs in this exact context so login, create-account, email
+            # verification, and the resumed application share one Chromium session.
+            HostedAccountOrchestrator(
+                self.database,
+                plan=plan,
+                bridge=bridge,
+                page=page,
+                context=context,
+                tenant_id=str(job["tenant_id"]),
+                user_id=str(job["user_id"]),
+                session_secret=session_secret,
+                interaction_fallback_service=interaction_fallback,
+                teach_munshi_service=self.account_teach_service,
+            ).run()
 
             def artifact_reader(current: dict[str, Any]) -> bytes:
                 if str(current.get("plan_id")) != str(plan["plan_id"]) or str(
@@ -227,17 +287,6 @@ class HostedAdapterFactory:
                 ) != str(plan["plan_digest"]):
                     return False
                 return bridge.plan_is_current(current)
-
-            interaction_fallback = self.interaction_fallback_service
-            if interaction_fallback is None and self.runtime_root is not None:
-                # Hosted execution treats Hunter Settings + encrypted vault as the
-                # runtime authority. The API key stays server-to-server and is
-                # resolved only if dashboard auth mode is API.
-                interaction_fallback = InteractionFallbackService(
-                    self.runtime_root,
-                    config_resolver=lambda: bridge.autoapply_config(plan),
-                    api_key_resolver=lambda: bridge.anthropic_api_key(plan),
-                )
 
             return HostedPlanBrowserAdapter(
                 page,
@@ -292,7 +341,7 @@ class HostedPreparationRunner:
         if job is None:
             return None
         stop = threading.Event()
-        heartbeat_errors: list[BaseException] = []
+        heartbeat_errors: list[Exception] = []
 
         def heartbeat_loop() -> None:
             while not stop.wait(self.heartbeat_interval):
@@ -302,7 +351,7 @@ class HostedPreparationRunner:
                         worker_id=worker_id,
                         lease_seconds=self.lease_seconds,
                     )
-                except BaseException as error:
+                except Exception as error:
                     heartbeat_errors.append(error)
                     return
 

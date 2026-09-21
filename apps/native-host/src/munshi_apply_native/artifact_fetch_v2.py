@@ -22,6 +22,13 @@ PURPOSE_ARTIFACT_BYTES = "ARTIFACT_BYTES"
 PURPOSE_COVER_LETTER_BYTES = "COVER_LETTER_BYTES"
 PURPOSE_AUTOAPPLY_CONFIG = "AUTOAPPLY_CONFIG"
 PURPOSE_AUTOAPPLY_CREDENTIAL = "AUTOAPPLY_CREDENTIAL"
+PURPOSE_ACCOUNT_PREPARE = "ATS_ACCOUNT_PREPARE"
+PURPOSE_ACCOUNT_CREDENTIAL = "ATS_ACCOUNT_CREDENTIAL"
+PURPOSE_MAILBOX_HEALTH = "MAILBOX_HEALTH"
+PURPOSE_MAILBOX_BEGIN = "MAILBOX_VERIFICATION_BEGIN"
+PURPOSE_MAILBOX_CLAIM = "MAILBOX_VERIFICATION_CLAIM"
+PURPOSE_MAILBOX_CONSUME = "MAILBOX_VERIFICATION_CONSUME"
+PURPOSE_MAILBOX_CANCEL = "MAILBOX_VERIFICATION_CANCEL"
 
 
 class HunterExecutionBridgeClient:
@@ -249,6 +256,326 @@ class HunterExecutionBridgeClient:
         if not value or len(value) > 16384:
             raise RuntimeError("Hunter AutoApply credential is unavailable")
         return value
+
+    def _control_payload(
+        self,
+        plan: dict[str, Any],
+        purpose: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "version": REQUEST_VERSION,
+            "request_id": f"execution-request-{uuid4()}",
+            "purpose": purpose,
+            "tenant_id": self.tenant_id,
+            "user_id": self.user_id,
+            "application_id": str(plan["application_id"]),
+            "plan_id": str(plan["plan_id"]),
+            "plan_digest": str(plan["plan_digest"]),
+            "payload": dict(payload),
+        }
+
+    def _control_call(
+        self,
+        plan: dict[str, Any],
+        *,
+        purpose: str,
+        endpoint: str,
+        payload: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        request = self._control_payload(plan, purpose, payload)
+        body = self._canonical(request)
+        response = self.client.post(
+            f"{self.base_url}{endpoint}",
+            content=body,
+            headers=self._headers(request, body),
+        )
+        raw = self._verify(response=response, payload=request, purpose=purpose)
+        try:
+            decoded = json.loads(raw)
+        except json.JSONDecodeError as error:
+            raise RuntimeError("Hunter account execution response is invalid JSON") from error
+        if (
+            not isinstance(decoded, dict)
+            or decoded.get("version") != RESPONSE_VERSION
+            or decoded.get("request_id") != request["request_id"]
+            or decoded.get("purpose") != purpose
+            or decoded.get("plan_id") != str(plan["plan_id"])
+            or decoded.get("plan_digest") != str(plan["plan_digest"])
+            or decoded.get("submission_authority") is not False
+            or not isinstance(decoded.get("result"), dict)
+        ):
+            raise RuntimeError("Hunter account execution response binding mismatch")
+        return dict(decoded["result"]), request
+
+    def _account_mail_key(
+        self,
+        *,
+        purpose: str,
+        request_id: str,
+        plan_digest: str,
+    ) -> bytes:
+        return hmac.new(
+            self.secret,
+            f"account-mail:{purpose}:{request_id}:{plan_digest}".encode(),
+            hashlib.sha256,
+        ).digest()
+
+    @staticmethod
+    def _account_mail_aad(*, purpose: str, request_id: str, plan_digest: str) -> bytes:
+        return f"{request_id}.{purpose}.{plan_digest}".encode()
+
+    def _open_account_mail_sealed(
+        self,
+        *,
+        sealed: object,
+        purpose: str,
+        request_id: str,
+        plan_digest: str,
+    ) -> dict[str, Any]:
+        import base64
+
+        try:
+            raw = base64.urlsafe_b64decode(str(sealed or "").encode())
+            if len(raw) < 29:
+                raise ValueError
+            plaintext = AESGCM(
+                self._account_mail_key(
+                    purpose=purpose,
+                    request_id=request_id,
+                    plan_digest=plan_digest,
+                )
+            ).decrypt(
+                raw[:12],
+                raw[12:],
+                self._account_mail_aad(
+                    purpose=purpose,
+                    request_id=request_id,
+                    plan_digest=plan_digest,
+                ),
+            )
+            decoded = json.loads(plaintext)
+        except Exception as error:
+            raise RuntimeError("Hunter account/mail sealed response is invalid") from error
+        if not isinstance(decoded, dict):
+            raise RuntimeError("Hunter account/mail sealed response is invalid")
+        return decoded
+
+    def _seal_account_mail_request(
+        self,
+        *,
+        value: dict[str, Any],
+        purpose: str,
+        request_id: str,
+        plan_digest: str,
+    ) -> str:
+        import base64
+        import os
+
+        nonce = os.urandom(12)
+        raw = self._canonical(value)
+        encrypted = AESGCM(
+            self._account_mail_key(
+                purpose=purpose,
+                request_id=request_id,
+                plan_digest=plan_digest,
+            )
+        ).encrypt(
+            nonce,
+            raw,
+            self._account_mail_aad(
+                purpose=purpose,
+                request_id=request_id,
+                plan_digest=plan_digest,
+            ),
+        )
+        return base64.urlsafe_b64encode(nonce + encrypted).decode()
+
+    def mailbox_health(self, plan: dict[str, Any]) -> dict[str, Any]:
+        result, _request = self._control_call(
+            plan,
+            purpose=PURPOSE_MAILBOX_HEALTH,
+            endpoint="/api/application-execution/mailbox/health",
+            payload={},
+        )
+        return result
+
+    def prepare_managed_account(
+        self,
+        plan: dict[str, Any],
+        *,
+        provider: str,
+        account_scope: str,
+        label: str,
+    ) -> dict[str, Any]:
+        result, _request = self._control_call(
+            plan,
+            purpose=PURPOSE_ACCOUNT_PREPARE,
+            endpoint="/api/application-execution/account/prepare",
+            payload={
+                "provider": provider,
+                "account_scope": account_scope,
+                "label": label,
+                "consent_version": "managed-ats-v1",
+            },
+        )
+        return result
+
+    def account_password(
+        self,
+        plan: dict[str, Any],
+        *,
+        account_id: str,
+        secret_ref: str,
+    ) -> str:
+        result, request = self._control_call(
+            plan,
+            purpose=PURPOSE_ACCOUNT_CREDENTIAL,
+            endpoint="/api/application-execution/account/credential",
+            payload={"account_id": account_id, "secret_ref": secret_ref},
+        )
+        opened = self._open_account_mail_sealed(
+            sealed=result.get("sealed"),
+            purpose=PURPOSE_ACCOUNT_CREDENTIAL,
+            request_id=str(request["request_id"]),
+            plan_digest=str(request["plan_digest"]),
+        )
+        if (
+            str(opened.get("account_id") or "") != account_id
+            or str(opened.get("secret_ref") or "") != secret_ref
+        ):
+            raise RuntimeError("Hunter ATS credential response binding mismatch")
+        password = str(opened.get("password") or "")
+        if len(password) < 12:
+            raise RuntimeError("Hunter ATS credential response is unavailable")
+        return password
+
+    def begin_mailbox_verification(
+        self,
+        plan: dict[str, Any],
+        *,
+        account_id: str,
+        provider: str,
+        expected_link_hosts: list[str],
+        expected_sender_domains: list[str],
+        ttl_minutes: int = 30,
+    ) -> dict[str, Any]:
+        result, _request = self._control_call(
+            plan,
+            purpose=PURPOSE_MAILBOX_BEGIN,
+            endpoint="/api/application-execution/mailbox/begin",
+            payload={
+                "account_id": account_id,
+                "provider": provider,
+                "application_key": str(plan["application_id"]),
+                "expected_link_hosts": list(expected_link_hosts),
+                "expected_sender_domains": list(expected_sender_domains),
+                "ttl_minutes": int(ttl_minutes),
+            },
+        )
+        return result
+
+    def claim_mailbox_verification(
+        self,
+        plan: dict[str, Any],
+        *,
+        request_id: str,
+        account_id: str,
+        expected_kind: str,
+    ) -> dict[str, Any]:
+        result, request = self._control_call(
+            plan,
+            purpose=PURPOSE_MAILBOX_CLAIM,
+            endpoint="/api/application-execution/mailbox/claim",
+            payload={
+                "request_id": request_id,
+                "account_id": account_id,
+                "application_key": str(plan["application_id"]),
+                "expected_kind": expected_kind,
+            },
+        )
+        opened = self._open_account_mail_sealed(
+            sealed=result.pop("sealed", None),
+            purpose=PURPOSE_MAILBOX_CLAIM,
+            request_id=str(request["request_id"]),
+            plan_digest=str(request["plan_digest"]),
+        )
+        artifact = str(opened.get("artifact") or "")
+        lease_token = str(opened.get("lease_token") or "")
+        if not artifact or not lease_token:
+            raise RuntimeError("Hunter mailbox verification artifact is unavailable")
+        return {**result, "artifact": artifact, "lease_token": lease_token}
+
+    def consume_mailbox_verification(
+        self,
+        plan: dict[str, Any],
+        *,
+        artifact_id: str,
+        request_id: str,
+        account_id: str,
+        lease_token: str,
+    ) -> dict[str, Any]:
+        request = self._control_payload(
+            plan,
+            PURPOSE_MAILBOX_CONSUME,
+            {
+                "artifact_id": artifact_id,
+                "request_id": request_id,
+                "account_id": account_id,
+                "application_key": str(plan["application_id"]),
+            },
+        )
+        request["payload"]["sealed"] = self._seal_account_mail_request(
+            value={"lease_token": lease_token},
+            purpose=PURPOSE_MAILBOX_CONSUME,
+            request_id=str(request["request_id"]),
+            plan_digest=str(request["plan_digest"]),
+        )
+        body = self._canonical(request)
+        response = self.client.post(
+            f"{self.base_url}/api/application-execution/mailbox/consume",
+            content=body,
+            headers=self._headers(request, body),
+        )
+        raw = self._verify(
+            response=response,
+            payload=request,
+            purpose=PURPOSE_MAILBOX_CONSUME,
+        )
+        try:
+            decoded = json.loads(raw)
+        except json.JSONDecodeError as error:
+            raise RuntimeError("Hunter mailbox consume response is invalid JSON") from error
+        result = decoded.get("result") if isinstance(decoded, dict) else None
+        if (
+            decoded.get("submission_authority") is not False
+            or not isinstance(result, dict)
+            or str(result.get("artifact_id") or "") != artifact_id
+            or str(result.get("request_id") or "") != request_id
+        ):
+            raise RuntimeError("Hunter mailbox consume response binding mismatch")
+        return dict(result)
+
+    def cancel_mailbox_verification(
+        self,
+        plan: dict[str, Any],
+        *,
+        request_id: str,
+        account_id: str,
+        reason_code: str = "VERIFICATION_NOT_REQUIRED",
+    ) -> dict[str, Any]:
+        result, _request = self._control_call(
+            plan,
+            purpose=PURPOSE_MAILBOX_CANCEL,
+            endpoint="/api/application-execution/mailbox/cancel",
+            payload={
+                "request_id": request_id,
+                "account_id": account_id,
+                "application_key": str(plan["application_id"]),
+                "reason_code": reason_code,
+            },
+        )
+        return result
 
     def close(self) -> None:
         self.client.close()

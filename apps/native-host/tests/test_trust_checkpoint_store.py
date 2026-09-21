@@ -288,3 +288,66 @@ def test_unknown_checkpoint_kind_is_rejected(trust_context):
             current_url="https://auth.example.test/login",
             page_fingerprint="login-page",
         )
+
+
+
+def test_live_browser_revalidation_clears_checkpoint_but_requeue_remains_explicit(
+    trust_context,
+):
+    db, _, job, queue, store = trust_context
+    assert queue.claim_next(
+        worker_id="worker-live",
+        now="2026-09-10T20:10:01+00:00",
+    ) is not None
+    checkpoint = store.observe(
+        job_id=job["job_id"],
+        tenant_id="tenant-a",
+        user_id="member-a",
+        checkpoint_kind="CAPTCHA",
+        current_url="https://auth.example.test/human-check?opaque=never-store",
+        page_fingerprint="captcha-page",
+        observed_at="2026-09-10T20:10:02+00:00",
+    )
+    store.record_waiting_for_user_auth(
+        trust_checkpoint_id=checkpoint["trust_checkpoint_id"],
+        tenant_id="tenant-a",
+        user_id="member-a",
+        now="2026-09-10T20:10:03+00:00",
+    )
+    assert queue.finish(
+        job_id=job["job_id"],
+        worker_id="worker-live",
+        session_state="NEEDS_INPUT",
+        now="2026-09-10T20:10:04+00:00",
+    )["state"] == "WAITING_INPUT"
+
+    cleared = store.clear_after_live_browser_revalidation(
+        trust_checkpoint_id=checkpoint["trust_checkpoint_id"],
+        tenant_id="tenant-a",
+        user_id="member-a",
+        current_url="https://boards.greenhouse.io/acme/jobs/42?opaque=never-store",
+        page_fingerprint="same-live-browser-post-auth",
+        now="2026-09-10T20:10:05+00:00",
+    )
+    assert cleared["status"] == "CLEARED"
+    assert cleared["prepare_job_state"] == "QUEUED"
+
+    requeued = queue.get(
+        job_id=job["job_id"],
+        tenant_id="tenant-a",
+        user_id="member-a",
+    )
+    assert requeued["state"] == "QUEUED"
+
+    with db.connect() as connection:
+        event = connection.execute(
+            """SELECT evidence_json
+               FROM complete_application_trust_checkpoint_events
+               WHERE trust_checkpoint_id=? AND event_type='CLEARED'
+               ORDER BY occurred_at DESC LIMIT 1""",
+            (checkpoint["trust_checkpoint_id"],),
+        ).fetchone()
+    assert event is not None
+    serialized = str(event["evidence_json"])
+    assert "SAME_LIVE_HOSTED_BROWSER" in serialized
+    assert "never-store" not in serialized

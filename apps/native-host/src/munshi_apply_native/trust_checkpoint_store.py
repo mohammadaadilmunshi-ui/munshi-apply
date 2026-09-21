@@ -392,6 +392,103 @@ class TrustCheckpointStore:
                 )
             return checkpoint
 
+    def clear_after_live_browser_revalidation(
+        self,
+        *,
+        trust_checkpoint_id: str,
+        tenant_id: str,
+        user_id: str,
+        current_url: str,
+        page_fingerprint: str,
+        now: str | None = None,
+    ) -> dict[str, Any]:
+        """Clear only after the trusted worker revalidates the same live browser.
+
+        This method is intentionally separate from the external/user-auth clearance
+        path below. The hosted trust worker may call it only while it still owns the
+        exact Playwright context that observed the checkpoint and after it has
+        revalidated the exact application in that context.
+        """
+        origin, path_sha256 = _safe_location(current_url)
+        fingerprint_sha256 = _sha_text(str(page_fingerprint or "unknown"))
+        timestamp = now or _now()
+
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            checkpoint = self._checkpoint_locked(
+                connection,
+                trust_checkpoint_id=trust_checkpoint_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
+            if str(checkpoint["status"]) != WAITING_FOR_USER_AUTH:
+                raise ValueError("Trust checkpoint is not active")
+            job = self._job_locked(
+                connection,
+                job_id=str(checkpoint["prepare_job_id"]),
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
+            if str(job["job_state"]) != "WAITING_INPUT":
+                raise ValueError("Preparation job is not parked for user authentication")
+            if job["cancel_requested_at"] is not None:
+                raise ValueError("Cancelled preparation cannot be resumed")
+            if str(job["session_state"]) not in _PAUSABLE_SESSION_STATES:
+                raise ValueError("Execution session is no longer safely resumable")
+
+            cursor = connection.execute(
+                """UPDATE complete_application_trust_checkpoints
+                   SET status='CLEARED',cleared_at=?,updated_at=?
+                   WHERE trust_checkpoint_id=?
+                     AND status='WAITING_FOR_USER_AUTH'""",
+                (timestamp, timestamp, trust_checkpoint_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("Trust checkpoint clearance lost its atomic claim")
+
+            requeue = connection.execute(
+                """UPDATE complete_application_prepare_jobs
+                   SET state='QUEUED',available_at=?,last_error=NULL,
+                       finished_at=NULL,updated_at=?
+                   WHERE job_id=? AND state='WAITING_INPUT'
+                     AND cancel_requested_at IS NULL""",
+                (timestamp, timestamp, job["job_id"]),
+            )
+            if requeue.rowcount != 1:
+                raise ValueError(
+                    "Trust checkpoint cleared without an atomic preparation requeue"
+                )
+
+            self._append_event_locked(
+                connection,
+                checkpoint_id=trust_checkpoint_id,
+                event_type="CLEARED",
+                evidence={
+                    "verification_method": "SAME_LIVE_HOSTED_BROWSER",
+                    "post_auth_origin": origin,
+                    "post_auth_path_sha256": path_sha256,
+                    "post_auth_page_fingerprint_sha256": fingerprint_sha256,
+                    "prepare_job_requeued": True,
+                    "raw_url_persisted": False,
+                    "browser_secrets_persisted": False,
+                },
+                occurred_at=timestamp,
+            )
+            row = connection.execute(
+                """SELECT * FROM complete_application_trust_checkpoints
+                   WHERE trust_checkpoint_id=?""",
+                (trust_checkpoint_id,),
+            ).fetchone()
+            queued = connection.execute(
+                """SELECT * FROM complete_application_prepare_jobs
+                   WHERE job_id=?""",
+                (job["job_id"],),
+            ).fetchone()
+            assert row is not None and queued is not None
+            result = dict(row)
+            result["prepare_job_state"] = str(queued["state"])
+            return result
+
     def clear_after_verified_user_auth(
         self,
         *,

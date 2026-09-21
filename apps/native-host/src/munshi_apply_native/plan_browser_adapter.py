@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
@@ -21,6 +22,7 @@ from .hunter_plan_semantic_bridge import answer_matches_question
 
 RESUME_UPLOAD_ENV = "MUNSHI_APPLY_RESUME_UPLOAD_ENABLED"
 NORMAL_AUTOFILL_ENV = "MUNSHI_APPLY_NORMAL_ANSWER_AUTOFILL_ENABLED"
+SUBMIT_MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH"})
 
 
 def _enabled(name: str) -> bool:
@@ -33,18 +35,23 @@ def digest(value: Any) -> str:
     ).hexdigest()
 
 
+KNOWN_PROVIDER_RECIPES = {
+    "GREENHOUSE": ("greenhouse.io",),
+    "LEVER": ("lever.co",),
+    "ASHBY": ("ashbyhq.com",),
+    "SMARTRECRUITERS": ("smartrecruiters.com",),
+    "WORKDAY": ("myworkdayjobs.com", "myworkdaysite.com"),
+    "AGILE_ATS": ("agile-ats.com",),
+}
+
+
 def provider_for_url(url: str) -> str:
-    host = (urlsplit(url).hostname or "").lower()
-    for provider, domains in {
-        "GREENHOUSE": ("greenhouse.io",),
-        "LEVER": ("lever.co",),
-        "ASHBY": ("ashbyhq.com",),
-        "SMARTRECRUITERS": ("smartrecruiters.com",),
-        "WORKDAY": ("myworkdayjobs.com", "myworkdaysite.com"),
-    }.items():
+    """Return an optimization recipe hint, never an execution eligibility verdict."""
+    host = (urlsplit(url).hostname or "").casefold().rstrip(".")
+    for provider, domains in KNOWN_PROVIDER_RECIPES.items():
         if any(host == domain or host.endswith("." + domain) for domain in domains):
             return provider
-    return "UNSUPPORTED"
+    return "GENERIC"
 
 
 class PlanBrowserAdapter:
@@ -63,6 +70,10 @@ class PlanBrowserAdapter:
         self.current_plan = current_plan
         self.runtime_path = runtime_path
         self.on_event: Callable[[str, dict[str, Any]], None] = lambda _kind, _evidence: None
+        # Exact browser-verified upload evidence survives SPA element replacement
+        # within this adapter/session.  It is always plan-bound and never sourced
+        # from provider text, filenames, or optimistic DOM state.
+        self._verified_uploads: dict[tuple[str, str], str] = {}
 
     def _scan(self) -> dict[str, Any]:
         if not self.page.evaluate("typeof MunshiPlanRuntime !== 'undefined'"):
@@ -172,8 +183,11 @@ class PlanBrowserAdapter:
             expected.query,
         )
         scan = self._scan()["page"]
+        provider_policy = dict(plan.get("provider_policy") or {})
+        declared_provider = str(provider_policy.get("provider") or "GENERIC").upper()
         return {
-            "provider": provider_for_url(self.page.url),
+            "provider": declared_provider,
+            "provider_recipe": provider_for_url(self.page.url),
             "job_id": str(plan["job"]["id"]) if same else "",
             "current_url": self.page.url,
             "page_id": scan["pageId"],
@@ -188,6 +202,120 @@ class PlanBrowserAdapter:
             raise ValueError("Observed control disappeared")
         return element
 
+    def _file_sha256(self, control_id: str) -> str:
+        data = self._element(control_id).evaluate("""async element => {
+          if (!element.files || element.files.length !== 1) return null;
+          const file = element.files[0];
+          const bytes = await file.arrayBuffer();
+          const hash = await crypto.subtle.digest('SHA-256', bytes);
+          return Array.from(new Uint8Array(hash),
+            byte => byte.toString(16).padStart(2, '0')).join('');
+        }""")
+        return str(data or "").strip().lower()
+
+    @staticmethod
+    def _upload_key(plan: dict[str, Any], role: str) -> tuple[str, str]:
+        return (str(plan.get("plan_id") or ""), str(role))
+
+    def _remember_verified_upload(
+        self, *, plan: dict[str, Any], role: str, expected_sha256: str
+    ) -> None:
+        if self.current_plan(plan) is not True:
+            raise ValueError("Hunter plan is stale")
+        self._verified_uploads[self._upload_key(plan, role)] = str(
+            expected_sha256
+        ).strip().lower()
+
+    def _remembered_upload(self, *, plan: dict[str, Any], role: str) -> str:
+        if self.current_plan(plan) is not True:
+            return ""
+        return self._verified_uploads.get(self._upload_key(plan, role), "")
+
+    def _advance_application_entry_surface(self, plan: dict[str, Any]) -> bool:
+        """Enter a generic application surface from a job-details shell.
+
+        This is intentionally provider-neutral.  It runs only when the scanner
+        sees no application questions and no final-submit boundary, and only one
+        visible button has an exact, non-destructive application-entry label.
+        """
+        if self.current_plan(plan) is not True:
+            raise ValueError("Hunter plan is stale")
+        described = self._scan()
+        page = described["page"]
+        controls = {
+            str(item.get("controlId") or ""): item
+            for item in page.get("controls") or []
+            if isinstance(item, dict)
+        }
+        visible_editable_questions = [
+            question
+            for question in page.get("questions") or []
+            if isinstance(question, dict)
+            and isinstance(controls.get(str(question.get("controlId") or "")), dict)
+            and controls[str(question.get("controlId") or "")].get("visible") is True
+            and controls[str(question.get("controlId") or "")].get("disabled") is not True
+            and str(controls[str(question.get("controlId") or "")].get("kind") or "")
+            != "BUTTON"
+        ]
+        if visible_editable_questions:
+            return False
+        if any(
+            item.get("action") == "FINAL_SUBMIT" and not item.get("disabled")
+            for item in page.get("navigationCandidates") or []
+        ):
+            return False
+        result = self.page.evaluate(
+            r"""() => {
+              const visible = element => {
+                if (!(element instanceof HTMLElement)) return false;
+                const style = getComputedStyle(element);
+                const rect = element.getBoundingClientRect();
+                return style.display !== 'none'
+                  && style.visibility !== 'hidden'
+                  && Number(style.opacity || 1) !== 0
+                  && rect.width > 0 && rect.height > 0;
+              };
+              const normalized = element => String(
+                element.innerText
+                || element.value
+                || element.getAttribute('aria-label')
+                || element.getAttribute('title')
+                || ''
+              ).replace(/\s+/g, ' ').trim().toLowerCase();
+              const allowed = new Set([
+                'apply',
+                'apply now',
+                'start application',
+                'begin application',
+                'start my application',
+              ]);
+              const candidates = Array.from(document.querySelectorAll(
+                'button,[role="button"],input[type="button"],a'
+              )).filter(element => visible(element) && allowed.has(normalized(element)));
+              if (candidates.length !== 1) return { advanced: false, count: candidates.length };
+              candidates[0].click();
+              return { advanced: true, label: normalized(candidates[0]) };
+            }"""
+        )
+        if not isinstance(result, dict) or result.get("advanced") is not True:
+            return False
+        self.on_event(
+            "APPLICATION_ENTRY_ADVANCED",
+            {"strategy": "unique_safe_entry_label", "label": str(result.get("label") or "")[:80]},
+        )
+        with suppress(Exception):
+            self.page.wait_for_timeout(150)
+        return True
+
+    @staticmethod
+    def _binding_material(binding: dict[str, Any]) -> dict[str, str]:
+        return {
+            "binding_type": str(binding.get("binding_type") or ""),
+            "control_id": str(binding.get("control_id") or ""),
+            "action": str(binding.get("action") or ""),
+            "method": str(binding.get("method") or "").upper(),
+        }
+
     def _submit_binding(self) -> dict[str, str] | None:
         candidates = [
             item
@@ -196,26 +324,194 @@ class PlanBrowserAdapter:
         ]
         if len(candidates) != 1:
             return None
-        return self._element(candidates[0]["controlId"]).evaluate(
-            """element => {
+        control_id = str(candidates[0]["controlId"])
+        observed = self._element(control_id).evaluate(
+            r"""element => {
               const form = element.form || element.closest('form');
-              if (!form) return null;
-              const method = (
-                element.getAttribute('formmethod')
-                || form.getAttribute('method')
-                || 'get'
-              ).trim().toUpperCase();
+              if (form) {
+                const method = (
+                  element.getAttribute('formmethod')
+                  || form.getAttribute('method')
+                  || 'get'
+                ).trim().toUpperCase();
+                const rawAction = (
+                  element.getAttribute('formaction')
+                  || form.getAttribute('action')
+                  || document.URL
+                );
+                return {
+                  binding_type: 'NATIVE_FORM',
+                  action: new URL(rawAction, document.baseURI).href,
+                  method,
+                };
+              }
+
               const rawAction = (
-                element.getAttribute('formaction')
-                || form.getAttribute('action')
-                || document.URL
-              );
+                element.getAttribute('data-submit-url')
+                || element.getAttribute('data-submit-endpoint')
+                || element.getAttribute('data-endpoint')
+                || element.getAttribute('data-action')
+                || element.getAttribute('data-url')
+                || element.getAttribute('href')
+                || ''
+              ).trim();
+              if (!rawAction) return null;
+              const method = (
+                element.getAttribute('data-method')
+                || element.getAttribute('data-http-method')
+                || element.getAttribute('formmethod')
+                || 'POST'
+              ).trim().toUpperCase();
               return {
+                binding_type: 'DECLARATIVE_CONTROL',
                 action: new URL(rawAction, document.baseURI).href,
                 method,
               };
             }"""
         )
+        if not isinstance(observed, dict):
+            return None
+        material = self._binding_material(
+            {
+                **observed,
+                "control_id": control_id,
+            }
+        )
+        if (
+            material["binding_type"] not in {"NATIVE_FORM", "DECLARATIVE_CONTROL"}
+            or material["method"] not in SUBMIT_MUTATING_METHODS
+            or not material["action"]
+        ):
+            return None
+        return {
+            **material,
+            "binding_digest": digest(material),
+        }
+
+    @staticmethod
+    def _allowed_submit_action(plan: dict[str, Any], action: str) -> bool:
+        parsed = urlsplit(action)
+        host = (parsed.hostname or "").casefold().rstrip(".")
+        if (
+            parsed.scheme.casefold() != "https"
+            or not host
+            or parsed.username
+            or parsed.password
+            or parsed.fragment
+        ):
+            return False
+        policy = dict(plan.get("provider_policy") or {})
+        allowed = {
+            str(value).casefold().rstrip(".")
+            for value in policy.get("allowed_hosts") or []
+            if str(value).strip()
+        }
+        target = str(
+            dict(plan.get("job") or {}).get("apply_url")
+            or dict(plan.get("job") or {}).get("job_url")
+            or ""
+        )
+        target_host = (urlsplit(target).hostname or "").casefold().rstrip(".")
+        if target_host:
+            allowed.add(target_host)
+        return not allowed or any(
+            host == suffix or host.endswith("." + suffix) for suffix in allowed
+        )
+
+    def _confirmation_snapshot(self) -> dict[str, str] | None:
+        result = self.page.evaluate(
+            r"""() => {
+              const visible = element => {
+                if (!(element instanceof HTMLElement)) return false;
+                const style = getComputedStyle(element);
+                const rect = element.getBoundingClientRect();
+                return style.display !== 'none'
+                  && style.visibility !== 'hidden'
+                  && Number(style.opacity || 1) !== 0
+                  && rect.width > 0 && rect.height > 0;
+              };
+              const patterns = [
+                ['application-submitted', /\bapplication\b.{0,80}\bsubmitted\b/i],
+                ['application-received', /\bapplication\b.{0,80}\breceived\b/i],
+                ['thank-you-applying', /\bthank(?:s| you)\b.{0,80}\bapply(?:ing|ied)\b/i],
+                ['successfully-submitted', /\bsuccessfully\b.{0,40}\bsubmitted\b/i],
+                ['application-complete', /\bapplication\b.{0,40}\bcomplete(?:d)?\b/i],
+              ];
+              const selectors = [
+                '#application_confirmation',
+                '.application-confirmation',
+                '[id*="confirmation" i]',
+                '[class*="confirmation" i]',
+                '[data-testid*="confirmation" i]',
+                '[data-qa*="confirmation" i]',
+                '[role="status"]',
+                '[role="alert"]',
+                'main',
+                'body',
+              ];
+              const seen = new Set();
+              for (const selector of selectors) {
+                const elements = Array.from(
+                  document.querySelectorAll(selector)
+                ).slice(0, 80);
+                for (const element of elements) {
+                  if (seen.has(element) || !visible(element)) continue;
+                  seen.add(element);
+                  const text = String(element.innerText || '')
+                    .replace(/\s+/g, ' ').trim();
+                  if (!text) continue;
+                  for (const [marker, pattern] of patterns) {
+                    if (pattern.test(text)) {
+                      return {
+                        marker,
+                        text: text.slice(0, 1000),
+                      };
+                    }
+                  }
+                }
+              }
+              return null;
+            }"""
+        )
+        if not isinstance(result, dict):
+            return None
+        marker = str(result.get("marker") or "").strip()
+        text = str(result.get("text") or "").strip()
+        if not marker or not text:
+            return None
+        return {"marker": marker, "text": text}
+
+    @staticmethod
+    def _payload_application_id(payload: Any) -> str:
+        if not isinstance(payload, dict):
+            return ""
+        queue: list[tuple[dict[str, Any], int]] = [(payload, 0)]
+        while queue:
+            current, depth = queue.pop(0)
+            for key, value in current.items():
+                normalized = "".join(
+                    character
+                    for character in str(key).casefold()
+                    if character.isalnum()
+                )
+                if (
+                    isinstance(value, (str, int))
+                    and (
+                        normalized in {
+                            "applicationid",
+                            "candidateapplicationid",
+                            "submissionid",
+                            "applicationsubmissionid",
+                        }
+                        or ("application" in normalized and normalized.endswith("id"))
+                    )
+                ):
+                    candidate = str(value).strip()
+                    if candidate:
+                        return candidate[:240]
+                if depth < 3 and isinstance(value, dict):
+                    queue.append((value, depth + 1))
+        return ""
 
     def _observe(self, plan: dict[str, Any]) -> dict[str, Any]:
         described = self._scan()
@@ -223,27 +519,42 @@ class PlanBrowserAdapter:
         files = [c for c in page["controls"] if c.get("inputType") == "file"]
         resume_sha = ""
         cover_letter_sha = ""
+        cover_letter_field_present = False
         expected_cover = (
             dict(plan["cover_letter"]) if isinstance(plan.get("cover_letter"), dict) else None
         )
         for control in files:
+            identity = (
+                str(control.get("name") or "")
+                + " "
+                + str(control.get("label") or "")
+                + " "
+                + str(control.get("ariaLabel") or "")
+            ).casefold()
+            if "cover" in identity:
+                cover_letter_field_present = True
             # Independently hash the actual File bytes in the browser.
-            data = self._element(control["controlId"]).evaluate("""async element => {
-              if (!element.files || element.files.length !== 1) return null;
-              const file = element.files[0];
-              const bytes = await file.arrayBuffer();
-              const hash = await crypto.subtle.digest('SHA-256', bytes);
-              return { name: file.name, sha: Array.from(new Uint8Array(hash),
-                byte => byte.toString(16).padStart(2, '0')).join('') };
-            }""")
-            if data and data["sha"] == plan["resume"]["artifact_sha256"]:
-                resume_sha = data["sha"]
+            file_sha = self._file_sha256(control["controlId"])
+            if file_sha and file_sha == plan["resume"]["artifact_sha256"]:
+                resume_sha = file_sha
+                self._remember_verified_upload(
+                    plan=plan, role="resume", expected_sha256=file_sha
+                )
             elif (
-                data
+                file_sha
                 and expected_cover is not None
-                and data["sha"] == expected_cover["artifact_sha256"]
+                and file_sha == expected_cover["artifact_sha256"]
             ):
-                cover_letter_sha = data["sha"]
+                cover_letter_sha = file_sha
+                self._remember_verified_upload(
+                    plan=plan, role="cover_letter", expected_sha256=file_sha
+                )
+        if not resume_sha:
+            resume_sha = self._remembered_upload(plan=plan, role="resume")
+        if expected_cover is not None and not cover_letter_sha:
+            cover_letter_sha = self._remembered_upload(
+                plan=plan, role="cover_letter"
+            )
         required = [f for f in fields if f["required"]]
         unresolved = [
             {
@@ -251,7 +562,9 @@ class PlanBrowserAdapter:
                 "control_id": f["control_id"],
                 "question": f["question"],
                 "semantic_type": f["semantic_type"],
+                "semantic_confidence": f.get("semantic_confidence", 0.0),
                 "sensitivity": f["sensitivity_class"],
+                "question_observation": dict(f.get("question_observation") or {}),
                 "reason": "Required answer is unresolved",
             }
             for f in required
@@ -277,6 +590,7 @@ class PlanBrowserAdapter:
             "resume_sha256": resume_sha,
             **(
                 {
+                    "cover_letter_field_present": cover_letter_field_present,
                     "cover_letter_uploaded": bool(cover_letter_sha),
                     "cover_letter_sha256": cover_letter_sha,
                 }
@@ -311,6 +625,7 @@ class PlanBrowserAdapter:
             self._dismiss_cookie_consent()
             if self.current_plan(plan) is not True:
                 raise ValueError("Hunter plan is stale")
+            self._advance_application_entry_surface(plan)
             observed = self.inspect_job(plan=plan)
             if observed["security_checkpoint"] or not observed["job_id"]:
                 raise ValueError("Browser identity or security checkpoint blocks preparation")
@@ -319,13 +634,26 @@ class PlanBrowserAdapter:
             for question in described["page"]["questions"]:
                 controls = {c["controlId"]: c for c in self._scan()["page"]["controls"]}
                 control = controls.get(question["controlId"])
-                if not control or not control["visible"] or control["disabled"]:
+                if not control or control["disabled"]:
                     continue
                 if control.get("inputType") == "file":
                     identity = (
                         str(control.get("name") or "") + " " + str(control.get("label") or "")
                     ).casefold()
-                    if "resume" in identity:
+                    file_controls = [
+                        item
+                        for item in controls.values()
+                        if item.get("inputType") == "file" and not item.get("disabled")
+                    ]
+                    resume_role = bool(
+                        any(token in identity for token in ("resume", "curriculum vitae"))
+                        or re.search(r"(^|\W)cv($|\W)", identity)
+                        or (
+                            len(file_controls) == 1
+                            and not isinstance(plan.get("cover_letter"), dict)
+                        )
+                    )
+                    if resume_role:
                         if not _enabled(RESUME_UPLOAD_ENV):
                             raise ValueError("Resume upload is disabled")
                         if self.current_plan(plan) is not True:
@@ -340,8 +668,16 @@ class PlanBrowserAdapter:
                                 "buffer": data,
                             }
                         )
+                        observed_sha = self._file_sha256(control["controlId"])
+                        if observed_sha != plan["resume"]["artifact_sha256"]:
+                            raise ValueError("Resume upload browser digest mismatch")
+                        self._remember_verified_upload(
+                            plan=plan,
+                            role="resume",
+                            expected_sha256=observed_sha,
+                        )
                         self.on_event(
-                            "RESUME_UPLOADED", {"sha256": plan["resume"]["artifact_sha256"]}
+                            "RESUME_UPLOADED", {"sha256": observed_sha}
                         )
                         continue
                     if (
@@ -364,7 +700,17 @@ class PlanBrowserAdapter:
                                 "buffer": data,
                             }
                         )
-                        self.on_event("COVER_LETTER_UPLOADED", {"sha256": cover["artifact_sha256"]})
+                        observed_sha = self._file_sha256(control["controlId"])
+                        if observed_sha != cover["artifact_sha256"]:
+                            raise ValueError("Cover-letter upload browser digest mismatch")
+                        self._remember_verified_upload(
+                            plan=plan,
+                            role="cover_letter",
+                            expected_sha256=observed_sha,
+                        )
+                        self.on_event("COVER_LETTER_UPLOADED", {"sha256": observed_sha})
+                    continue
+                if not control["visible"]:
                     continue
                 if question["sensitive"] or control.get("inputType") == "password":
                     continue  # Protected execution requires a scoped resolver, never plain memory.
@@ -419,7 +765,8 @@ class PlanBrowserAdapter:
     def inspect_submission(self, *, plan: dict[str, Any]) -> dict[str, Any]:
         return {
             **self._observe(plan),
-            "supported": provider_for_url(self.page.url) == "GREENHOUSE",
+            "supported": True,
+            "execution_mode": "GENERIC_DOM_ARIA",
             "plan_current": self.current_plan(plan) is True,
         }
 
@@ -432,9 +779,9 @@ class PlanBrowserAdapter:
         observation = self.inspect_submission(plan=plan)
         validate_submit_observation(observation, plan, review)
         buttons = [
-            n
-            for n in self._scan()["page"]["navigationCandidates"]
-            if n["action"] == "FINAL_SUBMIT" and not n["disabled"]
+            item
+            for item in self._scan()["page"]["navigationCandidates"]
+            if item["action"] == "FINAL_SUBMIT" and not item["disabled"]
         ]
         if len(buttons) != 1:
             return {"action_executed": False, "verification_status": "BLOCKED"}
@@ -442,9 +789,9 @@ class PlanBrowserAdapter:
         final_observation = self.inspect_submission(plan=plan)
         validate_submit_observation(final_observation, plan, review)
         final_buttons = [
-            n
-            for n in self._scan()["page"]["navigationCandidates"]
-            if n["action"] == "FINAL_SUBMIT" and not n["disabled"]
+            item
+            for item in self._scan()["page"]["navigationCandidates"]
+            if item["action"] == "FINAL_SUBMIT" and not item["disabled"]
         ]
         if len(final_buttons) != 1 or final_buttons[0]["controlId"] != buttons[0]["controlId"]:
             return {"action_executed": False, "verification_status": "BLOCKED"}
@@ -452,11 +799,24 @@ class PlanBrowserAdapter:
         submit_binding = final_observation.get("submit_binding")
         if not isinstance(submit_binding, dict):
             return {"action_executed": False, "verification_status": "BLOCKED"}
+        expected_binding_type = str(submit_binding.get("binding_type") or "")
+        expected_control_id = str(submit_binding.get("control_id") or "")
         expected_submit_url = str(submit_binding.get("action") or "")
         expected_submit_method = str(submit_binding.get("method") or "").upper()
-        if not expected_submit_url or expected_submit_method != "POST":
+        expected_binding_digest = str(submit_binding.get("binding_digest") or "")
+        expected_material = self._binding_material(submit_binding)
+        if (
+            expected_binding_type not in {"NATIVE_FORM", "DECLARATIVE_CONTROL"}
+            or expected_control_id != str(final_buttons[0]["controlId"])
+            or expected_submit_method not in SUBMIT_MUTATING_METHODS
+            or not expected_submit_url
+            or not self._allowed_submit_action(plan, expected_submit_url)
+            or expected_binding_digest != digest(expected_material)
+        ):
             return {"action_executed": False, "verification_status": "BLOCKED"}
 
+        before_url = str(self.page.url)
+        before_confirmation = self._confirmation_snapshot()
         observed_responses: list[Any] = []
 
         def capture_response(response: Any) -> None:
@@ -471,29 +831,65 @@ class PlanBrowserAdapter:
         self.page.on("response", capture_response)
         try:
             clicked = self.page.evaluate(
-                """({ controlId, expected }) => {
+                r"""({ controlId, expected }) => {
                   const element = MunshiPlanRuntime.element(controlId);
                   if (!element) return false;
-                  const form = element.form || element.closest('form');
-                  if (!form) return false;
-                  const method = (
-                    element.getAttribute('formmethod')
-                    || form.getAttribute('method')
-                    || 'get'
-                  ).trim().toUpperCase();
-                  const rawAction = (
-                    element.getAttribute('formaction')
-                    || form.getAttribute('action')
-                    || document.URL
-                  );
-                  const action = new URL(rawAction, document.baseURI).href;
-                  if (method !== expected.method || action !== expected.action) return false;
+
+                  const binding = (() => {
+                    const form = element.form || element.closest('form');
+                    if (form) {
+                      const method = (
+                        element.getAttribute('formmethod')
+                        || form.getAttribute('method')
+                        || 'get'
+                      ).trim().toUpperCase();
+                      const rawAction = (
+                        element.getAttribute('formaction')
+                        || form.getAttribute('action')
+                        || document.URL
+                      );
+                      return {
+                        binding_type: 'NATIVE_FORM',
+                        action: new URL(rawAction, document.baseURI).href,
+                        method,
+                      };
+                    }
+                    const rawAction = (
+                      element.getAttribute('data-submit-url')
+                      || element.getAttribute('data-submit-endpoint')
+                      || element.getAttribute('data-endpoint')
+                      || element.getAttribute('data-action')
+                      || element.getAttribute('data-url')
+                      || element.getAttribute('href')
+                      || ''
+                    ).trim();
+                    if (!rawAction) return null;
+                    const method = (
+                      element.getAttribute('data-method')
+                      || element.getAttribute('data-http-method')
+                      || element.getAttribute('formmethod')
+                      || 'POST'
+                    ).trim().toUpperCase();
+                    return {
+                      binding_type: 'DECLARATIVE_CONTROL',
+                      action: new URL(rawAction, document.baseURI).href,
+                      method,
+                    };
+                  })();
+
+                  if (
+                    !binding
+                    || binding.binding_type !== expected.binding_type
+                    || binding.method !== expected.method
+                    || binding.action !== expected.action
+                  ) return false;
                   element.click();
                   return true;
                 }""",
                 {
-                    "controlId": final_buttons[0]["controlId"],
+                    "controlId": expected_control_id,
                     "expected": {
+                        "binding_type": expected_binding_type,
                         "action": expected_submit_url,
                         "method": expected_submit_method,
                     },
@@ -501,90 +897,177 @@ class PlanBrowserAdapter:
             )
             if clicked is not True:
                 return {"action_executed": False, "verification_status": "BLOCKED"}
-            try:
-                self.page.locator("#application_confirmation, .application-confirmation").wait_for(
-                    state="visible", timeout=5000
-                )
-            except Exception:
-                return {"action_executed": True, "verification_status": "SUBMISSION_UNVERIFIED"}
+
+            for _attempt in range(50):
+                confirmation = self._confirmation_snapshot()
+                if observed_responses and confirmation is not None:
+                    break
+                self.page.wait_for_timeout(100)
         finally:
             self.page.remove_listener("response", capture_response)
 
-        marker = self.page.locator("#application_confirmation, .application-confirmation").first
-        message = marker.inner_text().strip()
-        if not any(
-            phrase in message.casefold()
-            for phrase in (
-                "application has been submitted",
-                "application has been received",
-                "thank you for applying",
-                "thanks for applying",
-            )
-        ):
-            return {"action_executed": True, "verification_status": "SUBMISSION_UNVERIFIED"}
+        confirmation = self._confirmation_snapshot()
+        if confirmation is None:
+            return {
+                "action_executed": True,
+                "verification_status": "SUBMISSION_UNVERIFIED",
+                "submission_url": self.page.url,
+            }
 
-        expected_provider = str(plan["provider_policy"]["provider"])
-        expected_job_id = str(plan["job"]["id"])
-        correlated: dict[str, Any] | None = None
+        exact_response: Any | None = None
+        response_status = 0
+        response_url = ""
+        response_payload: Any = None
         for response in reversed(observed_responses):
             try:
-                response_status = int(response.status)
-                response_url = str(response.url)
-                payload = response.json()
+                candidate_status = int(response.status)
+                candidate_url = str(response.url)
             except Exception:
-                response_status = 0
-                response_url = ""
-                payload = None
-            if not 200 <= response_status < 300:
+                candidate_status = 0
+                candidate_url = ""
+            if not 200 <= candidate_status < 400 or candidate_url != expected_submit_url:
                 continue
-            if response_url != expected_submit_url:
-                continue
-            if provider_for_url(response_url) != expected_provider:
-                continue
-            if not isinstance(payload, dict):
-                continue
-            observed_job_id = str(payload.get("job_id") or payload.get("jobId") or "")
-            provider_application_id = str(
-                payload.get("application_id") or payload.get("applicationId") or ""
-            ).strip()
-            response_state = str(payload.get("status") or "").strip().casefold()
-            if observed_job_id != expected_job_id or not provider_application_id:
-                continue
-            if response_state not in {"submitted", "received"}:
-                continue
-            correlated = {
-                "provider_application_id": provider_application_id,
-                "response_status": response_status,
-                "response_url": response_url,
-                "submit_action": expected_submit_url,
-                "submit_method": expected_submit_method,
-                "submission_response_marker": "provider-json-application-id",
-            }
+            exact_response = response
+            response_status = candidate_status
+            response_url = candidate_url
+            try:
+                response_payload = response.json()
+            except Exception:
+                response_payload = None
             break
 
-        if correlated is None:
+        if exact_response is None:
             return {
                 "action_executed": True,
                 "verification_status": "SUBMISSION_UNVERIFIED",
                 "submission_url": self.page.url,
                 "success_evidence": {
-                    "completion_marker": "greenhouse-application-confirmation",
-                    "confirmation_message": message[:500],
-                    "provider": expected_provider,
-                    "job_id": expected_job_id,
+                    "completion_marker": confirmation["marker"],
+                    "confirmation_message": confirmation["text"][:500],
+                    "exact_action_verified": False,
                 },
             }
 
+        expected_job_id = str(plan["job"]["id"])
+        if isinstance(response_payload, dict):
+            payload_job_id = str(
+                response_payload.get("job_id") or response_payload.get("jobId") or ""
+            ).strip()
+            if payload_job_id and payload_job_id != expected_job_id:
+                return {
+                    "action_executed": True,
+                    "verification_status": "SUBMISSION_UNVERIFIED",
+                    "submission_url": self.page.url,
+                }
+            payload_state = str(
+                response_payload.get("status")
+                or response_payload.get("state")
+                or response_payload.get("result")
+                or ""
+            ).strip().casefold()
+            if payload_state in {"failed", "error", "rejected", "invalid"}:
+                return {
+                    "action_executed": True,
+                    "verification_status": "SUBMISSION_UNVERIFIED",
+                    "submission_url": self.page.url,
+                }
+
+        confirmation_changed = (
+            before_confirmation is None
+            or digest(before_confirmation) != digest(confirmation)
+        )
+        url_changed = str(self.page.url) != before_url
+        try:
+            post_candidates = [
+                item
+                for item in self._scan()["page"]["navigationCandidates"]
+                if item["action"] == "FINAL_SUBMIT" and not item["disabled"]
+            ]
+            submit_control_gone = not any(
+                str(item.get("controlId") or "") == expected_control_id
+                for item in post_candidates
+            )
+        except Exception:
+            submit_control_gone = True
+
+        if not confirmation_changed and not url_changed and not submit_control_gone:
+            return {
+                "action_executed": True,
+                "verification_status": "SUBMISSION_UNVERIFIED",
+                "submission_url": self.page.url,
+            }
+
+        provider_policy = dict(plan.get("provider_policy") or {})
+        declared_provider = str(provider_policy.get("provider") or "GENERIC").upper()
+        provider_recipe = provider_for_url(expected_submit_url)
+        external_application_id = self._payload_application_id(response_payload)
+        confirmation_digest = digest(confirmation)
+        submission_reference = "submission-ref-" + digest(
+            {
+                "job_id": expected_job_id,
+                "reviewed_destination": str(review.get("destination_url") or ""),
+                "submit_action": expected_submit_url,
+                "submit_method": expected_submit_method,
+                "action_binding_digest": expected_binding_digest,
+                "response_status": response_status,
+                "response_url": response_url,
+                "confirmation_evidence_digest": confirmation_digest,
+                "post_submit_url": str(self.page.url),
+            }
+        )[:32]
+        provider_application_id = external_application_id or submission_reference
+
+        success_evidence = {
+            "completion_marker": confirmation["marker"],
+            "confirmation_message": confirmation["text"][:500],
+            "confirmation_evidence_digest": confirmation_digest,
+            "provider": declared_provider,
+            "provider_recipe": provider_recipe,
+            "job_id": expected_job_id,
+            "provider_application_id": provider_application_id,
+            "provider_application_id_source": (
+                "EMPLOYER_RESPONSE"
+                if external_application_id
+                else "DERIVED_EXACT_ACTION_EVIDENCE"
+            ),
+            "submission_reference": submission_reference,
+            "reviewed_destination": str(review.get("destination_url") or ""),
+            "submit_action": expected_submit_url,
+            "submit_method": expected_submit_method,
+            "action_binding_digest": expected_binding_digest,
+            "response_status": response_status,
+            "response_url": response_url,
+            "submission_response_marker": "exact-approved-action-response",
+            "exact_action_verified": True,
+            "post_submit_state_changed": bool(
+                confirmation_changed or url_changed or submit_control_gone
+            ),
+        }
+        provider_observation = {
+            "verification_method": "EXACT_APPROVED_ACTION_RESPONSE_AND_CONFIRMATION",
+            "exact_action_confirmed": True,
+            "provider": declared_provider,
+            "provider_recipe": provider_recipe,
+            "provider_application_id": provider_application_id,
+            "submission_reference": submission_reference,
+            "target_url": str(review.get("destination_url") or ""),
+            "submit_action": expected_submit_url,
+            "submit_method": expected_submit_method,
+            "response_status": response_status,
+            "response_url": response_url,
+            "action_binding_digest": expected_binding_digest,
+            "confirmation_evidence_digest": confirmation_digest,
+            "external_observation_id": "browser-evidence-" + digest(success_evidence)[:32],
+            "observed_status": "submitted",
+            "lookup_confirmed": False,
+        }
         return {
             "action_executed": True,
             "verification_status": "VERIFIED",
             "submission_url": self.page.url,
-            "provider_application_id": correlated["provider_application_id"],
-            "success_evidence": {
-                "completion_marker": "greenhouse-application-confirmation",
-                "confirmation_message": message[:500],
-                "provider": expected_provider,
-                "job_id": expected_job_id,
-                **correlated,
-            },
+            "provider_application_id": provider_application_id,
+            "submission_reference": submission_reference,
+            "success_evidence": success_evidence,
+            "provider_observation": provider_observation,
         }
+

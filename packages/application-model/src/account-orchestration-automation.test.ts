@@ -83,6 +83,7 @@ describe("capability-gated account automation", () => {
         automatedAccountCreation: true,
         secureCredentialResolver: true,
         candidateMailAlias: true,
+        mailboxRuntimeAvailable: true,
       },
     });
     expect(ready.canAutoAct).toBe(true);
@@ -106,6 +107,7 @@ describe("capability-gated account automation", () => {
       page: verification,
       capabilities: {
         ordinaryEmailVerification: true,
+        mailboxRuntimeAvailable: true,
         verificationKind: "EMAIL_CODE",
       },
     });
@@ -127,6 +129,7 @@ describe("capability-gated account automation", () => {
       }),
       capabilities: {
         ordinaryEmailVerification: true,
+        mailboxRuntimeAvailable: true,
         verificationKind: "EMAIL_LINK",
       },
     });
@@ -142,6 +145,7 @@ describe("capability-gated account automation", () => {
       knownAccounts: [account()],
       capabilities: {
         ordinaryEmailVerification: true,
+        mailboxRuntimeAvailable: true,
         verificationKind: "PASSWORD_RESET_LINK",
       },
     });
@@ -154,6 +158,7 @@ describe("capability-gated account automation", () => {
       page: recoveryPage,
       capabilities: {
         ordinaryEmailVerification: true,
+        mailboxRuntimeAvailable: true,
         verificationKind: "PASSWORD_RESET_LINK",
         secureCredentialResolver: true,
       },
@@ -165,6 +170,7 @@ describe("capability-gated account automation", () => {
       knownAccounts: [account()],
       capabilities: {
         ordinaryEmailVerification: true,
+        mailboxRuntimeAvailable: true,
         verificationKind: "PASSWORD_RESET_LINK",
         secureCredentialResolver: true,
       },
@@ -185,6 +191,7 @@ describe("capability-gated account automation", () => {
       }),
       capabilities: {
         ordinaryEmailVerification: true,
+        mailboxRuntimeAvailable: true,
         verificationKind: "MAGIC_LOGIN_LINK",
       },
     });

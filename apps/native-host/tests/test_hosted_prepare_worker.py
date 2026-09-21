@@ -30,6 +30,32 @@ def test_target_url_is_provider_and_host_bound():
         raise AssertionError("Wrong-provider target was accepted")
 
 
+def test_target_url_accepts_exact_agile_ats_provider_binding():
+    plan = _plan()
+    plan["job"]["apply_url"] = "https://neomax.jobs.agile-ats.com/jobs/details/1119"
+    plan["job"]["job_url"] = plan["job"]["apply_url"]
+    plan["provider_policy"] = {
+        "provider": "AGILE_ATS",
+        "allowed_hosts": ["agile-ats.com"],
+    }
+    assert _target_url(plan) == "https://neomax.jobs.agile-ats.com/jobs/details/1119"
+
+
+def test_target_url_refuses_agile_ats_label_on_unrelated_host():
+    plan = _plan()
+    plan["job"]["apply_url"] = "https://example.com/jobs/details/1119"
+    plan["provider_policy"] = {
+        "provider": "AGILE_ATS",
+        "allowed_hosts": ["agile-ats.com"],
+    }
+    try:
+        _target_url(plan)
+    except ValueError as error:
+        assert "provider" in str(error)
+    else:
+        raise AssertionError("Unrelated host was accepted as AGILE_ATS")
+
+
 class _Queue:
     def __init__(self):
         self.job = {

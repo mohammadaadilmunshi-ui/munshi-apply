@@ -1,0 +1,82 @@
+name: Provider Neutral Browser Targeted
+
+on:
+  push:
+    branches:
+      - feat/provider-neutral-browser-executor-v1-20260919
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  targeted:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          python -m pip install -e './apps/native-host[dev]'
+
+      - name: Lint provider-neutral surface
+        run: |
+          python -m ruff check \
+            apps/native-host/src/munshi_apply_native/application_plan_handoff_v2.py \
+            apps/native-host/src/munshi_apply_native/complete_application_loop.py \
+            apps/native-host/src/munshi_apply_native/execution_policy.py \
+            apps/native-host/src/munshi_apply_native/hosted_prepare_worker.py \
+            apps/native-host/src/munshi_apply_native/plan_browser_adapter.py \
+            apps/native-host/src/munshi_apply_native/production_receipt_v1.py \
+            apps/native-host/tests/test_application_plan_handoff_v2.py \
+            apps/native-host/tests/test_complete_application_loop.py \
+            apps/native-host/tests/test_production_submission_verification_determinism.py \
+            apps/native-host/tests/browser/test_plan_browser_adapter_chrome.py
+
+      - name: Compile provider-neutral surface
+        run: |
+          python -m py_compile \
+            apps/native-host/src/munshi_apply_native/application_plan_handoff_v2.py \
+            apps/native-host/src/munshi_apply_native/complete_application_loop.py \
+            apps/native-host/src/munshi_apply_native/execution_policy.py \
+            apps/native-host/src/munshi_apply_native/hosted_prepare_worker.py \
+            apps/native-host/src/munshi_apply_native/plan_browser_adapter.py \
+            apps/native-host/src/munshi_apply_native/production_receipt_v1.py
+
+      - name: Run policy and exactly-once regressions
+        run: |
+          python -m pytest -q \
+            apps/native-host/tests/test_application_plan_handoff_v2.py \
+            apps/native-host/tests/test_complete_application_loop.py \
+            apps/native-host/tests/test_production_submission_verification_determinism.py \
+            apps/native-host/tests/test_submit_atomic_review.py \
+            apps/native-host/tests/test_submit_authority_inbox.py \
+            apps/native-host/tests/test_submit_authority_rollover_consume.py
+
+      - name: Build browser runtime
+        run: npm run build
+
+      - name: Run real Chromium provider-neutral executor fixture
+        env:
+          MUNSHI_RUN_BROWSER_TESTS: "1"
+        run: |
+          MUNSHI_BROWSER_EXECUTABLE="$(
+            command -v google-chrome ||
+              command -v google-chrome-stable ||
+              command -v chromium ||
+              command -v chromium-browser ||
+              true
+          )"
+          test -n "${MUNSHI_BROWSER_EXECUTABLE}"
+          export MUNSHI_BROWSER_EXECUTABLE
+          python -m pytest -q \
+            apps/native-host/tests/browser/test_plan_browser_adapter_chrome.py

@@ -496,6 +496,9 @@ class CompleteApplicationLoopService:
                 "questionId": unresolved.get("question_id"),
                 "question": unresolved.get("question") or question_key,
                 "semanticType": semantic,
+                "questionObservation": (
+                    dict(unresolved.get("question_observation") or {}) or None
+                ),
                 "category": category,
                 "status": "WAITING_FOR_USER",
                 "riskLevel": risk,
@@ -625,11 +628,11 @@ class CompleteApplicationLoopService:
         if observation.get("security_checkpoint"):
             session = self._transition(session, "BLOCKED")
             return self._result(session, "BLOCKED")
-        provider = str(observation.get("provider") or "").upper()
-        expected_provider = str(plan_record["provider"]).upper()
+        provider = str(plan_record["provider"]).upper()
+        provider_recipe = str(observation.get("provider_recipe") or "GENERIC").upper()
         expected_job = str(plan["job"]["id"])
         observed_job = str(observation.get("job_id") or "")
-        if provider != expected_provider or observed_job != expected_job:
+        if observed_job != expected_job:
             if session["state"] != "BLOCKED":
                 session = self._transition(
                     session,
@@ -640,11 +643,11 @@ class CompleteApplicationLoopService:
             self._record_event(
                 session=session,
                 event_type="BLOCKED",
-                replay_identity=f"{session_id}:wrong-job:{provider}:{observed_job}",
+                replay_identity=f"{session_id}:wrong-job:{observed_job}",
                 evidence={
-                    "reason": "wrong_job_or_provider",
-                    "expected_provider": expected_provider,
-                    "observed_provider": provider,
+                    "reason": "wrong_job",
+                    "declared_provider": provider,
+                    "provider_recipe": provider_recipe,
                     "expected_job_id": expected_job,
                     "observed_job_id": observed_job,
                 },
@@ -661,8 +664,12 @@ class CompleteApplicationLoopService:
             self._record_event(
                 session=session,
                 event_type="JOB_VERIFIED",
-                replay_identity=f"{session_id}:job-verified:{provider}:{observed_job}",
-                evidence={"provider": provider, "job_id": observed_job},
+                replay_identity=f"{session_id}:job-verified:{observed_job}",
+                evidence={
+                    "provider": provider,
+                    "provider_recipe": provider_recipe,
+                    "job_id": observed_job,
+                },
             )
         if session["state"] == "JOB_VERIFIED":
             session = self._transition(session, "FORM_DISCOVERED")
@@ -687,15 +694,6 @@ class CompleteApplicationLoopService:
             checkpoint=latest,
             resolved_values=self._resolved_values(str(session["application_id"]), session_id),
         )
-        if str(prepared.get("provider") or "").upper() != expected_provider:
-            session = self._transition(session, "BLOCKED")
-            self._record_event(
-                session=session,
-                event_type="BLOCKED",
-                replay_identity=f"{session_id}:provider-changed:{prepared.get('provider')}",
-                evidence={"reason": "provider_changed_during_prepare"},
-            )
-            return self._result(session, "BLOCKED")
         if str(prepared.get("job_id") or "") != expected_job:
             session = self._transition(session, "BLOCKED")
             self._record_event(
@@ -722,10 +720,13 @@ class CompleteApplicationLoopService:
             dict(plan["cover_letter"]) if isinstance(plan.get("cover_letter"), dict) else None
         )
         if cover_letter is not None:
+            cover_field_present = prepared.get("cover_letter_field_present") is True
             cover_matches = str(prepared.get("cover_letter_sha256") or "") == str(
                 cover_letter["artifact_sha256"]
             )
-            if prepared.get("cover_letter_uploaded") is not True or not cover_matches:
+            if cover_field_present and (
+                prepared.get("cover_letter_uploaded") is not True or not cover_matches
+            ):
                 session = self._transition(session, "FAILED_SAFELY")
                 self._record_event(
                     session=session,
@@ -779,8 +780,17 @@ class CompleteApplicationLoopService:
             "review_fields": review_fields,
         }
         if cover_letter is not None:
-            event_evidence["cover_letter_uploaded"] = True
-            event_evidence["cover_letter_sha256"] = cover_letter["artifact_sha256"]
+            event_evidence["cover_letter_field_present"] = (
+                prepared.get("cover_letter_field_present") is True
+            )
+            event_evidence["cover_letter_uploaded"] = (
+                prepared.get("cover_letter_uploaded") is True
+            )
+            event_evidence["cover_letter_sha256"] = (
+                cover_letter["artifact_sha256"]
+                if prepared.get("cover_letter_uploaded") is True
+                else None
+            )
         self._record_event(
             session=session,
             event_type="FORM_PREPARED",
@@ -937,6 +947,7 @@ class CompleteApplicationLoopService:
                         "artifact_id": cover_letter["artifact_id"],
                         "filename": cover_letter["filename"],
                         "sha256": cover_letter["artifact_sha256"],
+                        "field_present": prepared.get("cover_letter_field_present") is True,
                         "uploaded": prepared.get("cover_letter_uploaded") is True,
                     }
                 }
@@ -1038,9 +1049,12 @@ class CompleteApplicationLoopService:
         elif not isinstance(reviewed_cover, dict) or (
             reviewed_cover.get("artifact_id") != current_cover.get("artifact_id")
             or reviewed_cover.get("sha256") != current_cover.get("artifact_sha256")
-            or reviewed_cover.get("uploaded") is not True
+            or (
+                reviewed_cover.get("field_present") is True
+                and reviewed_cover.get("uploaded") is not True
+            )
         ):
-            raise ValueError("Cover letter changed after review was created")
+            raise ValueError("Cover letter changed after internal review was created")
         open_tasks = [
             task
             for task in self.resolutions.list(application_id=str(session["application_id"]))
@@ -1313,9 +1327,12 @@ class CompleteApplicationLoopService:
         elif not isinstance(reviewed_cover, dict) or (
             reviewed_cover.get("artifact_id") != current_cover.get("artifact_id")
             or reviewed_cover.get("sha256") != current_cover.get("artifact_sha256")
-            or reviewed_cover.get("uploaded") is not True
+            or (
+                reviewed_cover.get("field_present") is True
+                and reviewed_cover.get("uploaded") is not True
+            )
         ):
-            raise ValueError("Cover letter changed after final review approval")
+            raise ValueError("Cover letter changed after internal integrity approval")
 
         current_observation = adapter.inspect_submission(plan=plan)
         try:
@@ -1533,10 +1550,33 @@ class CompleteApplicationLoopService:
                         "plan_digest": str(review["plan_digest"]),
                         "provider": str(plan_record["provider"]),
                         "provider_application_id": result.get("provider_application_id"),
+                        "submission_reference": (
+                            result.get("submission_reference")
+                            or success_evidence.get("submission_reference")
+                        ),
                         "submission_observation": {
+                            "reviewed_destination": json.loads(
+                                str(review["review_json"])
+                            ).get("destination_url"),
                             "method": success_evidence.get("submit_method"),
-                            "target": success_evidence.get("submit_action"),
-                            "provider_application_id": result.get("provider_application_id"),
+                            "action": success_evidence.get("submit_action"),
+                            "response_status": success_evidence.get("response_status"),
+                            "response_url": success_evidence.get("response_url"),
+                            "exact_action_verified": success_evidence.get(
+                                "exact_action_verified"
+                            ),
+                            "action_binding_digest": success_evidence.get(
+                                "action_binding_digest"
+                            ),
+                            "confirmation_evidence_digest": success_evidence.get(
+                                "confirmation_evidence_digest"
+                            ),
+                            "submission_reference": success_evidence.get(
+                                "submission_reference"
+                            ),
+                            "provider_application_id": result.get(
+                                "provider_application_id"
+                            ),
                         },
                     },
                     provider_observation=(

@@ -27,7 +27,11 @@ SUPERSESSION_VERSION = "munshi-application-plan-supersession-v1"
 PLAN_VERSION = "munshi-application-plan-v2"
 LIVE_HANDOFF_ENV = "MUNSHI_APPLY_LIVE_HANDOFF_ENABLED"
 RUNTIME_SUPERSESSION_ENV = "MUNSHI_APPLY_PLAN_SUPERSESSION_ENABLED"
-SUPPORTED_PROVIDERS = frozenset({"GREENHOUSE", "LEVER", "ASHBY", "SMARTRECRUITERS", "WORKDAY"})
+KNOWN_PROVIDER_RECIPES = frozenset(
+    {"GREENHOUSE", "LEVER", "ASHBY", "SMARTRECRUITERS", "WORKDAY", "AGILE_ATS"}
+)
+# Compatibility export only. Provider recognition is no longer an eligibility gate.
+SUPPORTED_PROVIDERS = KNOWN_PROVIDER_RECIPES
 
 
 def live_handoff_enabled() -> bool:
@@ -136,8 +140,6 @@ class ApplicationPlanEnvelope(BaseModel):
 
     @model_validator(mode="after")
     def validate_plan_contract(self) -> ApplicationPlanEnvelope:
-        if self.provider.upper() not in SUPPORTED_PROVIDERS:
-            raise ValueError("Application Plan provider is not supported by this contract")
         plan = self.plan
         if plan.get("version") != PLAN_VERSION:
             raise ValueError("Application Plan version is unsupported")
@@ -341,20 +343,32 @@ def _supersession_target_locked(
            WHERE session_id=? AND checkpoint_id=? AND status='WAITING_FOR_USER'""",
         (supersession.session_id, supersession.checkpoint_id),
     ).fetchall()
+    # Browser execution identity and Candidate-Truth semantic identity are
+    # deliberately distinct. The browser checkpoint is bound by its unique
+    # control_id; Hunter may map the same field to a canonical semantic
+    # question_key such as contact.postal_code. Requiring those strings to be
+    # identical incorrectly rejects legitimate immutable replacement plans.
     stored = {
-        str(row["group_key"] or row["control_id"] or row["task_id"]): dict(row)
+        str(row["control_id"] or ""): dict(row)
         for row in tasks
+        if str(row["control_id"] or "").strip()
     }
-    expected = {item.question_key: item for item in supersession.unresolved_questions}
-    if set(stored) != set(expected):
+    expected = {
+        str(item.control_id): item
+        for item in supersession.unresolved_questions
+    }
+    if (
+        len(stored) != len(tasks)
+        or len(expected) != len(supersession.unresolved_questions)
+        or set(stored) != set(expected)
+    ):
         raise ValueError(
-            "Runtime plan supersession question set does not match Apply NEEDS_INPUT"
+            "Runtime plan supersession control set does not match Apply NEEDS_INPUT"
         )
-    for key, question in expected.items():
-        task = stored[key]
+    for control_id, question in expected.items():
+        task = stored[control_id]
         if (
-            str(task["control_id"] or "") != question.control_id
-            or _normalized_text(task["question"]) != question.question
+            _normalized_text(task["question"]) != question.question
             or _normalized_text(task["semantic_type"]) != question.semantic_type
             or str(task["risk_level"]).upper() == "HIGH"
         ):

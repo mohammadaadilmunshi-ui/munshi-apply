@@ -87,6 +87,7 @@ describe("account orchestration", () => {
         automatedAccountCreation: true,
         secureCredentialResolver: true,
         candidateMailAlias: true,
+        mailboxRuntimeAvailable: true,
       },
     });
     expect(plan.canAutoAct).toBe(true);
@@ -174,7 +175,9 @@ describe("account orchestration", () => {
     });
     expect(detectAccountFlow(verification)).toBe("AUTH_VERIFY");
     const plan = buildAccountOrchestrationPlan({ page: verification });
-    expect(plan.actions).toEqual(["VERIFY_ACCOUNT"]);
+    expect(plan.state).toBe("ISSUE");
+    expect(plan.actions).toEqual([]);
+    expect(plan.requiresOwner).toBe(false);
     expect(plan.canAutoAct).toBe(false);
     expect(accountPreflightItem(plan).state).toBe("BLOCKED");
   });
@@ -189,6 +192,7 @@ describe("account orchestration", () => {
       page: verification,
       capabilities: {
         ordinaryEmailVerification: true,
+        mailboxRuntimeAvailable: true,
         verificationKind: "EMAIL_CODE",
       },
     });
@@ -213,6 +217,7 @@ describe("account orchestration", () => {
       knownAccounts: [account()],
       capabilities: {
         ordinaryEmailVerification: true,
+        mailboxRuntimeAvailable: true,
         secureCredentialResolver: true,
         verificationKind: "PASSWORD_RESET_LINK",
       },
@@ -229,6 +234,27 @@ describe("account orchestration", () => {
     expect(accountPreflightItem(plan).state).toBe("READY");
   });
 
+  it("routes ordinary email verification to ISSUE when mailbox runtime is unavailable", () => {
+    const verification = page({
+      applicationState: "VERIFY_ACCOUNT",
+      securityCheckpoint: "OTP",
+      pageContext: "Enter the verification code we sent to your email",
+    });
+    const plan = buildAccountOrchestrationPlan({
+      page: verification,
+      capabilities: {
+        ordinaryEmailVerification: true,
+        mailboxRuntimeAvailable: false,
+        verificationKind: "EMAIL_CODE",
+      },
+    });
+    expect(plan.state).toBe("ISSUE");
+    expect(plan.requiresOwner).toBe(false);
+    expect(plan.canAutoAct).toBe(false);
+    expect(plan.actions).toEqual([]);
+    expect(accountPreflightItem(plan).state).toBe("BLOCKED");
+  });
+
   it("routes protected security challenges to ISSUE with continuation preserved", () => {
     const verification = page({
       applicationState: "VERIFY_ACCOUNT",
@@ -239,6 +265,7 @@ describe("account orchestration", () => {
       page: verification,
       capabilities: {
         ordinaryEmailVerification: true,
+        mailboxRuntimeAvailable: true,
         verificationKind: "SECURITY_INTERVENTION",
       },
     });

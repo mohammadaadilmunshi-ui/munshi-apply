@@ -627,7 +627,13 @@ async function fillElement(
     if (ariaBoolean !== null) return ariaBoolean;
     const ariaRadio = await fillAriaRadioControl(element, value, options);
     if (ariaRadio !== null) return ariaRadio;
-    if (isPopupChoiceControl(element)) {
+    // Native SELECT is already a complete deterministic control even when the
+    // employer adds role="combobox". Do not route it through custom/portaled
+    // combobox mechanics, which intentionally search ARIA popup options.
+    if (
+      isPopupChoiceControl(element) &&
+      !(element instanceof HTMLSelectElement)
+    ) {
       return fillCombobox(element, value, options);
     }
   }

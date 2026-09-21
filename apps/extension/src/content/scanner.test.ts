@@ -76,6 +76,22 @@ describe("AutoPilot page-state scanner", () => {
     expect(actions).toEqual(["NEXT", "REVIEW"]);
   });
 
+  it("maps SMS code prompts and passkey prompts into protected checkpoints", () => {
+    document.body.innerHTML = `
+      <p>We sent an SMS verification code to your mobile phone.</p>
+      <input autocomplete="one-time-code">
+    `;
+    expect(scanDocument().securityCheckpoint).toBe("OTP");
+
+    document.body.innerHTML = `
+      <main>
+        <h1>Sign in with your passkey</h1>
+        <button type="button">Use security key</button>
+      </main>
+    `;
+    expect(scanDocument().securityCheckpoint).toBe("AUTHENTICATION");
+  });
+
   it("ignores passive reCAPTCHA integration until a challenge is active", () => {
     document.body.innerHTML = `
       <label for="resume">Upload CV</label>
@@ -186,6 +202,68 @@ describe("AutoPilot page-state scanner", () => {
       rawText: "How did you hear about us? *",
       semanticType: "REFERRAL",
     });
+  });
+
+  it("emits a value-free Universal Brain question observation", () => {
+    document.body.innerHTML = `
+      <section aria-label="Contact Address">
+        <p>Residence details</p>
+        <label for="state">State / Province *</label>
+        <select id="state" name="candidate_region" autocomplete="address-level1" required>
+          <option>New Jersey</option>
+          <option>New York</option>
+        </select>
+        <label for="zip">Postal code</label>
+        <input id="zip" name="postal" autocomplete="postal-code" />
+      </section>
+    `;
+    const result = scanDocument();
+    const question = result.questions.find(
+      (candidate) => candidate.semanticType === "STATE_PROVINCE",
+    );
+    expect(question).toMatchObject({
+      label: "State / Province *",
+      sectionHeading: "Contact Address",
+      fieldName: "candidate_region",
+      elementId: "state",
+      autocomplete: "address-level1",
+      options: ["New Jersey", "New York"],
+      semanticConfidence: expect.any(Number),
+      optionSignature: expect.any(String),
+      inputConstraints: expect.objectContaining({ required: true }),
+      logicalFieldFingerprintInputs: expect.objectContaining({
+        sectionHeading: "Contact Address",
+        fieldName: "candidate_region",
+        optionSignature: expect.any(String),
+      }),
+    });
+    expect(JSON.stringify(question)).not.toContain("candidate answer");
+  });
+
+  it("keeps repeated employment rows semantically isolated despite identical labels", () => {
+    document.body.innerHTML = `
+      <section aria-label="Work history">
+        <div class="employment-row">
+          <label for="employer-0">Employer</label>
+          <input id="employer-0" name="employment[0].employer" required />
+        </div>
+        <div class="employment-row">
+          <label for="employer-1">Employer</label>
+          <input id="employer-1" name="employment[1].employer" required />
+        </div>
+      </section>
+    `;
+    const employers = scanDocument().questions.filter(
+      (candidate) => candidate.label === "Employer",
+    );
+    expect(employers).toHaveLength(2);
+    expect(employers[0]?.repeatGroupId).toBe(employers[1]?.repeatGroupId);
+    expect(employers[0]?.repeatGroupId).toContain("[#]");
+    expect(employers.map((item) => item.repeatIndex)).toEqual([0, 1]);
+    expect(
+      employers.map((item) => item.logicalFieldFingerprintInputs?.repeatIndex),
+    ).toEqual([0, 1]);
+    expect(employers[0]?.controlId).not.toBe(employers[1]?.controlId);
   });
 
   it("discovers a focusable select shell without native or ARIA select semantics", () => {

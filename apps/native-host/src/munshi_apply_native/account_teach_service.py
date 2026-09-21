@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 from .database import Database
+from .mechanics_actions import MechanicsActionError, validate_mechanics_actions
 
 
 _ACCOUNT_SEMANTICS = {
@@ -17,6 +18,13 @@ _ACCOUNT_SEMANTICS = {
     "ATS_ACCOUNT_MAGIC_LOGIN",
     "ATS_ACCOUNT_CREATE",
     "ATS_ACCOUNT_LOGIN",
+    "AUTH_LOGIN_MECHANICS",
+    "AUTH_CREATE_MECHANICS",
+    "AUTH_SWITCH_LOGIN_MECHANICS",
+    "AUTH_SWITCH_CREATE_MECHANICS",
+    "AUTH_RECOVERY_REQUEST_MECHANICS",
+    "AUTH_PASSWORD_RESET_MECHANICS",
+    "EMAIL_VERIFICATION_MECHANICS",
 }
 _ACCOUNT_ACTIONS = {
     "FILL_PASSWORD_FROM_SECURE_CREDENTIAL_RESOLVER",
@@ -77,6 +85,33 @@ def _semantic(value: object) -> str:
 
 
 def _actions(value: object) -> list[dict[str, object]]:
+    if isinstance(value, list) and any(
+        isinstance(item, dict)
+        and (
+            "targetRef" in item
+            or "answerRef" in item
+            or "secretRef" in item
+            or "verificationRef" in item
+            or "artifactRef" in item
+            or "valueRef" in item
+            or str(item.get("type") or "").upper()
+            in {
+                "NEXT",
+                "TYPE_ANSWER_REF",
+                "FILL_SECRET_REF",
+                "FILL_VERIFICATION_ARTIFACT",
+                "UPLOAD_ARTIFACT",
+                "SELECT",
+                "OPEN_LINK",
+            }
+        )
+        for item in value
+    ):
+        try:
+            return validate_mechanics_actions(value)
+        except MechanicsActionError as error:
+            raise AccountTeachError(str(error)) from error
+
     if not isinstance(value, list) or not value or len(value) > 16:
         raise AccountTeachError("Account Teach requires 1-16 bounded actions")
     result: list[dict[str, object]] = []
@@ -110,7 +145,6 @@ def _actions(value: object) -> list[dict[str, object]]:
             continue
         raise AccountTeachError("Unsupported or value-bearing account Teach action")
     return result
-
 
 def _canonical(actions: list[dict[str, object]]) -> str:
     return json.dumps(actions, sort_keys=True, separators=(",", ":"))
