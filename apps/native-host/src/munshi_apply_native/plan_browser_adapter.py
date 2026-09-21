@@ -105,7 +105,17 @@ class PlanBrowserAdapter:
 
     def _scan(self) -> dict[str, Any]:
         if not self.page.evaluate("typeof MunshiPlanRuntime !== 'undefined'"):
-            self.page.add_script_tag(content=self.runtime_path.read_text(encoding="utf-8"))
+            runtime_source = self.runtime_path.read_text(encoding="utf-8")
+            try:
+                self.page.add_script_tag(content=runtime_source)
+            except Exception:
+                # Some ATS pages enforce a strict Content Security Policy that
+                # rejects inline <script> elements. Playwright evaluation runs
+                # through the browser automation channel instead of weakening
+                # or bypassing the page's CSP and keeps the same runtime code.
+                self.page.evaluate(runtime_source)
+            if not self.page.evaluate("typeof MunshiPlanRuntime !== 'undefined'"):
+                raise ValueError("MUNSHI browser runtime injection failed")
         return self.page.evaluate("MunshiPlanRuntime.describeForm()")
 
     def _dismiss_cookie_consent(self) -> bool:
