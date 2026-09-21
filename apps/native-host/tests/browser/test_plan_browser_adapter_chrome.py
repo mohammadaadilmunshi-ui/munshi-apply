@@ -594,3 +594,57 @@ def test_real_chrome_prepares_two_step_application_before_final_submit():
         assert prepared["resume_uploaded"] is True
         assert prepared["unresolved"] == []
         browser.close()
+
+
+def test_real_chrome_csp_restricted_page_uses_playwright_runtime_fallback():
+    browser_path = resolve_browser_executable()
+    plan = _plan()
+    fixture = (
+        _root()
+        / "apps/native-host/tests/browser/fixtures/greenhouse_like_application.html"
+    )
+    html = fixture.read_text()
+
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch(
+            headless=True,
+            executable_path=browser_path,
+        )
+        page = browser.new_page()
+
+        def route_handler(route):
+            request = route.request
+            if request.url == JOB_URL and request.method == "GET":
+                route.fulfill(
+                    status=200,
+                    content_type="text/html",
+                    headers={
+                        "Content-Security-Policy": (
+                            "script-src 'self'; object-src 'none'; "
+                            "frame-src 'self'"
+                        )
+                    },
+                    body=html,
+                )
+            else:
+                route.abort()
+
+        page.route("**/*", route_handler)
+        page.goto(JOB_URL, wait_until="domcontentloaded")
+        adapter = _adapter(page, plan)
+
+        inspected = adapter.inspect_job(plan=plan)
+        prepared = adapter.prepare_form(
+            plan=plan,
+            checkpoint=None,
+            resolved_values={},
+        )
+
+        assert inspected["provider"] == "GREENHOUSE"
+        assert inspected["provider_recipe"] == "GREENHOUSE"
+        assert prepared["resume_uploaded"] is True
+        assert prepared["resume_sha256"] == RESUME_SHA
+        assert prepared["unresolved"] == []
+        assert page.locator("#first_name").input_value() == "Aadil"
+        assert page.locator("#last_name").input_value() == "Munshi"
+        browser.close()
