@@ -4,7 +4,12 @@ import time
 from types import SimpleNamespace
 
 from munshi_apply_native.background_prepare_queue import PreparationRunResult
-from munshi_apply_native.hosted_prepare_worker import HostedPreparationRunner, _target_url
+from munshi_apply_native.hosted_prepare_worker import (
+    HostedPreparationRunner,
+    _boolean_value,
+    _target_url,
+    browser_runtime_self_check,
+)
 
 
 def _plan():
@@ -54,6 +59,73 @@ def test_target_url_refuses_agile_ats_label_on_unrelated_host():
         assert "provider" in str(error)
     else:
         raise AssertionError("Unrelated host was accepted as AGILE_ATS")
+
+
+class _SelfCheckPage:
+    def set_content(self, _html):
+        return None
+
+    def title(self):
+        return "MUNSHI browser ready"
+
+
+class _SelfCheckContext:
+    def new_page(self):
+        return _SelfCheckPage()
+
+    def close(self):
+        return None
+
+
+class _SelfCheckBrowser:
+    def new_context(self):
+        return _SelfCheckContext()
+
+    def close(self):
+        return None
+
+
+class _SelfCheckPlaywright:
+    def __init__(self, launch_calls):
+        self.launch_calls = launch_calls
+        self.chromium = self
+
+    def start(self):
+        return self
+
+    def launch(self, **kwargs):
+        self.launch_calls.append(kwargs)
+        return _SelfCheckBrowser()
+
+    def stop(self):
+        return None
+
+
+def test_browser_startup_self_check_honors_headless_and_records_pass(tmp_path):
+    executable = tmp_path / "chromium"
+    executable.write_text("fixture", encoding="utf-8")
+    executable.chmod(0o755)
+    health = tmp_path / "browser-health.json"
+    launch_calls = []
+
+    result = browser_runtime_self_check(
+        browser_executable=str(executable),
+        headless=True,
+        playwright_factory=lambda: _SelfCheckPlaywright(launch_calls),
+        health_path=health,
+    )
+
+    assert result["status"] == "PASS"
+    assert result["headless"] is True
+    assert launch_calls == [
+        {"headless": True, "executable_path": str(executable)}
+    ]
+    assert '"status":"PASS"' in health.read_text(encoding="utf-8")
+
+
+def test_browser_headless_default_is_true_without_environment_value():
+    assert _boolean_value(None, default=True) is True
+    assert _boolean_value("false", default=True) is False
 
 
 class _Queue:

@@ -14,6 +14,7 @@ import socket
 import threading
 import time
 from contextlib import suppress
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -40,10 +41,84 @@ HOSTED_WORKER_ENV = "MUNSHI_APPLY_HOSTED_PREPARE_WORKER_ENABLED"
 BRIDGE_URL_ENV = "MUNSHI_HUNTER_EXECUTION_BRIDGE_BASE_URL"
 RESUME_UPLOAD_ENV = "MUNSHI_APPLY_RESUME_UPLOAD_ENABLED"
 NORMAL_AUTOFILL_ENV = "MUNSHI_APPLY_NORMAL_ANSWER_AUTOFILL_ENABLED"
+BROWSER_HEALTH_PATH_ENV = "MUNSHI_APPLY_BROWSER_HEALTH_PATH"
 
 
 def _truthy(name: str) -> bool:
     return str(os.getenv(name) or "").strip().casefold() in {"1", "true", "yes", "on"}
+
+
+def _boolean_value(value: Any, *, default: bool = False) -> bool:
+    text = str(value or "").strip().casefold()
+    if not text:
+        return bool(default)
+    return text in {"1", "true", "yes", "on"}
+
+
+def _record_browser_health(payload: dict[str, Any], path: str | Path | None) -> None:
+    safe = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    print(f"BROWSER_RUNTIME_SELF_CHECK {safe}", flush=True)
+    if path is None:
+        return
+    target = Path(path)
+    temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary.write_text(safe + "\n", encoding="utf-8")
+        os.replace(temporary, target)
+    except OSError:
+        with suppress(OSError):
+            temporary.unlink()
+
+
+def browser_runtime_self_check(
+    *,
+    browser_executable: str | None = None,
+    headless: bool = True,
+    playwright_factory: Any = sync_playwright,
+    health_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Prove the configured Chromium can launch without visiting any website."""
+    executable = resolve_browser_executable(browser_executable)
+    target_path = health_path
+    if target_path is None:
+        target_path = os.getenv(BROWSER_HEALTH_PATH_ENV, "/data/browser-runtime-health.json")
+    status: dict[str, Any] = {
+        "status": "DEGRADED",
+        "checked_at": datetime.now(UTC).isoformat(),
+        "headless": bool(headless),
+        "executable": executable,
+    }
+    pw = browser = context = None
+    try:
+        pw = playwright_factory().start()
+        browser = pw.chromium.launch(
+            headless=bool(headless),
+            executable_path=executable,
+        )
+        context = browser.new_context()
+        page = context.new_page()
+        page.set_content("<!doctype html><title>MUNSHI browser ready</title>")
+        if page.title() != "MUNSHI browser ready":
+            raise RuntimeError("Chromium page readiness probe returned an unexpected title")
+        status["status"] = "PASS"
+    except Exception as error:
+        status["error_type"] = type(error).__name__
+        status["message"] = "Chromium could not launch with the configured production mode."
+        _record_browser_health(status, target_path)
+        raise RuntimeError(status["message"]) from error
+    finally:
+        if context is not None:
+            with suppress(Exception):
+                context.close()
+        if browser is not None:
+            with suppress(Exception):
+                browser.close()
+        if pw is not None:
+            with suppress(Exception):
+                pw.stop()
+    _record_browser_health(status, target_path)
+    return status
 
 
 def _runtime_path() -> Path:

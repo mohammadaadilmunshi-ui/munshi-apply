@@ -33,7 +33,9 @@ from .hosted_prepare_worker import (
     RESUME_UPLOAD_ENV,
     HostedAdapterFactory,
     HostedPreparationRunner,
+    _boolean_value,
     _truthy,
+    browser_runtime_self_check,
 )
 from .settings import Settings
 from .trust_checkpoint_store import TrustCheckpointStore
@@ -364,8 +366,9 @@ def build_runner(
         navigation_timeout_ms=int(
             os.getenv("MUNSHI_APPLY_BROWSER_TIMEOUT_MS", "30000")
         ),
-        headless=_truthy(
-            os.getenv("MUNSHI_APPLY_BROWSER_HEADLESS", "true")
+        headless=_boolean_value(
+            os.getenv("MUNSHI_APPLY_BROWSER_HEADLESS"),
+            default=True,
         ),
     )
     adapter_factory = TrustAwareAdapterFactory(
@@ -410,6 +413,13 @@ def run_forever() -> None:
     settings = Settings.from_environment()
     database = Database(settings.database_path, settings.migrations_path)
     database.migrate()
+    browser_runtime_self_check(
+        browser_executable=os.getenv("MUNSHI_BROWSER_EXECUTABLE") or None,
+        headless=_boolean_value(
+            os.getenv("MUNSHI_APPLY_BROWSER_HEADLESS"),
+            default=True,
+        ),
+    )
     runner = build_runner(database, settings)
     worker_id = str(
         os.getenv("MUNSHI_APPLY_PREPARE_WORKER_ID")
