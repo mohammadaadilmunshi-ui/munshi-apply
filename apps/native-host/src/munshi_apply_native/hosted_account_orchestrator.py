@@ -267,6 +267,39 @@ class HostedAccountOrchestrator:
                 return
         raise HostedAccountIssue("ACCOUNT_FORM_UNSUPPORTED", f"{label} control was not found")
 
+    def _account_form_diagnostics(self, *, redactions: tuple[str, ...]) -> str:
+        messages: list[str] = []
+        for selector in (
+            "[data-automation-id='errorMessage']",
+            "[data-automation-id$='Error']",
+            "[role='alert']",
+            "[aria-live='assertive']",
+        ):
+            with suppress(Exception):
+                for value in self.page.locator(selector).all_inner_texts():
+                    normalized = " ".join(str(value).split())
+                    if normalized and normalized not in messages:
+                        messages.append(normalized)
+        with suppress(Exception):
+            validation = self.page.evaluate(
+                r"""() => Array.from(document.querySelectorAll(
+                  'input[data-automation-id="email"],'
+                  + 'input[data-automation-id="password"],'
+                  + 'input[data-automation-id="verifyPassword"],'
+                  + 'input[data-automation-id="createAccountCheckbox"]'
+                )).map(element => String(element.validationMessage || '').trim())
+                  .filter(Boolean)"""
+            )
+            for value in validation or []:
+                normalized = " ".join(str(value).split())
+                if normalized and normalized not in messages:
+                    messages.append(normalized)
+        detail = " | ".join(messages) or "no visible validation message"
+        for value in redactions:
+            if value:
+                detail = detail.replace(value, "<redacted>")
+        return detail[:500]
+
     def _wait_page(self, milliseconds: int = 800) -> None:
         try:
             self.page.wait_for_timeout(milliseconds)
@@ -807,7 +840,8 @@ class HostedAccountOrchestrator:
             if self._is_create() and not self._is_verification():
                 raise HostedAccountIssue(
                     "ACCOUNT_FORM_UNSUPPORTED",
-                    "Account creation did not advance beyond the creation form",
+                    "Account creation did not advance beyond the creation form: "
+                    + self._account_form_diagnostics(redactions=(login_id, password)),
                 )
             return
         except Exception as error:
@@ -953,8 +987,13 @@ class HostedAccountOrchestrator:
         password = self._password(account_id, secret_ref)
         try:
             self._create(email=email, password=password)
-        except Exception:
-            self._issue("ACCOUNT_CREATION_FAILED", "ATS account creation failed")
+        except HostedAccountIssue as error:
+            self._issue("ACCOUNT_CREATION_FAILED", str(error))
+        except Exception as error:
+            self._issue(
+                "ACCOUNT_CREATION_FAILED",
+                f"ATS account creation failed ({type(error).__name__})",
+            )
         finally:
             password = ""
 
