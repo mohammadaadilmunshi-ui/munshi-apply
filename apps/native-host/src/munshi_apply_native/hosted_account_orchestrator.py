@@ -725,6 +725,8 @@ class HostedAccountOrchestrator:
             self._fill_first(
                 [
                     "input[type='email']",
+                    "input[autocomplete='email']",
+                    "input[data-automation-id='email']",
                     "input[autocomplete='username']",
                     "input[name*='email' i]",
                     "input[id*='email' i]",
@@ -763,6 +765,8 @@ class HostedAccountOrchestrator:
             self._fill_first(
                 [
                     "input[type='email']",
+                    "input[autocomplete='email']",
+                    "input[data-automation-id='email']",
                     "input[autocomplete='username']",
                     "input[name*='email' i]",
                     "input[id*='email' i]",
@@ -784,11 +788,27 @@ class HostedAccountOrchestrator:
             locator.nth(0).fill(password)
             if count > 1:
                 locator.nth(1).fill(password)
+            if self.provider == "WORKDAY":
+                consent = self._visible(
+                    ["input[data-automation-id='createAccountCheckbox']"]
+                )
+                if consent is not None and not consent.is_checked():
+                    consent.check()
+                if consent is not None and not consent.is_checked():
+                    raise HostedAccountIssue(
+                        "ACCOUNT_FORM_UNSUPPORTED",
+                        "Required account-creation consent was not selected",
+                    )
             self._click_text(
                 re.compile(r"^(create (?:my )?account|register|sign up|continue)$", re.I),
                 "create account",
             )
             self._wait_page(1000)
+            if self._is_create() and not self._is_verification():
+                raise HostedAccountIssue(
+                    "ACCOUNT_FORM_UNSUPPORTED",
+                    "Account creation did not advance beyond the creation form",
+                )
             return
         except Exception as error:
             recovered = self._mechanics_recover(
@@ -829,6 +849,8 @@ class HostedAccountOrchestrator:
                 self._fill_first(
                     [
                         "input[type='email']",
+                        "input[autocomplete='email']",
+                        "input[data-automation-id='email']",
                         "input[autocomplete='username']",
                         "input[name*='email' i]",
                     ],
@@ -918,6 +940,43 @@ class HostedAccountOrchestrator:
         except Exception:
             self._issue("ACCOUNT_RECOVERY_FAILED", "Account recovery failed")
 
+    def _finish_account_creation(
+        self,
+        *,
+        account_id: str,
+        email: str,
+        secret_ref: str,
+    ) -> HostedAccountResult:
+        self._bind_continuation(account_id)
+        self.lifecycle.begin_creation(account_id, _now())
+        mailbox_request = self._arm_mailbox(account_id)
+        password = self._password(account_id, secret_ref)
+        try:
+            self._create(email=email, password=password)
+        except Exception:
+            self._issue("ACCOUNT_CREATION_FAILED", "ATS account creation failed")
+        finally:
+            password = ""
+
+        verification_required = self._is_verification()
+        self.lifecycle.mark_created(
+            account_id,
+            self.application_id,
+            _now(),
+            verification_required=verification_required,
+        )
+        if verification_required:
+            self._verify_with_mailbox(
+                account_id=account_id,
+                mailbox_request=mailbox_request,
+            )
+        else:
+            self._cancel_mailbox_request(
+                mailbox_request=mailbox_request,
+                account_id=account_id,
+            )
+        return self._resume(account_id)
+
     def _persist_session(self, account_id: str) -> None:
         try:
             state = self.context.storage_state()
@@ -999,6 +1058,12 @@ class HostedAccountOrchestrator:
                 self._issue(
                     "ACCOUNT_CREDENTIAL_REFERENCE_MISSING",
                     "Existing ATS account has no opaque credential reference",
+                )
+            if record.get("exists") is not True:
+                return self._finish_account_creation(
+                    account_id=self.account_id,
+                    email=str(record["email"]),
+                    secret_ref=secret_ref,
                 )
             self._bind_continuation(self.account_id)
             mailbox_request = self._arm_mailbox(self.account_id)
@@ -1112,32 +1177,8 @@ class HostedAccountOrchestrator:
                 "observedAt": _now(),
             }
         )
-        self._bind_continuation(self.account_id)
-        self.lifecycle.begin_creation(self.account_id, _now())
-        mailbox_request = self._arm_mailbox(self.account_id)
-        password = self._password(self.account_id, secret_ref)
-        try:
-            self._create(email=email, password=password)
-        except Exception:
-            self._issue("ACCOUNT_CREATION_FAILED", "ATS account creation failed")
-        finally:
-            password = ""
-
-        verification_required = self._is_verification()
-        self.lifecycle.mark_created(
-            self.account_id,
-            self.application_id,
-            _now(),
-            verification_required=verification_required,
+        return self._finish_account_creation(
+            account_id=self.account_id,
+            email=email,
+            secret_ref=secret_ref,
         )
-        if verification_required:
-            self._verify_with_mailbox(
-                account_id=self.account_id,
-                mailbox_request=mailbox_request,
-            )
-        else:
-            self._cancel_mailbox_request(
-                mailbox_request=mailbox_request,
-                account_id=self.account_id,
-            )
-        return self._resume(self.account_id)

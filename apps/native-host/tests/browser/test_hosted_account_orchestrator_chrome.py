@@ -12,6 +12,7 @@ from munshi_apply_native.ats_account_lifecycle import ATSAccountLifecycle
 from munshi_apply_native.browser_runtime import resolve_browser_executable
 from munshi_apply_native.database import Database
 from munshi_apply_native.hosted_account_orchestrator import (
+    CREATE_ACCOUNT,
     EMAIL_VERIFICATION,
     EXISTING_ACCOUNT,
     LOGIN,
@@ -525,6 +526,157 @@ def test_existing_account_login_uses_managed_credential_and_persists_same_sessio
         assert bytes(persisted["ciphertext"])
         assert persisted["expires_at"]
         assert persisted["invalidated_at"] is None
+
+        context.close()
+        browser.close()
+
+
+class _WorkdayRetryBridge(_Bridge):
+    def __init__(self) -> None:
+        super().__init__("workday-retry")
+        self.prepare_calls = 0
+
+    def prepare_managed_account(self, *args: object, **kwargs: object) -> dict[str, str]:
+        self.prepare_calls += 1
+        raise AssertionError("An incomplete account retry must reuse its managed identity")
+
+    def begin_mailbox_verification(
+        self,
+        _plan: dict[str, object],
+        *,
+        account_id: str,
+        provider: str,
+        expected_link_hosts: list[str],
+        expected_sender_domains: list[str],
+        ttl_minutes: int = 30,
+    ) -> dict[str, object]:
+        assert account_id == "account-browser-workday-retry"
+        assert provider == "WORKDAY"
+        assert expected_link_hosts == ["careers.example.com"]
+        assert expected_sender_domains == ["mail.example.com"]
+        assert ttl_minutes == 30
+        return {"request_id": "request-workday-retry", "mail_relay_ready": True}
+
+
+def _workday_retry_html() -> str:
+    return """<!doctype html>
+<html>
+  <body>
+    <h1>Create Account</h1>
+    <form id="create-account">
+      <input type="text" autocomplete="email" data-automation-id="email" />
+      <input type="password" autocomplete="new-password" data-automation-id="password" />
+      <input type="password" autocomplete="new-password" data-automation-id="verifyPassword" />
+      <input type="checkbox" data-automation-id="createAccountCheckbox" />
+      <label>I agree</label>
+      <input type="text" name="website" data-automation-id="beecatcher" />
+      <button type="submit" data-automation-id="createAccountSubmitButton">Create Account</button>
+    </form>
+    <script>
+      sessionStorage.setItem("munshi-account-flow", "same-context");
+      document.querySelector("#create-account").addEventListener("submit", (event) => {
+        event.preventDefault();
+        const consent = document.querySelector("[data-automation-id=createAccountCheckbox]");
+        const trap = document.querySelector("[data-automation-id=beecatcher]");
+        sessionStorage.setItem("workday-consent", String(consent.checked));
+        sessionStorage.setItem("workday-beecatcher", trap.value);
+        if (consent.checked && trap.value === "") {
+          document.body.innerHTML = "<h1>Check your email to verify your account</h1>";
+        }
+      });
+    </script>
+  </body>
+</html>"""
+
+
+def test_failed_safe_workday_creation_reuses_account_and_handles_current_controls(
+    tmp_path: Path,
+) -> None:
+    application_id = "app-browser-workday-retry"
+    database = _database(tmp_path, application_id)
+    plan = _plan(application_id)
+    plan["provider_policy"]["provider"] = "WORKDAY"  # type: ignore[index]
+    bridge = _WorkdayRetryBridge()
+    account_id = "account-browser-workday-retry"
+    email = "u_workdayretry0001@mail.munshi.systems"
+    secret_ref = f"ats-secret://{account_id}/password"
+
+    AccountStore(database).upsert(
+        {
+            "accountId": account_id,
+            "employer": "Browser Fixture",
+            "portalUrl": REGISTER_URL,
+            "email": email,
+            "exists": False,
+            "applicationId": application_id,
+            "observedAt": NOW,
+        }
+    )
+    lifecycle = ATSAccountLifecycle(database)
+    lifecycle.provision(
+        {
+            "accountId": account_id,
+            "provider": "workday",
+            "credentialRef": secret_ref,
+            "mailAlias": email,
+            "observedAt": NOW,
+        }
+    )
+    lifecycle.begin_creation(account_id, NOW)
+    lifecycle.mark_issue(
+        account_id=account_id,
+        application_id=application_id,
+        continuation_id=None,
+        issue_code="ACCOUNT_CREATION_FAILED",
+        observed_at=NOW,
+    )
+
+    browser_path = resolve_browser_executable()
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, executable_path=browser_path)
+        context = browser.new_context()
+
+        def handler(route: object) -> None:
+            request = route.request
+            if request.url == REGISTER_URL and request.method == "GET":
+                route.fulfill(status=200, content_type="text/html", body=_workday_retry_html())
+                return
+            if request.url == VERIFY_URL and request.method == "GET":
+                route.fulfill(
+                    status=200,
+                    content_type="text/html",
+                    body=_verification_link_html(),
+                )
+                return
+            route.abort()
+
+        context.route("**/*", handler)
+        page = context.new_page()
+        page.goto(REGISTER_URL, wait_until="domcontentloaded")
+
+        result = HostedAccountOrchestrator(
+            database,
+            plan=plan,
+            bridge=bridge,
+            page=page,
+            context=context,
+            tenant_id="tenant-browser",
+            user_id="user-browser",
+            session_secret=b"browser-workday-retry-session-fixture",
+            verification_timeout_seconds=5,
+            poll_interval_seconds=0.05,
+        ).run()
+
+        assert result.account_id == account_id
+        assert EXISTING_ACCOUNT in result.trace
+        assert CREATE_ACCOUNT in result.trace
+        assert LOGIN not in result.trace
+        assert result.state == RESUME_APPLICATION
+        assert bridge.prepare_calls == 0
+        assert page.evaluate("sessionStorage.getItem('workday-consent')") == "true"
+        assert page.evaluate("sessionStorage.getItem('workday-beecatcher')") == ""
+        assert AccountStore(database).lookup({"portalUrl": REGISTER_URL})[0]["exists"] is True
+        assert lifecycle.snapshot(account_id)["state"] == "AUTHENTICATED"
 
         context.close()
         browser.close()
