@@ -162,6 +162,38 @@ def test_continuation_binding_is_idempotent_for_execution_session(tmp_path: Path
     assert count == 1
 
 
+def test_creation_incomplete_preserves_credential_and_clears_external_claim(
+    tmp_path: Path,
+) -> None:
+    database = create_database(tmp_path)
+    lifecycle = ATSAccountLifecycle(database)
+    provision(lifecycle)
+    bind(lifecycle)
+    lifecycle.begin_creation("account-1", NOW)
+    lifecycle.mark_created(
+        "account-1", "app-1", NOW, verification_required=False
+    )
+    lifecycle.mark_authenticated("account-1", "app-1", NOW)
+    credential_ref = lifecycle.snapshot("account-1")["credential_ref"]
+
+    snapshot = lifecycle.mark_creation_incomplete(
+        account_id="account-1",
+        application_id="app-1",
+        continuation_id="continuation-1",
+        observed_at=LATER,
+    )
+
+    assert snapshot["state"] == "FAILED_SAFE"
+    assert snapshot["issue_code"] == "CREATION_INCOMPLETE"
+    assert snapshot["credential_ref"] == credential_ref
+    assert snapshot["verified_at"] is None
+    assert snapshot["authenticated_at"] is None
+    assert snapshot["continuations"][0]["state"] == "ISSUE"
+    assert AccountStore(database).lookup(
+        {"portalUrl": "https://wd5.myworkdayjobs.com/example/login"}
+    )[0]["exists"] is False
+
+
 def test_no_raw_verification_or_password_material_is_durable(tmp_path: Path) -> None:
     database = create_database(tmp_path)
     lifecycle = ATSAccountLifecycle(database)

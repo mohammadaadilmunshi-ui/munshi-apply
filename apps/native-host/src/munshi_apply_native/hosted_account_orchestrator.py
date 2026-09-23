@@ -22,7 +22,7 @@ from uuid import uuid4
 
 from .account_store import AccountStore, portal_identity
 from .artifact_fetch_v2 import HunterExecutionBridgeClient
-from .ats_account_lifecycle import ATSAccountLifecycle, ATSAccountLifecycleError
+from .ats_account_lifecycle import ATSAccountLifecycle
 from .database import Database
 from .hosted_account_session import HostedAccountSessionStore
 from .mechanics_recovery_coordinator import MechanicsRecoveryCoordinator
@@ -111,6 +111,60 @@ def _fingerprint(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
+class WorkdayAccountStrategy:
+    """Workday-owned account surface and post-authentication mechanics."""
+
+    def __init__(self, page: Any, original_url: str) -> None:
+        self.page = page
+        self.original_url = original_url
+
+    def _visible(self, selector: str) -> Any | None:
+        with suppress(Exception):
+            matches = self.page.locator(selector)
+            for index in range(matches.count()):
+                candidate = matches.nth(index)
+                if candidate.is_visible():
+                    return candidate
+        return None
+
+    def create_submit(self) -> Any | None:
+        submit = self._visible("button[data-automation-id='createAccountSubmitButton']")
+        if submit is not None:
+            return submit
+        switch = self._visible("button[data-automation-id='createAccountLink']")
+        if switch is None:
+            return None
+        switch.click()
+        self.page.wait_for_timeout(500)
+        return self._visible("button[data-automation-id='createAccountSubmitButton']")
+
+    def on_bound_application_route(self) -> bool:
+        try:
+            expected = urlsplit(self.original_url)
+            current = urlsplit(str(self.page.url))
+        except Exception:
+            return False
+        application_path = expected.path.rstrip("/") + "/apply"
+        return (
+            current.scheme.casefold() == expected.scheme.casefold()
+            and (current.hostname or "").casefold()
+            == (expected.hostname or "").casefold()
+            and (
+                current.path == application_path
+                or current.path.startswith(application_path + "/")
+            )
+        )
+
+    def authentication_confirmed(self) -> bool:
+        auth_control = self._visible(
+            "button[data-automation-id='signInSubmitButton'],"
+            "button[data-automation-id='createAccountSubmitButton'],"
+            "input[autocomplete='current-password'],"
+            "input[autocomplete='new-password']"
+        )
+        return auth_control is None and self.on_bound_application_route()
+
+
 class HostedAccountOrchestrator:
     def __init__(
         self,
@@ -163,6 +217,11 @@ class HostedAccountOrchestrator:
         self.continuation_id: str | None = None
         self.original_url = str(plan["job"].get("apply_url") or plan["job"].get("job_url") or "")
         self.provider = str(plan["provider_policy"]["provider"]).strip().upper()
+        self.workday_strategy = (
+            WorkdayAccountStrategy(self.page, self.original_url)
+            if self.provider == "WORKDAY"
+            else None
+        )
         self.application_id = str(plan["application_id"])
         self.scope_key = portal_identity(self.original_url)[1]
 
@@ -821,9 +880,7 @@ class HostedAccountOrchestrator:
         login_id = self._login_identifier(email)
         try:
             if self.provider == "WORKDAY":
-                submit = self._visible(
-                    ["button[data-automation-id='createAccountSubmitButton']"]
-                )
+                submit = self.workday_strategy.create_submit()
                 if submit is None:
                     raise HostedAccountIssue(
                         "ACCOUNT_FORM_UNSUPPORTED",
@@ -1039,6 +1096,18 @@ class HostedAccountOrchestrator:
             password = ""
 
         verification_required = self._is_verification()
+        if not verification_required and not self._authentication_confirmed():
+            self.lifecycle.mark_creation_incomplete(
+                account_id=account_id,
+                application_id=self.application_id,
+                continuation_id=self.continuation_id,
+                observed_at=_now(),
+            )
+            self._event(ISSUE, "CREATION_INCOMPLETE")
+            raise HostedAccountIssue(
+                "CREATION_INCOMPLETE",
+                "ATS account creation did not produce authenticated browser evidence",
+            )
         self.lifecycle.mark_created(
             account_id,
             self.application_id,
@@ -1075,22 +1144,29 @@ class HostedAccountOrchestrator:
             )
 
     def _on_bound_workday_application_route(self) -> bool:
-        if self.provider != "WORKDAY":
-            return False
+        return bool(
+            self.workday_strategy is not None
+            and self.workday_strategy.on_bound_application_route()
+        )
+
+    def _authentication_confirmed(self) -> bool:
+        if self.workday_strategy is not None:
+            return self.workday_strategy.authentication_confirmed()
         try:
-            expected = urlsplit(self.original_url)
-            current = urlsplit(str(self.page.url))
+            path = urlsplit(str(self.page.url)).path
         except Exception:
             return False
-        expected_path = expected.path.rstrip("/")
-        application_path = expected_path + "/apply"
+        auth_control = self._visible(
+            [
+                "input[autocomplete='current-password']",
+                "input[autocomplete='new-password']",
+                "input[autocomplete='one-time-code']",
+            ]
+        )
         return (
-            current.scheme.casefold() == expected.scheme.casefold()
-            and (current.hostname or "").casefold() == (expected.hostname or "").casefold()
-            and (
-                current.path == application_path
-                or current.path.startswith(application_path + "/")
-            )
+            auth_control is None
+            and not _ACCOUNT_ROUTE.search(path)
+            and not self._is_verification()
         )
 
     def _resume(self, account_id: str) -> HostedAccountResult:
@@ -1098,13 +1174,16 @@ class HostedAccountOrchestrator:
         if (
             str(self.page.url) != self.original_url
             and not self._on_bound_workday_application_route()
+            and not self._authentication_confirmed()
         ):
             self.page.goto(self.original_url, wait_until="domcontentloaded")
             self._wait_page(500)
-        # VERIFIED is sufficient when the portal does not expose a separate
-        # authenticated landing transition.
-        with suppress(ATSAccountLifecycleError):
-            self.lifecycle.mark_authenticated(account_id, self.application_id, _now())
+        if not self._authentication_confirmed():
+            self._issue(
+                "ACCOUNT_AUTHENTICATION_UNCONFIRMED",
+                "ATS browser state did not prove authentication",
+            )
+        self.lifecycle.mark_authenticated(account_id, self.application_id, _now())
         if self.continuation_id:
             with suppress(Exception):
                 snapshot = self.lifecycle.snapshot(account_id)

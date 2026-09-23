@@ -193,6 +193,9 @@ def _registration_html(mode: str) -> str:
             const sameSession =
               sessionStorage.getItem("munshi-account-flow") === "same-context";
             const validCode = document.querySelector("#code").value === "482913";
+            if (sameSession && validCode) {
+              history.replaceState({}, "", "/candidate/dashboard");
+            }
             document.body.innerHTML =
               sameSession && validCode
                 ? "<h1>Email verified. Your account is now active.</h1>"
@@ -234,6 +237,9 @@ def _verification_link_html() -> str:
     <script>
       const sameSession =
         sessionStorage.getItem("munshi-account-flow") === "same-context";
+      if (sameSession) {
+        history.replaceState({}, "", "/candidate/dashboard");
+      }
       document.body.innerHTML = sameSession
         ? "<h1>Email verified. Your account is now active.</h1>"
         : "<h1>Verification failed.</h1>";
@@ -427,6 +433,7 @@ def _existing_login_html() -> str:
           password === "Fixture-Existing-Managed-1!"
         ) {
           sessionStorage.setItem("munshi-existing-login", "same-context");
+          history.replaceState({}, "", "/candidate/dashboard");
           document.body.innerHTML =
             "<h1>Candidate dashboard</h1><p>Application can resume.</p>";
         }
@@ -591,6 +598,7 @@ def _workday_duplicate_auth_forms_html() -> str:
           password === "Fixture-Existing-Managed-1!"
         ) {
           sessionStorage.setItem("workday-login-form", "scoped");
+          history.replaceState({}, "", location.pathname + "/apply/autofillWithResume");
           document.body.innerHTML = "<h1>Candidate dashboard</h1>";
         }
       });
@@ -825,7 +833,14 @@ def test_failed_safe_workday_creation_reuses_account_and_handles_current_control
                 route.fulfill(
                     status=200,
                     content_type="text/html",
-                    body=_verification_link_html(),
+                    body="""<!doctype html><body>
+                    <h1>Email verified. Your account is now active.</h1>
+                    <script>
+                      history.replaceState(
+                        {}, '', '/candidate/register/apply/autofillWithResume'
+                      );
+                    </script>
+                    </body>""",
                 )
                 return
             route.abort()

@@ -280,6 +280,59 @@ class ATSAccountLifecycle:
     def begin_creation(self, account_id: str, observed_at: str) -> dict[str, object]:
         return self.transition(account_id, "CREATING", observed_at)
 
+    def mark_creation_incomplete(
+        self,
+        *,
+        account_id: str,
+        application_id: str,
+        continuation_id: str | None,
+        observed_at: str,
+    ) -> dict[str, object]:
+        account_id = _required(account_id, "accountId")
+        application_id = _required(application_id, "applicationId")
+        observed_at = _timestamp(observed_at, "observedAt")
+        with self.database.connect() as connection:
+            self._require_account(connection, account_id)
+            self._require_application(connection, application_id)
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                """
+                UPDATE account_records
+                SET exists_flag = 0, updated_at = ?
+                WHERE account_id = ?
+                """,
+                (observed_at, account_id),
+            )
+            connection.execute(
+                """
+                UPDATE ats_account_state
+                SET state = 'FAILED_SAFE', verified_at = NULL,
+                    authenticated_at = NULL, issue_code = 'CREATION_INCOMPLETE',
+                    issue_detail = NULL, version = version + 1, updated_at = ?
+                WHERE account_id = ?
+                """,
+                (observed_at, account_id),
+            )
+            if continuation_id is not None:
+                connection.execute(
+                    """
+                    UPDATE ats_account_continuations
+                    SET state = 'ISSUE', issue_code = 'CREATION_INCOMPLETE', updated_at = ?
+                    WHERE continuation_id = ? AND account_id = ? AND application_id = ?
+                      AND state IN ('PENDING','READY')
+                    """,
+                    (observed_at, continuation_id, account_id, application_id),
+                )
+            self._event(
+                connection,
+                account_id=account_id,
+                application_id=application_id,
+                event_type="ATS_ACCOUNT_ISSUE",
+                occurred_at=observed_at,
+                metadata={"issueCode": "CREATION_INCOMPLETE"},
+            )
+        return self.snapshot(account_id)
+
     def mark_created(
         self,
         account_id: str,
