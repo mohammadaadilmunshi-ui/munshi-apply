@@ -74,6 +74,33 @@ def test_hidden_native_resume_input_uploads_and_hash_verifies():
         pw.stop()
 
 
+def test_replaced_native_input_verifies_from_filename_acknowledgement():
+    pw, browser = _browser()
+    try:
+        page = browser.new_page()
+        page.set_content(
+            """
+            <label for="resume">Resume / CV</label>
+            <input id="resume" name="resume" type="file">
+            <div id="status"></div>
+            <script>
+              document.querySelector('#resume').addEventListener('change', event => {
+                const filename = event.currentTarget.files[0].name;
+                event.currentTarget.remove();
+                document.querySelector('#status').textContent = filename;
+              });
+            </script>
+            """
+        )
+        uploader = UniversalDocumentUploader(page)
+        result = uploader.upload(resume=_resume(), cover_letter=None)
+        assert result["resume"] == RESUME_SHA
+        assert page.locator("#status").inner_text() == "resume.pdf"
+    finally:
+        browser.close()
+        pw.stop()
+
+
 def test_single_generic_native_slot_accepts_resume_even_when_cover_exists():
     pw, browser = _browser()
     try:

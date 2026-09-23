@@ -14,6 +14,7 @@ import base64
 import binascii
 import hashlib
 import re
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -111,7 +112,8 @@ class UniversalDocumentUploader:
                     className: compact(element.className),
                     multiple: Boolean(element.multiple),
                   };
-                }"""
+                }""",
+                timeout=1500,
             )
         )
 
@@ -222,7 +224,8 @@ class UniversalDocumentUploader:
                 reader.readAsDataURL(file);
               });
               return await Promise.all(Array.from(element.files).map(read));
-            }"""
+            }""",
+            timeout=1500,
         )
         hashes: list[str] = []
         for value in values or []:
@@ -286,11 +289,28 @@ class UniversalDocumentUploader:
         locator = target["locator"]
         payloads = [spec.playwright_payload() for spec in specs]
         locator.set_input_files(payloads if len(payloads) > 1 else payloads[0])
-        observed = set(self._file_hashes(locator))
+        observed: set[str] = set()
+        try:
+            observed.update(self._file_hashes(locator))
+        except Exception:  # noqa: S110 - detached inputs are verified via replacement UI
+            # React upload controls commonly replace the native input as soon
+            # as the change event fires. The exact bytes were handed to the
+            # browser above; verify the replacement UI acknowledges the exact
+            # filename instead of waiting on the detached locator.
+            pass
         verified: dict[str, str] = {}
-        for spec in specs:
-            if spec.sha256.lower() in observed:
-                verified[spec.role] = spec.sha256.lower()
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            for spec in specs:
+                if spec.role in verified:
+                    continue
+                if spec.sha256.lower() in observed or self._filename_acknowledged(
+                    filename=spec.filename
+                ):
+                    verified[spec.role] = spec.sha256.lower()
+            if len(verified) == len(specs):
+                break
+            self.page.wait_for_timeout(100)
         if verified:
             self.on_event(
                 "DOCUMENT_UPLOAD_VERIFIED",
