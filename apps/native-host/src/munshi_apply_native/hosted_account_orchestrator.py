@@ -370,6 +370,9 @@ class HostedAccountOrchestrator:
 
     def _account_form_diagnostics(self, *, redactions: tuple[str, ...]) -> str:
         messages: list[str] = []
+        with suppress(Exception):
+            current = urlsplit(str(self.page.url))
+            messages.append(f"current_path={current.path or '/'}")
         for selector in (
             "[data-automation-id='errorMessage']",
             "[data-automation-id$='Error']",
@@ -395,6 +398,10 @@ class HostedAccountOrchestrator:
                 normalized = " ".join(str(value).split())
                 if normalized and normalized not in messages:
                     messages.append(normalized)
+        with suppress(Exception):
+            visible_text = " ".join(self.page.locator("body").inner_text().split())
+            if visible_text:
+                messages.append(f"visible_text={visible_text[:300]}")
         detail = " | ".join(messages) or "no visible validation message"
         for value in redactions:
             if value:
