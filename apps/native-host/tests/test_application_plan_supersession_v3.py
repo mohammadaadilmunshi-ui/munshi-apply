@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from munshi_apply_native.application_plan_handoff_v2 import RuntimeQuestionBinding
 from munshi_apply_native.background_prepare_queue import DurablePreparationQueue
 from munshi_apply_native.complete_application_loop import CompleteApplicationLoopService
 
@@ -19,6 +20,27 @@ def _helpers():
 
 
 H = _helpers()
+
+
+def test_runtime_question_binding_accepts_only_value_free_observation() -> None:
+    payload = {
+        "question_key": "referral_source",
+        "control_id": "source--source",
+        "question": "How did you hear about us?",
+        "semantic_type": "REFERRAL",
+        "sensitivity_class": "NORMAL",
+        "question_observation": {
+            "label": "How did you hear about us?",
+            "input_type": "text",
+            "placeholder": "Search",
+        },
+    }
+    assert RuntimeQuestionBinding.model_validate(payload).question_observation == payload[
+        "question_observation"
+    ]
+    payload["question_observation"] = {"canonical_answer": "Indeed"}
+    with pytest.raises(ValueError, match="candidate values or secrets"):
+        RuntimeQuestionBinding.model_validate(payload)
 
 
 def _waiting_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

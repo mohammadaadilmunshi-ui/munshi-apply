@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from .database import Database, canonical_json
 from .execution_policy import prepare_permissions
+from .models import ResolutionTaskPayload
 from .n8n import verify_signature
 
 TRANSPORT_VERSION = "munshi-application-plan-handoff-v2"
@@ -116,6 +117,14 @@ class RuntimeQuestionBinding(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     semantic_type: str = Field(min_length=1, max_length=128)
     sensitivity_class: Literal["NORMAL"]
+    question_observation: dict[str, Any] | None = None
+
+    @field_validator("question_observation")
+    @classmethod
+    def validate_question_observation(
+        cls, value: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        return ResolutionTaskPayload.validate_question_observation(value)
 
 
 class PlanSupersession(BaseModel):
