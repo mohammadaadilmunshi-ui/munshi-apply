@@ -773,6 +773,59 @@ def test_workday_password_reset_uses_visible_action_and_waits_for_confirmation()
         browser.close()
 
 
+def test_workday_password_reset_accepts_exact_initiate_response() -> None:
+    browser_path = resolve_browser_executable()
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, executable_path=browser_path)
+        context = browser.new_context()
+        page = context.new_page()
+        page.route(
+            "**/initiatereset",
+            lambda route: route.fulfill(status=200, body="{}"),
+        )
+        page.set_content(
+            """
+            <button data-automation-id="forgotPasswordLink">Forgot your password?</button>
+            <form id="reset-form" style="display:none">
+              <input type="text" data-automation-id="email" />
+              <div style="position:relative;width:160px;height:40px">
+                <button type="submit" tabindex="-2" aria-hidden="true"
+                  style="width:160px;height:40px"
+                  data-automation-id="resetPasswordButton">Reset Password</button>
+                <div role="button" tabindex="0" aria-label="Reset Password"
+                  style="position:absolute;inset:0"
+                  data-automation-id="click_filter"></div>
+              </div>
+            </form>
+            <script>
+              document.querySelector('[data-automation-id=forgotPasswordLink]')
+                .addEventListener('click', () => {
+                  document.querySelector('#reset-form').style.display = 'block';
+                });
+              document.querySelector('#reset-form [data-automation-id=click_filter]')
+                .addEventListener('click', () => {
+                  fetch(
+                    'https://tti.wd1.myworkdayjobs.com/en-US/TTI_PE/initiatereset',
+                    {method: 'POST', mode: 'no-cors'}
+                  );
+                });
+            </script>
+            """
+        )
+
+        strategy = WorkdayAccountStrategy(
+            page,
+            "https://tti.wd1.myworkdayjobs.com/en-US/TTI_PE/login",
+        )
+        assert strategy.request_password_reset(
+            "u_workdayretry0001@mail.munshi.systems",
+            lambda: False,
+        )
+
+        context.close()
+        browser.close()
+
+
 class _WorkdayRetryBridge(_Bridge):
     def __init__(self) -> None:
         super().__init__("workday-retry")

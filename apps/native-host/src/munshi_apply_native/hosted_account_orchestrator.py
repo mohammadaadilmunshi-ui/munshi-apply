@@ -170,20 +170,46 @@ class WorkdayAccountStrategy:
         if submit is None:
             return False
         form = submit.locator("xpath=ancestor::form[1]")
-        form.locator("input[data-automation-id='email']").first.fill(login_id)
+        email = form.locator("input[data-automation-id='email']").first
+        email.click()
+        email.fill("")
+        email.press_sequentially(login_id, delay=10)
+        email.press("Tab")
+        # Workday wires the no-CAPTCHA click filter after the reset form is
+        # rendered.  A click made in the same turn as a programmatic fill can
+        # be dropped even though the control is already visible.
+        self.page.wait_for_timeout(500)
         visible_action = form.locator(
             "[data-automation-id='click_filter'][role='button']"
             "[aria-label='Reset Password']"
         ).first
-        if visible_action.count() and visible_action.is_visible():
-            visible_action.click()
-        else:
-            submit.click()
-        while time.monotonic() < deadline:
-            if confirmation_visible():
-                return True
-            self.page.wait_for_timeout(100)
-        return False
+        expected_host = (urlsplit(self.original_url).hostname or "").casefold()
+        reset_response_confirmed = False
+
+        def observe_response(response: Any) -> None:
+            nonlocal reset_response_confirmed
+            parsed = urlsplit(str(response.url))
+            if (
+                (parsed.hostname or "").casefold() == expected_host
+                and parsed.path.casefold().endswith("/initiatereset")
+                and str(response.request.method).upper() == "POST"
+                and 200 <= int(response.status) < 300
+            ):
+                reset_response_confirmed = True
+
+        self.page.on("response", observe_response)
+        try:
+            if visible_action.count() and visible_action.is_visible():
+                visible_action.click()
+            else:
+                submit.click()
+            while time.monotonic() < deadline:
+                if reset_response_confirmed or confirmation_visible():
+                    return True
+                self.page.wait_for_timeout(100)
+            return False
+        finally:
+            self.page.remove_listener("response", observe_response)
 
     def wait_for_creation_outcome(
         self,
