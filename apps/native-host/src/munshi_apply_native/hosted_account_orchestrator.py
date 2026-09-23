@@ -256,15 +256,19 @@ class HostedAccountOrchestrator:
     def _click_text(self, pattern: re.Pattern[str], label: str) -> None:
         for role in ("button", "link"):
             with suppress(Exception):
-                locator = self.page.get_by_role(role, name=pattern).first
-                if locator.count() and locator.is_visible():
+                matches = self.page.get_by_role(role, name=pattern)
+                for index in range(matches.count()):
+                    locator = matches.nth(index)
+                    if locator.is_visible():
+                        locator.click()
+                        return
+        with suppress(Exception):
+            matches = self.page.get_by_text(pattern)
+            for index in range(matches.count()):
+                locator = matches.nth(index)
+                if locator.is_visible():
                     locator.click()
                     return
-        with suppress(Exception):
-            locator = self.page.get_by_text(pattern).first
-            if locator.count() and locator.is_visible():
-                locator.click()
-                return
         raise HostedAccountIssue("ACCOUNT_FORM_UNSUPPORTED", f"{label} control was not found")
 
     def _account_form_diagnostics(self, *, redactions: tuple[str, ...]) -> str:

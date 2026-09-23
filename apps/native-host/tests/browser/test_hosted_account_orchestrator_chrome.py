@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -661,6 +662,51 @@ def test_workday_login_scopes_fields_and_submit_to_login_form(tmp_path: Path) ->
         assert page.evaluate("sessionStorage.getItem('workday-login-form')") == "scoped"
         assert bridge.cancelled == ["VERIFICATION_NOT_REQUIRED"]
 
+        context.close()
+        browser.close()
+
+
+def test_text_click_uses_visible_match_when_hidden_duplicate_comes_first(
+    tmp_path: Path,
+) -> None:
+    application_id = "app-browser-visible-text-control"
+    database = _database(tmp_path, application_id)
+    plan = _plan(application_id)
+    bridge = _Bridge("visible-text-control")
+
+    browser_path = resolve_browser_executable()
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, executable_path=browser_path)
+        context = browser.new_context()
+        page = context.new_page()
+        page.set_content(
+            """
+            <button style="display:none">Forgot your password?</button>
+            <button id="visible-recovery">Forgot your password?</button>
+            <script>
+              document.querySelector('#visible-recovery').addEventListener('click', () => {
+                document.body.dataset.recoveryClicked = 'yes';
+              });
+            </script>
+            """
+        )
+        orchestrator = HostedAccountOrchestrator(
+            database,
+            plan=plan,
+            bridge=bridge,
+            page=page,
+            context=context,
+            tenant_id="tenant-browser",
+            user_id="user-browser",
+            session_secret=b"browser-visible-control-session-fixture",
+        )
+
+        orchestrator._click_text(
+            re.compile(r"forgot (?:your )?password", re.I),
+            "password recovery",
+        )
+
+        assert page.evaluate("document.body.dataset.recoveryClicked") == "yes"
         context.close()
         browser.close()
 
