@@ -120,3 +120,95 @@ def test_generic_entry_ignores_hidden_template_file_then_uploads_cv(monkeypatch)
         assert prepared["unresolved"] == []
         assert prepared["validation_errors"] == []
         browser.close()
+
+
+def test_job_bound_apply_link_ignores_site_search_combobox(monkeypatch) -> None:
+    monkeypatch.setenv("MUNSHI_APPLY_RESUME_UPLOAD_ENABLED", "true")
+    monkeypatch.setenv("MUNSHI_APPLY_NORMAL_ANSWER_AUTOFILL_ENABLED", "true")
+    apply_url = JOB_URL + "/apply"
+    job_html = f"""<!doctype html>
+<html><body>
+  <header>
+    <label for="career-search">Synthetic Careers</label>
+    <input id="career-search" role="combobox" />
+  </header>
+  <main><a role="button" href="{apply_url}">Apply</a></main>
+</body></html>"""
+    application_html = """<!doctype html>
+<html><body><main>
+  <label for="resume">Resume</label>
+  <input id="resume" name="resume" type="file" required />
+  <label for="first-name">First name</label>
+  <input id="first-name" name="first_name" required />
+  <button type="submit">Submit application</button>
+</main></body></html>"""
+    plan = {
+        "plan_id": "plan-job-bound-entry",
+        "job": {
+            "id": "fixture-1",
+            "company": "Synthetic Generic Employer",
+            "title": "People Analytics Fixture",
+            "job_url": JOB_URL,
+            "apply_url": JOB_URL,
+        },
+        "provider_policy": {
+            "provider": "WORKDAY",
+            "permitted": True,
+            "allowed_hosts": ["jobs.generic.example"],
+        },
+        "resume": {
+            "artifact_id": "resume-artifact",
+            "version_id": "resume-version",
+            "version_number": 1,
+            "filename": "resume.pdf",
+            "mime_type": "application/pdf",
+            "artifact_sha256": RESUME_SHA,
+        },
+        "answers": [],
+        "permissions": {
+            "background_prepare": True,
+            "resume_upload": True,
+            "normal_answer_autofill": True,
+        },
+    }
+
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch(
+            headless=True,
+            executable_path=resolve_browser_executable(),
+        )
+        page = browser.new_page()
+
+        def route_handler(route):
+            if route.request.url == JOB_URL:
+                route.fulfill(status=200, content_type="text/html", body=job_html)
+            elif route.request.url == apply_url:
+                route.fulfill(
+                    status=200,
+                    content_type="text/html",
+                    body=application_html,
+                )
+            else:
+                route.abort()
+
+        page.route("**/*", route_handler)
+        page.goto(JOB_URL, wait_until="domcontentloaded")
+        runtime = _root() / "apps/native-host/browser-dist/plan-runtime.js"
+        adapter = PlanBrowserAdapter(
+            page,
+            artifact_reader=lambda _plan: RESUME_BYTES,
+            current_plan=lambda current: current == plan,
+            runtime_path=runtime,
+        )
+
+        prepared = adapter.prepare_form(
+            plan=plan,
+            checkpoint=None,
+            resolved_values={"first_name": "Aadil"},
+        )
+
+        assert page.url == apply_url
+        assert prepared["job_id"] == "fixture-1"
+        assert prepared["resume_uploaded"] is True
+        assert page.locator("#first-name").input_value() == "Aadil"
+        browser.close()

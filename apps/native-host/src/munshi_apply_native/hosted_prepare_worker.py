@@ -150,6 +150,117 @@ def _target_url(plan: dict[str, Any]) -> str:
     return target
 
 
+def _enter_workday_application_surface(
+    page: Any,
+    *,
+    plan: dict[str, Any],
+    navigation_timeout_ms: int,
+) -> bool:
+    """Reach Workday's account/application surface without choosing an answer.
+
+    Workday exposes a job-details shell first, then a job-bound ``/apply`` route,
+    then a choice such as ``Autofill with Resume``.  Account orchestration must
+    run after those reversible entry actions because the login/create-account
+    form does not exist on the public job shell.
+    """
+
+    provider = str(dict(plan.get("provider_policy") or {}).get("provider") or "")
+    if provider.strip().upper() != "WORKDAY":
+        return False
+
+    target = _target_url(plan)
+    expected = urlsplit(target)
+    entered = False
+    deadline = time.monotonic() + min(10.0, max(2.0, navigation_timeout_ms / 1000.0))
+    apply_href = ""
+    while time.monotonic() < deadline:
+        try:
+            apply_href = str(
+                page.evaluate(
+                    r"""() => {
+                      const visible = element => {
+                        const style = getComputedStyle(element);
+                        const rect = element.getBoundingClientRect();
+                        return style.display !== 'none'
+                          && style.visibility !== 'hidden'
+                          && Number(style.opacity || 1) !== 0
+                          && rect.width > 0 && rect.height > 0;
+                      };
+                      const label = element => String(
+                        element.innerText || element.getAttribute('aria-label') || ''
+                      ).replace(/\s+/g, ' ').trim().toLowerCase();
+                      const candidates = Array.from(document.querySelectorAll('a[href]'))
+                        .filter(element => visible(element) && label(element) === 'apply');
+                      return candidates.length === 1 ? candidates[0].href : '';
+                    }"""
+                )
+                or ""
+            )
+        except Exception:
+            apply_href = ""
+        if apply_href:
+            break
+        page.wait_for_timeout(100)
+
+    if apply_href:
+        destination = urlsplit(apply_href)
+        expected_path = expected.path.rstrip("/")
+        if not (
+            destination.scheme == expected.scheme
+            and destination.netloc == expected.netloc
+            and destination.path == expected_path + "/apply"
+            and not destination.username
+            and not destination.password
+            and not destination.fragment
+        ):
+            raise ValueError("Workday application entry left the exact job binding")
+        page.goto(
+            apply_href,
+            wait_until="domcontentloaded",
+            timeout=navigation_timeout_ms,
+        )
+        entered = True
+
+    current = urlsplit(str(page.url))
+    if current.path != expected.path.rstrip("/") + "/apply":
+        return entered
+
+    deadline = time.monotonic() + min(10.0, max(2.0, navigation_timeout_ms / 1000.0))
+    while time.monotonic() < deadline:
+        choice = page.evaluate(
+            r"""() => {
+              const visible = element => {
+                const style = getComputedStyle(element);
+                const rect = element.getBoundingClientRect();
+                return style.display !== 'none'
+                  && style.visibility !== 'hidden'
+                  && Number(style.opacity || 1) !== 0
+                  && rect.width > 0 && rect.height > 0;
+              };
+              const label = element => String(
+                element.innerText || element.value
+                || element.getAttribute('aria-label') || ''
+              ).replace(/\s+/g, ' ').trim().toLowerCase();
+              const controls = Array.from(document.querySelectorAll(
+                'button,[role="button"],a,input[type="button"]'
+              )).filter(visible);
+              for (const wanted of ['autofill with resume', 'apply manually']) {
+                const matches = controls.filter(element => label(element) === wanted);
+                if (matches.length === 1) {
+                  matches[0].click();
+                  return wanted;
+                }
+              }
+              return '';
+            }"""
+        )
+        if choice:
+            page.wait_for_timeout(1800)
+            return True
+        page.wait_for_timeout(100)
+    return entered
+
+
 class HostedPlanBrowserAdapter(HostedRecoveringPlanBrowserAdapter):
     def __init__(
         self,
@@ -306,6 +417,12 @@ class HostedAdapterFactory:
             page = context.new_page()
             page.set_default_timeout(self.navigation_timeout_ms)
             page.goto(target, wait_until="domcontentloaded", timeout=self.navigation_timeout_ms)
+
+            _enter_workday_application_surface(
+                page,
+                plan=plan,
+                navigation_timeout_ms=self.navigation_timeout_ms,
+            )
 
             interaction_fallback = self.interaction_fallback_service
             if interaction_fallback is None and self.runtime_root is not None:

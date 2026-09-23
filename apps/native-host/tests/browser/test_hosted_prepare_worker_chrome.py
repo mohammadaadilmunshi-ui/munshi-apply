@@ -13,6 +13,7 @@ from munshi_apply_native.complete_application_loop import CompleteApplicationLoo
 from munshi_apply_native.hosted_prepare_worker import (
     HostedAdapterFactory,
     HostedPreparationRunner,
+    _enter_workday_application_surface,
 )
 
 pytestmark = pytest.mark.skipif(
@@ -160,3 +161,56 @@ def test_hosted_runner_uses_real_chromium_and_stops_at_needs_input(
     assert stored["state"] == "NEEDS_INPUT"
     assert len(stored["browser_form_digest"]) == 64
     assert stored["checkpoint_id"]
+
+
+def test_workday_entry_reaches_account_surface_before_orchestration() -> None:
+    browser_path = __import__(
+        "munshi_apply_native.browser_runtime",
+        fromlist=["resolve_browser_executable"],
+    ).resolve_browser_executable()
+    target = "https://tenant.wd1.myworkdayjobs.com/en-US/careers/job/Test_R-1"
+    apply_url = target + "/apply"
+    account_url = apply_url + "/autofillWithResume"
+    plan = {
+        "job": {"apply_url": target, "job_url": target},
+        "provider_policy": {
+            "provider": "WORKDAY",
+            "allowed_hosts": ["myworkdayjobs.com"],
+        },
+        "submission_authority": False,
+    }
+    job_html = f'<a role="button" href="{apply_url}">Apply</a>'
+    apply_html = (
+        '<button id="resume-choice" type="button">Autofill with Resume</button>'
+        f'<script>document.querySelector("#resume-choice").onclick=()=>location.href="{account_url}";</script>'
+    )
+    account_html = '<title>Create Account</title><input type="password" />'
+
+    playwright = pytest.importorskip("playwright.sync_api")
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True, executable_path=browser_path)
+        page = browser.new_page()
+
+        def handler(route):
+            bodies = {
+                target: job_html,
+                apply_url: apply_html,
+                account_url: account_html,
+            }
+            body = bodies.get(route.request.url)
+            if body is None:
+                route.abort()
+            else:
+                route.fulfill(status=200, content_type="text/html", body=body)
+
+        page.route("**/*", handler)
+        page.goto(target, wait_until="domcontentloaded")
+
+        assert _enter_workday_application_surface(
+            page,
+            plan=plan,
+            navigation_timeout_ms=5000,
+        ) is True
+        assert page.url == account_url
+        assert page.locator("input[type=password]").is_visible()
+        browser.close()

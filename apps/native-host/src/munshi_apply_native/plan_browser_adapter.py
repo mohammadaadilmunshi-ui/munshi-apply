@@ -204,13 +204,29 @@ class PlanBrowserAdapter:
     def inspect_job(self, *, plan: dict[str, Any]) -> dict[str, Any]:
         expected = urlsplit(plan["job"]["apply_url"] or plan["job"]["job_url"])
         actual = urlsplit(self.page.url)
-        # Exact origin/path/query binding. Redirected flows require a new plan.
-        same = (actual.scheme, actual.netloc, actual.path, actual.query) == (
+        # Keep the exact posting binding while allowing an ATS to move into a
+        # descendant application route for that same posting.  Workday, for
+        # example, appends /apply and additional application steps beneath the
+        # exact job path.  A sibling job or a generic account route remains
+        # outside this binding and fails closed.
+        exact = (actual.scheme, actual.netloc, actual.path, actual.query) == (
             expected.scheme,
             expected.netloc,
             expected.path,
             expected.query,
         )
+        expected_path = expected.path.rstrip("/")
+        application_path = expected_path + "/apply"
+        application_child = (
+            actual.scheme == expected.scheme
+            and actual.netloc == expected.netloc
+            and bool(expected_path)
+            and (
+                actual.path == application_path
+                or actual.path.startswith(application_path + "/")
+            )
+        )
+        same = exact or application_child
         scan = self._scan()["page"]
         provider_policy = dict(plan.get("provider_policy") or {})
         declared_provider = str(provider_policy.get("provider") or "GENERIC").upper()
@@ -334,15 +350,13 @@ class PlanBrowserAdapter:
             and str(controls[str(question.get("controlId") or "")].get("kind") or "")
             != "BUTTON"
         ]
-        if visible_editable_questions:
-            return False
         if any(
             item.get("action") == "FINAL_SUBMIT" and not item.get("disabled")
             for item in page.get("navigationCandidates") or []
         ):
             return False
         result = self.page.evaluate(
-            r"""() => {
+            r"""({ anchorOnly }) => {
               const visible = element => {
                 if (!(element instanceof HTMLElement)) return false;
                 const style = getComputedStyle(element);
@@ -369,10 +383,30 @@ class PlanBrowserAdapter:
               const candidates = Array.from(document.querySelectorAll(
                 'button,[role="button"],input[type="button"],a'
               )).filter(element => visible(element) && allowed.has(normalized(element)));
-              if (candidates.length !== 1) return { advanced: false, count: candidates.length };
-              candidates[0].click();
-              return { advanced: true, label: normalized(candidates[0]) };
-            }"""
+              const safeCandidates = anchorOnly
+                ? candidates.filter(element => {
+                    if (element.tagName !== 'A' || element.closest('form')) return false;
+                    const rawHref = element.getAttribute('href') || '';
+                    if (!rawHref) return false;
+                    const destination = new URL(rawHref, document.baseURI);
+                    const current = new URL(document.URL);
+                    const currentPath = current.pathname.replace(/\/$/, '');
+                    return destination.origin === current.origin
+                      && destination.pathname === currentPath + '/apply';
+                  })
+                : candidates;
+              if (safeCandidates.length !== 1) {
+                return { advanced: false, count: safeCandidates.length };
+              }
+              const candidate = safeCandidates[0];
+              candidate.click();
+              return {
+                advanced: true,
+                label: normalized(candidate),
+                href: candidate.tagName === 'A' ? candidate.href : '',
+              };
+            }""",
+            {"anchorOnly": bool(visible_editable_questions)},
         )
         if not isinstance(result, dict) or result.get("advanced") is not True:
             return False
@@ -381,7 +415,7 @@ class PlanBrowserAdapter:
             {"strategy": "unique_safe_entry_label", "label": str(result.get("label") or "")[:80]},
         )
         with suppress(Exception):
-            self.page.wait_for_timeout(150)
+            self.page.wait_for_timeout(500)
         return True
 
     @staticmethod
@@ -1153,4 +1187,3 @@ class PlanBrowserAdapter:
             "success_evidence": success_evidence,
             "provider_observation": provider_observation,
         }
-
