@@ -194,3 +194,18 @@ def test_username_policy_can_use_managed_email_local_part(tmp_path: Path) -> Non
         )
         == "u_abcdefghijklmnop"
     )
+
+
+def test_workday_resume_preserves_exact_job_application_descendant(tmp_path: Path) -> None:
+    plan = _plan()
+    job_url = "https://careers.example.com/job/hr-coordinator_R77321-1"
+    plan["job"]["apply_url"] = job_url
+    plan["job"]["job_url"] = job_url
+    plan["provider_policy"]["provider"] = "WORKDAY"
+    orchestrator = _orchestrator_for_direct_checks(tmp_path, plan=plan)
+
+    orchestrator.page.url = job_url + "/apply/autofillWithResume"
+    assert orchestrator._on_bound_workday_application_route() is True
+
+    orchestrator.page.url = "https://careers.example.com/job/another-role/apply"
+    assert orchestrator._on_bound_workday_application_route() is False

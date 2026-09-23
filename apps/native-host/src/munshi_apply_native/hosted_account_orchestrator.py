@@ -1033,9 +1033,31 @@ class HostedAccountOrchestrator:
                 "Authenticated browser session could not be persisted",
             )
 
+    def _on_bound_workday_application_route(self) -> bool:
+        if self.provider != "WORKDAY":
+            return False
+        try:
+            expected = urlsplit(self.original_url)
+            current = urlsplit(str(self.page.url))
+        except Exception:
+            return False
+        expected_path = expected.path.rstrip("/")
+        application_path = expected_path + "/apply"
+        return (
+            current.scheme.casefold() == expected.scheme.casefold()
+            and (current.hostname or "").casefold() == (expected.hostname or "").casefold()
+            and (
+                current.path == application_path
+                or current.path.startswith(application_path + "/")
+            )
+        )
+
     def _resume(self, account_id: str) -> HostedAccountResult:
         self._event(RESUME_APPLICATION)
-        if str(self.page.url) != self.original_url:
+        if (
+            str(self.page.url) != self.original_url
+            and not self._on_bound_workday_application_route()
+        ):
             self.page.goto(self.original_url, wait_until="domcontentloaded")
             self._wait_page(500)
         # VERIFIED is sufficient when the portal does not expose a separate
