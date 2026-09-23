@@ -154,13 +154,17 @@ class WorkdayAccountStrategy:
         self,
         verification_confirmed: Callable[[], bool],
         timeout_ms: int = 10_000,
-    ) -> bool:
+    ) -> str | None:
         deadline = time.monotonic() + max(0.5, timeout_ms / 1000.0)
         while time.monotonic() < deadline:
-            if verification_confirmed() or self.authentication_confirmed():
-                return True
+            if verification_confirmed():
+                return "VERIFICATION"
+            if self.authentication_confirmed():
+                return "AUTHENTICATED"
+            if self.on_login_route():
+                return "LOGIN_REQUIRED"
             self.page.wait_for_timeout(100)
-        return False
+        return None
 
     def wait_for_auth_surface(self, timeout_ms: int = 10_000) -> bool:
         deadline = time.monotonic() + max(0.5, timeout_ms / 1000.0)
@@ -191,6 +195,19 @@ class WorkdayAccountStrategy:
                 current.path == application_path
                 or current.path.startswith(application_path + "/")
             )
+        )
+
+    def on_login_route(self) -> bool:
+        try:
+            expected = urlsplit(self.original_url)
+            current = urlsplit(str(self.page.url))
+        except Exception:
+            return False
+        return (
+            current.scheme.casefold() == expected.scheme.casefold()
+            and (current.hostname or "").casefold()
+            == (expected.hostname or "").casefold()
+            and current.path.rstrip("/").casefold().endswith("/login")
         )
 
     def authentication_confirmed(self) -> bool:
@@ -920,7 +937,7 @@ class HostedAccountOrchestrator:
                 return
             raise error
 
-    def _create(self, *, email: str, password: str) -> None:
+    def _create(self, *, email: str, password: str) -> str:
         self._event(CREATE_ACCOUNT)
         login_id = self._login_identifier(email)
         try:
@@ -948,9 +965,10 @@ class HostedAccountOrchestrator:
                         "Required account-creation consent was not selected",
                     )
                 self.workday_strategy.click_create_submit(submit)
-                if not self.workday_strategy.wait_for_creation_outcome(
+                outcome = self.workday_strategy.wait_for_creation_outcome(
                     self._is_verification
-                ):
+                )
+                if outcome is None:
                     raise HostedAccountIssue(
                         "ACCOUNT_FORM_UNSUPPORTED",
                         "Workday account creation did not reach a confirmed next state: "
@@ -958,6 +976,7 @@ class HostedAccountOrchestrator:
                             redactions=(login_id, password)
                         ),
                     )
+                return outcome
             else:
                 self._fill_first(
                     [
@@ -996,7 +1015,7 @@ class HostedAccountOrchestrator:
                     "Account creation did not advance beyond the creation form: "
                     + self._account_form_diagnostics(redactions=(login_id, password)),
                 )
-            return
+            return "ADVANCED"
         except Exception as error:
             recovered = self._mechanics_recover(
                 goal="Complete reversible candidate account creation mechanics",
@@ -1006,7 +1025,7 @@ class HostedAccountOrchestrator:
                 verify=lambda: not self._is_create() or self._is_verification(),
             )
             if recovered:
-                return
+                return "ADVANCED"
             raise error
 
     def _recovery(
@@ -1139,7 +1158,7 @@ class HostedAccountOrchestrator:
         mailbox_request = self._arm_mailbox(account_id)
         password = self._password(account_id, secret_ref)
         try:
-            self._create(email=email, password=password)
+            creation_outcome = self._create(email=email, password=password)
         except HostedAccountIssue as error:
             self._issue("ACCOUNT_CREATION_FAILED", str(error))
         except Exception as error:
@@ -1147,38 +1166,63 @@ class HostedAccountOrchestrator:
                 "ACCOUNT_CREATION_FAILED",
                 f"ATS account creation failed ({type(error).__name__})",
             )
+        try:
+            verification_required = (
+                creation_outcome == "VERIFICATION" or self._is_verification()
+            )
+            login_required = creation_outcome == "LOGIN_REQUIRED"
+            if (
+                not verification_required
+                and not login_required
+                and not self._authentication_confirmed()
+            ):
+                self.lifecycle.mark_creation_incomplete(
+                    account_id=account_id,
+                    application_id=self.application_id,
+                    continuation_id=self.continuation_id,
+                    observed_at=_now(),
+                )
+                self._event(ISSUE, "CREATION_INCOMPLETE")
+                raise HostedAccountIssue(
+                    "CREATION_INCOMPLETE",
+                    "ATS account creation did not produce authenticated browser evidence",
+                )
+            self.lifecycle.mark_created(
+                account_id,
+                self.application_id,
+                _now(),
+                verification_required=verification_required,
+            )
+            if verification_required:
+                self._verify_with_mailbox(
+                    account_id=account_id,
+                    mailbox_request=mailbox_request,
+                )
+            else:
+                self._cancel_mailbox_request(
+                    mailbox_request=mailbox_request,
+                    account_id=account_id,
+                )
+            if login_required:
+                if not self.workday_strategy.wait_for_auth_surface():
+                    self._issue(
+                        "ACCOUNT_LOGIN_FAILED",
+                        "Workday login surface did not become ready after account creation",
+                    )
+                self._login(email=email, password=password)
+                if self._is_login():
+                    self._recovery(
+                        account_id=account_id,
+                        email=email,
+                        password=password,
+                    )
+                    if self._is_login():
+                        self._issue(
+                            "ACCOUNT_LOGIN_FAILED",
+                            "Newly confirmed Workday account rejected the persisted credential",
+                        )
         finally:
             password = ""
-
-        verification_required = self._is_verification()
-        if not verification_required and not self._authentication_confirmed():
-            self.lifecycle.mark_creation_incomplete(
-                account_id=account_id,
-                application_id=self.application_id,
-                continuation_id=self.continuation_id,
-                observed_at=_now(),
-            )
-            self._event(ISSUE, "CREATION_INCOMPLETE")
-            raise HostedAccountIssue(
-                "CREATION_INCOMPLETE",
-                "ATS account creation did not produce authenticated browser evidence",
-            )
-        self.lifecycle.mark_created(
-            account_id,
-            self.application_id,
-            _now(),
-            verification_required=verification_required,
-        )
-        if verification_required:
-            self._verify_with_mailbox(
-                account_id=account_id,
-                mailbox_request=mailbox_request,
-            )
-        else:
-            self._cancel_mailbox_request(
-                mailbox_request=mailbox_request,
-                account_id=account_id,
-            )
         return self._resume(account_id)
 
     def _persist_session(self, account_id: str) -> None:

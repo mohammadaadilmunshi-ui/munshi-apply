@@ -723,6 +723,7 @@ class _WorkdayRetryBridge(_Bridge):
     def __init__(self) -> None:
         super().__init__("workday-retry")
         self.prepare_calls = 0
+        self.cancelled: list[str] = []
 
     def prepare_managed_account(self, *args: object, **kwargs: object) -> dict[str, str]:
         self.prepare_calls += 1
@@ -744,6 +745,19 @@ class _WorkdayRetryBridge(_Bridge):
         assert expected_sender_domains == ["mail.example.com"]
         assert ttl_minutes == 30
         return {"request_id": "request-workday-retry", "mail_relay_ready": True}
+
+    def cancel_mailbox_verification(
+        self,
+        _plan: dict[str, object],
+        *,
+        request_id: str,
+        account_id: str,
+        reason_code: str,
+    ) -> dict[str, str]:
+        assert request_id == "request-workday-retry"
+        assert account_id == "account-browser-workday-retry"
+        self.cancelled.append(reason_code)
+        return {"request_id": request_id, "state": "CANCELLED"}
 
 
 def _workday_retry_html() -> str:
@@ -781,7 +795,41 @@ def _workday_retry_html() -> str:
         sessionStorage.setItem("workday-beecatcher", trap.value);
         if (consent.checked && trap.value === "") {
           setTimeout(() => {
-            document.body.innerHTML = "<h1>Check your email to verify your account</h1>";
+            history.replaceState({}, "", "/candidate/register/login");
+            document.body.innerHTML = `
+              <h1>Sign In</h1>
+              <form id="login-form">
+                <input type="text" data-automation-id="email" />
+                <input type="password" autocomplete="current-password"
+                  data-automation-id="password" />
+                <div style="position:relative;width:160px;height:40px">
+                  <button type="submit" tabindex="-2" aria-hidden="true"
+                    style="width:160px;height:40px"
+                    data-automation-id="signInSubmitButton">Sign In</button>
+                  <div role="button" tabindex="0" aria-label="Sign In"
+                    style="position:absolute;inset:0"
+                    data-automation-id="click_filter"></div>
+                </div>
+              </form>`;
+            document.querySelector("#login-form").addEventListener("submit", (loginEvent) => {
+              loginEvent.preventDefault();
+              const loginForm = loginEvent.currentTarget;
+              if (
+                loginForm.querySelector("[data-automation-id=email]").value ===
+                  "u_workdayretry0001@mail.munshi.systems" &&
+                loginForm.querySelector("[data-automation-id=password]").value ===
+                  "Fixture-Managed-Credential-1!"
+              ) {
+                sessionStorage.setItem("workday-post-create-login", "confirmed");
+                history.replaceState(
+                  {}, "", "/candidate/register/apply/autofillWithResume"
+                );
+                document.body.innerHTML = "<h1>Autofill with Resume</h1>";
+              }
+            });
+            document.querySelector("#login-form [data-automation-id=click_filter]")
+              .addEventListener("click", () =>
+                document.querySelector("#login-form").requestSubmit());
           }, 1500);
         }
       });
@@ -880,13 +928,17 @@ def test_failed_safe_workday_creation_reuses_account_and_handles_current_control
         assert result.account_id == account_id
         assert EXISTING_ACCOUNT in result.trace
         assert CREATE_ACCOUNT in result.trace
-        assert LOGIN not in result.trace
+        assert LOGIN in result.trace
         assert result.state == RESUME_APPLICATION
         assert bridge.prepare_calls == 0
         assert page.evaluate("sessionStorage.getItem('workday-consent')") == "true"
         assert page.evaluate("sessionStorage.getItem('workday-beecatcher')") == ""
+        assert page.evaluate(
+            "sessionStorage.getItem('workday-post-create-login')"
+        ) == "confirmed"
         assert AccountStore(database).lookup({"portalUrl": REGISTER_URL})[0]["exists"] is True
         assert lifecycle.snapshot(account_id)["state"] == "AUTHENTICATED"
+        assert bridge.cancelled == ["VERIFICATION_NOT_REQUIRED"]
 
         context.close()
         browser.close()
