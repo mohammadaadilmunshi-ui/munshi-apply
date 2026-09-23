@@ -567,7 +567,14 @@ def _workday_duplicate_auth_forms_html() -> str:
       <h2>Sign In</h2>
       <input type="text" autocomplete="email" data-automation-id="email" />
       <input type="password" autocomplete="current-password" data-automation-id="password" />
-      <button type="submit" data-automation-id="signInSubmitButton">Sign In</button>
+      <div style="position:relative;width:160px;height:40px">
+        <button type="submit" tabindex="-2" aria-hidden="true"
+          style="width:160px;height:40px"
+          data-automation-id="signInSubmitButton">Sign In</button>
+        <div role="button" tabindex="0" aria-label="Sign In"
+          style="position:absolute;inset:0"
+          data-automation-id="click_filter"></div>
+      </div>
     </form>
     <script>
       document.querySelector("[data-automation-id=signInLink]").addEventListener("click", () => {
@@ -586,6 +593,8 @@ def _workday_duplicate_auth_forms_html() -> str:
           document.body.innerHTML = "<h1>Candidate dashboard</h1>";
         }
       });
+      document.querySelector("#login-form [data-automation-id=click_filter]")
+        .addEventListener("click", () => document.querySelector("#login-form").requestSubmit());
     </script>
   </body>
 </html>"""

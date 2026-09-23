@@ -442,7 +442,7 @@ class ATSAccountLifecycle:
                     continuation_id, account_id, application_id, execution_session_id,
                     provider, target_fingerprint, state, issue_code, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, 'PENDING', NULL, ?, ?)
-                ON CONFLICT(continuation_id) DO UPDATE SET
+                ON CONFLICT(account_id, application_id, execution_session_id) DO UPDATE SET
                     updated_at = excluded.updated_at
                 """,
                 (
@@ -457,8 +457,11 @@ class ATSAccountLifecycle:
                 ),
             )
             row = connection.execute(
-                "SELECT * FROM ats_account_continuations WHERE continuation_id = ?",
-                (continuation_id,),
+                """
+                SELECT * FROM ats_account_continuations
+                WHERE account_id = ? AND application_id = ? AND execution_session_id = ?
+                """,
+                (account_id, application_id, execution_session_id),
             ).fetchone()
         return dict(row) if row is not None else {}
 

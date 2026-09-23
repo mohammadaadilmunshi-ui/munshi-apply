@@ -136,6 +136,32 @@ def test_account_creation_verification_and_continuation_survive_restart(tmp_path
     )
 
 
+def test_continuation_binding_is_idempotent_for_execution_session(tmp_path: Path) -> None:
+    database = create_database(tmp_path)
+    lifecycle = ATSAccountLifecycle(database)
+    provision(lifecycle)
+    bind(lifecycle)
+
+    rebound = lifecycle.bind_continuation(
+        {
+            "continuationId": "continuation-retry",
+            "accountId": "account-1",
+            "applicationId": "app-1",
+            "executionSessionId": "session-1",
+            "provider": "workday",
+            "targetFingerprint": "sha256:application-target",
+            "observedAt": LATER,
+        }
+    )
+
+    assert rebound["continuation_id"] == "continuation-1"
+    with database.connect() as connection:
+        count = connection.execute(
+            "SELECT COUNT(*) FROM ats_account_continuations"
+        ).fetchone()[0]
+    assert count == 1
+
+
 def test_no_raw_verification_or_password_material_is_durable(tmp_path: Path) -> None:
     database = create_database(tmp_path)
     lifecycle = ATSAccountLifecycle(database)

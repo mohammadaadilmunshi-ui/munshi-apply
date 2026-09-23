@@ -460,7 +460,7 @@ class HostedAccountOrchestrator:
 
     def _bind_continuation(self, account_id: str) -> str:
         continuation_id = f"acctcont_{uuid4().hex}"
-        self.lifecycle.bind_continuation(
+        bound = self.lifecycle.bind_continuation(
             {
                 "continuationId": continuation_id,
                 "accountId": account_id,
@@ -471,8 +471,8 @@ class HostedAccountOrchestrator:
                 "observedAt": _now(),
             }
         )
-        self.continuation_id = continuation_id
-        return continuation_id
+        self.continuation_id = str(bound["continuation_id"])
+        return self.continuation_id
 
     def _issue(self, code: str, message: str) -> None:
         normalized = str(code).upper()
@@ -767,7 +767,14 @@ class HostedAccountOrchestrator:
                 form = submit.locator("xpath=ancestor::form[1]")
                 form.locator("input[data-automation-id='email']").first.fill(login_id)
                 form.locator("input[data-automation-id='password']").first.fill(password)
-                submit.click()
+                visible_action = form.locator(
+                    "[data-automation-id='click_filter'][role='button']"
+                    "[aria-label='Sign In']"
+                ).first
+                if visible_action.count() and visible_action.is_visible():
+                    visible_action.click()
+                else:
+                    submit.click()
             else:
                 self._fill_first(
                     [
