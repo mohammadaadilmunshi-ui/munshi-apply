@@ -19,6 +19,7 @@ from urllib.parse import urlsplit
 
 from .execution_policy import prepare_permissions, safe_evidence
 from .hunter_plan_semantic_bridge import answer_matches_question
+from .universal_document_uploader import DocumentSpec, UniversalDocumentUploader
 
 RESUME_UPLOAD_ENV = "MUNSHI_APPLY_RESUME_UPLOAD_ENABLED"
 NORMAL_AUTOFILL_ENV = "MUNSHI_APPLY_NORMAL_ANSWER_AUTOFILL_ENABLED"
@@ -231,15 +232,12 @@ class PlanBrowserAdapter:
         return element
 
     def _file_sha256(self, control_id: str) -> str:
-        data = self._element(control_id).evaluate("""async element => {
-          if (!element.files || element.files.length !== 1) return null;
-          const file = element.files[0];
-          const bytes = await file.arrayBuffer();
-          const hash = await crypto.subtle.digest('SHA-256', bytes);
-          return Array.from(new Uint8Array(hash),
-            byte => byte.toString(16).padStart(2, '0')).join('');
-        }""")
-        return str(data or "").strip().lower()
+        hashes = UniversalDocumentUploader._file_hashes(
+            self._element(control_id)
+        )
+        if len(hashes) != 1:
+            return ""
+        return str(hashes[0] or "").strip().lower()
 
     @staticmethod
     def _upload_key(plan: dict[str, Any], role: str) -> tuple[str, str]:
@@ -258,6 +256,57 @@ class PlanBrowserAdapter:
         if self.current_plan(plan) is not True:
             return ""
         return self._verified_uploads.get(self._upload_key(plan, role), "")
+
+    def _universal_document_upload(
+        self,
+        *,
+        plan: dict[str, Any],
+        permissions: dict[str, bool],
+    ) -> dict[str, str]:
+        if self.current_plan(plan) is not True:
+            raise ValueError("Hunter plan is stale")
+
+        resume_spec = None
+        if permissions.get("resume_upload") and _enabled(RESUME_UPLOAD_ENV):
+            resume = dict(plan.get("resume") or {})
+            resume_spec = DocumentSpec(
+                role="resume",
+                filename=str(resume.get("filename") or ""),
+                mime_type=str(resume.get("mime_type") or ""),
+                sha256=str(resume.get("artifact_sha256") or ""),
+                data=self.artifact_reader(plan),
+            )
+
+        cover_spec = None
+        cover = dict(plan.get("cover_letter") or {})
+        if (
+            cover
+            and permissions.get("cover_letter_upload")
+            and self.cover_letter_reader is not None
+        ):
+            cover_spec = DocumentSpec(
+                role="cover_letter",
+                filename=str(cover.get("filename") or ""),
+                mime_type=str(cover.get("mime_type") or ""),
+                sha256=str(cover.get("artifact_sha256") or ""),
+                data=self.cover_letter_reader(plan),
+            )
+
+        if resume_spec is None and cover_spec is None:
+            return {}
+
+        uploader = UniversalDocumentUploader(self.page, on_event=self.on_event)
+        verified = uploader.upload(
+            resume=resume_spec,
+            cover_letter=cover_spec,
+        )
+        for role, sha256 in verified.items():
+            self._remember_verified_upload(
+                plan=plan,
+                role=role,
+                expected_sha256=sha256,
+            )
+        return verified
 
     def _advance_application_entry_surface(self, plan: dict[str, Any]) -> bool:
         """Enter a generic application surface from a job-details shell.
@@ -657,6 +706,10 @@ class PlanBrowserAdapter:
             observed = self.inspect_job(plan=plan)
             if observed["security_checkpoint"] or not observed["job_id"]:
                 raise ValueError("Browser identity or security checkpoint blocks preparation")
+            self._universal_document_upload(
+                plan=plan,
+                permissions=permissions,
+            )
             described = self._scan()
             self.on_event("PAGE_SCANNED", {"page_id": described["page"]["pageId"]})
             for question in described["page"]["questions"]:
@@ -673,12 +726,15 @@ class PlanBrowserAdapter:
                         for item in controls.values()
                         if item.get("inputType") == "file" and not item.get("disabled")
                     ]
+                    cover_letter_role = (
+                        "cover" in identity and "letter" in identity
+                    )
                     resume_role = bool(
                         any(token in identity for token in ("resume", "curriculum vitae"))
                         or re.search(r"(^|\W)cv($|\W)", identity)
                         or (
                             len(file_controls) == 1
-                            and not isinstance(plan.get("cover_letter"), dict)
+                            and not cover_letter_role
                         )
                     )
                     if resume_role:
@@ -709,8 +765,7 @@ class PlanBrowserAdapter:
                         )
                         continue
                     if (
-                        "cover" in identity
-                        and "letter" in identity
+                        cover_letter_role
                         and isinstance(plan.get("cover_letter"), dict)
                     ):
                         if self.current_plan(plan) is not True:
