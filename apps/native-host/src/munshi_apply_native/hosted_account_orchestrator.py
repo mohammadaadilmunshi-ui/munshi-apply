@@ -138,6 +138,20 @@ class WorkdayAccountStrategy:
         self.page.wait_for_timeout(500)
         return self._visible("button[data-automation-id='createAccountSubmitButton']")
 
+    def wait_for_auth_surface(self, timeout_ms: int = 10_000) -> bool:
+        deadline = time.monotonic() + max(0.5, timeout_ms / 1000.0)
+        selector = (
+            "button[data-automation-id='signInSubmitButton'],"
+            "button[data-automation-id='createAccountSubmitButton'],"
+            "input[autocomplete='current-password'],"
+            "input[autocomplete='new-password']"
+        )
+        while time.monotonic() < deadline:
+            if self._visible(selector) is not None:
+                return True
+            self.page.wait_for_timeout(100)
+        return False
+
     def on_bound_application_route(self) -> bool:
         try:
             expected = urlsplit(self.original_url)
@@ -1204,6 +1218,21 @@ class HostedAccountOrchestrator:
         )
 
     def run(self) -> HostedAccountResult:
+        records = self.store.lookup({"portalUrl": self.original_url})
+        if len(records) > 1:
+            self._event(ISSUE, "DUPLICATE_ACCOUNT_DETECTED")
+            raise HostedAccountIssue(
+                "DUPLICATE_ACCOUNT_DETECTED",
+                "Multiple ATS accounts exist for the exact portal scope",
+            )
+        creation_required = not records or records[0].get("exists") is not True
+        if (
+            creation_required
+            and self.workday_strategy is not None
+            and not self.workday_strategy.wait_for_auth_surface()
+        ):
+            self._event(ISSUE, "ACCOUNT_SURFACE_NOT_READY")
+            raise TimeoutError("Workday account surface did not become ready")
         if not self._account_required():
             self._event(NOT_REQUIRED)
             return HostedAccountResult(
@@ -1214,14 +1243,6 @@ class HostedAccountOrchestrator:
             )
 
         self._event(ACCOUNT_REQUIRED)
-        records = self.store.lookup({"portalUrl": self.original_url})
-        if len(records) > 1:
-            self._event(ISSUE, "DUPLICATE_ACCOUNT_DETECTED")
-            raise HostedAccountIssue(
-                "DUPLICATE_ACCOUNT_DETECTED",
-                "Multiple ATS accounts exist for the exact portal scope",
-            )
-
         if records:
             self._event(EXISTING_ACCOUNT)
             record = records[0]

@@ -750,8 +750,8 @@ def _workday_retry_html() -> str:
     return """<!doctype html>
 <html>
   <body>
-    <h1>Create Account</h1>
-    <form id="create-account">
+    <h1 id="account-heading">Loading</h1>
+    <form id="create-account" style="display:none">
       <input type="text" autocomplete="email" data-automation-id="email" />
       <input type="password" autocomplete="new-password" data-automation-id="password" />
       <input type="password" autocomplete="new-password" data-automation-id="verifyPassword" />
@@ -762,6 +762,10 @@ def _workday_retry_html() -> str:
     </form>
     <script>
       sessionStorage.setItem("munshi-account-flow", "same-context");
+      setTimeout(() => {
+        document.querySelector("#account-heading").textContent = "Create Account";
+        document.querySelector("#create-account").style.display = "block";
+      }, 350);
       document.querySelector("#create-account").addEventListener("submit", (event) => {
         event.preventDefault();
         const consent = document.querySelector("[data-automation-id=createAccountCheckbox]");
