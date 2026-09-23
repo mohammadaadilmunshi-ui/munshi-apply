@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import re
 import time
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -148,6 +149,18 @@ class WorkdayAccountStrategy:
             visible_action.click()
         else:
             submit.click()
+
+    def wait_for_creation_outcome(
+        self,
+        verification_confirmed: Callable[[], bool],
+        timeout_ms: int = 10_000,
+    ) -> bool:
+        deadline = time.monotonic() + max(0.5, timeout_ms / 1000.0)
+        while time.monotonic() < deadline:
+            if verification_confirmed() or self.authentication_confirmed():
+                return True
+            self.page.wait_for_timeout(100)
+        return False
 
     def wait_for_auth_surface(self, timeout_ms: int = 10_000) -> bool:
         deadline = time.monotonic() + max(0.5, timeout_ms / 1000.0)
@@ -928,6 +941,16 @@ class HostedAccountOrchestrator:
                         "Required account-creation consent was not selected",
                     )
                 self.workday_strategy.click_create_submit(submit)
+                if not self.workday_strategy.wait_for_creation_outcome(
+                    self._is_verification
+                ):
+                    raise HostedAccountIssue(
+                        "ACCOUNT_FORM_UNSUPPORTED",
+                        "Workday account creation did not reach a confirmed next state: "
+                        + self._account_form_diagnostics(
+                            redactions=(login_id, password)
+                        ),
+                    )
             else:
                 self._fill_first(
                     [

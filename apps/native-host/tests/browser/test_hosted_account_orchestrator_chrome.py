@@ -780,7 +780,9 @@ def _workday_retry_html() -> str:
         sessionStorage.setItem("workday-consent", String(consent.checked));
         sessionStorage.setItem("workday-beecatcher", trap.value);
         if (consent.checked && trap.value === "") {
-          document.body.innerHTML = "<h1>Check your email to verify your account</h1>";
+          setTimeout(() => {
+            document.body.innerHTML = "<h1>Check your email to verify your account</h1>";
+          }, 1500);
         }
       });
       document.querySelector("#create-account [data-automation-id=click_filter]")
