@@ -755,28 +755,42 @@ class HostedAccountOrchestrator:
         self._event(LOGIN)
         login_id = self._login_identifier(email)
         try:
-            self._fill_first(
-                [
-                    "input[type='email']",
-                    "input[autocomplete='email']",
-                    "input[data-automation-id='email']",
-                    "input[autocomplete='username']",
-                    "input[name*='email' i]",
-                    "input[id*='email' i]",
-                    "input[name*='user' i]",
-                ],
-                login_id,
-                "account email or username",
-            )
-            self._fill_first(
-                ["input[autocomplete='current-password']", "input[type='password']"],
-                password,
-                "account password",
-            )
-            self._click_text(
-                re.compile(r"^(sign in|log in|login|continue)$", re.I),
-                "login",
-            )
+            if self.provider == "WORKDAY":
+                submit = self._visible(
+                    ["button[data-automation-id='signInSubmitButton']"]
+                )
+                if submit is None:
+                    raise HostedAccountIssue(
+                        "ACCOUNT_FORM_UNSUPPORTED",
+                        "Workday sign-in submit control was not found",
+                    )
+                form = submit.locator("xpath=ancestor::form[1]")
+                form.locator("input[data-automation-id='email']").first.fill(login_id)
+                form.locator("input[data-automation-id='password']").first.fill(password)
+                submit.click()
+            else:
+                self._fill_first(
+                    [
+                        "input[type='email']",
+                        "input[autocomplete='email']",
+                        "input[data-automation-id='email']",
+                        "input[autocomplete='username']",
+                        "input[name*='email' i]",
+                        "input[id*='email' i]",
+                        "input[name*='user' i]",
+                    ],
+                    login_id,
+                    "account email or username",
+                )
+                self._fill_first(
+                    ["input[autocomplete='current-password']", "input[type='password']"],
+                    password,
+                    "account password",
+                )
+                self._click_text(
+                    re.compile(r"^(sign in|log in|login|continue)$", re.I),
+                    "login",
+                )
             self._wait_page(1000)
             return
         except Exception as error:
@@ -795,36 +809,24 @@ class HostedAccountOrchestrator:
         self._event(CREATE_ACCOUNT)
         login_id = self._login_identifier(email)
         try:
-            self._fill_first(
-                [
-                    "input[type='email']",
-                    "input[autocomplete='email']",
-                    "input[data-automation-id='email']",
-                    "input[autocomplete='username']",
-                    "input[name*='email' i]",
-                    "input[id*='email' i]",
-                ],
-                login_id,
-                "account email or username",
-            )
-            passwords = [
-                "input[autocomplete='new-password']",
-                "input[type='password']",
-            ]
-            locator = self.page.locator(", ".join(passwords))
-            count = locator.count()
-            if count < 1:
-                raise HostedAccountIssue(
-                    "ACCOUNT_FORM_UNSUPPORTED",
-                    "Account password field was not found",
-                )
-            locator.nth(0).fill(password)
-            if count > 1:
-                locator.nth(1).fill(password)
             if self.provider == "WORKDAY":
-                consent = self._visible(
-                    ["input[data-automation-id='createAccountCheckbox']"]
+                submit = self._visible(
+                    ["button[data-automation-id='createAccountSubmitButton']"]
                 )
+                if submit is None:
+                    raise HostedAccountIssue(
+                        "ACCOUNT_FORM_UNSUPPORTED",
+                        "Workday create-account submit control was not found",
+                    )
+                form = submit.locator("xpath=ancestor::form[1]")
+                form.locator("input[data-automation-id='email']").first.fill(login_id)
+                form.locator("input[data-automation-id='password']").first.fill(password)
+                form.locator("input[data-automation-id='verifyPassword']").first.fill(password)
+                consent = form.locator(
+                    "input[data-automation-id='createAccountCheckbox']"
+                ).first
+                if not consent.count():
+                    consent = None
                 if consent is not None and not consent.is_checked():
                     consent.check()
                 if consent is not None and not consent.is_checked():
@@ -832,10 +834,38 @@ class HostedAccountOrchestrator:
                         "ACCOUNT_FORM_UNSUPPORTED",
                         "Required account-creation consent was not selected",
                     )
-            self._click_text(
-                re.compile(r"^(create (?:my )?account|register|sign up|continue)$", re.I),
-                "create account",
-            )
+                submit.click()
+            else:
+                self._fill_first(
+                    [
+                        "input[type='email']",
+                        "input[autocomplete='email']",
+                        "input[data-automation-id='email']",
+                        "input[autocomplete='username']",
+                        "input[name*='email' i]",
+                        "input[id*='email' i]",
+                    ],
+                    login_id,
+                    "account email or username",
+                )
+                passwords = [
+                    "input[autocomplete='new-password']",
+                    "input[type='password']",
+                ]
+                locator = self.page.locator(", ".join(passwords))
+                count = locator.count()
+                if count < 1:
+                    raise HostedAccountIssue(
+                        "ACCOUNT_FORM_UNSUPPORTED",
+                        "Account password field was not found",
+                    )
+                locator.nth(0).fill(password)
+                if count > 1:
+                    locator.nth(1).fill(password)
+                self._click_text(
+                    re.compile(r"^(create (?:my )?account|register|sign up|continue)$", re.I),
+                    "create account",
+                )
             self._wait_page(1000)
             if self._is_create() and not self._is_verification():
                 raise HostedAccountIssue(
@@ -1132,10 +1162,21 @@ class HostedAccountOrchestrator:
             try:
                 if self._is_create():
                     try:
-                        self._click_text(
-                            re.compile(r"^(sign in|log in|login)$", re.I),
-                            "existing account",
-                        )
+                        if self.provider == "WORKDAY":
+                            switch = self._visible(
+                                ["button[data-automation-id='signInLink']"]
+                            )
+                            if switch is None:
+                                raise HostedAccountIssue(
+                                    "ACCOUNT_FORM_UNSUPPORTED",
+                                    "Workday existing-account switch was not found",
+                                )
+                            switch.click()
+                        else:
+                            self._click_text(
+                                re.compile(r"^(sign in|log in|login)$", re.I),
+                                "existing account",
+                            )
                         self._wait_page(500)
                     except Exception as error:
                         recovered = self._mechanics_recover(

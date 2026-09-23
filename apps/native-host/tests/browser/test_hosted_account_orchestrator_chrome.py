@@ -531,6 +531,131 @@ def test_existing_account_login_uses_managed_credential_and_persists_same_sessio
         browser.close()
 
 
+class _WorkdayLoginBridge(_LoginBridge):
+    def begin_mailbox_verification(
+        self,
+        _plan: dict[str, object],
+        *,
+        account_id: str,
+        provider: str,
+        expected_link_hosts: list[str],
+        expected_sender_domains: list[str],
+        ttl_minutes: int = 30,
+    ) -> dict[str, object]:
+        assert account_id == "account-existing-browser"
+        assert provider == "WORKDAY"
+        assert expected_link_hosts == ["careers.example.com"]
+        assert expected_sender_domains == ["mail.example.com"]
+        assert ttl_minutes == 30
+        return {"request_id": "request-existing-login", "mail_relay_ready": True}
+
+
+def _workday_duplicate_auth_forms_html() -> str:
+    return """<!doctype html>
+<html>
+  <body>
+    <h1>Create Account</h1>
+    <form id="create-form">
+      <input type="text" autocomplete="email" data-automation-id="email" />
+      <input type="password" autocomplete="new-password" data-automation-id="password" />
+      <input type="password" autocomplete="new-password" data-automation-id="verifyPassword" />
+      <input type="checkbox" data-automation-id="createAccountCheckbox" />
+      <button type="submit" data-automation-id="createAccountSubmitButton">Create Account</button>
+    </form>
+    <button type="button" data-automation-id="signInLink">Sign In</button>
+    <form id="login-form" style="display:none">
+      <h2>Sign In</h2>
+      <input type="text" autocomplete="email" data-automation-id="email" />
+      <input type="password" autocomplete="current-password" data-automation-id="password" />
+      <button type="submit" data-automation-id="signInSubmitButton">Sign In</button>
+    </form>
+    <script>
+      document.querySelector("[data-automation-id=signInLink]").addEventListener("click", () => {
+        document.querySelector("#login-form").style.display = "block";
+      });
+      document.querySelector("#login-form").addEventListener("submit", (event) => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const email = form.querySelector("[data-automation-id=email]").value;
+        const password = form.querySelector("[data-automation-id=password]").value;
+        if (
+          email === "u_existingbrowser0001@mail.munshi.systems" &&
+          password === "Fixture-Existing-Managed-1!"
+        ) {
+          sessionStorage.setItem("workday-login-form", "scoped");
+          document.body.innerHTML = "<h1>Candidate dashboard</h1>";
+        }
+      });
+    </script>
+  </body>
+</html>"""
+
+
+def test_workday_login_scopes_fields_and_submit_to_login_form(tmp_path: Path) -> None:
+    application_id = "app-browser-workday-login"
+    database = _database(tmp_path, application_id)
+    plan = _plan(application_id)
+    plan["provider_policy"]["provider"] = "WORKDAY"  # type: ignore[index]
+    bridge = _WorkdayLoginBridge()
+
+    AccountStore(database).upsert(
+        {
+            "accountId": "account-existing-browser",
+            "employer": "Browser Fixture",
+            "portalUrl": REGISTER_URL,
+            "email": "u_existingbrowser0001@mail.munshi.systems",
+            "exists": True,
+            "applicationId": application_id,
+            "observedAt": NOW,
+        }
+    )
+    ATSAccountLifecycle(database).provision(
+        {
+            "accountId": "account-existing-browser",
+            "provider": "workday",
+            "credentialRef": EXISTING_CREDENTIAL_REFERENCE,
+            "mailAlias": "u_existingbrowser0001@mail.munshi.systems",
+            "observedAt": NOW,
+        }
+    )
+
+    browser_path = resolve_browser_executable()
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, executable_path=browser_path)
+        context = browser.new_context()
+        context.route(
+            "**/*",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="text/html",
+                body=_workday_duplicate_auth_forms_html(),
+            ),
+        )
+        page = context.new_page()
+        page.goto(REGISTER_URL, wait_until="domcontentloaded")
+
+        result = HostedAccountOrchestrator(
+            database,
+            plan=plan,
+            bridge=bridge,
+            page=page,
+            context=context,
+            tenant_id="tenant-browser",
+            user_id="user-browser",
+            session_secret=b"browser-workday-login-session-fixture",
+            verification_timeout_seconds=5,
+            poll_interval_seconds=0.05,
+        ).run()
+
+        assert result.state == RESUME_APPLICATION
+        assert LOGIN in result.trace
+        assert page.evaluate("sessionStorage.getItem('workday-login-form')") == "scoped"
+        assert bridge.cancelled == ["VERIFICATION_NOT_REQUIRED"]
+
+        context.close()
+        browser.close()
+
+
 class _WorkdayRetryBridge(_Bridge):
     def __init__(self) -> None:
         super().__init__("workday-retry")
