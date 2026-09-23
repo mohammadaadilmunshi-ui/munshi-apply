@@ -758,7 +758,14 @@ def _workday_retry_html() -> str:
       <input type="checkbox" data-automation-id="createAccountCheckbox" />
       <label>I agree</label>
       <input type="text" name="website" data-automation-id="beecatcher" />
-      <button type="submit" data-automation-id="createAccountSubmitButton">Create Account</button>
+      <div style="position:relative;width:160px;height:40px">
+        <button type="submit" tabindex="-2" aria-hidden="true"
+          style="width:160px;height:40px"
+          data-automation-id="createAccountSubmitButton">Create Account</button>
+        <div role="button" tabindex="0" aria-label="Create Account"
+          style="position:absolute;inset:0"
+          data-automation-id="click_filter"></div>
+      </div>
     </form>
     <script>
       sessionStorage.setItem("munshi-account-flow", "same-context");
@@ -776,6 +783,8 @@ def _workday_retry_html() -> str:
           document.body.innerHTML = "<h1>Check your email to verify your account</h1>";
         }
       });
+      document.querySelector("#create-account [data-automation-id=click_filter]")
+        .addEventListener("click", () => document.querySelector("#create-account").requestSubmit());
     </script>
   </body>
 </html>"""

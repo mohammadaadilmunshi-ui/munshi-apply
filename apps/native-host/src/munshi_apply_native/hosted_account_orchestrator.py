@@ -138,6 +138,17 @@ class WorkdayAccountStrategy:
         self.page.wait_for_timeout(500)
         return self._visible("button[data-automation-id='createAccountSubmitButton']")
 
+    def click_create_submit(self, submit: Any) -> None:
+        form = submit.locator("xpath=ancestor::form[1]")
+        visible_action = form.locator(
+            "[data-automation-id='click_filter'][role='button']"
+            "[aria-label='Create Account']"
+        ).first
+        if visible_action.count() and visible_action.is_visible():
+            visible_action.click()
+        else:
+            submit.click()
+
     def wait_for_auth_surface(self, timeout_ms: int = 10_000) -> bool:
         deadline = time.monotonic() + max(0.5, timeout_ms / 1000.0)
         selector = (
@@ -916,7 +927,7 @@ class HostedAccountOrchestrator:
                         "ACCOUNT_FORM_UNSUPPORTED",
                         "Required account-creation consent was not selected",
                     )
-                submit.click()
+                self.workday_strategy.click_create_submit(submit)
             else:
                 self._fill_first(
                     [
