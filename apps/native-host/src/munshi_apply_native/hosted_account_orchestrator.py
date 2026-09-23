@@ -150,6 +150,41 @@ class WorkdayAccountStrategy:
         else:
             submit.click()
 
+    def request_password_reset(
+        self,
+        login_id: str,
+        confirmation_visible: Callable[[], bool],
+        timeout_ms: int = 10_000,
+    ) -> bool:
+        forgot = self._visible("button[data-automation-id='forgotPasswordLink']")
+        if forgot is None:
+            return False
+        forgot.click()
+        deadline = time.monotonic() + max(0.5, timeout_ms / 1000.0)
+        submit = None
+        while time.monotonic() < deadline:
+            submit = self._visible("button[data-automation-id='resetPasswordButton']")
+            if submit is not None:
+                break
+            self.page.wait_for_timeout(100)
+        if submit is None:
+            return False
+        form = submit.locator("xpath=ancestor::form[1]")
+        form.locator("input[data-automation-id='email']").first.fill(login_id)
+        visible_action = form.locator(
+            "[data-automation-id='click_filter'][role='button']"
+            "[aria-label='Reset Password']"
+        ).first
+        if visible_action.count() and visible_action.is_visible():
+            visible_action.click()
+        else:
+            submit.click()
+        while time.monotonic() < deadline:
+            if confirmation_visible():
+                return True
+            self.page.wait_for_timeout(100)
+        return False
+
     def wait_for_creation_outcome(
         self,
         verification_confirmed: Callable[[], bool],
@@ -1051,24 +1086,34 @@ class HostedAccountOrchestrator:
 
         try:
             try:
-                self._click_text(_RECOVERY_TEXT, "password recovery")
-                self._fill_first(
-                    [
-                        "input[type='email']",
-                        "input[autocomplete='email']",
-                        "input[data-automation-id='email']",
-                        "input[autocomplete='username']",
-                        "input[name*='email' i]",
-                    ],
-                    login_id,
-                    "recovery email or username",
-                )
-                self._click_text(
-                    re.compile(r"^(send|continue|reset password|email me|submit)$", re.I),
-                    "send reset email",
-                )
-                self._wait_page(500)
-                if not reset_requested():
+                if self.workday_strategy is not None:
+                    confirmed = self.workday_strategy.request_password_reset(
+                        login_id,
+                        reset_requested,
+                    )
+                else:
+                    self._click_text(_RECOVERY_TEXT, "password recovery")
+                    self._fill_first(
+                        [
+                            "input[type='email']",
+                            "input[autocomplete='email']",
+                            "input[data-automation-id='email']",
+                            "input[autocomplete='username']",
+                            "input[name*='email' i]",
+                        ],
+                        login_id,
+                        "recovery email or username",
+                    )
+                    self._click_text(
+                        re.compile(
+                            r"^(send|continue|reset password|email me|submit)$",
+                            re.I,
+                        ),
+                        "send reset email",
+                    )
+                    self._wait_page(500)
+                    confirmed = reset_requested()
+                if not confirmed:
                     raise HostedAccountIssue(
                         "ACCOUNT_FORM_UNSUPPORTED",
                         "Password recovery request was not confirmed",

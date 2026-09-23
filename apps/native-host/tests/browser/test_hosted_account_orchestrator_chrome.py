@@ -20,6 +20,7 @@ from munshi_apply_native.hosted_account_orchestrator import (
     RESUME_APPLICATION,
     VERIFIED,
     HostedAccountOrchestrator,
+    WorkdayAccountStrategy,
 )
 
 pytestmark = pytest.mark.skipif(
@@ -715,6 +716,59 @@ def test_text_click_uses_visible_match_when_hidden_duplicate_comes_first(
         )
 
         assert page.evaluate("document.body.dataset.recoveryClicked") == "yes"
+        context.close()
+        browser.close()
+
+
+def test_workday_password_reset_uses_visible_action_and_waits_for_confirmation() -> None:
+    browser_path = resolve_browser_executable()
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, executable_path=browser_path)
+        context = browser.new_context()
+        page = context.new_page()
+        page.set_content(
+            """
+            <button data-automation-id="forgotPasswordLink">Forgot your password?</button>
+            <form id="reset-form" style="display:none">
+              <input type="text" data-automation-id="email" />
+              <div style="position:relative;width:160px;height:40px">
+                <button type="submit" tabindex="-2" aria-hidden="true"
+                  style="width:160px;height:40px"
+                  data-automation-id="resetPasswordButton">Reset Password</button>
+                <div role="button" tabindex="0" aria-label="Reset Password"
+                  style="position:absolute;inset:0"
+                  data-automation-id="click_filter"></div>
+              </div>
+            </form>
+            <script>
+              document.querySelector('[data-automation-id=forgotPasswordLink]')
+                .addEventListener('click', () => {
+                  document.querySelector('#reset-form').style.display = 'block';
+                });
+              document.querySelector('#reset-form').addEventListener('submit', (event) => {
+                event.preventDefault();
+                document.body.dataset.resetEmail =
+                  event.currentTarget.querySelector('[data-automation-id=email]').value;
+                setTimeout(() => {
+                  document.body.dataset.resetRequested = 'yes';
+                }, 800);
+              });
+              document.querySelector('#reset-form [data-automation-id=click_filter]')
+                .addEventListener('click', () =>
+                  document.querySelector('#reset-form').requestSubmit());
+            </script>
+            """
+        )
+
+        strategy = WorkdayAccountStrategy(page, REGISTER_URL)
+        assert strategy.request_password_reset(
+            "u_workdayretry0001@mail.munshi.systems",
+            lambda: page.evaluate("document.body.dataset.resetRequested === 'yes'"),
+        )
+        assert page.evaluate(
+            "document.body.dataset.resetEmail"
+        ) == "u_workdayretry0001@mail.munshi.systems"
+
         context.close()
         browser.close()
 
