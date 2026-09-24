@@ -113,7 +113,6 @@ class UniversalDocumentUploader:
                     multiple: Boolean(element.multiple),
                   };
                 }""",
-                timeout=1500,
             )
         )
 
@@ -225,7 +224,6 @@ class UniversalDocumentUploader:
               });
               return await Promise.all(Array.from(element.files).map(read));
             }""",
-            timeout=1500,
         )
         hashes: list[str] = []
         for value in values or []:
