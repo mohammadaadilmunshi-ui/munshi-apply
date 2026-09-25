@@ -895,7 +895,7 @@ function navigationCandidates(
   });
 }
 
-function visibleSecurityText(): string {
+function visibleSecurityTexts(): string[] {
   const selectors = [
     "h1",
     "h2",
@@ -908,13 +908,14 @@ function visibleSecurityText(): string {
     "[role='dialog']",
     "[aria-live]",
   ].join(",");
-  return normalized(
-    Array.from(document.querySelectorAll(selectors))
-      .filter((element) => isVisible(element))
-      .map((element) => compactText(element.textContent))
-      .filter(Boolean)
-      .join(" "),
-  ).slice(0, 120_000);
+  return Array.from(document.querySelectorAll(selectors))
+    .filter((element) => isVisible(element))
+    .map((element) => normalized(element.textContent))
+    .filter(Boolean);
+}
+
+function visibleSecurityText(): string {
+  return visibleSecurityTexts().join(" ").slice(0, 120_000);
 }
 
 function hasVisibleSecurityElement(selector: string): boolean {
@@ -993,12 +994,17 @@ function detectSecurityCheckpoint(): SecurityCheckpointKind | null {
   if (/\b(multi[- ]factor|two[- ]factor|2fa|authenticator app)\b/.test(body)) {
     return "MFA";
   }
+  const visibleTexts = visibleSecurityTexts();
   if (
-    /\b(one[- ]time (passcode|password|code)|verification code|security code|enter the code we sent|otp)\b/.test(
-      body,
-    ) ||
-    /\b(sms|text message|mobile).{0,48}\b(code|verification|authenticate)\b/.test(
-      body,
+    hasVisibleSecurityElement("input[autocomplete='one-time-code']") ||
+    visibleTexts.some(
+      (text) =>
+        /\b(one[- ]time (passcode|password|code)|verification code|security code|enter the code we sent|otp)\b/.test(
+          text,
+        ) ||
+        /\b(sms|text message|mobile).{0,48}\b(code|verification|authenticate)\b/.test(
+          text,
+        ),
     )
   ) {
     return "OTP";
