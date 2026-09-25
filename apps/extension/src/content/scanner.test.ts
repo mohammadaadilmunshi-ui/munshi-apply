@@ -92,6 +92,23 @@ describe("AutoPilot page-state scanner", () => {
     expect(scanDocument().securityCheckpoint).toBe("AUTHENTICATION");
   });
 
+  it("does not combine ordinary Workday phone and postal fields into an OTP checkpoint", () => {
+    document.body.innerHTML = `
+      <section aria-label="Phone">
+        <label for="phone-type">Phone Device Type Mobile Required</label>
+        <button id="phone-type" type="button">Mobile</button>
+        <label for="phone-number">Phone Number*</label>
+        <input id="phone-number" type="text">
+      </section>
+      <section aria-label="Address">
+        <label for="postal-code">Postal Code</label>
+        <input id="postal-code" type="text">
+      </section>
+    `;
+
+    expect(scanDocument().securityCheckpoint).toBeNull();
+  });
+
   it("ignores passive reCAPTCHA integration until a challenge is active", () => {
     document.body.innerHTML = `
       <label for="resume">Upload CV</label>
