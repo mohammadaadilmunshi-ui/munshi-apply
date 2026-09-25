@@ -49,7 +49,7 @@ _SECRET_MARKERS = (
 _CREDENTIAL_REF_RE = re.compile(r"^credref:v1:[A-Za-z0-9_-]{16,128}$")
 _HUNTER_ATS_SECRET_REF_RE = re.compile(r"^ats-secret://[A-Za-z0-9_-]{8,128}/password$")
 _MAIL_ALIAS_RE = re.compile(
-    r"^(?:u|a)_[A-Za-z0-9_-]{16,64}@mail\.munshi\.systems$",
+    r"^(?:u|a)_[A-Za-z0-9_-]{12,64}@mail\.munshi\.systems$",
     re.IGNORECASE,
 )
 _SHA256_RE = re.compile(r"^[a-f0-9]{64}$")

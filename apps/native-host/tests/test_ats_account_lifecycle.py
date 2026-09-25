@@ -56,6 +56,23 @@ def provision(lifecycle: ATSAccountLifecycle) -> None:
     )
 
 
+def test_provision_accepts_existing_hunter_opaque_mail_alias(tmp_path: Path) -> None:
+    database = create_database(tmp_path)
+    lifecycle = ATSAccountLifecycle(database)
+
+    lifecycle.provision(
+        {
+            "accountId": "account-1",
+            "provider": "workday",
+            "credentialRef": "credref:v1:abcdefghijklmnop",
+            "mailAlias": "u_abcdefghijklmno@mail.munshi.systems",
+            "observedAt": NOW,
+        }
+    )
+
+    assert lifecycle.snapshot("account-1")["mail_alias"].startswith("u_")
+
+
 def bind(lifecycle: ATSAccountLifecycle) -> None:
     lifecycle.bind_continuation(
         {
