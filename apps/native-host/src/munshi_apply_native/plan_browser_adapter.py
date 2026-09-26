@@ -334,6 +334,7 @@ class PlanBrowserAdapter:
         poll_ms: int = 75,
         press_enter: bool = True,
     ) -> bool:
+        """Activate exactly one visible Workday option without fuzzy guessing."""
         wanted = self._workday_option_text(answer)
         if not wanted:
             return False
@@ -343,95 +344,146 @@ class PlanBrowserAdapter:
         if trigger is not None and press_enter:
             try:
                 trigger.press("Enter")
-                self.page.wait_for_timeout(500)
+                self.page.wait_for_timeout(350)
             except Exception:
                 pass
 
         selector = (
             "[data-automation-id='promptOption'],"
+            "[data-automation-id*='promptOption'],"
+            "[data-automation-id='dropdownOption'],"
             "[role='option'],[role='menuitem'],"
             "[data-value],[data-option-value]"
         )
 
-        def exact_matches() -> list[Any]:
-            candidates = self.page.locator(selector)
-            result: list[Any] = []
+        def metadata(candidate: Any) -> tuple[bool, list[Any], str]:
+            try:
+                raw = candidate.evaluate(
+                    r"""element => ({
+                      selectedContainer: Boolean(
+                        element.closest('[data-automation-id^="selectedItem"]')
+                      ),
+                      values: [
+                        element.innerText || '',
+                        element.textContent || '',
+                        element.getAttribute('aria-label') || '',
+                        element.getAttribute('title') || '',
+                        element.getAttribute('data-value') || '',
+                        element.getAttribute('data-option-value') || '',
+                        element.getAttribute('data-automation-label') || ''
+                      ],
+                      id: element.id || ''
+                    })"""
+                )
+            except Exception:
+                return False, [], ""
+
+            if isinstance(raw, dict):
+                selected = bool(raw.get("selectedContainer"))
+                values = list(raw.get("values") or [])
+                token_id = str(raw.get("id") or "")
+                return selected, values, token_id
+            if isinstance(raw, (list, tuple)):
+                return False, list(raw), ""
+            return False, [raw], ""
+
+        def is_exact(candidate: Any) -> tuple[bool, str]:
+            selected, values, token_id = metadata(candidate)
+            if selected:
+                return False, token_id
+            for raw in values:
+                if self._workday_option_text(raw) == wanted:
+                    return True, token_id
+                for line in str(raw or "").splitlines():
+                    if self._workday_option_text(line) == wanted:
+                        return True, token_id
+            return False, token_id
+
+        def collect(locator: Any, limit: int) -> list[Any]:
+            matches: list[Any] = []
             seen: set[str] = set()
-            for index in range(min(candidates.count(), 300)):
-                candidate = candidates.nth(index)
+            try:
+                count = min(locator.count(), limit)
+            except Exception:
+                return []
+            for index in range(count):
+                candidate = locator.nth(index)
                 try:
                     if not candidate.is_visible():
                         continue
-                    meta = candidate.evaluate(
-                        r"""element => ({
-                          selectedContainer: Boolean(
-                            element.closest('[data-automation-id^="selectedItem"]')
-                          ),
-                          text: element.innerText || element.textContent || '',
-                          aria: element.getAttribute('aria-label') || '',
-                          title: element.getAttribute('title') || '',
-                          value: element.getAttribute('data-value') || '',
-                          optionValue: element.getAttribute('data-option-value') || '',
-                          automationLabel: element.getAttribute('data-automation-label') || '',
-                          id: element.id || ''
-                        })"""
-                    )
+                    exact, token_id = is_exact(candidate)
+                    if not exact:
+                        continue
+                    token = token_id or f"candidate:{index}"
+                    if token in seen:
+                        continue
+                    seen.add(token)
+                    matches.append(candidate)
                 except Exception:
                     continue
-                if meta.get("selectedContainer"):
-                    continue
-                values = [
-                    meta.get("text"), meta.get("aria"), meta.get("title"),
-                    meta.get("value"), meta.get("optionValue"),
-                    meta.get("automationLabel"),
-                ]
-                if not any(self._workday_option_text(item) == wanted for item in values):
-                    continue
-                token = "|".join(
-                    self._workday_option_text(item) for item in values if item
-                ) + "|" + str(meta.get("id") or "")
-                if token in seen:
-                    continue
-                seen.add(token)
-                result.append(candidate)
-            return result
+            return matches
+
+        def selector_matches() -> list[Any]:
+            return collect(self.page.locator(selector), 300)
+
+        def exact_text_matches() -> list[Any]:
+            try:
+                return collect(self.page.get_by_text(str(answer), exact=True), 50)
+            except Exception:
+                return []
+
+        def activate(candidate: Any) -> bool:
+            target = candidate
+            try:
+                nearest = candidate.locator(
+                    "xpath=ancestor-or-self::*[@role='option'][1]"
+                )
+                if nearest.count() == 1:
+                    target = nearest
+            except Exception:
+                target = candidate
+
+            try:
+                radio = target.locator(
+                    "input[type='radio'],[data-automation-id='radioBtn']"
+                )
+                if radio.count() == 1:
+                    radio.first.click()
+                else:
+                    target.click()
+            except Exception:
+                try:
+                    candidate.click()
+                except Exception:
+                    return False
+            return True
 
         deadline = time.monotonic() + (timeout_ms / 1000.0)
+        arrow_sent = False
+        pass_number = 0
         while time.monotonic() <= deadline:
-            matches = exact_matches()
+            matches = selector_matches()
             if len(matches) == 1:
-                candidate = matches[0]
-                target = candidate
-                try:
-                    nearest = candidate.locator(
-                        "xpath=ancestor-or-self::*[@role='option'][1]"
-                    )
-                    if nearest.count() == 1:
-                        target = nearest
-                except Exception:
-                    target = candidate
-                try:
-                    radio = target.locator(
-                        "input[type='radio'],[data-automation-id='radioBtn']"
-                    )
-                    if radio.count() == 1:
-                        radio.first.click()
-                    else:
-                        target.click()
-                except Exception:
-                    candidate.click()
-                self.page.wait_for_timeout(650)
-                if trigger is None or self._workday_source_committed(trigger, answer):
-                    return True
-                try:
-                    trigger.press("Tab")
-                except Exception:
-                    pass
-                self.page.wait_for_timeout(400)
-                return self._workday_source_committed(trigger, answer)
+                return activate(matches[0])
             if len(matches) > 1:
                 return False
-            self.page.wait_for_timeout(poll_ms)
+
+            matches = exact_text_matches()
+            if len(matches) == 1:
+                return activate(matches[0])
+            if len(matches) > 1:
+                return False
+
+            if trigger is not None and not arrow_sent and pass_number >= 1:
+                try:
+                    trigger.press("ArrowDown")
+                except Exception:
+                    pass
+                arrow_sent = True
+                self.page.wait_for_timeout(150)
+            else:
+                self.page.wait_for_timeout(poll_ms)
+            pass_number += 1
         return False
 
     def _workday_public_prompt_fallback(self, element: Any, answer: str) -> bool:
@@ -540,19 +592,47 @@ class PlanBrowserAdapter:
                 clicked = self._workday_click_exact_option(
                     str(value), trigger=element, press_enter=True
                 )
-                if not clicked and source_prompt:
-                    clicked = self._workday_public_prompt_fallback(element, str(value))
-                if not clicked:
+                committed_early = (
+                    self._workday_source_committed(element, value)
+                    if source_prompt
+                    else False
+                )
+
+                if source_prompt and clicked and not committed_early:
+                    for key in ("Enter", "Tab"):
+                        try:
+                            element.press(key)
+                        except Exception:
+                            pass
+                        self.page.wait_for_timeout(300)
+                        if self._workday_source_committed(element, value):
+                            committed_early = True
+                            break
+
+                if source_prompt and not committed_early:
+                    fallback_ok = self._workday_public_prompt_fallback(
+                        element, str(value)
+                    )
+                    clicked = clicked or fallback_ok
+                    committed_early = self._workday_source_committed(
+                        element, value
+                    )
+
+                if not clicked and not committed_early:
                     return {
                         "status": "FAILED",
                         "reason": "Workday exact prompt option did not commit",
                         "strategy": "WORKDAY_PROVIDER_PROMPT",
                         "verification": "FAILED_CLOSED",
                     }
+
                 try:
                     element.press("Tab")
                 except Exception:
-                    self.page.keyboard.press("Tab")
+                    try:
+                        self.page.keyboard.press("Tab")
+                    except Exception:
+                        pass
             else:
                 element.press("Tab")
 
@@ -563,7 +643,9 @@ class PlanBrowserAdapter:
                 else self._wait_for_control_committed(control_id)
             )
             if source_prompt and not committed:
-                committed = self._wait_for_control_committed(control_id)
+                committed = self._wait_for_control_committed(
+                    control_id, timeout_ms=3500
+                )
             return {
                 "status": "FILLED" if committed else "FAILED",
                 "reason": (
