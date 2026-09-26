@@ -276,3 +276,13 @@ def test_matching_universal_fingerprint_cannot_bypass_protected_boundary() -> No
 def test_bridge_reports_universal_binding_authority() -> None:
     status = bridge_status()
     assert status["universal_binding_authority"] == "hunter_application_plan"
+
+
+def test_stable_question_id_matches_when_control_name_is_empty() -> None:
+    question = _question("REFERRAL", "Provider text may rerender")
+    question["questionId"] = "q-referral-source"
+    assert answer_matches_question(
+        _answer("q-referral-source", "Older display wording"),
+        question,
+        _control(""),
+    ) is True

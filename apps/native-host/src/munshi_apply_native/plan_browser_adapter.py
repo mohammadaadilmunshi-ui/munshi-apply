@@ -264,35 +264,54 @@ class PlanBrowserAdapter:
     def _workday_option_text(value: Any) -> str:
         return " ".join(str(value or "").split()).casefold()
 
-    def _workday_click_exact_option(self, answer: str) -> bool:
+    def _workday_click_exact_option(
+        self,
+        answer: str,
+        *,
+        timeout_ms: int = 2000,
+        poll_ms: int = 50,
+    ) -> bool:
+        # Workday search-backed comboboxes may render exact options asynchronously.
+        # Poll only for one exact normalized match; ambiguity always fails closed.
         wanted = self._workday_option_text(answer)
         if not wanted:
             return False
+        timeout_ms = max(0, min(int(timeout_ms), 5000))
+        poll_ms = max(10, min(int(poll_ms), 250))
+        attempts = max(1, (timeout_ms // poll_ms) + 1)
         candidates = self.page.locator(
             "[role='option'],[role='menuitem'],[data-value],[data-option-value]"
         )
-        matches: list[Any] = []
-        for index in range(min(candidates.count(), 250)):
-            candidate = candidates.nth(index)
-            try:
-                if not candidate.is_visible():
+        for attempt in range(attempts):
+            matches: list[Any] = []
+            for index in range(min(candidates.count(), 250)):
+                candidate = candidates.nth(index)
+                try:
+                    if not candidate.is_visible():
+                        continue
+                    values = candidate.evaluate(
+                        "element => ["
+                        "element.innerText || element.textContent || '',"
+                        "element.getAttribute('aria-label') || '',"
+                        "element.getAttribute('data-value') || '',"
+                        "element.getAttribute('data-option-value') || ''"
+                        "]"
+                    )
+                except Exception:
                     continue
-                values = candidate.evaluate(
-                    """element => [
-                      element.innerText || element.textContent || '',
-                      element.getAttribute('aria-label') || '',
-                      element.getAttribute('data-value') || '',
-                      element.getAttribute('data-option-value') || ''
-                    ]"""
-                )
-            except Exception:
-                continue
-            if any(self._workday_option_text(item) == wanted for item in values or []):
-                matches.append(candidate)
-        if len(matches) != 1:
-            return False
-        matches[0].click()
-        return True
+                if any(
+                    self._workday_option_text(item) == wanted
+                    for item in values or []
+                ):
+                    matches.append(candidate)
+            if len(matches) == 1:
+                matches[0].click()
+                return True
+            if len(matches) > 1:
+                return False
+            if attempt + 1 < attempts:
+                self.page.wait_for_timeout(poll_ms)
+        return False
 
     def _workday_fill_control(
         self,

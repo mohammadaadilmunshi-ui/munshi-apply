@@ -248,6 +248,11 @@ def answer_matches_question(
     if answer_key and control_name and answer_key == control_name:
         return True
 
+    # Stable scanner identity for controlled inputs without a name.
+    question_id = str(question.get("questionId") or "").strip()
+    if answer_key and question_id and answer_key == question_id:
+        return True
+
     normalized_question = _normalized(answer.get("normalized_question"))
     raw_text = _normalized(question.get("rawText"))
     if normalized_question and raw_text and normalized_question == raw_text:
