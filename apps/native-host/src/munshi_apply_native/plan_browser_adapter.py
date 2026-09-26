@@ -450,6 +450,12 @@ class PlanBrowserAdapter:
             element.press("Backspace")
             element.type(str(value), delay=10)
             if choice_like:
+                # WORKDAY_STATE_NUDGE_SPACE_BACKSPACE
+                # Trigger a real edit transition, then restore the exact
+                # approved value before choosing the provider option.
+                element.type(" ", delay=25)
+                element.press("Backspace")
+                self.page.wait_for_timeout(125)
                 if not self._workday_click_exact_option(str(value), trigger=element):
                     return {
                         "status": "FAILED",

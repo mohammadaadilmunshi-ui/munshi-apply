@@ -321,3 +321,30 @@ def test_failed_safely_can_receive_one_explicit_technical_retry(queued):
     assert retried["attempt_count"] == 1
     assert retried["max_attempts"] == 4
     assert retried["last_error"] is None
+
+
+def test_waiting_input_without_open_tasks_can_receive_one_bound_retry(queued):
+    db, _, session, queue, job = queued
+    checkpoint_id="checkpoint-tech"
+    browser_digest="a"*64
+    with db.connect() as connection:
+        connection.execute(
+            "UPDATE complete_application_sessions SET state='NEEDS_INPUT',checkpoint_id=?,browser_form_digest=? WHERE session_id=?",
+            (checkpoint_id,browser_digest,session.session_id),
+        )
+        connection.execute(
+            "UPDATE complete_application_prepare_jobs SET state='WAITING_INPUT',attempt_count=3,max_attempts=3 WHERE job_id=?",
+            (job["job_id"],),
+        )
+        connection.commit()
+    retried=queue.retry_waiting_session_without_open_tasks(
+        session_id=session.session_id,
+        tenant_id="tenant-a",
+        user_id="member-a",
+        expected_checkpoint_id=checkpoint_id,
+        expected_browser_form_digest=browser_digest,
+        now="2026-09-08T04:00:00+00:00",
+    )
+    assert retried["state"]=="QUEUED"
+    assert retried["attempt_count"]==3
+    assert retried["max_attempts"]==4

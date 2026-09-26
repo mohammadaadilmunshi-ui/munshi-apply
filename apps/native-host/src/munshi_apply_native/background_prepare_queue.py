@@ -578,6 +578,72 @@ class DurablePreparationQueue:
             return dict(result)
 
 
+    def retry_waiting_session_without_open_tasks(
+        self,
+        *,
+        session_id: str,
+        tenant_id: str,
+        user_id: str,
+        expected_checkpoint_id: str,
+        expected_browser_form_digest: str,
+        now: str | None = None,
+    ) -> dict[str, Any]:
+        timestamp = now or _now()
+        session = self._owned_session(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+        if str(session["state"]) != "NEEDS_INPUT":
+            raise ValueError("Technical waiting retry requires NEEDS_INPUT session")
+        if str(session["checkpoint_id"] or "") != str(expected_checkpoint_id):
+            raise ValueError("Technical waiting retry checkpoint changed")
+        if str(session["browser_form_digest"] or "") != str(expected_browser_form_digest):
+            raise ValueError("Technical waiting retry browser form changed")
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            open_count = int(connection.execute(
+                "SELECT COUNT(*) AS n FROM resolution_tasks WHERE session_id=? AND status IN ('PENDING','RESOLVING','WAITING_FOR_USER')",
+                (session_id,),
+            ).fetchone()["n"])
+            if open_count != 0:
+                raise ValueError("Technical waiting retry cannot bypass unresolved user input")
+            row = connection.execute(
+                "SELECT * FROM complete_application_prepare_jobs WHERE session_id=? AND tenant_id=? AND user_id=?",
+                (session_id, tenant_id, user_id),
+            ).fetchone()
+            if row is None:
+                raise LookupError("Preparation job was not found")
+            row=dict(row)
+            if str(row["state"]) != "WAITING_INPUT":
+                raise ValueError("Technical waiting retry requires WAITING_INPUT job")
+            if row["cancel_requested_at"] is not None:
+                raise ValueError("Cancelled preparation cannot be retried")
+            attempts=int(row["attempt_count"]); maximum=int(row["max_attempts"])
+            if attempts != maximum:
+                raise ValueError("Technical waiting retry requires exhausted retry budget")
+            if maximum >= 10:
+                raise ValueError("Technical retry ceiling is exhausted")
+            updated=connection.execute(
+                """UPDATE complete_application_prepare_jobs
+                   SET state='QUEUED',max_attempts=?,available_at=?,lease_owner=NULL,
+                       lease_expires_at=NULL,heartbeat_at=NULL,last_error=NULL,
+                       finished_at=NULL,updated_at=?
+                   WHERE job_id=? AND state='WAITING_INPUT'
+                     AND attempt_count=? AND max_attempts=?
+                     AND cancel_requested_at IS NULL""",
+                (maximum+1,timestamp,timestamp,row["job_id"],attempts,maximum),
+            )
+            if updated.rowcount != 1:
+                raise RuntimeError("Technical waiting retry lost its atomic state binding")
+            result=connection.execute(
+                "SELECT * FROM complete_application_prepare_jobs WHERE job_id=?",
+                (row["job_id"],),
+            ).fetchone()
+            assert result is not None
+            return dict(result)
+
+
 class DurablePreparationWorker:
     """One-claim-at-a-time worker that can only call prepare_session."""
 
