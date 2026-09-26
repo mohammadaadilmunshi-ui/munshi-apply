@@ -10,6 +10,40 @@ export function element(controlId: string): Element | null {
   return resolveControlElement(controlId)?.element ?? null;
 }
 
+
+// WORKDAY_SELECTED_PROMPT_VERIFIER_V1
+function workdaySelectedPromptValue(node: Element | null): string {
+  if (!(node instanceof HTMLInputElement)) return "";
+  if (!String(node.id || "").toLowerCase().includes("source--source")) return "";
+
+  const compact = (value: unknown) =>
+    String(value || "").replace(/\s+/g, " ").trim();
+  const promptValue = (item: Element) => {
+    const prompt = item.matches('[data-automation-id="promptOption"]')
+      ? item
+      : item.querySelector('[data-automation-id="promptOption"]');
+    const candidate = prompt || item;
+    return compact(
+      candidate.getAttribute("data-automation-label")
+      || candidate.getAttribute("aria-label")
+      || candidate.getAttribute("title")
+      || candidate.textContent
+      || "",
+    );
+  };
+
+  let scope: Element | null = node.parentElement;
+  for (let depth = 0; scope && depth < 9; depth += 1, scope = scope.parentElement) {
+    const selected = Array.from(
+      scope.querySelectorAll('[data-automation-id^="selectedItem"]'),
+    );
+    if (!selected.length) continue;
+    const values = [...new Set(selected.map(promptValue).filter(Boolean))];
+    return values.length === 1 ? values[0]! : "";
+  }
+  return "";
+}
+
 export async function describeForm() {
   const page = scanDocument();
   const fields = await Promise.all(
@@ -17,6 +51,7 @@ export async function describeForm() {
       const resolved = resolveControlElement(question.controlId);
       const control = resolved?.control;
       const node = resolved?.element;
+      const workdaySelectedValue = workdaySelectedPromptValue(node);
       let value = "";
       if (node instanceof HTMLInputElement) {
         value = ["checkbox", "radio"].includes(node.type)
@@ -28,6 +63,7 @@ export async function describeForm() {
       ) {
         value = node.value;
       }
+      if (!value && workdaySelectedValue) value = workdaySelectedValue;
       const digest = await crypto.subtle.digest(
         "SHA-256",
         new TextEncoder().encode(value),
@@ -71,7 +107,10 @@ export async function describeForm() {
         display_value: question.sensitive ? "[protected value]" : value,
         value_digest: valueDigest,
         required: control?.required ?? false,
-        satisfied: control?.satisfied ?? Boolean(value),
+        satisfied:
+          (control?.invalid ?? false)
+            ? false
+            : Boolean(control?.satisfied || value || workdaySelectedValue),
         invalid: control?.invalid ?? false,
       };
     }),

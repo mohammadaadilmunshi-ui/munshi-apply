@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import time
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
@@ -264,117 +265,197 @@ class PlanBrowserAdapter:
     def _workday_option_text(value: Any) -> str:
         return " ".join(str(value or "").split()).casefold()
 
+    def _workday_source_selected_value(self, element: Any, answer: str) -> str:
+        wanted = self._workday_option_text(answer)
+        if not wanted:
+            return ""
+        try:
+            result = element.evaluate(
+                r"""(element, answer) => {
+                  const compact = value => String(value || '').replace(/\s+/g, ' ').trim();
+                  const wanted = compact(answer).toLowerCase();
+                  const promptValue = item => {
+                    const prompt = item.matches?.('[data-automation-id="promptOption"]')
+                      ? item
+                      : item.querySelector?.('[data-automation-id="promptOption"]');
+                    const candidate = prompt || item;
+                    return compact(
+                      candidate.getAttribute?.('data-automation-label')
+                      || candidate.getAttribute?.('aria-label')
+                      || candidate.getAttribute?.('title')
+                      || candidate.textContent
+                      || ''
+                    );
+                  };
+                  let scope = element.parentElement;
+                  for (let depth = 0; scope && depth < 9; depth += 1, scope = scope.parentElement) {
+                    const selected = Array.from(
+                      scope.querySelectorAll('[data-automation-id^="selectedItem"]')
+                    );
+                    if (!selected.length) continue;
+                    const matches = [...new Set(selected.map(promptValue).filter(Boolean))]
+                      .filter(value => value.toLowerCase() === wanted);
+                    return matches.length === 1 ? matches[0] : '';
+                  }
+                  return '';
+                }""",
+                str(answer),
+            )
+        except Exception:
+            return ""
+        return str(result or "").strip()
+
+    def _workday_source_committed(self, element: Any, answer: str) -> bool:
+        selected = self._workday_source_selected_value(element, answer)
+        if self._workday_option_text(selected) == self._workday_option_text(answer):
+            return True
+        try:
+            state = element.evaluate(
+                r"""(element, answer) => {
+                  const compact = value => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+                  const wanted = compact(answer);
+                  const dataValue = compact(element.getAttribute('data-value'));
+                  const ariaValue = compact(element.getAttribute('aria-valuetext'));
+                  const invalid = element.getAttribute('aria-invalid') === 'true';
+                  return !invalid && wanted && (dataValue === wanted || ariaValue === wanted);
+                }""",
+                str(answer),
+            )
+            return state is True
+        except Exception:
+            return False
+
     def _workday_click_exact_option(
         self,
         answer: str,
         *,
         trigger: Any | None = None,
-        timeout_ms: int = 2500,
-        poll_ms: int = 50,
+        timeout_ms: int = 4500,
+        poll_ms: int = 75,
+        press_enter: bool = True,
     ) -> bool:
-        """Commit exactly one visible Workday option without fuzzy guessing."""
         wanted = self._workday_option_text(answer)
         if not wanted:
             return False
-        timeout_ms = max(0, min(int(timeout_ms), 5000))
-        poll_ms = max(10, min(int(poll_ms), 250))
-        attempts = max(1, (timeout_ms // poll_ms) + 1)
-        arrow_sent = False
+        timeout_ms = max(250, min(int(timeout_ms), 7000))
+        poll_ms = max(25, min(int(poll_ms), 250))
+
+        if trigger is not None and press_enter:
+            try:
+                trigger.press("Enter")
+                self.page.wait_for_timeout(500)
+            except Exception:
+                pass
 
         selector = (
-            "[role='option'],[role='menuitem'],[data-value],[data-option-value],"
             "[data-automation-id='promptOption'],"
-            "[data-automation-id='dropdownOption'],"
-            "[data-automation-id='menuItem'],"
-            "[data-automation-id*='promptOption'],"
-            "[data-automation-id*='dropdownOption']"
+            "[role='option'],[role='menuitem'],"
+            "[data-value],[data-option-value]"
         )
 
-        def exact_tokens(candidate: Any) -> bool:
-            try:
-                values = candidate.evaluate(
-                    """element => [
-                      element.innerText || '',
-                      element.textContent || '',
-                      element.getAttribute('aria-label') || '',
-                      element.getAttribute('title') || '',
-                      element.getAttribute('data-value') || '',
-                      element.getAttribute('data-option-value') || '',
-                      element.getAttribute('data-automation-label') || ''
-                    ]"""
-                )
-            except Exception:
-                return False
-            for raw in values or []:
-                if self._workday_option_text(raw) == wanted:
-                    return True
-                for line in str(raw or "").splitlines():
-                    if self._workday_option_text(line) == wanted:
-                        return True
-            return False
-
-        def selector_matches() -> list[Any]:
+        def exact_matches() -> list[Any]:
             candidates = self.page.locator(selector)
-            matches: list[Any] = []
-            for index in range(min(candidates.count(), 250)):
+            result: list[Any] = []
+            seen: set[str] = set()
+            for index in range(min(candidates.count(), 300)):
                 candidate = candidates.nth(index)
                 try:
-                    if candidate.is_visible() and exact_tokens(candidate):
-                        matches.append(candidate)
+                    if not candidate.is_visible():
+                        continue
+                    meta = candidate.evaluate(
+                        r"""element => ({
+                          selectedContainer: Boolean(
+                            element.closest('[data-automation-id^="selectedItem"]')
+                          ),
+                          text: element.innerText || element.textContent || '',
+                          aria: element.getAttribute('aria-label') || '',
+                          title: element.getAttribute('title') || '',
+                          value: element.getAttribute('data-value') || '',
+                          optionValue: element.getAttribute('data-option-value') || '',
+                          automationLabel: element.getAttribute('data-automation-label') || '',
+                          id: element.id || ''
+                        })"""
+                    )
                 except Exception:
                     continue
-            return matches
-
-        def exact_text_matches() -> list[Any]:
-            try:
-                candidates = self.page.get_by_text(str(answer), exact=True)
-            except Exception:
-                return []
-            matches: list[Any] = []
-            try:
-                count = min(candidates.count(), 50)
-            except Exception:
-                return []
-            for index in range(count):
-                candidate = candidates.nth(index)
-                try:
-                    if candidate.is_visible() and exact_tokens(candidate):
-                        matches.append(candidate)
-                except Exception:
+                if meta.get("selectedContainer"):
                     continue
-            return matches
+                values = [
+                    meta.get("text"), meta.get("aria"), meta.get("title"),
+                    meta.get("value"), meta.get("optionValue"),
+                    meta.get("automationLabel"),
+                ]
+                if not any(self._workday_option_text(item) == wanted for item in values):
+                    continue
+                token = "|".join(
+                    self._workday_option_text(item) for item in values if item
+                ) + "|" + str(meta.get("id") or "")
+                if token in seen:
+                    continue
+                seen.add(token)
+                result.append(candidate)
+            return result
 
-        for attempt in range(attempts):
-            matches = selector_matches()
+        deadline = time.monotonic() + (timeout_ms / 1000.0)
+        while time.monotonic() <= deadline:
+            matches = exact_matches()
             if len(matches) == 1:
-                matches[0].click()
-                return True
-            if len(matches) > 1:
-                return False
-
-            matches = exact_text_matches()
-            if len(matches) == 1:
-                matches[0].click()
-                return True
-            if len(matches) > 1:
-                return False
-
-            if trigger is not None and not arrow_sent and attempt >= 2:
+                candidate = matches[0]
+                target = candidate
                 try:
-                    trigger.press("ArrowDown")
-                    arrow_sent = True
+                    nearest = candidate.locator(
+                        "xpath=ancestor-or-self::*[@role='option'][1]"
+                    )
+                    if nearest.count() == 1:
+                        target = nearest
                 except Exception:
-                    arrow_sent = True
+                    target = candidate
+                try:
+                    radio = target.locator(
+                        "input[type='radio'],[data-automation-id='radioBtn']"
+                    )
+                    if radio.count() == 1:
+                        radio.first.click()
+                    else:
+                        target.click()
+                except Exception:
+                    candidate.click()
+                self.page.wait_for_timeout(650)
+                if trigger is None or self._workday_source_committed(trigger, answer):
+                    return True
+                try:
+                    trigger.press("Tab")
+                except Exception:
+                    pass
+                self.page.wait_for_timeout(400)
+                return self._workday_source_committed(trigger, answer)
+            if len(matches) > 1:
+                return False
+            self.page.wait_for_timeout(poll_ms)
+        return False
 
-            if attempt + 1 < attempts:
-                self.page.wait_for_timeout(poll_ms)
+    def _workday_public_prompt_fallback(self, element: Any, answer: str) -> bool:
+        try:
+            element.click()
+            element.press("Control+A")
+            element.press("Backspace")
+            for char in str(answer):
+                element.type(char, delay=90)
+            element.press("Enter")
+            self.page.wait_for_timeout(750)
+        except Exception:
+            return False
+        if self._workday_click_exact_option(
+            str(answer), trigger=element, press_enter=False, timeout_ms=3500
+        ):
+            return self._workday_source_committed(element, answer)
         return False
 
     def _wait_for_control_committed(
         self,
         control_id: str,
         *,
-        timeout_ms: int = 2000,
+        timeout_ms: int = 2500,
         poll_ms: int = 100,
     ) -> bool:
         timeout_ms = max(0, min(int(timeout_ms), 5000))
@@ -394,7 +475,6 @@ class PlanBrowserAdapter:
         question: dict[str, Any],
         value: str,
     ) -> dict[str, Any] | None:
-        """Use trusted Playwright interaction for Workday controlled fields."""
         if provider_for_url(self.page.url) != "WORKDAY":
             return None
 
@@ -424,57 +504,75 @@ class PlanBrowserAdapter:
             question.get("rawText") or question.get("question") or ""
         ).casefold()
         kind = str(control.get("kind") or "").upper()
+        source_prompt = semantic == "REFERRAL" or "source--source" in element_id
         choice_like = (
             kind in {"SELECT", "COMBOBOX"}
             or role in {"combobox", "listbox"}
             or has_popup not in {"", "false", "none"}
             or aria_autocomplete in {"list", "both"}
-            or semantic == "REFERRAL"
-            or "source--source" in element_id
+            or source_prompt
             or "select one" in question_text
         )
 
+        if source_prompt and self._workday_source_committed(element, value):
+            return {
+                "status": "FILLED",
+                "reason": "Workday source prompt already has the exact selected item",
+                "strategy": "WORKDAY_SOURCE_SELECTED_ITEM",
+                "verification": "POST_ACTION_PROVIDER_VERIFIED",
+            }
+
         if tag in {"input", "textarea"} and input_type not in {
-            "file",
-            "password",
-            "hidden",
-            "submit",
-            "button",
-            "reset",
-            "radio",
-            "checkbox",
-            "date",
+            "file","password","hidden","submit","button","reset",
+            "radio","checkbox","date",
         }:
             element.click()
             element.press("Control+A")
             element.press("Backspace")
-            element.type(str(value), delay=10)
-            if choice_like:
-                # WORKDAY_STATE_NUDGE_SPACE_BACKSPACE
-                # Trigger a real edit transition, then restore the exact
-                # approved value before choosing the provider option.
+            element.type(str(value), delay=75 if source_prompt else 10)
+
+            if source_prompt:
                 element.type(" ", delay=25)
                 element.press("Backspace")
-                self.page.wait_for_timeout(125)
-                if not self._workday_click_exact_option(str(value), trigger=element):
+                self.page.wait_for_timeout(150)
+
+            if choice_like:
+                clicked = self._workday_click_exact_option(
+                    str(value), trigger=element, press_enter=True
+                )
+                if not clicked and source_prompt:
+                    clicked = self._workday_public_prompt_fallback(element, str(value))
+                if not clicked:
                     return {
                         "status": "FAILED",
-                        "reason": "Workday exact option did not commit",
-                        "strategy": "WORKDAY_TRUSTED_PLAYWRIGHT",
+                        "reason": "Workday exact prompt option did not commit",
+                        "strategy": "WORKDAY_PROVIDER_PROMPT",
                         "verification": "FAILED_CLOSED",
                     }
-                self.page.keyboard.press("Tab")
+                try:
+                    element.press("Tab")
+                except Exception:
+                    self.page.keyboard.press("Tab")
             else:
                 element.press("Tab")
-            committed = self._wait_for_control_committed(control_id)
+
+            self.page.wait_for_timeout(500)
+            committed = (
+                self._workday_source_committed(element, value)
+                if source_prompt
+                else self._wait_for_control_committed(control_id)
+            )
+            if source_prompt and not committed:
+                committed = self._wait_for_control_committed(control_id)
             return {
                 "status": "FILLED" if committed else "FAILED",
                 "reason": (
-                    "Workday value committed through trusted keyboard interaction"
+                    "Workday provider value committed"
                     if committed
-                    else "Workday kept the field uncommitted after trusted keyboard interaction"
+                    else "Workday kept the field uncommitted after exact provider interaction"
                 ),
-                "strategy": "WORKDAY_TRUSTED_PLAYWRIGHT",
+                "strategy": "WORKDAY_PROVIDER_PROMPT" if source_prompt
+                    else "WORKDAY_TRUSTED_PLAYWRIGHT",
                 "verification": (
                     "POST_ACTION_PROVIDER_VERIFIED" if committed else "FAILED_CLOSED"
                 ),
@@ -497,15 +595,11 @@ class PlanBrowserAdapter:
             committed = self._wait_for_control_committed(control_id)
             return {
                 "status": "FILLED" if committed else "FAILED",
-                "reason": (
-                    "Workday native selection committed"
-                    if committed
-                    else "Workday native selection remained uncommitted"
-                ),
+                "reason": "Workday native selection committed" if committed
+                    else "Workday native selection remained uncommitted",
                 "strategy": "WORKDAY_TRUSTED_PLAYWRIGHT",
-                "verification": (
-                    "POST_ACTION_PROVIDER_VERIFIED" if committed else "FAILED_CLOSED"
-                ),
+                "verification": "POST_ACTION_PROVIDER_VERIFIED" if committed
+                    else "FAILED_CLOSED",
             }
 
         if choice_like or tag == "button":
@@ -521,15 +615,11 @@ class PlanBrowserAdapter:
             committed = self._wait_for_control_committed(control_id)
             return {
                 "status": "FILLED" if committed else "FAILED",
-                "reason": (
-                    "Workday custom selection committed"
-                    if committed
-                    else "Workday custom selection remained uncommitted"
-                ),
+                "reason": "Workday custom selection committed" if committed
+                    else "Workday custom selection remained uncommitted",
                 "strategy": "WORKDAY_TRUSTED_PLAYWRIGHT",
-                "verification": (
-                    "POST_ACTION_PROVIDER_VERIFIED" if committed else "FAILED_CLOSED"
-                ),
+                "verification": "POST_ACTION_PROVIDER_VERIFIED" if committed
+                    else "FAILED_CLOSED",
             }
 
         return None
