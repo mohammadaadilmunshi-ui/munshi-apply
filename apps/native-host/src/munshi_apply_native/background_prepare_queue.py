@@ -103,6 +103,7 @@ class DurablePreparationQueue:
             row = connection.execute(
                 """SELECT
                        s.session_id,s.application_id,s.plan_id,s.provider,s.state,
+                       s.checkpoint_id,s.browser_form_digest,
                        p.tenant_id,p.user_id
                    FROM complete_application_sessions AS s
                    JOIN career_os_application_plans AS p ON p.plan_id=s.plan_id
