@@ -500,6 +500,84 @@ class DurablePreparationQueue:
             return dict(updated)
 
 
+    def retry_failed_session(
+        self,
+        *,
+        session_id: str,
+        tenant_id: str,
+        user_id: str,
+        expected_last_error: str,
+        now: str | None = None,
+    ) -> dict[str, Any]:
+        """Grant one explicit pre-submit technical retry after FAILED_SAFELY.
+
+        This never resets attempt_count. It advances max_attempts by exactly one,
+        preserves the same session/job/plan identity, and requires the caller to
+        bind the exact observed terminal error so a stale failure cannot be
+        revived accidentally.
+        """
+        timestamp = now or _now()
+        session = self._owned_session(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+        if str(session["state"]) not in PREPARABLE_SESSION_STATES:
+            raise ValueError(
+                "Failed preparation session is not eligible for a technical retry"
+            )
+        expected = _clean_error(RuntimeError(expected_last_error))
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """SELECT * FROM complete_application_prepare_jobs
+                   WHERE session_id=? AND tenant_id=? AND user_id=?""",
+                (session_id, tenant_id, user_id),
+            ).fetchone()
+            if row is None:
+                raise LookupError("Preparation job was not found for technical retry")
+            row = dict(row)
+            if str(row["state"]) != "FAILED_SAFELY":
+                raise ValueError(
+                    "Technical retry requires a FAILED_SAFELY preparation job"
+                )
+            if row["cancel_requested_at"] is not None:
+                raise ValueError("Cancelled preparation cannot be technically retried")
+            if str(row["last_error"] or "") != expected:
+                raise ValueError("Technical retry terminal error binding changed")
+            attempts = int(row["attempt_count"])
+            maximum = int(row["max_attempts"])
+            if maximum >= 10:
+                raise ValueError("Technical retry ceiling is exhausted")
+            next_maximum = max(maximum + 1, attempts + 1)
+            updated = connection.execute(
+                """UPDATE complete_application_prepare_jobs
+                   SET state='QUEUED',max_attempts=?,available_at=?,
+                       lease_owner=NULL,lease_expires_at=NULL,heartbeat_at=NULL,
+                       last_error=NULL,finished_at=NULL,updated_at=?
+                   WHERE job_id=? AND state='FAILED_SAFELY'
+                     AND attempt_count=? AND max_attempts=?
+                     AND cancel_requested_at IS NULL AND last_error=?""",
+                (
+                    next_maximum,
+                    timestamp,
+                    timestamp,
+                    row["job_id"],
+                    attempts,
+                    maximum,
+                    expected,
+                ),
+            )
+            if updated.rowcount != 1:
+                raise RuntimeError("Technical retry lost its atomic failure binding")
+            result = connection.execute(
+                "SELECT * FROM complete_application_prepare_jobs WHERE job_id=?",
+                (row["job_id"],),
+            ).fetchone()
+            assert result is not None
+            return dict(result)
+
+
 class DurablePreparationWorker:
     """One-claim-at-a-time worker that can only call prepare_session."""
 

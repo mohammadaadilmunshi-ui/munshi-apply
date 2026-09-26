@@ -771,7 +771,7 @@ class CompleteApplicationLoopService:
             self._record_event(
                 session=session,
                 event_type="FAILED_SAFELY",
-                replay_identity=f"{session_id}:invalid-form-digest:{checkpoint['sequence']}",
+                replay_identity=f"{session_id}:invalid-form-digest:{checkpoint['checkpoint_id']}",
                 evidence={"reason": "browser_form_digest_missing_or_invalid"},
                 checkpoint=checkpoint,
             )
@@ -805,7 +805,7 @@ class CompleteApplicationLoopService:
         self._record_event(
             session=session,
             event_type="FORM_PREPARED",
-            replay_identity=f"{session_id}:form-prepared:{form_digest}:{checkpoint['sequence']}",
+            replay_identity=f"{session_id}:form-prepared:{form_digest}:{checkpoint['checkpoint_id']}",
             evidence=event_evidence,
             checkpoint=checkpoint,
         )
@@ -836,7 +836,7 @@ class CompleteApplicationLoopService:
             self._record_event(
                 session=session,
                 event_type="NEEDS_INPUT",
-                replay_identity=f"{session_id}:needs-input:{form_digest}:{len(unresolved)}",
+                replay_identity=f"{session_id}:needs-input:{checkpoint['checkpoint_id']}:{form_digest}:{len(unresolved)}",
                 evidence={"unresolved_count": len(unresolved)},
                 checkpoint=checkpoint,
             )
@@ -852,7 +852,7 @@ class CompleteApplicationLoopService:
             self._record_event(
                 session=session,
                 event_type="FAILED_SAFELY",
-                replay_identity=f"{session_id}:validation-errors:{form_digest}",
+                replay_identity=f"{session_id}:validation-errors:{checkpoint['checkpoint_id']}:{form_digest}",
                 evidence={
                     "validation_errors": validation_errors,
                     "reason": "required_form_not_complete",
@@ -872,7 +872,7 @@ class CompleteApplicationLoopService:
             self._record_event(
                 session=session,
                 event_type="READY_FOR_REVIEW",
-                replay_identity=f"{session_id}:ready-review:{form_digest}",
+                replay_identity=f"{session_id}:ready-review:{checkpoint['checkpoint_id']}:{form_digest}",
                 evidence={"form_digest": form_digest, "resume_sha256": resume["artifact_sha256"]},
                 checkpoint=checkpoint,
             )

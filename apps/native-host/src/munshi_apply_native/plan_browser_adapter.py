@@ -268,47 +268,121 @@ class PlanBrowserAdapter:
         self,
         answer: str,
         *,
-        timeout_ms: int = 2000,
+        trigger: Any | None = None,
+        timeout_ms: int = 2500,
         poll_ms: int = 50,
     ) -> bool:
-        # Workday search-backed comboboxes may render exact options asynchronously.
-        # Poll only for one exact normalized match; ambiguity always fails closed.
+        """Commit exactly one visible Workday option without fuzzy guessing."""
         wanted = self._workday_option_text(answer)
         if not wanted:
             return False
         timeout_ms = max(0, min(int(timeout_ms), 5000))
         poll_ms = max(10, min(int(poll_ms), 250))
         attempts = max(1, (timeout_ms // poll_ms) + 1)
-        candidates = self.page.locator(
-            "[role='option'],[role='menuitem'],[data-value],[data-option-value]"
+        arrow_sent = False
+
+        selector = (
+            "[role='option'],[role='menuitem'],[data-value],[data-option-value],"
+            "[data-automation-id='promptOption'],"
+            "[data-automation-id='dropdownOption'],"
+            "[data-automation-id='menuItem'],"
+            "[data-automation-id*='promptOption'],"
+            "[data-automation-id*='dropdownOption']"
         )
-        for attempt in range(attempts):
+
+        def exact_tokens(candidate: Any) -> bool:
+            try:
+                values = candidate.evaluate(
+                    """element => [
+                      element.innerText || '',
+                      element.textContent || '',
+                      element.getAttribute('aria-label') || '',
+                      element.getAttribute('title') || '',
+                      element.getAttribute('data-value') || '',
+                      element.getAttribute('data-option-value') || '',
+                      element.getAttribute('data-automation-label') || ''
+                    ]"""
+                )
+            except Exception:
+                return False
+            for raw in values or []:
+                if self._workday_option_text(raw) == wanted:
+                    return True
+                for line in str(raw or "").splitlines():
+                    if self._workday_option_text(line) == wanted:
+                        return True
+            return False
+
+        def selector_matches() -> list[Any]:
+            candidates = self.page.locator(selector)
             matches: list[Any] = []
             for index in range(min(candidates.count(), 250)):
                 candidate = candidates.nth(index)
                 try:
-                    if not candidate.is_visible():
-                        continue
-                    values = candidate.evaluate(
-                        "element => ["
-                        "element.innerText || element.textContent || '',"
-                        "element.getAttribute('aria-label') || '',"
-                        "element.getAttribute('data-value') || '',"
-                        "element.getAttribute('data-option-value') || ''"
-                        "]"
-                    )
+                    if candidate.is_visible() and exact_tokens(candidate):
+                        matches.append(candidate)
                 except Exception:
                     continue
-                if any(
-                    self._workday_option_text(item) == wanted
-                    for item in values or []
-                ):
-                    matches.append(candidate)
+            return matches
+
+        def exact_text_matches() -> list[Any]:
+            try:
+                candidates = self.page.get_by_text(str(answer), exact=True)
+            except Exception:
+                return []
+            matches: list[Any] = []
+            try:
+                count = min(candidates.count(), 50)
+            except Exception:
+                return []
+            for index in range(count):
+                candidate = candidates.nth(index)
+                try:
+                    if candidate.is_visible() and exact_tokens(candidate):
+                        matches.append(candidate)
+                except Exception:
+                    continue
+            return matches
+
+        for attempt in range(attempts):
+            matches = selector_matches()
             if len(matches) == 1:
                 matches[0].click()
                 return True
             if len(matches) > 1:
                 return False
+
+            matches = exact_text_matches()
+            if len(matches) == 1:
+                matches[0].click()
+                return True
+            if len(matches) > 1:
+                return False
+
+            if trigger is not None and not arrow_sent and attempt >= 2:
+                try:
+                    trigger.press("ArrowDown")
+                    arrow_sent = True
+                except Exception:
+                    arrow_sent = True
+
+            if attempt + 1 < attempts:
+                self.page.wait_for_timeout(poll_ms)
+        return False
+
+    def _wait_for_control_committed(
+        self,
+        control_id: str,
+        *,
+        timeout_ms: int = 2000,
+        poll_ms: int = 100,
+    ) -> bool:
+        timeout_ms = max(0, min(int(timeout_ms), 5000))
+        poll_ms = max(10, min(int(poll_ms), 250))
+        attempts = max(1, (timeout_ms // poll_ms) + 1)
+        for attempt in range(attempts):
+            if self._control_committed(control_id):
+                return True
             if attempt + 1 < attempts:
                 self.page.wait_for_timeout(poll_ms)
         return False
@@ -376,7 +450,7 @@ class PlanBrowserAdapter:
             element.press("Backspace")
             element.type(str(value), delay=10)
             if choice_like:
-                if not self._workday_click_exact_option(str(value)):
+                if not self._workday_click_exact_option(str(value), trigger=element):
                     return {
                         "status": "FAILED",
                         "reason": "Workday exact option did not commit",
@@ -386,8 +460,7 @@ class PlanBrowserAdapter:
                 self.page.keyboard.press("Tab")
             else:
                 element.press("Tab")
-            self.page.wait_for_timeout(100)
-            committed = self._control_committed(control_id)
+            committed = self._wait_for_control_committed(control_id)
             return {
                 "status": "FILLED" if committed else "FAILED",
                 "reason": (
@@ -415,8 +488,7 @@ class PlanBrowserAdapter:
                         "verification": "FAILED_CLOSED",
                     }
             self.page.keyboard.press("Tab")
-            self.page.wait_for_timeout(100)
-            committed = self._control_committed(control_id)
+            committed = self._wait_for_control_committed(control_id)
             return {
                 "status": "FILLED" if committed else "FAILED",
                 "reason": (
@@ -432,7 +504,7 @@ class PlanBrowserAdapter:
 
         if choice_like or tag == "button":
             element.click()
-            if not self._workday_click_exact_option(str(value)):
+            if not self._workday_click_exact_option(str(value), trigger=element):
                 return {
                     "status": "FAILED",
                     "reason": "Workday custom exact option was unavailable",
@@ -440,8 +512,7 @@ class PlanBrowserAdapter:
                     "verification": "FAILED_CLOSED",
                 }
             self.page.keyboard.press("Tab")
-            self.page.wait_for_timeout(100)
-            committed = self._control_committed(control_id)
+            committed = self._wait_for_control_committed(control_id)
             return {
                 "status": "FILLED" if committed else "FAILED",
                 "reason": (

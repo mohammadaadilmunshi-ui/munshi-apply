@@ -634,3 +634,27 @@ def test_restart_after_lost_claim_response_reuses_durable_claimant(loop):
     assert len(authority_client.claimants) == 2
     assert authority_client.claimants[0] == authority_client.claimants[1]
     assert browser.calls == 1
+
+
+def test_repeated_identical_needs_input_uses_new_checkpoint_replay_identity(loop):
+    service, db, browser = loop
+    session = service.start_session(plan_id="application-plan-1")
+
+    first = service.prepare_session(session_id=session.session_id, adapter=browser)
+    assert first.state == "NEEDS_INPUT"
+    second = service.prepare_session(session_id=session.session_id, adapter=browser)
+    assert second.state == "NEEDS_INPUT"
+
+    with db.connect() as connection:
+        rows = connection.execute(
+            """SELECT replay_identity,checkpoint_json
+                 FROM complete_application_execution_events
+                WHERE session_id=? AND event_type='NEEDS_INPUT'
+                ORDER BY occurred_at,event_id""",
+            (session.session_id,),
+        ).fetchall()
+    assert len(rows) == 2
+    assert rows[0]["replay_identity"] != rows[1]["replay_identity"]
+    first_checkpoint = json.loads(rows[0]["checkpoint_json"])
+    second_checkpoint = json.loads(rows[1]["checkpoint_json"])
+    assert first_checkpoint["checkpoint_id"] != second_checkpoint["checkpoint_id"]

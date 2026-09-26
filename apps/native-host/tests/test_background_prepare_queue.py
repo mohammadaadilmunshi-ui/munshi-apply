@@ -292,3 +292,32 @@ def test_deterministic_preparation_error_fails_without_retry(queued):
     )
     assert stored["attempt_count"] == 1
     assert "Hunter plan is stale" in stored["last_error"]
+
+
+def test_failed_safely_can_receive_one_explicit_technical_retry(queued):
+    _, _, session, queue, job = queued
+    claimed = queue.claim_next(
+        worker_id="worker-a",
+        now="2026-09-08T03:00:00+00:00",
+    )
+    assert claimed is not None
+    failed = queue.fail(
+        job_id=job["job_id"],
+        worker_id="worker-a",
+        error=RuntimeError("provider adapter bug"),
+        retryable=False,
+        now="2026-09-08T03:00:01+00:00",
+    )
+    assert failed["state"] == "FAILED_SAFELY"
+
+    retried = queue.retry_failed_session(
+        session_id=session.session_id,
+        tenant_id="tenant-a",
+        user_id="member-a",
+        expected_last_error="provider adapter bug",
+        now="2026-09-08T03:00:02+00:00",
+    )
+    assert retried["state"] == "QUEUED"
+    assert retried["attempt_count"] == 1
+    assert retried["max_attempts"] == 4
+    assert retried["last_error"] is None
