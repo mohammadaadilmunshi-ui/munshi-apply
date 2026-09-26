@@ -40,6 +40,7 @@ EXPECTED_MIGRATIONS = [
     "030_hosted_account_sessions.sql",
     "031_hosted_account_session_lifecycle.sql",
     "032_resolution_task_question_observation.sql",
+    "033_failed_safely_execution_retry.sql",
 ]
 
 
@@ -50,8 +51,92 @@ def test_migrations_are_idempotent(tmp_path: Path) -> None:
     assert database.migrate() == []
     health = database.health()
     assert health["status"] == "healthy"
-    assert health["migration_count"] == 32
-    assert health["schema_version"] == "032_resolution_task_question_observation.sql"
+    assert health["migration_count"] == 33
+    assert health["schema_version"] == "033_failed_safely_execution_retry.sql"
+
+
+def test_failed_safely_retry_migration_preserves_session_and_event_history(
+    tmp_path: Path,
+) -> None:
+    migrations = Path(__file__).resolve().parents[3] / "migrations"
+    legacy_migrations = tmp_path / "legacy-migrations"
+    legacy_migrations.mkdir()
+    for migration in sorted(migrations.glob("[0-9][0-9][0-9]_*.sql")):
+        if migration.name >= "033_failed_safely_execution_retry.sql":
+            continue
+        copy2(migration, legacy_migrations / migration.name)
+
+    database_path = tmp_path / "upgrade.sqlite"
+    legacy = Database(database_path, legacy_migrations)
+    legacy.migrate()
+    now = datetime.now(UTC).isoformat()
+    with legacy.connect() as connection:
+        connection.execute(
+            """INSERT INTO applications(
+                   application_id,status,created_at,updated_at
+               ) VALUES ('application-retry','FAILED_SAFELY',?,?)""",
+            (now, now),
+        )
+        connection.execute(
+            """INSERT INTO career_os_application_plans(
+                   plan_id,handoff_id,tenant_id,user_id,application_id,job_id,provider,
+                   plan_version,plan_digest,job_snapshot_sha256,resume_artifact_id,
+                   resume_artifact_sha256,body_sha256,idempotency_key,plan_json,
+                   acceptance_state,accepted_at
+               ) VALUES (
+                   'plan-retry','handoff-retry','tenant-a','member-a',
+                   'application-retry','job-retry','GREENHOUSE','v2',?,?,?,?,?,
+                   'idempotency-retry','{}','PLAN_ACCEPTED',?
+               )""",
+            ("a" * 64, "b" * 64, "resume-retry", "c" * 64, "d" * 64, now),
+        )
+        connection.execute(
+            """INSERT INTO complete_application_sessions(
+                   session_id,application_id,plan_id,provider,state,state_version,
+                   created_at,updated_at
+               ) VALUES (
+                   'session-failed','application-retry','plan-retry','GREENHOUSE',
+                   'FAILED_SAFELY',7,?,?
+               )""",
+            (now, now),
+        )
+        connection.execute(
+            """INSERT INTO complete_application_execution_events(
+                   event_id,application_id,plan_id,session_id,provider,event_type,
+                   replay_identity,evidence_json,occurred_at
+               ) VALUES (
+                   'event-failed','application-retry','plan-retry','session-failed',
+                   'GREENHOUSE','FAILED_SAFELY','session-failed:event','{}',?
+               )""",
+            (now,),
+        )
+
+    current = Database(database_path, migrations)
+    assert current.migrate() == ["033_failed_safely_execution_retry.sql"]
+    with current.connect() as connection:
+        assert tuple(
+            connection.execute(
+                """SELECT session_id,state,state_version,created_at,updated_at
+                   FROM complete_application_sessions WHERE session_id='session-failed'"""
+            ).fetchone()
+        ) == ("session-failed", "FAILED_SAFELY", 7, now, now)
+        assert tuple(
+            connection.execute(
+                """SELECT event_id,session_id,event_type,evidence_json,occurred_at
+                   FROM complete_application_execution_events WHERE event_id='event-failed'"""
+            ).fetchone()
+        ) == ("event-failed", "session-failed", "FAILED_SAFELY", "{}", now)
+        connection.execute(
+            """INSERT INTO complete_application_sessions(
+                   session_id,application_id,plan_id,provider,state,state_version,
+                   created_at,updated_at
+               ) VALUES (
+                   'session-retry','application-retry','plan-retry','GREENHOUSE',
+                   'SESSION_STARTING',2,?,?
+               )""",
+            (now, now),
+        )
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
 
 
 def test_architecture_tables_are_created_with_integrity_constraints(tmp_path: Path) -> None:

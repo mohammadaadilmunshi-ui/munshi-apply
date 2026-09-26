@@ -415,29 +415,40 @@ class CompleteApplicationLoopService:
             raise ValueError("Accepted Application Plan unexpectedly carries submission authority")
         with self.database.connect() as connection:
             existing = connection.execute(
-                "SELECT * FROM complete_application_sessions WHERE application_id=? AND plan_id=?",
+                """SELECT * FROM complete_application_sessions
+                   WHERE application_id=? AND plan_id=? AND state<>'FAILED_SAFELY'""",
                 (plan_record["application_id"], plan_id),
             ).fetchone()
-            if existing is None:
-                self._ensure_local_application(plan_record)
-                session_id = f"apply-session-{uuid4()}"
-                now = _now()
-                connection.execute(
-                    """INSERT INTO complete_application_sessions(
-                           session_id,application_id,plan_id,provider,state,state_version,
-                           created_at,updated_at
-                       ) VALUES (?,?,?,?,'PLAN_ACCEPTED',1,?,?)""",
-                    (
-                        session_id,
-                        plan_record["application_id"],
-                        plan_id,
-                        str(plan_record["provider"]),
-                        now,
-                        now,
-                    ),
-                )
-            else:
-                session_id = str(existing["session_id"])
+        if existing is None:
+            self._ensure_local_application(plan_record)
+            with self.database.connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                existing = connection.execute(
+                    """SELECT * FROM complete_application_sessions
+                       WHERE application_id=? AND plan_id=? AND state<>'FAILED_SAFELY'""",
+                    (plan_record["application_id"], plan_id),
+                ).fetchone()
+                if existing is not None:
+                    session_id = str(existing["session_id"])
+                else:
+                    session_id = f"apply-session-{uuid4()}"
+                    now = _now()
+                    connection.execute(
+                        """INSERT INTO complete_application_sessions(
+                               session_id,application_id,plan_id,provider,state,state_version,
+                               created_at,updated_at
+                           ) VALUES (?,?,?,?,'PLAN_ACCEPTED',1,?,?)""",
+                        (
+                            session_id,
+                            plan_record["application_id"],
+                            plan_id,
+                            str(plan_record["provider"]),
+                            now,
+                            now,
+                        ),
+                    )
+        else:
+            session_id = str(existing["session_id"])
         session = self._session(session_id)
         if session["state"] == "PLAN_ACCEPTED":
             session = self._transition(session, "SESSION_STARTING")
@@ -1687,4 +1698,3 @@ class CompleteApplicationLoopService:
             "receipt_id": receipt_id,
             "verification_status": final_status,
         }
-

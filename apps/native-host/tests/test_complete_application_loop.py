@@ -12,6 +12,7 @@ from conftest import (
 )
 from test_application_plan_handoff_v2 import _consumer, _envelope, _signed
 
+from munshi_apply_native.background_prepare_queue import DurablePreparationQueue
 from munshi_apply_native.complete_application_loop import CompleteApplicationLoopService
 
 
@@ -220,6 +221,120 @@ def _seed_authority(loop, review, session, *, accept=True):
     return seed_production_authority(
         database=db, service=service, envelope=envelope, review_id=review["review_id"]
     )
+
+
+def _fail_resume_verification(service, session, browser):
+    prepare_form = browser.prepare_form
+
+    def unverified_resume(**kwargs):
+        prepared = prepare_form(**kwargs)
+        prepared["resume_uploaded"] = False
+        return prepared
+
+    browser.prepare_form = unverified_resume
+    failed = service.prepare_session(session_id=session.session_id, adapter=browser)
+    assert failed.state == "FAILED_SAFELY"
+    return failed
+
+
+def test_failed_safely_plan_retry_creates_new_preparable_current_session(loop):
+    service, db, browser = loop
+    first = service.start_session(plan_id="application-plan-1")
+    failed = _fail_resume_verification(service, first, browser)
+
+    with db.connect() as connection:
+        old_row_before = dict(
+            connection.execute(
+                "SELECT * FROM complete_application_sessions WHERE session_id=?",
+                (first.session_id,),
+            ).fetchone()
+        )
+        old_events_before = [
+            dict(row)
+            for row in connection.execute(
+                """SELECT * FROM complete_application_execution_events
+                   WHERE session_id=? ORDER BY occurred_at,event_id""",
+                (first.session_id,),
+            ).fetchall()
+        ]
+
+    retried = service.start_session(plan_id="application-plan-1")
+    replayed = service.start_session(plan_id="application-plan-1")
+    assert retried.session_id != failed.session_id
+    assert retried.state == "SESSION_STARTING"
+    assert replayed.session_id == retried.session_id
+
+    queue = DurablePreparationQueue(db)
+    first_job = queue.enqueue_session(
+        session_id=retried.session_id,
+        tenant_id="tenant-a",
+        user_id="member-a",
+    )
+    replayed_job = queue.enqueue_session(
+        session_id=retried.session_id,
+        tenant_id="tenant-a",
+        user_id="member-a",
+    )
+    assert first_job["state"] == "QUEUED"
+    assert replayed_job["job_id"] == first_job["job_id"]
+
+    with db.connect() as connection:
+        old_row_after = dict(
+            connection.execute(
+                "SELECT * FROM complete_application_sessions WHERE session_id=?",
+                (first.session_id,),
+            ).fetchone()
+        )
+        old_events_after = [
+            dict(row)
+            for row in connection.execute(
+                """SELECT * FROM complete_application_execution_events
+                   WHERE session_id=? ORDER BY occurred_at,event_id""",
+                (first.session_id,),
+            ).fetchall()
+        ]
+        assert connection.execute(
+            """SELECT COUNT(*) FROM complete_application_sessions
+               WHERE application_id=? AND plan_id=?""",
+            (first.application_id, first.plan_id),
+        ).fetchone()[0] == 2
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+
+    assert old_row_after == old_row_before
+    assert old_events_after == old_events_before
+
+
+def test_failed_safely_plan_retry_preserves_exactly_once_submit(loop):
+    service, db, failed_browser = loop
+    first = service.start_session(plan_id="application-plan-1")
+    _fail_resume_verification(service, first, failed_browser)
+
+    retried = service.start_session(plan_id="application-plan-1")
+    browser = FixtureBrowser()
+    pending = service.prepare_session(session_id=retried.session_id, adapter=browser)
+    assert pending.state == "NEEDS_INPUT"
+    task = service.resolutions.list(application_id=retried.application_id)[0]
+    service.resolve_task(task_id=task.task_id, value="https://example.test/portfolio")
+    prepared = service.prepare_session(session_id=retried.session_id, adapter=browser)
+    assert prepared.state == "READY_FOR_REVIEW"
+    review = service.build_review(session_id=retried.session_id)
+    service.approve_review(review_id=review["review_id"])
+    _seed_authority((service, db, browser), review, retried)
+
+    first_receipt = service.submit(
+        review_id=review["review_id"], idempotency_key="retry-submit-1", adapter=browser
+    )
+    replayed_receipt = service.submit(
+        review_id=review["review_id"], idempotency_key="retry-submit-1", adapter=browser
+    )
+
+    assert replayed_receipt["receipt_id"] == first_receipt["receipt_id"]
+    assert browser.calls == 1
+    with db.connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM final_submit_commands").fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT COUNT(*) FROM application_submission_receipts"
+        ).fetchone()[0] == 1
 
 
 def test_one_customer_approval_freezes_and_submits_once(loop):
