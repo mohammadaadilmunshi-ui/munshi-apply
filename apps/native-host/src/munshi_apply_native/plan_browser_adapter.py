@@ -520,6 +520,47 @@ class PlanBrowserAdapter:
                 self.page.wait_for_timeout(poll_ms)
         return False
 
+    # WORKDAY_PHONE_CANONICAL_VARIANTS_V1
+    @staticmethod
+    def _workday_phone_variants(value: str) -> list[str]:
+        raw = " ".join(str(value or "").split()).strip()
+        if not raw:
+            return []
+        digits = re.sub(r"\D+", "", raw)
+        variants: list[str] = [raw]
+        if digits:
+            variants.append(digits)
+        local = digits
+        if len(digits) == 11 and digits.startswith("1"):
+            local = digits[1:]
+            variants.append(local)
+        if len(local) == 10:
+            area, prefix, line = local[:3], local[3:6], local[6:]
+            variants.extend(
+                [
+                    f"({area}) {prefix}-{line}",
+                    f"{area}-{prefix}-{line}",
+                    f"{area} {prefix} {line}",
+                    f"{area}{prefix}{line}",
+                ]
+            )
+            if len(digits) == 11 and digits.startswith("1"):
+                variants.extend(
+                    [
+                        f"+1 {area}-{prefix}-{line}",
+                        f"+1 ({area}) {prefix}-{line}",
+                    ]
+                )
+        unique: list[str] = []
+        seen: set[str] = set()
+        for item in variants:
+            candidate = str(item or "").strip()
+            if not candidate or candidate in seen:
+                continue
+            seen.add(candidate)
+            unique.append(candidate)
+        return unique
+
     def _workday_fill_control(
         self,
         *,
@@ -572,6 +613,44 @@ class PlanBrowserAdapter:
                 "reason": "Workday source prompt already has the exact selected item",
                 "strategy": "WORKDAY_SOURCE_SELECTED_ITEM",
                 "verification": "POST_ACTION_PROVIDER_VERIFIED",
+            }
+
+        if (
+            semantic == "PHONE"
+            and tag in {"input", "textarea"}
+            and input_type not in {
+                "file","password","hidden","submit","button","reset",
+                "radio","checkbox","date",
+            }
+        ):
+            for candidate in self._workday_phone_variants(str(value)):
+                try:
+                    element = self._element(control_id)
+                    element.click()
+                    element.press("Control+A")
+                    element.press("Backspace")
+                    element.type(candidate, delay=35)
+                    try:
+                        element.press("Tab")
+                    except Exception:
+                        self.page.keyboard.press("Tab")
+                    self.page.wait_for_timeout(400)
+                    if self._wait_for_control_committed(
+                        control_id, timeout_ms=1800, poll_ms=100
+                    ):
+                        return {
+                            "status": "FILLED",
+                            "reason": "Workday phone committed from canonical phone digits",
+                            "strategy": "WORKDAY_PHONE_CANONICAL_VARIANT",
+                            "verification": "POST_ACTION_PROVIDER_VERIFIED",
+                        }
+                except Exception:
+                    continue
+            return {
+                "status": "FAILED",
+                "reason": "Workday rejected all equivalent canonical phone renderings",
+                "strategy": "WORKDAY_PHONE_CANONICAL_VARIANT",
+                "verification": "FAILED_CLOSED",
             }
 
         if tag in {"input", "textarea"} and input_type not in {
