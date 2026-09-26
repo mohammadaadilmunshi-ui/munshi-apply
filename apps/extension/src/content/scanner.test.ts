@@ -349,4 +349,20 @@ describe("AutoPilot page-state scanner", () => {
     expect(result.navigationCandidates[0]?.action).toBe("FINAL_SUBMIT");
     expect(result.finalSubmissionBoundary).toBe(true);
   });
+  it("never reports a visibly populated aria-invalid field as satisfied", () => {
+    document.body.innerHTML = `
+      <label for="first-name">First Name *</label>
+      <input id="first-name" type="text" required value="Aadil" aria-invalid="true">
+    `;
+    const control = scanDocument().controls.find(
+      (candidate) => candidate.inputType === "text",
+    );
+    expect(control).toBeDefined();
+    expect(control).toMatchObject({
+      invalid: true,
+      satisfied: false,
+    });
+  });
+
+
 });

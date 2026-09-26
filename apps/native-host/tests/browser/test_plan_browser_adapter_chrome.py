@@ -594,3 +594,78 @@ def test_real_chrome_prepares_two_step_application_before_final_submit():
         assert prepared["resume_uploaded"] is True
         assert prepared["unresolved"] == []
         browser.close()
+
+
+def test_real_chrome_workday_commits_text_with_trusted_keyboard_events():
+    """A Workday-like controlled field accepts only browser-trusted input."""
+    browser_path = resolve_browser_executable()
+    workday_url = (
+        "https://fixture.wd5.myworkdayjobs.com/en-US/fixture/job/Test/"
+        "Fixture_Job/apply"
+    )
+    plan = _plan()
+    plan["provider_policy"]["provider"] = "WORKDAY"
+    plan["job"]["job_url"] = workday_url
+    plan["job"]["apply_url"] = workday_url
+
+    html = """<!doctype html>
+<html>
+  <body data-step="one">
+    <section id="step-one">
+      <label for="first_name">First name</label>
+      <input id="first_name" name="first_name" type="text" required />
+      <button id="continue" type="button">Save and Continue</button>
+    </section>
+    <section id="step-two" hidden>
+      <button id="submit-app" type="submit">Submit application</button>
+    </section>
+    <script>
+      const input = document.querySelector("#first_name");
+      const next = document.querySelector("#continue");
+      let workdayModel = "";
+      input.addEventListener("input", (event) => {
+        if (event.isTrusted) {
+          workdayModel = input.value;
+          input.removeAttribute("aria-invalid");
+        }
+      });
+      next.addEventListener("click", () => {
+        if (workdayModel && workdayModel === input.value) {
+          document.querySelector("#step-one").hidden = true;
+          document.querySelector("#step-two").hidden = false;
+          document.body.dataset.step = "two";
+          return;
+        }
+        input.setAttribute("aria-invalid", "true");
+      });
+    </script>
+  </body>
+</html>"""
+
+    def handler(route):
+        if route.request.url == workday_url and route.request.method == "GET":
+            route.fulfill(status=200, content_type="text/html", body=html)
+            return
+        route.abort()
+
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch(
+            headless=True,
+            executable_path=browser_path,
+        )
+        page = browser.new_page()
+        page.route("**/*", handler)
+        page.goto(workday_url, wait_until="domcontentloaded")
+        adapter = _adapter(page, plan)
+
+        prepared = adapter.prepare_form(
+            plan=plan,
+            checkpoint=None,
+            resolved_values={},
+        )
+
+        assert page.locator("body").get_attribute("data-step") == "two"
+        assert page.locator("#first_name").input_value() == "Aadil"
+        assert page.locator("#first_name").get_attribute("aria-invalid") is None
+        assert prepared["validation_errors"] == []
+        browser.close()

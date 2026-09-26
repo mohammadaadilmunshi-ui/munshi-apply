@@ -55,6 +55,16 @@ const rules: readonly Rule[] = [
   },
   { id: "email", pattern: /\b(e-?mail)\b/i, semanticType: "EMAIL" },
   {
+    id: "phone-device-type",
+    pattern: /\bphone(?: device)? type\b/i,
+    semanticType: "UNKNOWN",
+  },
+  {
+    id: "phone-extension",
+    pattern: /\bphone(?: number)? extension\b|^extension$/i,
+    semanticType: "UNKNOWN",
+  },
+  {
     id: "phone",
     pattern: /\b(phone|mobile|telephone)\b/i,
     semanticType: "PHONE",

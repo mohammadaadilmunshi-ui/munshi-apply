@@ -773,7 +773,13 @@ class HostedRecoveringPlanBrowserAdapter(PlanBrowserAdapter):
             elif action_type == "TYPE":
                 if raw.get("valueSource") != "ANSWER":
                     raise ValueError("Hosted recovery TYPE must use ANSWER")
-                element.fill(answer)
+                if provider_for_url(self.page.url) == "WORKDAY":
+                    element.click()
+                    element.press("Control+A")
+                    element.press("Backspace")
+                    element.type(answer, delay=10)
+                else:
+                    element.fill(answer)
             elif action_type == "SELECT_EXACT_OPTION":
                 self._select_exact_option(element, answer)
             elif action_type == "KEY":
@@ -856,6 +862,7 @@ class HostedRecoveringPlanBrowserAdapter(PlanBrowserAdapter):
             isinstance(field, dict)
             and str(field.get("control_id") or "") == control_id
             and field.get("satisfied") is True
+            and field.get("invalid") is not True
             for field in described.get("fields", [])
         )
 

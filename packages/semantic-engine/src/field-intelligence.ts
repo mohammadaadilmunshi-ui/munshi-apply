@@ -38,6 +38,19 @@ const aliasRules: readonly AliasRule[] = [
     semanticType: "LAST_NAME",
   },
   {
+    id: "phone-device-type",
+    pattern:
+      /^(?:phone|telephone|mobile)(?: device)? type(?: select one)?$/,
+    semanticType: "UNKNOWN",
+    confidence: 0.99,
+  },
+  {
+    id: "phone-extension",
+    pattern: /^(?:phone(?: number)? )?extension$/,
+    semanticType: "UNKNOWN",
+    confidence: 0.99,
+  },
+  {
     id: "cell-phone",
     pattern:
       /^(?:cell|mobile|telephone|contact) (?:phone )?(?:number|no)$|^cell phone$/,

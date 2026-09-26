@@ -563,6 +563,11 @@ function controlSatisfied(element: Element): boolean {
   ) {
     return true;
   }
+  // A provider may leave a visually populated value in the DOM while its
+  // controlled application model still rejects that value. Workday exposes
+  // this state through aria-invalid after Save and Continue. Never let the
+  // visible value override explicit provider validation.
+  if (validationState(element).invalid) return false;
   if (element instanceof HTMLInputElement) {
     if (element.type === "file") return Boolean(element.files?.length);
     if (element.type === "checkbox") return element.checked;

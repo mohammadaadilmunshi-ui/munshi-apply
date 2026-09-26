@@ -71,4 +71,28 @@ describe("semantic field equivalence", () => {
       matchedRule: null,
     });
   });
+  it("keeps Workday phone metadata controls separate from the phone number", () => {
+    expect(
+      classifyQuestion(
+        "Phone Device Type Select One Required",
+        "phoneNumber--phoneType",
+      ),
+    ).toMatchObject({
+      semanticType: "UNKNOWN",
+      matchedRule: "phone-device-type",
+    });
+    expect(
+      classifyQuestion("Phone Extension", "phoneNumber--extension"),
+    ).toMatchObject({
+      semanticType: "UNKNOWN",
+      matchedRule: "phone-extension",
+    });
+    expect(
+      classifyQuestion("Phone Number", "phoneNumber--phoneNumber"),
+    ).toMatchObject({
+      semanticType: "PHONE",
+    });
+  });
+
+
 });

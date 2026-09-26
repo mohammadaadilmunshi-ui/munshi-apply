@@ -247,6 +247,197 @@ class PlanBrowserAdapter:
             raise ValueError("Observed control disappeared")
         return element
 
+    @staticmethod
+    def _field_committed(field: dict[str, Any]) -> bool:
+        return bool(field.get("satisfied")) and field.get("invalid") is not True
+
+    def _control_committed(self, control_id: str) -> bool:
+        described = self._scan()
+        return any(
+            isinstance(field, dict)
+            and str(field.get("control_id") or "") == control_id
+            and self._field_committed(field)
+            for field in described.get("fields", [])
+        )
+
+    @staticmethod
+    def _workday_option_text(value: Any) -> str:
+        return " ".join(str(value or "").split()).casefold()
+
+    def _workday_click_exact_option(self, answer: str) -> bool:
+        wanted = self._workday_option_text(answer)
+        if not wanted:
+            return False
+        candidates = self.page.locator(
+            "[role='option'],[role='menuitem'],[data-value],[data-option-value]"
+        )
+        matches: list[Any] = []
+        for index in range(min(candidates.count(), 250)):
+            candidate = candidates.nth(index)
+            try:
+                if not candidate.is_visible():
+                    continue
+                values = candidate.evaluate(
+                    """element => [
+                      element.innerText || element.textContent || '',
+                      element.getAttribute('aria-label') || '',
+                      element.getAttribute('data-value') || '',
+                      element.getAttribute('data-option-value') || ''
+                    ]"""
+                )
+            except Exception:
+                continue
+            if any(self._workday_option_text(item) == wanted for item in values or []):
+                matches.append(candidate)
+        if len(matches) != 1:
+            return False
+        matches[0].click()
+        return True
+
+    def _workday_fill_control(
+        self,
+        *,
+        control: dict[str, Any],
+        question: dict[str, Any],
+        value: str,
+    ) -> dict[str, Any] | None:
+        """Use trusted Playwright interaction for Workday controlled fields."""
+        if provider_for_url(self.page.url) != "WORKDAY":
+            return None
+
+        control_id = str(control.get("controlId") or "")
+        element = self._element(control_id)
+        metadata = element.evaluate(
+            """element => ({
+              tag: element.tagName.toLowerCase(),
+              type: String(element.type || '').toLowerCase(),
+              role: element.getAttribute('role') || '',
+              hasPopup: element.getAttribute('aria-haspopup') || '',
+              autocomplete: element.getAttribute('aria-autocomplete') || '',
+              id: element.id || '',
+              name: element.getAttribute('name') || ''
+            })"""
+        )
+        tag = str(metadata.get("tag") or "")
+        input_type = str(metadata.get("type") or "")
+        role = str(metadata.get("role") or "").casefold()
+        has_popup = str(metadata.get("hasPopup") or "").casefold()
+        aria_autocomplete = str(metadata.get("autocomplete") or "").casefold()
+        element_id = str(metadata.get("id") or "").casefold()
+        semantic = str(
+            question.get("semanticType") or question.get("semantic_type") or ""
+        ).upper()
+        question_text = str(
+            question.get("rawText") or question.get("question") or ""
+        ).casefold()
+        kind = str(control.get("kind") or "").upper()
+        choice_like = (
+            kind in {"SELECT", "COMBOBOX"}
+            or role in {"combobox", "listbox"}
+            or has_popup not in {"", "false", "none"}
+            or aria_autocomplete in {"list", "both"}
+            or semantic == "REFERRAL"
+            or "source--source" in element_id
+            or "select one" in question_text
+        )
+
+        if tag in {"input", "textarea"} and input_type not in {
+            "file",
+            "password",
+            "hidden",
+            "submit",
+            "button",
+            "reset",
+            "radio",
+            "checkbox",
+            "date",
+        }:
+            element.click()
+            element.press("Control+A")
+            element.press("Backspace")
+            element.type(str(value), delay=10)
+            if choice_like:
+                if not self._workday_click_exact_option(str(value)):
+                    return {
+                        "status": "FAILED",
+                        "reason": "Workday exact option did not commit",
+                        "strategy": "WORKDAY_TRUSTED_PLAYWRIGHT",
+                        "verification": "FAILED_CLOSED",
+                    }
+                self.page.keyboard.press("Tab")
+            else:
+                element.press("Tab")
+            self.page.wait_for_timeout(100)
+            committed = self._control_committed(control_id)
+            return {
+                "status": "FILLED" if committed else "FAILED",
+                "reason": (
+                    "Workday value committed through trusted keyboard interaction"
+                    if committed
+                    else "Workday kept the field uncommitted after trusted keyboard interaction"
+                ),
+                "strategy": "WORKDAY_TRUSTED_PLAYWRIGHT",
+                "verification": (
+                    "POST_ACTION_PROVIDER_VERIFIED" if committed else "FAILED_CLOSED"
+                ),
+            }
+
+        if tag == "select":
+            try:
+                element.select_option(label=str(value))
+            except Exception:
+                try:
+                    element.select_option(value=str(value))
+                except Exception:
+                    return {
+                        "status": "FAILED",
+                        "reason": "Workday native select exact option was unavailable",
+                        "strategy": "WORKDAY_TRUSTED_PLAYWRIGHT",
+                        "verification": "FAILED_CLOSED",
+                    }
+            self.page.keyboard.press("Tab")
+            self.page.wait_for_timeout(100)
+            committed = self._control_committed(control_id)
+            return {
+                "status": "FILLED" if committed else "FAILED",
+                "reason": (
+                    "Workday native selection committed"
+                    if committed
+                    else "Workday native selection remained uncommitted"
+                ),
+                "strategy": "WORKDAY_TRUSTED_PLAYWRIGHT",
+                "verification": (
+                    "POST_ACTION_PROVIDER_VERIFIED" if committed else "FAILED_CLOSED"
+                ),
+            }
+
+        if choice_like or tag == "button":
+            element.click()
+            if not self._workday_click_exact_option(str(value)):
+                return {
+                    "status": "FAILED",
+                    "reason": "Workday custom exact option was unavailable",
+                    "strategy": "WORKDAY_TRUSTED_PLAYWRIGHT",
+                    "verification": "FAILED_CLOSED",
+                }
+            self.page.keyboard.press("Tab")
+            self.page.wait_for_timeout(100)
+            committed = self._control_committed(control_id)
+            return {
+                "status": "FILLED" if committed else "FAILED",
+                "reason": (
+                    "Workday custom selection committed"
+                    if committed
+                    else "Workday custom selection remained uncommitted"
+                ),
+                "strategy": "WORKDAY_TRUSTED_PLAYWRIGHT",
+                "verification": (
+                    "POST_ACTION_PROVIDER_VERIFIED" if committed else "FAILED_CLOSED"
+                ),
+            }
+
+        return None
+
     def _file_sha256(self, control_id: str) -> str:
         hashes = UniversalDocumentUploader._file_hashes(
             self._element(control_id)
@@ -667,6 +858,10 @@ class PlanBrowserAdapter:
                 plan=plan, role="cover_letter"
             )
         required = [f for f in fields if f["required"]]
+        # Some controlled ATS widgets do not expose required/aria-required until
+        # provider validation runs. Once a provider marks a control invalid it is
+        # blocking even if the raw DOM did not classify it as required.
+        blocking = [f for f in fields if f["required"] or f["invalid"]]
         unresolved = [
             {
                 "question_key": f["question_key"],
@@ -676,10 +871,10 @@ class PlanBrowserAdapter:
                 "semantic_confidence": f.get("semantic_confidence", 0.0),
                 "sensitivity": f["sensitivity_class"],
                 "question_observation": dict(f.get("question_observation") or {}),
-                "reason": "Required answer is unresolved",
+                "reason": "Required or browser-invalid answer is unresolved",
             }
-            for f in required
-            if not f["satisfied"]
+            for f in blocking
+            if not self._field_committed(f)
         ]
         # Only safe field summaries enter durable evidence; pageContext never does.
         review_fields = safe_evidence(fields)
@@ -709,9 +904,15 @@ class PlanBrowserAdapter:
                 else {}
             ),
             "required_fields": len(required),
-            "completed_required_fields": sum(bool(f["satisfied"]) for f in required),
-            "completed_control_ids": [f["control_id"] for f in fields if f["satisfied"]],
-            "pending_control_ids": [f["control_id"] for f in required if not f["satisfied"]],
+            "completed_required_fields": sum(
+                self._field_committed(f) for f in required
+            ),
+            "completed_control_ids": [
+                f["control_id"] for f in fields if self._field_committed(f)
+            ],
+            "pending_control_ids": [
+                f["control_id"] for f in blocking if not self._field_committed(f)
+            ],
             "review_fields": review_fields,
             "unresolved": unresolved,
             "validation_errors": ["Field validation failed" for f in fields if f["invalid"]],
@@ -846,18 +1047,24 @@ class PlanBrowserAdapter:
                     value = candidates[0]["execution_value"]
                 if value is None:
                     continue
-                result = self.page.evaluate(
-                    "instructions => MunshiPlanRuntime.applyFillInstructions(instructions)",
-                    [
-                        {
-                            "controlId": control["controlId"],
-                            "frameId": control["frameId"],
-                            "value": str(value),
-                            "sensitive": False,
-                            "approved": True,
-                        }
-                    ],
-                )[0]
+                result = self._workday_fill_control(
+                    control=control,
+                    question=question,
+                    value=str(value),
+                )
+                if result is None:
+                    result = self.page.evaluate(
+                        "instructions => MunshiPlanRuntime.applyFillInstructions(instructions)",
+                        [
+                            {
+                                "controlId": control["controlId"],
+                                "frameId": control["frameId"],
+                                "value": str(value),
+                                "sensitive": False,
+                                "approved": True,
+                            }
+                        ],
+                    )[0]
                 self.on_event(
                     "FIELD_VERIFIED" if result["status"] == "FILLED" else "NEEDS_INPUT",
                     {"control_id": control["controlId"], "status": result["status"]},
