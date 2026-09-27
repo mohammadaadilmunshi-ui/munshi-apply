@@ -83,10 +83,11 @@ def reconcile_provider_review(
     The function intentionally uses only deterministic negative invariants. It
     does not infer missing candidate facts and never returns raw review text.
     """
+    all_fields = [dict(item) for item in prepared_fields]
     compact_review = _compact(review_text)
     normalized_review = _norm(review_text)
     lines = [_compact(line) for line in str(review_text or "").splitlines() if _compact(line)]
-    fields = _normal_fields(prepared_fields)
+    fields = _normal_fields(all_fields)
     grouped = _by_semantic(fields)
     mismatches: list[dict[str, Any]] = []
 
@@ -185,8 +186,17 @@ def reconcile_provider_review(
     # than one role at the same company.
     for semantic in ("JOB_TITLE", "SCHOOL_NAME"):
         for item in grouped.get(semantic, []):
-            repeat_group = item.get("repeat_group_id")
-            repeat_index = item.get("repeat_index")
+            observation = dict(item.get("question_observation") or {})
+            repeat_group = (
+                item.get("repeat_group_id")
+                if item.get("repeat_group_id") is not None
+                else observation.get("repeat_group")
+            )
+            repeat_index = (
+                item.get("repeat_index")
+                if item.get("repeat_index") is not None
+                else observation.get("repeat_index")
+            )
             if repeat_group is None and repeat_index is None:
                 continue
             value = _compact(item.get("display_value"))
@@ -209,7 +219,7 @@ def reconcile_provider_review(
             *sorted(
                 f"{str(item.get('semantic_type') or '')}:{str(item.get('value_digest') or '')}:"
                 f"{str(item.get('repeat_group_id') or '')}:{str(item.get('repeat_index') or '')}"
-                for item in prepared_fields
+                for item in all_fields
             ),
         ]
     )
