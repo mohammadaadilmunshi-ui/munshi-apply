@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from munshi_apply_native.review_reconciliation_v1 import (
-    reconcile_provider_review,
-)
-
+from munshi_apply_native.review_reconciliation_v1 import reconcile_provider_review
 
 APPROVED_RESUME = "a" * 64
 
