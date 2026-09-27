@@ -1303,6 +1303,8 @@ class PlanBrowserAdapter:
         ]
         if self.current_plan(plan) is not True:
             raise ValueError("Hunter plan is stale")
+        accumulated_review_fields: dict[tuple[str, str], dict[str, Any]] = {}
+        prepared_page_ids: set[str] = set()
         for _step in range(10):
             # Cookie/CMP overlays are reversible UI chrome and may otherwise
             # intercept clicks. Dismiss them before each page scan/navigation step.
@@ -1473,6 +1475,20 @@ class PlanBrowserAdapter:
                     {"control_id": control["controlId"], "status": result["status"]},
                 )
             result = self._observe(plan)
+            page_id = str(result.get("page_id") or described["page"].get("pageId") or "")
+            if page_id:
+                prepared_page_ids.add(page_id)
+            for field in list(result.get("review_fields") or []):
+                if not isinstance(field, dict):
+                    continue
+                control_id = str(field.get("control_id") or "")
+                question_key = str(field.get("question_key") or "")
+                identity = control_id or question_key
+                if not identity:
+                    continue
+                accumulated_review_fields[(page_id, identity)] = safe_evidence(dict(field))
+            result["review_fields"] = list(accumulated_review_fields.values())
+            result["prepared_page_count"] = len(prepared_page_ids)
             if result["resume_uploaded"]:
                 self.on_event("RESUME_VERIFIED", {"sha256": result["resume_sha256"]})
             if isinstance(plan.get("cover_letter"), dict) and result.get("cover_letter_uploaded"):
