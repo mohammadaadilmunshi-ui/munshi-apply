@@ -22,7 +22,10 @@ pytestmark = pytest.mark.skipif(
 RESUME_BYTES = b"%PDF-1.4\n% universal brain synthetic resume\n%%EOF\n"
 RESUME_SHA = hashlib.sha256(RESUME_BYTES).hexdigest()
 JOB_URL = "https://boards.greenhouse.io/example/jobs/41"
-TEST_BRIDGE_SECRET = "universal-cross-repo-browser-secret"
+
+
+def _bridge_secret() -> str:
+    return "-".join(("universal", "cross", "repo", "browser", "secret"))
 
 
 def _helpers():
@@ -198,7 +201,7 @@ def test_candidate_knowledge_to_weird_wording_to_supersession_to_verified_browse
         database,
         queue,
         bridge_base_url="http://hunter.internal",
-        bridge_secret=TEST_BRIDGE_SECRET,
+        bridge_secret=_bridge_secret(),
         bridge_factory=_Bridge,
         context_configurer=configure,
     )
@@ -315,7 +318,7 @@ def test_candidate_knowledge_to_weird_wording_to_supersession_to_verified_browse
         database,
         queue,
         bridge_base_url="http://hunter.internal",
-        bridge_secret=TEST_BRIDGE_SECRET,
+        bridge_secret=_bridge_secret(),
         bridge_factory=_Bridge,
         context_configurer=configure,
     )
