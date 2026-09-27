@@ -295,6 +295,42 @@ def answer_matches_question(
     return bool(answer_key and answer_key in semantic_keys(semantic))
 
 
+def protected_answer_matches_question(
+    answer: Mapping[str, Any],
+    question: Mapping[str, Any],
+    control: Mapping[str, Any],
+) -> bool:
+    """Bind one protected/self-ID plan answer to exactly one browser field.
+
+    Unlike normal answers, protected values never use fuzzy semantics, provider
+    wording, or legacy answer-key aliases. The immutable Hunter plan must carry
+    the value-free logical-field fingerprint created from the same structural
+    browser observation, and the current field must reproduce it exactly.
+    """
+    sensitivity = str(answer.get("sensitivity_class") or "").strip().upper()
+    if sensitivity not in {"PROTECTED", "SELF_ID"}:
+        return False
+    if answer.get("autofill_allowed") is not True:
+        return False
+    if answer.get("execution_value") is not None:
+        return False
+    reference = str(answer.get("secure_resolver_ref") or "").strip()
+    if not reference.startswith("hunter-secure://candidate-truth/"):
+        return False
+
+    expected = str(answer.get("universal_binding_fingerprint") or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", expected):
+        return False
+    observed = logical_field_fingerprint(question, control)
+    if observed is None or observed != expected:
+        return False
+
+    semantic = str(question.get("semanticType") or "").strip().upper()
+    if semantic not in PROTECTED_SEMANTIC_TYPES:
+        return False
+    return True
+
+
 def bridge_status() -> dict[str, Any]:
     """Non-secret diagnostics for CI/health surfaces."""
     return {
