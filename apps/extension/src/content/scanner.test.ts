@@ -443,4 +443,60 @@ describe("AutoPilot page-state scanner", () => {
     );
   });
 
+
+  it("binds repeated Workday-style cards from structural row headings when ids are unindexed", () => {
+    document.body.innerHTML = `
+      <main>
+        <h2>My Experience</h2>
+        <section>
+          <div class="workday-card">
+            <h3>Work Experience 1</h3>
+            <label for="employer-alpha">Employer</label>
+            <input id="employer-alpha" name="employerAlpha" required />
+            <label for="title-alpha">Job Title</label>
+            <input id="title-alpha" name="titleAlpha" required />
+          </div>
+          <div class="workday-card">
+            <h3>Work Experience 2</h3>
+            <label for="employer-beta">Employer</label>
+            <input id="employer-beta" name="employerBeta" required />
+            <label for="title-beta">Job Title</label>
+            <input id="title-beta" name="titleBeta" required />
+          </div>
+          <div class="workday-card">
+            <h3>Education 1</h3>
+            <label for="school-alpha">School or University</label>
+            <input id="school-alpha" name="schoolAlpha" required />
+          </div>
+          <div class="workday-card">
+            <h3>Education 2</h3>
+            <label for="school-beta">School or University</label>
+            <input id="school-beta" name="schoolBeta" required />
+          </div>
+        </section>
+      </main>
+    `;
+
+    const questions = scanDocument().questions;
+    const employers = questions.filter(
+      (candidate) => candidate.semanticType === "EMPLOYER_NAME",
+    );
+    const schools = questions.filter(
+      (candidate) => candidate.semanticType === "SCHOOL_NAME",
+    );
+
+    expect(employers).toHaveLength(2);
+    expect(employers.map((item) => item.repeatIndex)).toEqual([0, 1]);
+    expect(new Set(employers.map((item) => item.repeatGroupId))).toEqual(
+      new Set(["structural:work-experience:#"]),
+    );
+
+    expect(schools).toHaveLength(2);
+    expect(schools.map((item) => item.repeatIndex)).toEqual([0, 1]);
+    expect(new Set(schools.map((item) => item.repeatGroupId))).toEqual(
+      new Set(["structural:education:#"]),
+    );
+    expect(employers[0]?.repeatGroupId).not.toBe(schools[0]?.repeatGroupId);
+  });
+
 });
