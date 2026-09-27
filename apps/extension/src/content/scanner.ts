@@ -166,6 +166,56 @@ function radioOptionLabel(element: HTMLInputElement): string {
   );
 }
 
+function checkboxOptionLabel(element: HTMLInputElement): string {
+  return (
+    inputLabel(element) ||
+    compactText(element.getAttribute("aria-label")) ||
+    compactText(element.value)
+  );
+}
+
+function singleChoiceCheckboxGroup(
+  element: HTMLInputElement,
+): HTMLInputElement[] {
+  if (element.type !== "checkbox" || !element.name) return [];
+  const root = element.getRootNode();
+  const candidates =
+    root instanceof Document || root instanceof ShadowRoot
+      ? Array.from(root.querySelectorAll("input[type='checkbox']"))
+      : [];
+  const group = candidates.filter(
+    (candidate): candidate is HTMLInputElement =>
+      candidate instanceof HTMLInputElement && candidate.name === element.name,
+  );
+  if (group.length < 2) return [];
+
+  const scope =
+    element.closest("fieldset, [role='group'], [data-automation-id*='group' i]")
+    ?? element.parentElement?.parentElement
+    ?? element.parentElement;
+  const context = normalized(
+    [
+      scope?.querySelector("legend")?.textContent,
+      scope?.getAttribute("aria-label"),
+      scope?.textContent,
+      nearbyPromptText(element),
+    ]
+      .filter(Boolean)
+      .join(" "),
+  );
+  if (/select all|check all|choose all|all that apply|any that apply/.test(context)) {
+    return [];
+  }
+  if (
+    !/(?:check|select|choose)(?: only)? one(?: of)?|one of the (?:boxes|options|choices)/.test(
+      context,
+    )
+  ) {
+    return [];
+  }
+  return group;
+}
+
 function groupLegend(element: Element): string {
   const fieldset = element.closest("fieldset");
   return compactText(fieldset?.querySelector(":scope > legend")?.textContent);
@@ -486,6 +536,12 @@ function optionsFor(element: Element): string[] {
   if (element instanceof HTMLInputElement && element.type === "radio") {
     return radioGroup(element).map(radioOptionLabel).filter(Boolean);
   }
+  if (element instanceof HTMLInputElement && element.type === "checkbox") {
+    const group = singleChoiceCheckboxGroup(element);
+    if (group.length > 1) {
+      return group.map(checkboxOptionLabel).filter(Boolean);
+    }
+  }
   if (element.getAttribute("role") === "combobox") {
     return controlledComboboxOptions(element);
   }
@@ -570,7 +626,12 @@ function controlSatisfied(element: Element): boolean {
   if (validationState(element).invalid) return false;
   if (element instanceof HTMLInputElement) {
     if (element.type === "file") return Boolean(element.files?.length);
-    if (element.type === "checkbox") return element.checked;
+    if (element.type === "checkbox") {
+      const group = singleChoiceCheckboxGroup(element);
+      return group.length > 1
+        ? group.some((candidate) => candidate.checked)
+        : element.checked;
+    }
     if (element.type === "radio") {
       return radioGroup(element).some((candidate) => candidate.checked);
     }
@@ -842,6 +903,13 @@ function questionIdentity(entry: ControlEntry, question: Question): string {
     entry.element.name
   ) {
     return `radio|${entry.element.name}|${question.rawText}`;
+  }
+  if (
+    entry.control.kind === "CHECKBOX" &&
+    entry.element instanceof HTMLInputElement &&
+    singleChoiceCheckboxGroup(entry.element).length > 1
+  ) {
+    return `checkbox-one|${entry.element.name}|${question.contextText}`;
   }
   return entry.control.controlId;
 }
