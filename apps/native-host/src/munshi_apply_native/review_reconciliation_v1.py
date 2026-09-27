@@ -9,7 +9,8 @@ from __future__ import annotations
 import hashlib
 import re
 from collections import defaultdict
-from typing import Any, Iterable, Mapping
+from collections.abc import Iterable, Mapping
+from typing import Any
 
 
 def _compact(value: Any) -> str:
@@ -105,7 +106,9 @@ def reconcile_provider_review(
             "mismatches": [
                 {
                     "code": "MISSING_REQUIRED",
-                    "safe_detail": "Final provider review/submit boundary was not uniquely observed.",
+                    "safe_detail": (
+                        "Final provider review/submit boundary was not uniquely observed."
+                    ),
                 }
             ],
         }
