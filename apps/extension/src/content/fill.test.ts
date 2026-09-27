@@ -153,6 +153,37 @@ describe("guarded field filling", () => {
     expect(result[0]?.status).toBe("FILLED");
   });
 
+  it("selects one exact option from a single-choice checkbox group", async () => {
+    document.body.innerHTML = `
+      <fieldset>
+        <legend>Please check one of the boxes below:</legend>
+        <label><input type="checkbox" name="disability" value="Yes"> Yes, I have a disability, or have had one in the past</label>
+        <label><input type="checkbox" name="disability" value="No"> No, I do not have a disability and have not had one in the past</label>
+        <label><input type="checkbox" name="disability" value="Decline"> I do not want to answer</label>
+      </fieldset>
+    `;
+    const question = scanDocument().questions[0];
+    expect(question).toBeDefined();
+
+    const requested =
+      "No, I do not have a disability and have not had one in the past";
+    const result = await applyFillInstructions([
+      {
+        controlId: question!.controlId,
+        frameId: 0,
+        value: requested,
+        sensitive: true,
+        approved: true,
+      },
+    ]);
+
+    const boxes = Array.from(
+      document.querySelectorAll<HTMLInputElement>("input[type='checkbox']"),
+    );
+    expect(boxes.map((box) => box.checked)).toEqual([false, true, false]);
+    expect(result[0]?.status).toBe("FILLED");
+  });
+
   it("does not mutate a checkbox for an ambiguous value", async () => {
     document.body.innerHTML = `
       <label><input id="agree" type="checkbox" checked> I agree</label>
