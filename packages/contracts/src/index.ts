@@ -107,6 +107,9 @@ export const semanticTypes = [
   "COUNTRY",
   "EMAIL",
   "PHONE",
+  "PHONE_DEVICE_TYPE",
+  "PHONE_COUNTRY_CODE",
+  "PHONE_EXTENSION",
   "LINKEDIN",
   "GITHUB",
   "PORTFOLIO",
@@ -132,6 +135,8 @@ export const semanticTypes = [
   "POSITION_FUNCTION",
   "EMPLOYMENT_RESPONSIBILITIES",
   "WORK_AUTHORIZATION_CURRENT",
+  "WORK_LOCATION_ELIGIBILITY",
+  "AGE_18_PLUS",
   "SPONSORSHIP_CURRENT",
   "SPONSORSHIP_FUTURE",
   "IMMIGRATION_ASSISTANCE",
@@ -159,7 +164,12 @@ export const semanticTypes = [
   "DISABILITY_STATUS",
   "GENDER",
   "RACE_ETHNICITY",
+  "HISPANIC_LATINO",
   "EEO_SELF_ID",
+  "SELF_ID_NAME",
+  "SELF_ID_DATE",
+  "EMPLOYEE_ID",
+  "LEGAL_ATTESTATION",
   "REFERRAL",
   "PREVIOUS_EMPLOYEE",
   "PREVIOUS_APPLICATION",
@@ -419,6 +429,77 @@ export const ApplicationPageSchema = z.object({
     .optional(),
 });
 export type ApplicationPage = z.infer<typeof ApplicationPageSchema>;
+
+export const reviewSensitivityClasses = [
+  "NORMAL",
+  "PROTECTED",
+  "SELF_ID",
+  "POST_OFFER",
+  "CREDENTIAL",
+  "SECRET",
+] as const;
+export const ReviewSensitivityClassSchema = z.enum(reviewSensitivityClasses);
+
+export const ReviewObservationSchema = z.object({
+  semanticType: SemanticTypeSchema,
+  label: z.string(),
+  // Plaintext is optional and only for NORMAL observations. Protected/self-ID
+  // comparison should use valueDigest and policy provenance instead.
+  displayValue: z.string().max(4_000).optional(),
+  valueDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  sensitivityClass: ReviewSensitivityClassSchema,
+  redacted: z.boolean().default(false),
+  repeatGroupId: z.string().nullable().optional(),
+  repeatIndex: z.number().int().nonnegative().nullable().optional(),
+  artifactSha256: z.string().regex(/^[a-f0-9]{64}$/).nullable().optional(),
+  provenanceDigest: z.string().regex(/^[a-f0-9]{64}$/).nullable().optional(),
+});
+export type ReviewObservation = z.infer<typeof ReviewObservationSchema>;
+
+export const ReviewSnapshotSchema = z.object({
+  pageId: z.string().min(1),
+  pageFingerprint: z.string().min(1),
+  formDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  snapshotDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  observations: z.array(ReviewObservationSchema),
+  validationErrorCount: z.number().int().nonnegative(),
+  finalSubmissionBoundary: z.literal(true),
+  observedAt: z.string().datetime(),
+});
+export type ReviewSnapshot = z.infer<typeof ReviewSnapshotSchema>;
+
+export const reviewMismatchCodes = [
+  "MISSING_REQUIRED",
+  "UNEXPECTED_VALUE",
+  "NAME_RECOMPOSITION",
+  "PHONE_MISMATCH",
+  "PHONE_EXTENSION_WITHOUT_FACT",
+  "PHONE_COUNTRY_CODE_MISMATCH",
+  "ADDRESS_MISMATCH",
+  "REPEAT_GROUP_MISMATCH",
+  "RESUME_SHA_MISMATCH",
+  "PROTECTED_PROVENANCE_MISSING",
+  "LEGAL_ATTESTATION_UNBOUND",
+  "VALIDATION_ERROR",
+  "FORM_DIGEST_CHANGED",
+] as const;
+export const ReviewMismatchCodeSchema = z.enum(reviewMismatchCodes);
+
+export const ReviewMismatchSchema = z.object({
+  code: ReviewMismatchCodeSchema,
+  semanticType: SemanticTypeSchema.optional(),
+  repeatGroupId: z.string().nullable().optional(),
+  repeatIndex: z.number().int().nonnegative().nullable().optional(),
+  safeDetail: z.string().max(1_000),
+});
+export type ReviewMismatch = z.infer<typeof ReviewMismatchSchema>;
+
+export const ReviewReconciliationSchema = z.object({
+  status: z.enum(["MATCH", "MISMATCH", "INCOMPLETE"]),
+  snapshotDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  mismatches: z.array(ReviewMismatchSchema),
+});
+export type ReviewReconciliation = z.infer<typeof ReviewReconciliationSchema>;
 
 export const eventTypes = [
   "PAGE_DETECTED",

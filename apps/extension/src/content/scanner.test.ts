@@ -109,6 +109,31 @@ describe("AutoPilot page-state scanner", () => {
     expect(scanDocument().securityCheckpoint).toBeNull();
   });
 
+  it("observes segmented phone controls as four distinct semantic questions", () => {
+    document.body.innerHTML = `
+      <section aria-label="Phone">
+        <label for="phone-type">Phone Device Type *</label>
+        <select id="phone-type" name="phoneNumber--phoneType">
+          <option>Select One</option><option>Mobile</option>
+        </select>
+        <label for="phone-code">Country Phone Code *</label>
+        <div id="phone-code" role="combobox" aria-label="Country Phone Code"></div>
+        <label for="phone-number">Phone Number *</label>
+        <input id="phone-number" name="phoneNumber--phoneNumber" type="tel">
+        <label for="phone-ext">Phone Extension</label>
+        <input id="phone-ext" name="phoneNumber--extension" type="text">
+      </section>
+    `;
+
+    const semantics = scanDocument().questions.map(
+      (candidate) => candidate.semanticType,
+    );
+    expect(semantics).toContain("PHONE_DEVICE_TYPE");
+    expect(semantics).toContain("PHONE_COUNTRY_CODE");
+    expect(semantics).toContain("PHONE");
+    expect(semantics).toContain("PHONE_EXTENSION");
+  });
+
   it("ignores passive reCAPTCHA integration until a challenge is active", () => {
     document.body.innerHTML = `
       <label for="resume">Upload CV</label>
