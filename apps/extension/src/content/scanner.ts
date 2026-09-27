@@ -1040,6 +1040,9 @@ const personalTypes = new Set<SemanticType>([
   "COUNTRY",
   "EMAIL",
   "PHONE",
+  "PHONE_DEVICE_TYPE",
+  "PHONE_COUNTRY_CODE",
+  "PHONE_EXTENSION",
 ]);
 const educationTypes = new Set<SemanticType>([
   "EDUCATION",
@@ -1071,6 +1074,7 @@ const eeoTypes = new Set<SemanticType>([
   "DISABILITY_STATUS",
   "GENDER",
   "RACE_ETHNICITY",
+  "HISPANIC_LATINO",
   "EEO_SELF_ID",
 ]);
 const disclosureTypes = new Set<SemanticType>([
@@ -1085,6 +1089,31 @@ function hasQuestionType(
   types: ReadonlySet<SemanticType>,
 ): boolean {
   return questions.some((question) => types.has(question.semanticType));
+}
+
+function structuralPageState(): ApplicationState | null {
+  const headings = Array.from(
+    document.querySelectorAll("h1, h2, h3, [role='heading']"),
+  )
+    .filter(isVisible)
+    .map((element) => normalized(element.textContent))
+    .filter(Boolean);
+
+  for (const heading of headings) {
+    if (/^review(?: application)?$/.test(heading)) return "REVIEW";
+    if (
+      /^(?:self identify|self identification|voluntary self identification(?: of disability)?)$/.test(
+        heading,
+      )
+    ) {
+      return "EEO";
+    }
+    if (/^voluntary disclosures?$/.test(heading)) return "DISCLOSURES";
+    if (/^application questions?$/.test(heading)) return "QUESTIONS";
+    if (/^(?:my )?experience$/.test(heading)) return "EXPERIENCE";
+    if (/^(?:my |personal )?information$/.test(heading)) return "PERSONAL";
+  }
+  return null;
 }
 
 function inferApplicationState(input: {
@@ -1113,6 +1142,14 @@ function inferApplicationState(input: {
   ) {
     return "VERIFY_ACCOUNT";
   }
+
+  // Workday and other multi-step ATSs may reuse the same protected semantics on
+  // different pages. Prefer the active structural page heading before semantic
+  // fallbacks so "Voluntary Disclosures", "Self Identify", and "Review" remain
+  // distinct even when their field families overlap.
+  const structuralState = structuralPageState();
+  if (structuralState) return structuralState;
+
   if (input.finalSubmissionBoundary) return "SUBMISSION";
   if (
     input.navigation.some((candidate) => candidate.action === "REVIEW") ||
