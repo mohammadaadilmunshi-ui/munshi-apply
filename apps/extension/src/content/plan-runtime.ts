@@ -56,6 +56,49 @@ function isWorkdayPromptControl(node: Element | null): node is HTMLInputElement 
   return promptShape && workdaySurface;
 }
 
+function singleChoiceCheckboxSelectedValue(
+  node: Element | null,
+  options: readonly string[] | undefined,
+): string {
+  if (
+    !(node instanceof HTMLInputElement)
+    || node.type !== "checkbox"
+    || !node.name
+    || !Array.isArray(options)
+    || options.length < 2
+  ) {
+    return "";
+  }
+  const root = node.getRootNode();
+  if (!(root instanceof Document || root instanceof ShadowRoot)) return "";
+  const candidates = Array.from(
+    root.querySelectorAll("input[type='checkbox']"),
+  ).filter(
+    (candidate): candidate is HTMLInputElement =>
+      candidate instanceof HTMLInputElement
+      && candidate.name === node.name
+      && candidate.checked,
+  );
+  if (candidates.length !== 1) return "";
+  const selected = candidates[0]!;
+  const label = Array.from(selected.labels ?? [])
+    .map((item) => String(item.textContent || "").replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join(" ");
+  const fallback =
+    selected.getAttribute("aria-label")
+    || selected.value
+    || "";
+  const value = String(label || fallback).replace(/\s+/g, " ").trim();
+  return options.some(
+    (option) =>
+      String(option || "").replace(/\s+/g, " ").trim().toLowerCase()
+      === value.toLowerCase(),
+  )
+    ? value
+    : "";
+}
+
 function workdaySelectedPromptValue(node: Element | null): string {
   if (!isWorkdayPromptControl(node)) return "";
 
@@ -159,8 +202,12 @@ export async function describeForm() {
       if (node instanceof HTMLInputElement) {
         if (workdayPrompt) {
           value = workdaySelectedValue;
+        } else if (node.type === "checkbox") {
+          value =
+            singleChoiceCheckboxSelectedValue(node, control?.options)
+            || String(node.checked);
         } else {
-          value = ["checkbox", "radio"].includes(node.type)
+          value = node.type === "radio"
             ? String(node.checked)
             : node.value;
         }
