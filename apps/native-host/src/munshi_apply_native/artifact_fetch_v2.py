@@ -23,6 +23,7 @@ PURPOSE_COVER_LETTER_BYTES = "COVER_LETTER_BYTES"
 PURPOSE_AUTOAPPLY_CONFIG = "AUTOAPPLY_CONFIG"
 PURPOSE_AUTOAPPLY_CREDENTIAL = "AUTOAPPLY_CREDENTIAL"
 PURPOSE_PROTECTED_ANSWER = "PROTECTED_APPLICATION_VALUE"
+PURPOSE_LEGAL_ATTESTATION = "LEGAL_ATTESTATION_AUTHORIZATION"
 PURPOSE_ACCOUNT_PREPARE = "ATS_ACCOUNT_PREPARE"
 PURPOSE_ACCOUNT_CREDENTIAL = "ATS_ACCOUNT_CREDENTIAL"
 PURPOSE_MAILBOX_HEALTH = "MAILBOX_HEALTH"
@@ -329,6 +330,44 @@ class HunterExecutionBridgeClient:
         ):
             raise RuntimeError("Hunter protected answer payload binding mismatch")
         return dict(decoded)
+
+    def authorize_legal_attestation(
+        self,
+        plan: dict[str, Any],
+        *,
+        attestation_identity: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Request a value-free mandate proof for one exact legal attestation."""
+        identity = dict(attestation_identity or {})
+        payload = {
+            "tenant_id": self.tenant_id,
+            "user_id": self.user_id,
+            "application_id": str(plan["application_id"]),
+            "plan_id": str(plan["plan_id"]),
+            "plan_digest": str(plan["plan_digest"]),
+            "attestation_identity": identity,
+        }
+        result, _request = self._control_call(
+            plan,
+            purpose=PURPOSE_LEGAL_ATTESTATION,
+            endpoint="/api/application-execution/legal-attestation",
+            payload=payload,
+        )
+        if (
+            result.get("authorized") is not True
+            or result.get("submission_authority") is not False
+            or str(result.get("plan_id") or "") != str(plan["plan_id"])
+            or str(result.get("plan_digest") or "") != str(plan["plan_digest"])
+            or dict(result.get("attestation_identity") or {}) != identity
+        ):
+            raise RuntimeError("Hunter legal attestation authorization binding mismatch")
+        authorization_digest = str(result.get("authorization_digest") or "").lower()
+        if len(authorization_digest) != 64 or any(
+            character not in "0123456789abcdef"
+            for character in authorization_digest
+        ):
+            raise RuntimeError("Hunter legal attestation authorization digest is invalid")
+        return result
 
     def _control_payload(
         self,
