@@ -22,6 +22,7 @@ PURPOSE_ARTIFACT_BYTES = "ARTIFACT_BYTES"
 PURPOSE_COVER_LETTER_BYTES = "COVER_LETTER_BYTES"
 PURPOSE_AUTOAPPLY_CONFIG = "AUTOAPPLY_CONFIG"
 PURPOSE_AUTOAPPLY_CREDENTIAL = "AUTOAPPLY_CREDENTIAL"
+PURPOSE_PROTECTED_ANSWER = "PROTECTED_APPLICATION_VALUE"
 PURPOSE_ACCOUNT_PREPARE = "ATS_ACCOUNT_PREPARE"
 PURPOSE_ACCOUNT_CREDENTIAL = "ATS_ACCOUNT_CREDENTIAL"
 PURPOSE_MAILBOX_HEALTH = "MAILBOX_HEALTH"
@@ -256,6 +257,78 @@ class HunterExecutionBridgeClient:
         if not value or len(value) > 16384:
             raise RuntimeError("Hunter AutoApply credential is unavailable")
         return value
+
+    def protected_application_value(
+        self,
+        plan: dict[str, Any],
+        *,
+        question_key: str,
+        secure_resolver_ref: str,
+    ) -> dict[str, Any]:
+        """Resolve one protected/self-ID value without exposing it to generic plan state."""
+        purpose = PURPOSE_PROTECTED_ANSWER
+        key_name = str(question_key or "").strip()
+        reference = str(secure_resolver_ref or "").strip()
+        if not key_name or not reference.startswith("hunter-secure://candidate-truth/"):
+            raise ValueError("Protected application answer binding is invalid")
+
+        payload = {
+            "tenant_id": self.tenant_id,
+            "user_id": self.user_id,
+            "application_id": str(plan["application_id"]),
+            "plan_id": str(plan["plan_id"]),
+            "plan_digest": str(plan["plan_digest"]),
+            "question_key": key_name,
+            "secure_resolver_ref": reference,
+        }
+        request = self._control_payload(plan, purpose, payload)
+        body = self._canonical(request)
+        response = self.client.post(
+            f"{self.base_url}/api/application-execution/protected-answer",
+            content=body,
+            headers=self._headers(request, body),
+        )
+        envelope = self._verify(response=response, payload=request, purpose=purpose)
+        if (
+            response.headers.get("X-Munshi-Protected-Answer-Encryption") != "aes-gcm-v1"
+            or response.headers.get("X-Munshi-Question-Key") != key_name
+            or response.headers.get("X-Munshi-Sensitivity-Class") not in {"PROTECTED", "SELF_ID"}
+            or response.headers.get("X-Munshi-Submission-Authority") != "false"
+        ):
+            raise RuntimeError("Hunter protected answer response binding mismatch")
+        if len(envelope) < 29 or len(envelope) > 16448:
+            raise RuntimeError("Hunter protected answer envelope is invalid")
+
+        nonce, ciphertext = envelope[:12], envelope[12:]
+        derived = hmac.new(
+            self.secret,
+            (
+                f"protected-answer:{request['request_id']}:"
+                f"{request['plan_digest']}:{key_name}"
+            ).encode(),
+            hashlib.sha256,
+        ).digest()
+        aad = (
+            f"{request['request_id']}.{request['plan_digest']}."
+            f"{key_name}.protected_application_value"
+        ).encode()
+        try:
+            raw = AESGCM(derived).decrypt(nonce, ciphertext, aad)
+            decoded = json.loads(raw)
+        except Exception as error:
+            raise RuntimeError(
+                "Hunter protected answer envelope could not be decrypted"
+            ) from error
+
+        if (
+            not isinstance(decoded, dict)
+            or decoded.get("question_key") != key_name
+            or decoded.get("sensitivity") not in {"PROTECTED", "SELF_ID"}
+            or decoded.get("provenance") != "candidate_truth_protected_domain"
+            or "value" not in decoded
+        ):
+            raise RuntimeError("Hunter protected answer payload binding mismatch")
+        return dict(decoded)
 
     def _control_payload(
         self,
