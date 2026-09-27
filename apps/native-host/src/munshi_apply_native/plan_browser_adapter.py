@@ -507,14 +507,15 @@ class PlanBrowserAdapter:
                 except Exception:
                     return False
 
-        deadline = time.monotonic() + (timeout_ms / 1000.0)
-        while time.monotonic() <= deadline:
+        attempts = max(1, (timeout_ms // poll_ms) + 1)
+        for attempt in range(attempts):
             matches = candidates()
             if len(matches) == 1:
                 return activate(matches[0])
             if len(matches) > 1:
                 return False
-            self.page.wait_for_timeout(poll_ms)
+            if attempt + 1 < attempts:
+                self.page.wait_for_timeout(poll_ms)
         return False
 
     def _workday_public_prompt_fallback(self, element: Any, answer: str) -> bool:
