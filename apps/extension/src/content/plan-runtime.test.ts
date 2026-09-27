@@ -102,4 +102,36 @@ describe("plan runtime provider-backed evidence", () => {
     expect(bySemantic.get("EMPLOYEE_ID")?.sensitivity_class).toBe("POST_OFFER");
     expect(bySemantic.get("GENDER")?.display_value).toBe("[protected value]");
   });
+
+  it("hashes the selected option for a protected check-one checkbox group", async () => {
+    document.body.innerHTML = `
+      <main>
+        <h2>Self Identify</h2>
+        <fieldset>
+          <legend>Voluntary Self-Identification of Disability</legend>
+          <p>Please check one of the boxes below:</p>
+          <label><input type="checkbox" name="disability-choice" value="yes" />
+            Yes, I have a disability, or have had one in the past
+          </label>
+          <label><input type="checkbox" name="disability-choice" value="no" checked />
+            No, I do not have a disability and have not had one in the past
+          </label>
+          <label><input type="checkbox" name="disability-choice" value="decline" />
+            I do not want to answer
+          </label>
+        </fieldset>
+      </main>
+    `;
+
+    const described = await describeForm();
+    const protectedField = described.fields.find(
+      (field) => field.sensitivity_class === "SELF_ID",
+    );
+
+    expect(protectedField).toBeDefined();
+    expect(protectedField?.display_value).toBe("[protected value]");
+    expect(protectedField?.satisfied).toBe(true);
+    expect(protectedField?.value_digest).toMatch(/^[0-9a-f]{64}$/);
+  });
+
 });
