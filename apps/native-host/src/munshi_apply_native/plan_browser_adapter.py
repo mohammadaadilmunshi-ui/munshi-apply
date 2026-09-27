@@ -270,7 +270,8 @@ class PlanBrowserAdapter:
     def _workday_option_text(value: Any) -> str:
         return " ".join(str(value or "").split()).casefold()
 
-    def _workday_source_selected_value(self, element: Any, answer: str) -> str:
+    def _workday_prompt_selected_value(self, element: Any, answer: str) -> str:
+        """Return an exact provider-backed selected prompt value, never typed query text."""
         wanted = self._workday_option_text(answer)
         if not wanted:
             return ""
@@ -279,28 +280,54 @@ class PlanBrowserAdapter:
                 r"""(element, answer) => {
                   const compact = value => String(value || '').replace(/\s+/g, ' ').trim();
                   const wanted = compact(answer).toLowerCase();
-                  const promptValue = item => {
-                    const prompt = item.matches?.('[data-automation-id="promptOption"]')
+                  const direct = compact(
+                    element.getAttribute('data-value')
+                    || element.getAttribute('aria-valuetext')
+                    || ''
+                  );
+                  if (direct && direct.toLowerCase() === wanted) return direct;
+
+                  const optionValue = item => {
+                    const option = item.matches?.(
+                      '[data-automation-id="promptOption"],'
+                      + '[role="option"],[role="menuitem"]'
+                    )
                       ? item
-                      : item.querySelector?.('[data-automation-id="promptOption"]');
-                    const candidate = prompt || item;
+                      : item.querySelector?.(
+                          '[data-automation-id="promptOption"],'
+                          + '[role="option"],[role="menuitem"]'
+                        );
+                    const candidate = option || item;
                     return compact(
                       candidate.getAttribute?.('data-automation-label')
                       || candidate.getAttribute?.('aria-label')
                       || candidate.getAttribute?.('title')
+                      || candidate.getAttribute?.('data-value')
+                      || candidate.getAttribute?.('data-option-value')
                       || candidate.textContent
                       || ''
                     );
                   };
+
                   let scope = element.parentElement;
-                  for (let depth = 0; scope && depth < 9; depth += 1, scope = scope.parentElement) {
+                  for (
+                    let depth = 0;
+                    scope && depth < 10;
+                    depth += 1, scope = scope.parentElement
+                  ) {
                     const selected = Array.from(
-                      scope.querySelectorAll('[data-automation-id^="selectedItem"]')
+                      scope.querySelectorAll(
+                        '[data-automation-id^="selectedItem"],'
+                        + '[role="option"][aria-selected="true"],'
+                        + '[data-automation-id="promptOption"][aria-selected="true"]'
+                      )
                     );
                     if (!selected.length) continue;
-                    const matches = [...new Set(selected.map(promptValue).filter(Boolean))]
-                      .filter(value => value.toLowerCase() === wanted);
-                    return matches.length === 1 ? matches[0] : '';
+                    const matches = [...new Set(
+                      selected.map(optionValue).filter(Boolean)
+                    )].filter(value => value.toLowerCase() === wanted);
+                    if (matches.length === 1) return matches[0];
+                    if (matches.length > 1) return '';
                   }
                   return '';
                 }""",
@@ -310,25 +337,21 @@ class PlanBrowserAdapter:
             return ""
         return str(result or "").strip()
 
+    def _workday_source_selected_value(self, element: Any, answer: str) -> str:
+        """Compatibility wrapper for older production tests."""
+        return self._workday_prompt_selected_value(element, answer)
+
+    def _workday_prompt_committed(self, element: Any, answer: str) -> bool:
+        selected = self._workday_prompt_selected_value(element, answer)
+        return self._workday_option_text(selected) == self._workday_option_text(answer)
+
     def _workday_source_committed(self, element: Any, answer: str) -> bool:
-        selected = self._workday_source_selected_value(element, answer)
-        if self._workday_option_text(selected) == self._workday_option_text(answer):
-            return True
-        try:
-            state = element.evaluate(
-                r"""(element, answer) => {
-                  const compact = value => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
-                  const wanted = compact(answer);
-                  const dataValue = compact(element.getAttribute('data-value'));
-                  const ariaValue = compact(element.getAttribute('aria-valuetext'));
-                  const invalid = element.getAttribute('aria-invalid') === 'true';
-                  return !invalid && wanted && (dataValue === wanted || ariaValue === wanted);
-                }""",
-                str(answer),
-            )
-            return state is True
-        except Exception:
-            return False
+        """Compatibility wrapper for older production tests."""
+        return self._workday_prompt_committed(element, answer)
+
+    @staticmethod
+    def _workday_locator_id(value: str) -> str:
+        return str(value or "").replace("\\", "\\\\").replace('"', '\\"')
 
     def _workday_click_exact_option(
         self,
@@ -337,21 +360,34 @@ class PlanBrowserAdapter:
         trigger: Any | None = None,
         timeout_ms: int = 4500,
         poll_ms: int = 75,
-        press_enter: bool = True,
+        press_enter: bool = False,
     ) -> bool:
-        """Activate exactly one visible Workday option without fuzzy guessing."""
+        """Activate exactly one visible Workday option from the provider popup.
+
+        Keyboard guessing is intentionally excluded. The press_enter argument is
+        retained only for call-site compatibility and is ignored.
+        """
+        del press_enter
         wanted = self._workday_option_text(answer)
         if not wanted:
             return False
         timeout_ms = max(250, min(int(timeout_ms), 7000))
         poll_ms = max(25, min(int(poll_ms), 250))
 
-        if trigger is not None and press_enter:
+        controlled_ids: list[str] = []
+        if trigger is not None:
             try:
-                trigger.press("Enter")
-                self.page.wait_for_timeout(350)
+                raw_ids = trigger.evaluate(
+                    r"""element => [
+                      element.getAttribute('aria-controls') || '',
+                      element.getAttribute('aria-owns') || ''
+                    ].join(' ')"""
+                )
+                controlled_ids = [
+                    item for item in str(raw_ids or "").split() if item
+                ]
             except Exception:
-                pass
+                controlled_ids = []
 
         selector = (
             "[data-automation-id='promptOption'],"
@@ -361,7 +397,7 @@ class PlanBrowserAdapter:
             "[data-value],[data-option-value]"
         )
 
-        def metadata(candidate: Any) -> tuple[bool, list[Any], str]:
+        def candidate_metadata(candidate: Any) -> tuple[bool, list[Any], str]:
             try:
                 raw = candidate.evaluate(
                     r"""element => ({
@@ -382,27 +418,13 @@ class PlanBrowserAdapter:
                 )
             except Exception:
                 return False, [], ""
-
             if isinstance(raw, dict):
-                selected = bool(raw.get("selectedContainer"))
-                values = list(raw.get("values") or [])
-                token_id = str(raw.get("id") or "")
-                return selected, values, token_id
-            if isinstance(raw, (list, tuple)):
-                return False, list(raw), ""
+                return (
+                    bool(raw.get("selectedContainer")),
+                    list(raw.get("values") or []),
+                    str(raw.get("id") or ""),
+                )
             return False, [raw], ""
-
-        def is_exact(candidate: Any) -> tuple[bool, str]:
-            selected, values, token_id = metadata(candidate)
-            if selected:
-                return False, token_id
-            for raw in values:
-                if self._workday_option_text(raw) == wanted:
-                    return True, token_id
-                for line in str(raw or "").splitlines():
-                    if self._workday_option_text(line) == wanted:
-                        return True, token_id
-            return False, token_id
 
         def collect(locator: Any, limit: int) -> list[Any]:
             matches: list[Any] = []
@@ -416,7 +438,17 @@ class PlanBrowserAdapter:
                 try:
                     if not candidate.is_visible():
                         continue
-                    exact, token_id = is_exact(candidate)
+                    selected_container, values, token_id = candidate_metadata(candidate)
+                    if selected_container:
+                        continue
+                    exact = any(
+                        self._workday_option_text(raw) == wanted
+                        or any(
+                            self._workday_option_text(line) == wanted
+                            for line in str(raw or "").splitlines()
+                        )
+                        for raw in values
+                    )
                     if not exact:
                         continue
                     token = token_id or f"candidate:{index}"
@@ -428,14 +460,20 @@ class PlanBrowserAdapter:
                     continue
             return matches
 
-        def selector_matches() -> list[Any]:
+        def candidates() -> list[Any]:
+            scoped: list[Any] = []
+            for popup_id in controlled_ids:
+                escaped = self._workday_locator_id(popup_id)
+                try:
+                    popup = self.page.locator(f'[id="{escaped}"]')
+                    if popup.count() != 1 or not popup.first.is_visible():
+                        continue
+                    scoped.extend(collect(popup.first.locator(selector), 250))
+                except Exception:
+                    continue
+            if controlled_ids:
+                return scoped
             return collect(self.page.locator(selector), 300)
-
-        def exact_text_matches() -> list[Any]:
-            try:
-                return collect(self.page.get_by_text(str(answer), exact=True), 50)
-            except Exception:
-                return []
 
         def activate(candidate: Any) -> bool:
             target = candidate
@@ -447,7 +485,6 @@ class PlanBrowserAdapter:
                     target = nearest
             except Exception:
                 target = candidate
-
             try:
                 radio = target.locator(
                     "input[type='radio'],[data-automation-id='radioBtn']"
@@ -456,57 +493,40 @@ class PlanBrowserAdapter:
                     radio.first.click()
                 else:
                     target.click()
+                return True
             except Exception:
                 try:
                     candidate.click()
+                    return True
                 except Exception:
                     return False
-            return True
 
         deadline = time.monotonic() + (timeout_ms / 1000.0)
-        arrow_sent = False
-        pass_number = 0
         while time.monotonic() <= deadline:
-            matches = selector_matches()
+            matches = candidates()
             if len(matches) == 1:
                 return activate(matches[0])
             if len(matches) > 1:
                 return False
-
-            matches = exact_text_matches()
-            if len(matches) == 1:
-                return activate(matches[0])
-            if len(matches) > 1:
-                return False
-
-            if trigger is not None and not arrow_sent and pass_number >= 1:
-                try:
-                    trigger.press("ArrowDown")
-                except Exception:
-                    pass
-                arrow_sent = True
-                self.page.wait_for_timeout(150)
-            else:
-                self.page.wait_for_timeout(poll_ms)
-            pass_number += 1
+            self.page.wait_for_timeout(poll_ms)
         return False
 
     def _workday_public_prompt_fallback(self, element: Any, answer: str) -> bool:
+        """One deterministic slow retype; no blind key or nudge behavior."""
         try:
             element.click()
             element.press("Control+A")
             element.press("Backspace")
-            for char in str(answer):
-                element.type(char, delay=90)
-            element.press("Enter")
-            self.page.wait_for_timeout(750)
+            element.type(str(answer), delay=90)
+            self.page.wait_for_timeout(250)
         except Exception:
             return False
-        if self._workday_click_exact_option(
-            str(answer), trigger=element, press_enter=False, timeout_ms=3500
+        if not self._workday_click_exact_option(
+            str(answer), trigger=element, timeout_ms=3500
         ):
-            return self._workday_source_committed(element, answer)
-        return False
+            return False
+        self.page.wait_for_timeout(250)
+        return self._workday_prompt_committed(element, answer)
 
     def _wait_for_control_committed(
         self,
