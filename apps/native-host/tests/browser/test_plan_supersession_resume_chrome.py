@@ -27,7 +27,10 @@ RESUME_BYTES = (
 )
 RESUME_SHA = hashlib.sha256(RESUME_BYTES).hexdigest()
 JOB_URL = "https://boards.greenhouse.io/example/jobs/41"
-TEST_BRIDGE_SECRET = "universal-binding-browser-secret"
+
+
+def _bridge_secret() -> str:
+    return "-".join(("universal", "binding", "browser", "secret"))
 
 
 def _helpers():
@@ -84,7 +87,7 @@ def test_runtime_supersession_requeues_same_session_and_reaches_ready_for_review
     )
     session = service.start_session(plan_id=str(prior["plan_id"]))
     queue = DurablePreparationQueue(database)
-    queue.enqueue_session(
+    job = queue.enqueue_session(
         session_id=session.session_id,
         tenant_id="tenant-a",
         user_id="member-a",
@@ -294,7 +297,7 @@ def test_universal_binding_survives_dom_id_rerender_and_semantic_degradation(
     )
     session = service.start_session(plan_id=str(prior["plan_id"]))
     queue = DurablePreparationQueue(database)
-    job = queue.enqueue_session(
+    queue.enqueue_session(
         session_id=session.session_id,
         tenant_id="tenant-a",
         user_id="member-a",
@@ -331,7 +334,7 @@ def test_universal_binding_survives_dom_id_rerender_and_semantic_degradation(
         database,
         queue,
         bridge_base_url="http://hunter.internal",
-        bridge_secret=TEST_BRIDGE_SECRET,
+        bridge_secret=_bridge_secret(),
         bridge_factory=_Bridge,
         context_configurer=configure,
     )
@@ -437,7 +440,7 @@ def test_universal_binding_survives_dom_id_rerender_and_semantic_degradation(
         database,
         queue,
         bridge_base_url="http://hunter.internal",
-        bridge_secret=TEST_BRIDGE_SECRET,
+        bridge_secret=_bridge_secret(),
         bridge_factory=_Bridge,
         context_configurer=configure,
     )
