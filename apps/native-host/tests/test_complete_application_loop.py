@@ -658,3 +658,66 @@ def test_repeated_identical_needs_input_uses_new_checkpoint_replay_identity(loop
     first_checkpoint = json.loads(rows[0]["checkpoint_json"])
     second_checkpoint = json.loads(rows[1]["checkpoint_json"])
     assert first_checkpoint["checkpoint_id"] != second_checkpoint["checkpoint_id"]
+
+
+class WorkdayReviewMismatchBrowser(FixtureBrowser):
+    """A complete-looking Workday form whose final provider Review is wrong."""
+
+    def inspect_job(self, *, plan):
+        return {
+            **super().inspect_job(plan=plan),
+            "provider_recipe": "WORKDAY",
+        }
+
+    def prepare_form(self, *, plan, checkpoint, resolved_values):
+        result = super().prepare_form(
+            plan=plan,
+            checkpoint=checkpoint,
+            resolved_values=resolved_values,
+        )
+        if not result["unresolved"]:
+            result["review_reconciliation"] = {
+                "status": "MISMATCH",
+                "snapshot_digest": "e" * 64,
+                "mismatches": [
+                    {
+                        "code": "PHONE_EXTENSION_WITHOUT_FACT",
+                        "safe_detail": "Final Review contains a phantom extension.",
+                    }
+                ],
+            }
+        return result
+
+
+def test_workday_review_mismatch_never_reaches_ready_for_review(loop):
+    service, _db, _browser = loop
+    browser = WorkdayReviewMismatchBrowser()
+    session = service.start_session(plan_id="application-plan-1")
+
+    pending = service.prepare_session(session_id=session.session_id, adapter=browser)
+    assert pending.state == "NEEDS_INPUT"
+    tasks = service.resolutions.list(application_id=session.application_id)
+    assert len(tasks) == 1
+    service.resolve_task(
+        task_id=tasks[0].task_id,
+        value="https://example.test/portfolio",
+    )
+
+    prepared = service.prepare_session(
+        session_id=session.session_id,
+        adapter=browser,
+    )
+    assert prepared.state == "FAILED_SAFELY"
+
+    with service.database.connect() as connection:
+        event = connection.execute(
+            """SELECT evidence_json
+                 FROM complete_application_execution_events
+                WHERE session_id=? AND event_type='FAILED_SAFELY'
+                ORDER BY occurred_at DESC,event_id DESC LIMIT 1""",
+            (session.session_id,),
+        ).fetchone()
+    assert event is not None
+    evidence = json.loads(str(event["evidence_json"]))
+    assert evidence["reason"] == "provider_review_reconciliation_failed"
+    assert evidence["mismatch_codes"] == ["PHONE_EXTENSION_WITHOUT_FACT"]
