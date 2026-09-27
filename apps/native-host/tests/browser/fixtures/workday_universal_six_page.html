@@ -1,0 +1,228 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Workday Universal Fixture</title></head>
+<body>
+<main id="application-root">
+  <h1>People Analytics Specialist</h1>
+  <form id="application-form" action="/fixture/applications" method="post">
+    <section class="page" data-page="0">
+      <h2>My Information</h2>
+      <div class="prompt-wrap">
+        <label for="referral">How Did You Hear About Us?</label>
+        <input id="referral" name="referral" role="combobox" aria-controls="referral-options" required>
+        <div id="referral-options" role="listbox">
+          <div id="referral-indeed" role="option" data-automation-id="promptOption">Indeed</div>
+        </div>
+        <div class="selected" data-automation-id="selectedItem-referral"></div>
+      </div>
+      <fieldset><legend>Have you previously worked for this employer or a subsidiary?</legend>
+        <label><input type="radio" name="previous_employee" value="Yes" required> Yes</label>
+        <label><input type="radio" name="previous_employee" value="No" required> No</label>
+      </fieldset>
+      <label>Country <select name="country" required><option value="">Select One</option><option>United States of America</option></select></label>
+      <h3>Legal Name</h3>
+      <label>Prefix <select name="honorific" required><option value="">Select One</option><option>Mr.</option><option>Ms.</option></select></label>
+      <label>First Name <input name="first_name" required></label>
+      <label>Middle Name <input name="middle_name"></label>
+      <label>Last Name <input name="last_name" required></label>
+      <h3>Address</h3>
+      <label>Address Line 1 <input name="street_address" required></label>
+      <label>Address Line 2 <input name="address_line_2"></label>
+      <label>City <input name="city" required></label>
+      <label>State <select name="state" required><option value="">Select One</option><option>New York</option></select></label>
+      <label>Postal Code <input name="postal_code" required></label>
+      <h3>Email Address</h3>
+      <label>Email <input name="email" type="email" value="candidate@example.test" readonly required></label>
+      <h3>Phone</h3>
+      <label>Phone Device Type <select name="phone_device_type" required><option value="">Select One</option><option>Mobile</option></select></label>
+      <div class="prompt-wrap">
+        <label for="phone-country">Country Phone Code</label>
+        <input id="phone-country" name="phone_country_code" role="combobox" aria-controls="phone-country-options" required>
+        <div id="phone-country-options" role="listbox">
+          <div id="phone-us" role="option" data-automation-id="promptOption">United States of America (+1)</div>
+        </div>
+        <div class="selected" data-automation-id="selectedItem-phone"></div>
+      </div>
+      <label>Phone Number <input name="phone" type="tel" required></label>
+      <label>Phone Extension <input name="phone_extension"></label>
+      <button type="button" class="next">Save and Continue</button>
+    </section>
+
+    <section class="page" data-page="1" hidden>
+      <h2>My Experience</h2>
+      <section><h3>Work Experience 1</h3>
+        <label>Job Title <input name="employment_0_title" required></label>
+        <label>Company <input name="employment_0_employer" required></label>
+        <label>Location <input name="employment_0_location"></label>
+        <label>From <input name="employment_0_start" required></label>
+        <label>To <input name="employment_0_end" required></label>
+        <label>Role Description <textarea name="employment_0_description" required></textarea></label>
+      </section>
+      <section><h3>Work Experience 2</h3>
+        <label>Job Title <input name="employment_1_title" required></label>
+        <label>Company <input name="employment_1_employer" required></label>
+        <label>Location <input name="employment_1_location"></label>
+        <label>From <input name="employment_1_start" required></label>
+        <label>To <input name="employment_1_end" required></label>
+        <label>Role Description <textarea name="employment_1_description" required></textarea></label>
+      </section>
+      <section><h3>Education 1</h3>
+        <label>School or University <input name="education_0_school" required></label>
+        <label>Degree <select name="education_0_degree" required><option value="">Select One</option><option>Bachelors Degree</option></select></label>
+        <label>Field of Study <input name="education_0_field"></label>
+      </section>
+      <section><h3>Education 2</h3>
+        <label>School or University <input name="education_1_school" required></label>
+        <label>Degree <select name="education_1_degree" required><option value="">Select One</option><option>Masters Degree</option></select></label>
+        <label>Field of Study <input name="education_1_field"></label>
+      </section>
+      <h3>Resume</h3>
+      <label>Upload a file <input name="resume" type="file" required></label>
+      <h3>Websites</h3>
+      <label>URL <input name="website_0"></label>
+      <label>URL <input name="website_1"></label>
+      <button type="button" class="next">Save and Continue</button>
+    </section>
+
+    <section class="page" data-page="2" hidden>
+      <h2>Application Questions</h2>
+      <label>Are you eligible to work in the location in which this position is located?
+        <select name="work_location_eligibility" required><option value="">Select One</option><option>Yes</option><option>No</option></select>
+      </label>
+      <label>Are you at least 18 years of age?
+        <select name="age_18_plus" required><option value="">Select One</option><option>Yes</option><option>No</option></select>
+      </label>
+      <label>Do you now or in the future require visa sponsorship?
+        <select name="sponsorship_future" required><option value="">Select One</option><option>Yes</option><option>No</option></select>
+      </label>
+      <label>Please list your salary requirements.
+        <textarea name="salary_expectation" required></textarea>
+      </label>
+      <button type="button" class="next">Save and Continue</button>
+    </section>
+
+    <section class="page" data-page="3" hidden>
+      <h2>Voluntary Disclosures</h2>
+      <label>What is your gender? <select name="gender" required><option value="">Select One</option><option>Male</option><option>Female</option><option>I do not want to answer</option></select></label>
+      <label>What is your race/ethnicity? <select name="race_ethnicity" required><option value="">Select One</option><option>Asian (United States of America)</option><option>I do not want to answer</option></select></label>
+      <label>Do you identify as Hispanic or Latino? <select name="hispanic_latino" required><option value="">Select One</option><option>Yes</option><option>No</option><option>I do not want to answer</option></select></label>
+      <label>What is your veterans status? <select name="veteran_status" required><option value="">Select One</option><option>I AM NOT A VETERAN</option><option>I do not want to answer</option></select></label>
+      <section id="terms-surface">
+        <h3>Terms and Conditions</h3>
+        <p>Please review the provider terms for this application.</p>
+        <a href="/fixture/terms-v1">Terms and Conditions</a>
+        <label><input name="legal_attestation" type="checkbox" required> I accept the Terms and Conditions.</label>
+      </section>
+      <button type="button" class="next">Save and Continue</button>
+    </section>
+
+    <section class="page" data-page="4" hidden>
+      <h2>Self Identify</h2>
+      <label>Language <select name="language" required><option value="">Select One</option><option>English</option></select></label>
+      <h3>Voluntary Self-Identification of Disability</h3>
+      <label>Name <input name="self_id_name" required></label>
+      <label>Employee ID (if applicable) <input name="employee_id"></label>
+      <label>Date <input name="self_id_date" type="date" required></label>
+      <fieldset>
+        <legend>Please check one of the boxes below:</legend>
+        <label><input type="checkbox" name="disability_status" value="Yes, I have a disability, or have had one in the past" required> Yes, I have a disability, or have had one in the past</label>
+        <label><input type="checkbox" name="disability_status" value="No, I do not have a disability and have not had one in the past" required> No, I do not have a disability and have not had one in the past</label>
+        <label><input type="checkbox" name="disability_status" value="I do not want to answer" required> I do not want to answer</label>
+      </fieldset>
+      <button type="button" class="next">Save and Continue</button>
+    </section>
+
+    <section class="page" data-page="5" hidden>
+      <h2>Review</h2>
+      <div id="review-text"></div>
+      <button id="final-submit" type="submit">Submit application</button>
+    </section>
+  </form>
+</main>
+<script>
+(() => {
+  const pages = Array.from(document.querySelectorAll('.page'));
+  const compact = v => String(v || '').replace(/\s+/g, ' ').trim();
+  window.fixtureShowPage = index => {
+    pages.forEach((page, i) => { page.hidden = i !== index; });
+    document.body.dataset.page = String(index);
+    if (index === 5) renderReview();
+  };
+  const setPrompt = (inputId, optionId, selectedSelector) => {
+    const input = document.getElementById(inputId);
+    const option = document.getElementById(optionId);
+    option.addEventListener('click', () => {
+      input.value = compact(option.textContent);
+      input.setAttribute('data-value', input.value);
+      input.setAttribute('aria-expanded', 'false');
+      option.setAttribute('aria-selected', 'true');
+      const selected = document.querySelector(selectedSelector);
+      selected.innerHTML = '<span data-automation-id="promptOption"></span>';
+      selected.querySelector('span').textContent = input.value;
+      input.dispatchEvent(new Event('change', {bubbles:true}));
+    });
+    input.addEventListener('focus', () => input.setAttribute('aria-expanded','true'));
+  };
+  setPrompt('referral','referral-indeed','[data-automation-id="selectedItem-referral"]');
+  setPrompt('phone-country','phone-us','[data-automation-id="selectedItem-phone"]');
+
+  document.querySelectorAll('button.next').forEach((button, index) => {
+    button.addEventListener('click', () => window.fixtureShowPage(index + 1));
+  });
+
+  const value = name => {
+    const element = document.querySelector('[name="' + name + '"]');
+    if (!element) return '';
+    if (element.type === 'radio') {
+      return document.querySelector('[name="' + name + '"]:checked')?.value || '';
+    }
+    return element.value || '';
+  };
+  const checkedText = name => {
+    const item = document.querySelector('[name="' + name + '"]:checked');
+    return item ? item.value : '';
+  };
+  function renderReview() {
+    const ext = value('phone_extension');
+    const phone = '+1 ' + value('phone') + (ext ? ' x' + ext : '') + ' (Mobile)';
+    document.getElementById('review-text').innerText = [
+      'My Information',
+      'Legal Name',
+      [value('honorific'), value('first_name'), value('middle_name'), value('last_name')].filter(Boolean).join(' '),
+      'Address',
+      value('street_address'),
+      value('city') + ', NY ' + value('postal_code'),
+      'Phone',
+      phone,
+      'My Experience',
+      'Work Experience 1',
+      'Job Title',
+      value('employment_0_title'),
+      'Company',
+      value('employment_0_employer'),
+      'Work Experience 2',
+      'Job Title',
+      value('employment_1_title'),
+      'Company',
+      value('employment_1_employer'),
+      'Education 1',
+      value('education_0_school'),
+      'Education 2',
+      value('education_1_school'),
+      'Application Questions',
+      value('salary_expectation'),
+      'Voluntary Disclosures',
+      'Self Identify',
+      checkedText('disability_status'),
+      'Review'
+    ].join('\n');
+  }
+  document.getElementById('application-form').addEventListener('submit', event => {
+    event.preventDefault();
+    document.body.dataset.submitted = 'true';
+  });
+  window.fixtureShowPage(0);
+})();
+</script>
+</body>
+</html>
