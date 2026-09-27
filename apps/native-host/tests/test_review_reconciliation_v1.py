@@ -191,3 +191,92 @@ def test_review_without_final_boundary_is_incomplete():
     )
     assert result["status"] == "INCOMPLETE"
     assert result["mismatches"][0]["code"] == "MISSING_REQUIRED"
+
+
+def test_review_blocks_wrong_phone_digits():
+    review = """
+    Review
+    Legal Name
+    Ms. Ada Mary Lovelace
+    Address
+    12 Example Street
+    Exampletown, NY 12345
+    Phone
+    +1 (212) 555-9999 (Mobile)
+    Work Experience 1
+    People Analytics Intern
+    Work Experience 2
+    HR Operations Intern
+    Education 1
+    Example University
+    Submit
+    """
+    result = reconcile_provider_review(
+        review_text=review,
+        prepared_fields=_prepared_fields(),
+        expected_resume_sha256=APPROVED_RESUME,
+        observed_resume_sha256=APPROVED_RESUME,
+        final_submission_boundary=True,
+    )
+    assert result["status"] == "MISMATCH"
+    assert "PHONE_MISMATCH" in {item["code"] for item in result["mismatches"]}
+
+
+def test_review_blocks_address_drift():
+    review = """
+    Review
+    Legal Name
+    Ms. Ada Mary Lovelace
+    Address
+    99 Different Avenue
+    Othercity, NY 99999
+    Phone
+    +1 (212) 555-0199 (Mobile)
+    Work Experience 1
+    People Analytics Intern
+    Work Experience 2
+    HR Operations Intern
+    Education 1
+    Example University
+    Submit
+    """
+    result = reconcile_provider_review(
+        review_text=review,
+        prepared_fields=_prepared_fields(),
+        expected_resume_sha256=APPROVED_RESUME,
+        observed_resume_sha256=APPROVED_RESUME,
+        final_submission_boundary=True,
+    )
+    assert result["status"] == "MISMATCH"
+    assert "ADDRESS_MISMATCH" in {item["code"] for item in result["mismatches"]}
+
+
+def test_review_blocks_wrong_resume_artifact_sha():
+    review = """
+    Review
+    Legal Name
+    Ms. Ada Mary Lovelace
+    Address
+    12 Example Street
+    Exampletown, NY 12345
+    Phone
+    +1 (212) 555-0199 (Mobile)
+    Work Experience 1
+    People Analytics Intern
+    Work Experience 2
+    HR Operations Intern
+    Education 1
+    Example University
+    Submit
+    """
+    result = reconcile_provider_review(
+        review_text=review,
+        prepared_fields=_prepared_fields(),
+        expected_resume_sha256=APPROVED_RESUME,
+        observed_resume_sha256="c" * 64,
+        final_submission_boundary=True,
+    )
+    assert result["status"] == "MISMATCH"
+    assert "RESUME_SHA_MISMATCH" in {
+        item["code"] for item in result["mismatches"]
+    }
