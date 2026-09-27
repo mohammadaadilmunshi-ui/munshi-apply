@@ -780,6 +780,11 @@ class CompleteApplicationLoopService:
         unresolved = list(prepared.get("unresolved") or [])
         validation_errors = [str(value) for value in prepared.get("validation_errors") or []]
         review_fields = safe_evidence(list(prepared.get("review_fields") or []))
+        review_reconciliation = (
+            safe_evidence(dict(prepared.get("review_reconciliation") or {}))
+            if isinstance(prepared.get("review_reconciliation"), dict)
+            else None
+        )
         event_evidence = {
             "required_fields": int(prepared.get("required_fields") or 0),
             "completed_required_fields": int(prepared.get("completed_required_fields") or 0),
@@ -789,6 +794,7 @@ class CompleteApplicationLoopService:
             "resume_sha256": resume["artifact_sha256"],
             "form_digest": form_digest,
             "review_fields": review_fields,
+            "review_reconciliation": review_reconciliation,
         }
         if cover_letter is not None:
             event_evidence["cover_letter_field_present"] = (
@@ -859,6 +865,44 @@ class CompleteApplicationLoopService:
                 },
                 checkpoint=checkpoint,
             )
+        elif provider_recipe == "WORKDAY" and (
+            not isinstance(review_reconciliation, dict)
+            or str(review_reconciliation.get("status") or "") != "MATCH"
+        ):
+            session = self._transition(
+                session,
+                "FAILED_SAFELY",
+                browser_form_digest=form_digest,
+                checkpoint_id=checkpoint["checkpoint_id"],
+            )
+            mismatch_codes = [
+                str(item.get("code") or "")
+                for item in (review_reconciliation or {}).get("mismatches", [])
+                if isinstance(item, dict) and str(item.get("code") or "")
+            ]
+            self._record_event(
+                session=session,
+                event_type="FAILED_SAFELY",
+                replay_identity=(
+                    f"{session_id}:workday-review-reconciliation:"
+                    f"{checkpoint['checkpoint_id']}:{form_digest}"
+                ),
+                evidence={
+                    "reason": "provider_review_reconciliation_failed",
+                    "review_status": (
+                        str(review_reconciliation.get("status") or "")
+                        if isinstance(review_reconciliation, dict)
+                        else "MISSING"
+                    ),
+                    "mismatch_codes": mismatch_codes,
+                    "snapshot_digest": (
+                        str(review_reconciliation.get("snapshot_digest") or "")
+                        if isinstance(review_reconciliation, dict)
+                        else ""
+                    ),
+                },
+                checkpoint=checkpoint,
+            )
         else:
             session = self._transition(
                 session,
@@ -873,7 +917,16 @@ class CompleteApplicationLoopService:
                 session=session,
                 event_type="READY_FOR_REVIEW",
                 replay_identity=f"{session_id}:ready-review:{checkpoint['checkpoint_id']}:{form_digest}",
-                evidence={"form_digest": form_digest, "resume_sha256": resume["artifact_sha256"]},
+                evidence={
+                    "form_digest": form_digest,
+                    "resume_sha256": resume["artifact_sha256"],
+                    **(
+                        {"review_snapshot_digest": review_reconciliation["snapshot_digest"]}
+                        if isinstance(review_reconciliation, dict)
+                        and review_reconciliation.get("snapshot_digest")
+                        else {}
+                    ),
+                },
                 checkpoint=checkpoint,
             )
         return SessionResult(
