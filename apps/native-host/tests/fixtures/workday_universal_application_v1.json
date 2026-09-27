@@ -1,0 +1,267 @@
+{
+  "version": "workday-universal-application-fixture-v1",
+  "provider": "WORKDAY",
+  "employerSpecific": false,
+  "pages": [
+    {
+      "state": "PERSONAL",
+      "label": "My Information",
+      "fields": [
+        {
+          "semantic": "REFERRAL",
+          "required": true,
+          "control": "search_prompt",
+          "expected": "exact_option_commit"
+        },
+        {
+          "semantic": "PREVIOUS_EMPLOYEE",
+          "required": true,
+          "control": "radio"
+        },
+        {
+          "semantic": "COUNTRY",
+          "required": true,
+          "control": "select"
+        },
+        {
+          "semantic": "HONORIFIC",
+          "required": true,
+          "control": "select"
+        },
+        {
+          "semantic": "FIRST_NAME",
+          "required": true,
+          "control": "text"
+        },
+        {
+          "semantic": "MIDDLE_NAME",
+          "required": false,
+          "control": "text"
+        },
+        {
+          "semantic": "LAST_NAME",
+          "required": true,
+          "control": "text"
+        },
+        {
+          "semantic": "PREFERRED_NAME",
+          "required": false,
+          "control": "conditional"
+        },
+        {
+          "semantic": "STREET_ADDRESS",
+          "required": true,
+          "control": "text"
+        },
+        {
+          "semantic": "ADDRESS_LINE_2",
+          "required": false,
+          "control": "text"
+        },
+        {
+          "semantic": "CITY",
+          "required": true,
+          "control": "text"
+        },
+        {
+          "semantic": "STATE_PROVINCE",
+          "required": true,
+          "control": "select"
+        },
+        {
+          "semantic": "POSTAL_CODE",
+          "required": true,
+          "control": "text"
+        },
+        {
+          "semantic": "EMAIL",
+          "required": true,
+          "control": "readonly_or_text"
+        },
+        {
+          "semantic": "PHONE_DEVICE_TYPE",
+          "required": true,
+          "control": "select"
+        },
+        {
+          "semantic": "PHONE_COUNTRY_CODE",
+          "required": true,
+          "control": "search_prompt"
+        },
+        {
+          "semantic": "PHONE",
+          "required": true,
+          "control": "tel"
+        },
+        {
+          "semantic": "PHONE_EXTENSION",
+          "required": false,
+          "control": "text",
+          "policy": "blank_without_distinct_extension_fact"
+        }
+      ],
+      "navigation": "NEXT"
+    },
+    {
+      "state": "EXPERIENCE",
+      "label": "My Experience",
+      "repeatedGroups": [
+        {
+          "kind": "employment",
+          "count": 2,
+          "requiredBinding": true,
+          "semantics": [
+            "JOB_TITLE",
+            "EMPLOYER_NAME",
+            "EMPLOYMENT_LOCATION",
+            "CURRENTLY_EMPLOYED",
+            "EMPLOYMENT_START_DATE",
+            "EMPLOYMENT_END_DATE",
+            "EMPLOYMENT_RESPONSIBILITIES"
+          ]
+        },
+        {
+          "kind": "education",
+          "count": 2,
+          "requiredBinding": true,
+          "semantics": [
+            "SCHOOL_NAME",
+            "DEGREE",
+            "FIELD_OF_STUDY"
+          ]
+        }
+      ],
+      "optionalGroups": [
+        "CERTIFICATIONS",
+        "LANGUAGES"
+      ],
+      "artifacts": [
+        "RESUME"
+      ],
+      "repeatedSimple": [
+        "WEBSITE"
+      ],
+      "navigation": "NEXT"
+    },
+    {
+      "state": "QUESTIONS",
+      "label": "Application Questions",
+      "fields": [
+        {
+          "semantic": "WORK_LOCATION_ELIGIBILITY",
+          "required": true,
+          "control": "select",
+          "sensitivity": "PROTECTED"
+        },
+        {
+          "semantic": "AGE_18_PLUS",
+          "required": true,
+          "control": "select",
+          "policy": "user_confirmed_or_secure_derivation"
+        },
+        {
+          "semantic": "SPONSORSHIP_FUTURE",
+          "required": true,
+          "control": "select",
+          "sensitivity": "PROTECTED"
+        },
+        {
+          "semantic": "SALARY_EXPECTATION",
+          "required": true,
+          "control": "textarea",
+          "policy": "explicit_approved_answer_only"
+        }
+      ],
+      "navigation": "NEXT"
+    },
+    {
+      "state": "DISCLOSURES",
+      "label": "Voluntary Disclosures",
+      "fields": [
+        {
+          "semantic": "GENDER",
+          "required": true,
+          "control": "select",
+          "sensitivity": "SELF_ID"
+        },
+        {
+          "semantic": "RACE_ETHNICITY",
+          "required": true,
+          "control": "select",
+          "sensitivity": "SELF_ID"
+        },
+        {
+          "semantic": "HISPANIC_LATINO",
+          "required": true,
+          "control": "select",
+          "sensitivity": "SELF_ID"
+        },
+        {
+          "semantic": "VETERAN_STATUS",
+          "required": true,
+          "control": "select",
+          "sensitivity": "SELF_ID"
+        },
+        {
+          "semantic": "LEGAL_ATTESTATION",
+          "required": true,
+          "control": "checkbox",
+          "policy": "mandate_scoped_exact_terms"
+        }
+      ],
+      "navigation": "NEXT"
+    },
+    {
+      "state": "EEO",
+      "label": "Self Identify",
+      "fields": [
+        {
+          "semantic": "LANGUAGES",
+          "required": true,
+          "control": "select"
+        },
+        {
+          "semantic": "SELF_ID_NAME",
+          "required": true,
+          "control": "text",
+          "policy": "canonical_legal_full_name"
+        },
+        {
+          "semantic": "EMPLOYEE_ID",
+          "required": false,
+          "control": "text",
+          "policy": "blank_unless_explicit"
+        },
+        {
+          "semantic": "SELF_ID_DATE",
+          "required": true,
+          "control": "date",
+          "policy": "execution_date"
+        },
+        {
+          "semantic": "DISABILITY_STATUS",
+          "required": true,
+          "control": "checkbox_group",
+          "sensitivity": "SELF_ID"
+        }
+      ],
+      "navigation": "NEXT"
+    },
+    {
+      "state": "REVIEW",
+      "label": "Review",
+      "assertions": [
+        "legal_name_parts_match_canonical_truth",
+        "no_name_part_duplication",
+        "phone_digits_match_canonical_truth",
+        "phone_extension_blank_without_distinct_fact",
+        "address_matches_canonical_truth",
+        "repeated_groups_match_bound_profile_entries",
+        "resume_sha_matches_approved_artifact",
+        "protected_values_have_protected_provenance",
+        "no_validation_errors"
+      ],
+      "finalSubmissionBoundary": true
+    }
+  ]
+}
