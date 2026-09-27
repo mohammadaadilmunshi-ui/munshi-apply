@@ -19,7 +19,10 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from .execution_policy import prepare_permissions, safe_evidence
-from .hunter_plan_semantic_bridge import answer_matches_question
+from .hunter_plan_semantic_bridge import (
+    answer_matches_question,
+    protected_answer_matches_question,
+)
 from .universal_document_uploader import DocumentSpec, UniversalDocumentUploader
 
 RESUME_UPLOAD_ENV = "MUNSHI_APPLY_RESUME_UPLOAD_ENABLED"
@@ -1399,23 +1402,54 @@ class PlanBrowserAdapter:
                     continue
                 if not control["visible"]:
                     continue
-                if question["sensitive"] or control.get("inputType") == "password":
-                    continue  # Protected execution requires a scoped resolver, never plain memory.
-                if not normal_fill_enabled:
+                if control.get("inputType") == "password":
                     continue
-                candidates = [
-                    a
-                    for a in plan["answers"]
-                    if a.get("autofill_allowed") is True
-                    and a.get("sensitivity_class") == "NORMAL"
-                    and a.get("execution_value") is not None
-                    and answer_matches_question(a, question, control)
-                ]
-                value = resolved_values.get(control["name"])
-                if value is None and len(candidates) == 1:
-                    value = candidates[0]["execution_value"]
-                if value is None:
-                    continue
+
+                sensitivity = str(
+                    question.get("sensitivityClass")
+                    or question.get("sensitivity_class")
+                    or ("PROTECTED" if question.get("sensitive") else "NORMAL")
+                ).upper()
+                protected_lane = bool(question.get("sensitive")) or sensitivity in {
+                    "PROTECTED",
+                    "SELF_ID",
+                }
+
+                if protected_lane:
+                    protected_candidates = [
+                        a
+                        for a in plan["answers"]
+                        if protected_answer_matches_question(a, question, control)
+                    ]
+                    if len(protected_candidates) != 1:
+                        continue
+                    if self.protected_value_resolver is None:
+                        raise RuntimeError(
+                            "Protected Workday/application answer requires scoped Hunter resolver"
+                        )
+                    resolved = self.protected_value_resolver(
+                        plan,
+                        dict(protected_candidates[0]),
+                    )
+                    value = resolved.get("value")
+                    if value is None:
+                        continue
+                else:
+                    if not normal_fill_enabled:
+                        continue
+                    candidates = [
+                        a
+                        for a in plan["answers"]
+                        if a.get("autofill_allowed") is True
+                        and a.get("sensitivity_class") == "NORMAL"
+                        and a.get("execution_value") is not None
+                        and answer_matches_question(a, question, control)
+                    ]
+                    value = resolved_values.get(control["name"])
+                    if value is None and len(candidates) == 1:
+                        value = candidates[0]["execution_value"]
+                    if value is None:
+                        continue
                 result = self._workday_fill_control(
                     control=control,
                     question=question,
