@@ -256,10 +256,15 @@ timeout 1200s docker run --rm \
     /app/apps/native-host/tests/test_production_submission_verification_determinism.py \
     /app/apps/native-host/tests/test_submit_authority_inbox.py \
     /app/apps/native-host/tests/test_submit_authority_contract_vector.py \
+    /app/apps/native-host/tests/test_submit_authority_rollover_consume.py \
+    /app/apps/native-host/tests/test_complete_application_loop.py \
+    /app/apps/native-host/tests/test_hunter_plan_semantic_bridge.py \
+    /app/apps/native-host/tests/test_review_reconciliation_v1.py \
     /app/apps/native-host/tests/test_workday_exact_option_poll.py \
     /app/apps/native-host/tests/test_workday_source_provider_state.py \
     /app/apps/native-host/tests/test_workday_provider_adaptive_v2.py \
-    /app/apps/native-host/tests/test_workday_phone_variants_v1.py
+    /app/apps/native-host/tests/test_workday_phone_variants_v1.py \
+    /app/apps/native-host/tests/test_workday_generic_file_upload_regression.py
 echo "APPLY_PRODUCTION_EXACT_IMAGE_TESTS=PASS"
 
 echo "=== FORCE SUBMIT OFF DURING REVERSIBLE DEPLOYMENT ==="
