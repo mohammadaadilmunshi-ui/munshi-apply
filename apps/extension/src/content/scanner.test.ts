@@ -499,4 +499,59 @@ describe("AutoPilot page-state scanner", () => {
     expect(employers[0]?.repeatGroupId).not.toBe(schools[0]?.repeatGroupId);
   });
 
+
+  it("models explicit check-one checkbox sets as one logical choice group", () => {
+    document.body.innerHTML = `
+      <main>
+        <h2>Self Identify</h2>
+        <fieldset>
+          <legend>Voluntary Self-Identification of Disability</legend>
+          <p>Please check one of the boxes below:</p>
+          <label><input type="checkbox" name="disability-choice" value="yes" />
+            Yes, I have a disability, or have had one in the past
+          </label>
+          <label><input type="checkbox" name="disability-choice" value="no" checked />
+            No, I do not have a disability and have not had one in the past
+          </label>
+          <label><input type="checkbox" name="disability-choice" value="decline" />
+            I do not want to answer
+          </label>
+        </fieldset>
+      </main>
+    `;
+
+    const result = scanDocument();
+    const groupQuestions = result.questions.filter(
+      (question) => question.fieldName === "disability-choice",
+    );
+    expect(groupQuestions).toHaveLength(1);
+    expect(groupQuestions[0]?.options).toEqual([
+      "Yes, I have a disability, or have had one in the past",
+      "No, I do not have a disability and have not had one in the past",
+      "I do not want to answer",
+    ]);
+
+    const groupControls = result.controls.filter(
+      (control) => control.name === "disability-choice",
+    );
+    expect(groupControls).toHaveLength(3);
+    expect(groupControls[0]?.satisfied).toBe(true);
+  });
+
+  it("does not collapse multi-select checkbox sets into one choice question", () => {
+    document.body.innerHTML = `
+      <fieldset>
+        <legend>Skills</legend>
+        <p>Select all that apply.</p>
+        <label><input type="checkbox" name="skills" value="analytics" />Analytics</label>
+        <label><input type="checkbox" name="skills" value="hris" />HRIS</label>
+      </fieldset>
+    `;
+
+    const result = scanDocument();
+    expect(
+      result.questions.filter((question) => question.fieldName === "skills"),
+    ).toHaveLength(2);
+  });
+
 });
