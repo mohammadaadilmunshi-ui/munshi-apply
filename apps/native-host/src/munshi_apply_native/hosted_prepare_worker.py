@@ -528,11 +528,41 @@ class HostedAdapterFactory:
                     )
                 return resolved
 
+            def legal_attestation_authorizer(
+                current: dict[str, Any],
+                attestation_identity: dict[str, Any],
+            ) -> dict[str, Any]:
+                if str(current.get("plan_id")) != str(plan["plan_id"]) or str(
+                    current.get("plan_digest")
+                ) != str(plan["plan_digest"]):
+                    raise ValueError(
+                        "Legal attestation request no longer matches accepted plan"
+                    )
+                if bridge.plan_is_current(current) is not True:
+                    raise ValueError(
+                        "Legal attestation request belongs to a stale plan"
+                    )
+                proof = bridge.authorize_legal_attestation(
+                    current,
+                    attestation_identity=dict(attestation_identity),
+                )
+                if (
+                    proof.get("authorized") is not True
+                    or proof.get("submission_authority") is not False
+                    or dict(proof.get("attestation_identity") or {})
+                    != dict(attestation_identity)
+                ):
+                    raise RuntimeError(
+                        "Legal attestation authorization response binding mismatch"
+                    )
+                return proof
+
             return HostedPlanBrowserAdapter(
                 page,
                 artifact_reader=artifact_reader,
                 cover_letter_reader=(cover_letter_reader if cover_binding is not None else None),
                 protected_value_resolver=protected_value_resolver,
+                legal_attestation_authorizer=legal_attestation_authorizer,
                 current_plan=current_plan,
                 runtime_path=_runtime_path(),
                 interaction_fallback_service=interaction_fallback,
