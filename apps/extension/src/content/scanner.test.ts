@@ -390,4 +390,57 @@ describe("AutoPilot page-state scanner", () => {
   });
 
 
+
+  it("keeps Voluntary Disclosures distinct from self-identification semantics", () => {
+    document.body.innerHTML = `
+      <main>
+        <h2>Voluntary Disclosures</h2>
+        <label for="gender">What is your gender? *</label>
+        <select id="gender" required><option>Example choice</option></select>
+        <label for="race">What is your race/ethnicity? *</label>
+        <select id="race" required><option>Example choice</option></select>
+        <label for="veteran">What is your veterans status? *</label>
+        <select id="veteran" required><option>Example choice</option></select>
+        <button type="button">Save and Continue</button>
+      </main>
+    `;
+
+    const result = scanDocument();
+    expect(result.applicationState).toBe("DISCLOSURES");
+  });
+
+  it("recognizes Self Identify as the EEO/self-identification page", () => {
+    document.body.innerHTML = `
+      <main>
+        <h2>Self Identify</h2>
+        <label for="name">Name *</label>
+        <input id="name" required />
+        <p>Voluntary Self-Identification of Disability</p>
+        <label for="disability">Disability status *</label>
+        <select id="disability" required><option>Example choice</option></select>
+        <button type="button">Save and Continue</button>
+      </main>
+    `;
+
+    const result = scanDocument();
+    expect(result.applicationState).toBe("EEO");
+  });
+
+  it("keeps a structurally identified Review page distinct at final submit", () => {
+    document.body.innerHTML = `
+      <main>
+        <h2>Review</h2>
+        <p>Please review your application.</p>
+        <button type="submit">Submit Application</button>
+      </main>
+    `;
+
+    const result = scanDocument();
+    expect(result.finalSubmissionBoundary).toBe(true);
+    expect(result.applicationState).toBe("REVIEW");
+    expect(result.navigationCandidates).toContainEqual(
+      expect.objectContaining({ action: "FINAL_SUBMIT" }),
+    );
+  });
+
 });
