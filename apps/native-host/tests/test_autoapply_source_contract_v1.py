@@ -5,7 +5,6 @@ from types import SimpleNamespace
 
 from munshi_apply_native.plan_browser_adapter import PlanBrowserAdapter
 
-
 ROOT = Path(__file__).resolve().parents[3]
 
 CANONICAL_RUNTIME_FILES = (
