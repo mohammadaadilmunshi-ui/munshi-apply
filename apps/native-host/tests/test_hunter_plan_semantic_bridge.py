@@ -278,6 +278,61 @@ def test_bridge_reports_universal_binding_authority() -> None:
     assert status["universal_binding_authority"] == "hunter_application_plan"
 
 
+def test_segmented_phone_semantics_map_to_distinct_hunter_keys() -> None:
+    assert semantic_keys("PHONE") == frozenset({"contact.phone"})
+    assert semantic_keys("PHONE_DEVICE_TYPE") == frozenset(
+        {"application.phone_device_type"}
+    )
+    assert semantic_keys("PHONE_COUNTRY_CODE") == frozenset(
+        {"contact.phone_country_code"}
+    )
+    assert semantic_keys("PHONE_EXTENSION") == frozenset(
+        {"contact.phone_extension"}
+    )
+    assert len(
+        {
+            next(iter(semantic_keys("PHONE"))),
+            next(iter(semantic_keys("PHONE_DEVICE_TYPE"))),
+            next(iter(semantic_keys("PHONE_COUNTRY_CODE"))),
+            next(iter(semantic_keys("PHONE_EXTENSION"))),
+        }
+    ) == 4
+
+
+def test_structural_self_id_name_remains_normal_but_policy_fields_do_not() -> None:
+    assert semantic_keys("SELF_ID_NAME") == frozenset({"contact.full_name"})
+    for semantic in (
+        "WORK_LOCATION_ELIGIBILITY",
+        "AGE_18_PLUS",
+        "HISPANIC_LATINO",
+        "EMPLOYEE_ID",
+        "SELF_ID_DATE",
+        "LEGAL_ATTESTATION",
+    ):
+        assert semantic_keys(semantic) == frozenset()
+
+
+def test_protected_semantic_cannot_bypass_boundary_via_exact_provider_key() -> None:
+    answer = _answer("provider.exact.key")
+    assert answer_matches_question(
+        answer,
+        _question("AGE_18_PLUS", "Are you at least 18 years of age?"),
+        _control("provider.exact.key"),
+    ) is False
+
+
+def test_non_normal_answer_cannot_bypass_boundary_via_exact_question_text() -> None:
+    answer = {
+        **_answer("provider.answer", "Do you identify as Hispanic or Latino?"),
+        "sensitivity_class": "SELF_ID",
+    }
+    assert answer_matches_question(
+        answer,
+        _question("UNKNOWN", "Do you identify as Hispanic or Latino?"),
+        _control("unrelated-control"),
+    ) is False
+
+
 def test_stable_question_id_matches_when_control_name_is_empty() -> None:
     question = _question("REFERRAL", "Provider text may rerender")
     question["questionId"] = "q-referral-source"
