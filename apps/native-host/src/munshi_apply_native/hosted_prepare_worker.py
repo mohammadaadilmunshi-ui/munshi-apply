@@ -480,10 +480,59 @@ class HostedAdapterFactory:
                     return False
                 return bridge.plan_is_current(current)
 
+            def protected_value_resolver(
+                current: dict[str, Any],
+                answer: dict[str, Any],
+            ) -> dict[str, Any]:
+                if str(current.get("plan_id")) != str(plan["plan_id"]) or str(
+                    current.get("plan_digest")
+                ) != str(plan["plan_digest"]):
+                    raise ValueError(
+                        "Protected browser value request no longer matches accepted plan"
+                    )
+                if bridge.plan_is_current(current) is not True:
+                    raise ValueError(
+                        "Protected browser value request belongs to a stale plan"
+                    )
+                question_key = str(answer.get("question_key") or "").strip()
+                reference = str(answer.get("secure_resolver_ref") or "").strip()
+                sensitivity = str(
+                    answer.get("sensitivity_class") or ""
+                ).strip().upper()
+                if (
+                    not question_key
+                    or not reference.startswith(
+                        "hunter-secure://candidate-truth/"
+                    )
+                    or sensitivity not in {"PROTECTED", "SELF_ID"}
+                    or answer.get("autofill_allowed") is not True
+                    or answer.get("execution_value") is not None
+                ):
+                    raise PermissionError(
+                        "Protected browser answer is outside immutable plan authority"
+                    )
+                resolved = bridge.protected_application_value(
+                    current,
+                    question_key=question_key,
+                    secure_resolver_ref=reference,
+                )
+                if (
+                    str(resolved.get("question_key") or "") != question_key
+                    or str(resolved.get("sensitivity") or "").upper()
+                    != sensitivity
+                    or str(resolved.get("provenance") or "")
+                    != "candidate_truth_protected_domain"
+                ):
+                    raise RuntimeError(
+                        "Protected browser answer response binding mismatch"
+                    )
+                return resolved
+
             return HostedPlanBrowserAdapter(
                 page,
                 artifact_reader=artifact_reader,
                 cover_letter_reader=(cover_letter_reader if cover_binding is not None else None),
+                protected_value_resolver=protected_value_resolver,
                 current_plan=current_plan,
                 runtime_path=_runtime_path(),
                 interaction_fallback_service=interaction_fallback,
