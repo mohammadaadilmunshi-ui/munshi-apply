@@ -9,13 +9,16 @@ from __future__ import annotations
 import json
 import os
 import re
-
-import httpx
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from .interaction_fallback_service import InteractionFallbackError, InteractionFallbackService
+import httpx
+
+from .interaction_fallback_service import (
+    InteractionFallbackError,
+    InteractionFallbackService,
+)
 
 SEMANTIC_INTERPRETER_VERSION = "universal-semantic-interpreter-v1"
 SEMANTIC_MODEL_ENV = "MUNSHI_UNIVERSAL_MODEL_SEMANTICS_ENABLED"
@@ -70,9 +73,13 @@ def _validate_no_forbidden_keys(value: Any, *, path: str = "payload") -> None:
     if isinstance(value, Mapping):
         for raw_key, child in value.items():
             key = str(raw_key).strip().casefold()
-            if any(marker == key or key.endswith("_" + marker) for marker in _FORBIDDEN_KEY_MARKERS):
+            if any(
+                marker == key or key.endswith("_" + marker)
+                for marker in _FORBIDDEN_KEY_MARKERS
+            ):
                 raise UniversalSemanticInterpretationError(
-                    f"Value-bearing or secret field is forbidden in semantic interpretation: {path}.{raw_key}"
+                    "Value-bearing or secret field is forbidden in semantic "
+                    f"interpretation: {path}.{raw_key}"
                 )
             _validate_no_forbidden_keys(child, path=f"{path}.{raw_key}")
     elif isinstance(value, list):
@@ -81,16 +88,30 @@ def _validate_no_forbidden_keys(value: Any, *, path: str = "payload") -> None:
 
 
 def _clean_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
-    if set(payload) - {"resolver_version", "observation", "ontology_candidates", "candidate_values"}:
-        raise UniversalSemanticInterpretationError("Unsupported semantic interpretation payload fields")
+    allowed_payload_keys = {
+        "resolver_version",
+        "observation",
+        "ontology_candidates",
+        "candidate_values",
+    }
+    if set(payload) - allowed_payload_keys:
+        raise UniversalSemanticInterpretationError(
+            "Unsupported semantic interpretation payload fields"
+        )
     if payload.get("candidate_values") is not None:
-        raise UniversalSemanticInterpretationError("Candidate values are forbidden in semantic interpretation")
+        raise UniversalSemanticInterpretationError(
+            "Candidate values are forbidden in semantic interpretation"
+        )
     observation_raw = payload.get("observation")
     candidates_raw = payload.get("ontology_candidates")
     if not isinstance(observation_raw, Mapping):
-        raise UniversalSemanticInterpretationError("Semantic interpretation requires an observation")
+        raise UniversalSemanticInterpretationError(
+            "Semantic interpretation requires an observation"
+        )
     if not isinstance(candidates_raw, list) or not 1 <= len(candidates_raw) <= 8:
-        raise UniversalSemanticInterpretationError("Semantic interpretation requires one to eight ontology candidates")
+        raise UniversalSemanticInterpretationError(
+            "Semantic interpretation requires one to eight ontology candidates"
+        )
     if set(observation_raw) - _ALLOWED_OBSERVATION_KEYS:
         raise UniversalSemanticInterpretationError("Observation contains unsupported fields")
 
@@ -167,11 +188,15 @@ def _parse_model_output(stdout: str) -> dict[str, Any]:
     joined = "\n".join(pieces)
     matches = re.findall(rf"{re.escape(_RESULT_PREFIX)}\s*(\{{.*\}})", joined)
     if not matches:
-        raise UniversalSemanticInterpretationError("Semantic model returned no structured interpretation")
+        raise UniversalSemanticInterpretationError(
+            "Semantic model returned no structured interpretation"
+        )
     try:
         result = json.loads(matches[-1])
     except json.JSONDecodeError as error:
-        raise UniversalSemanticInterpretationError("Semantic model returned invalid JSON") from error
+        raise UniversalSemanticInterpretationError(
+            "Semantic model returned invalid JSON"
+        ) from error
     if not isinstance(result, dict):
         raise UniversalSemanticInterpretationError("Semantic model result must be an object")
     return result
