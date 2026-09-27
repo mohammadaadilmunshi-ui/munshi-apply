@@ -605,6 +605,7 @@ class PlanBrowserAdapter:
               role: element.getAttribute('role') || '',
               hasPopup: element.getAttribute('aria-haspopup') || '',
               autocomplete: element.getAttribute('aria-autocomplete') || '',
+              automationId: element.getAttribute('data-automation-id') || '',
               id: element.id || '',
               name: element.getAttribute('name') || ''
             })"""
@@ -614,7 +615,7 @@ class PlanBrowserAdapter:
         role = str(metadata.get("role") or "").casefold()
         has_popup = str(metadata.get("hasPopup") or "").casefold()
         aria_autocomplete = str(metadata.get("autocomplete") or "").casefold()
-        element_id = str(metadata.get("id") or "").casefold()
+        automation_id = str(metadata.get("automationId") or "").casefold()
         semantic = str(
             question.get("semanticType") or question.get("semantic_type") or ""
         ).upper()
@@ -622,21 +623,32 @@ class PlanBrowserAdapter:
             question.get("rawText") or question.get("question") or ""
         ).casefold()
         kind = str(control.get("kind") or "").upper()
-        source_prompt = semantic == "REFERRAL" or "source--source" in element_id
+        prompt_like = (
+            tag in {"input", "textarea"}
+            and (
+                role == "combobox"
+                or has_popup in {"listbox", "tree", "grid"}
+                or aria_autocomplete in {"list", "both"}
+                or any(
+                    token in automation_id
+                    for token in ("prompt", "search", "lookup", "typeahead")
+                )
+            )
+        )
         choice_like = (
             kind in {"SELECT", "COMBOBOX"}
             or role in {"combobox", "listbox"}
             or has_popup not in {"", "false", "none"}
             or aria_autocomplete in {"list", "both"}
-            or source_prompt
+            or prompt_like
             or "select one" in question_text
         )
 
-        if source_prompt and self._workday_source_committed(element, value):
+        if prompt_like and self._workday_prompt_committed(element, str(value)):
             return {
                 "status": "FILLED",
-                "reason": "Workday source prompt already has the exact selected item",
-                "strategy": "WORKDAY_SOURCE_SELECTED_ITEM",
+                "reason": "Workday prompt already has the exact selected item",
+                "strategy": "WORKDAY_PROMPT_SELECTED_ITEM",
                 "verification": "POST_ACTION_PROVIDER_VERIFIED",
             }
 
@@ -685,48 +697,37 @@ class PlanBrowserAdapter:
             element.click()
             element.press("Control+A")
             element.press("Backspace")
-            element.type(str(value), delay=75 if source_prompt else 10)
-
-            if source_prompt:
-                element.type(" ", delay=25)
-                element.press("Backspace")
-                self.page.wait_for_timeout(150)
+            element.type(str(value), delay=75 if prompt_like else 10)
 
             if choice_like:
                 clicked = self._workday_click_exact_option(
-                    str(value), trigger=element, press_enter=True
+                    str(value), trigger=element, press_enter=False
                 )
-                committed_early = (
-                    self._workday_source_committed(element, value)
-                    if source_prompt
-                    else False
-                )
-
-                if source_prompt and clicked and not committed_early:
-                    for key in ("Enter", "Tab"):
-                        try:
-                            element.press(key)
-                        except Exception:
-                            pass
-                        self.page.wait_for_timeout(300)
-                        if self._workday_source_committed(element, value):
-                            committed_early = True
-                            break
-
-                if source_prompt and not committed_early:
-                    fallback_ok = self._workday_public_prompt_fallback(
+                if prompt_like:
+                    self.page.wait_for_timeout(250)
+                    committed_early = self._workday_prompt_committed(
                         element, str(value)
                     )
-                    clicked = clicked or fallback_ok
-                    committed_early = self._workday_source_committed(
-                        element, value
-                    )
-
-                if not clicked and not committed_early:
+                    if not committed_early:
+                        fallback_ok = self._workday_public_prompt_fallback(
+                            element, str(value)
+                        )
+                        clicked = clicked or fallback_ok
+                        committed_early = self._workday_prompt_committed(
+                            element, str(value)
+                        )
+                    if not clicked or not committed_early:
+                        return {
+                            "status": "FAILED",
+                            "reason": "Workday exact prompt option did not reach provider-selected state",
+                            "strategy": "WORKDAY_PROVIDER_PROMPT",
+                            "verification": "FAILED_CLOSED",
+                        }
+                elif not clicked:
                     return {
                         "status": "FAILED",
-                        "reason": "Workday exact prompt option did not commit",
-                        "strategy": "WORKDAY_PROVIDER_PROMPT",
+                        "reason": "Workday exact provider option was unavailable",
+                        "strategy": "WORKDAY_PROVIDER_CHOICE",
                         "verification": "FAILED_CLOSED",
                     }
 
@@ -742,14 +743,10 @@ class PlanBrowserAdapter:
 
             self.page.wait_for_timeout(500)
             committed = (
-                self._workday_source_committed(element, value)
-                if source_prompt
+                self._workday_prompt_committed(element, str(value))
+                if prompt_like
                 else self._wait_for_control_committed(control_id)
             )
-            if source_prompt and not committed:
-                committed = self._wait_for_control_committed(
-                    control_id, timeout_ms=3500
-                )
             return {
                 "status": "FILLED" if committed else "FAILED",
                 "reason": (
@@ -757,7 +754,7 @@ class PlanBrowserAdapter:
                     if committed
                     else "Workday kept the field uncommitted after exact provider interaction"
                 ),
-                "strategy": "WORKDAY_PROVIDER_PROMPT" if source_prompt
+                "strategy": "WORKDAY_PROVIDER_PROMPT" if prompt_like
                     else "WORKDAY_TRUSTED_PLAYWRIGHT",
                 "verification": (
                     "POST_ACTION_PROVIDER_VERIFIED" if committed else "FAILED_CLOSED"
