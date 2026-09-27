@@ -71,26 +71,92 @@ describe("semantic field equivalence", () => {
       matchedRule: null,
     });
   });
-  it("keeps Workday phone metadata controls separate from the phone number", () => {
+  it("keeps segmented phone metadata controls separate from the phone number", () => {
     expect(
       classifyQuestion(
         "Phone Device Type Select One Required",
         "phoneNumber--phoneType",
       ),
     ).toMatchObject({
-      semanticType: "UNKNOWN",
+      semanticType: "PHONE_DEVICE_TYPE",
       matchedRule: "phone-device-type",
+    });
+    expect(
+      classifyQuestion(
+        "Country Phone Code",
+        "phoneNumber--countryPhoneCode",
+      ),
+    ).toMatchObject({
+      semanticType: "PHONE_COUNTRY_CODE",
     });
     expect(
       classifyQuestion("Phone Extension", "phoneNumber--extension"),
     ).toMatchObject({
-      semanticType: "UNKNOWN",
+      semanticType: "PHONE_EXTENSION",
       matchedRule: "phone-extension",
     });
     expect(
       classifyQuestion("Phone Number", "phoneNumber--phoneNumber"),
     ).toMatchObject({
       semanticType: "PHONE",
+    });
+  });
+
+  it("classifies common eligibility, self-id, and legal application prompts", () => {
+    expect(
+      classifyQuestion("Are you at least 18 years of age?"),
+    ).toMatchObject({
+      semanticType: "AGE_18_PLUS",
+      sensitive: true,
+      requiresReview: true,
+    });
+    expect(
+      classifyQuestion(
+        "Are you eligible to work in the location in which this position is located?",
+      ),
+    ).toMatchObject({
+      semanticType: "WORK_LOCATION_ELIGIBILITY",
+      sensitive: true,
+      requiresReview: true,
+    });
+    expect(
+      classifyQuestion("Do you identify as Hispanic or Latino?"),
+    ).toMatchObject({
+      semanticType: "HISPANIC_LATINO",
+      sensitive: true,
+      requiresReview: true,
+    });
+    expect(
+      classifyQuestion("Employee ID (if applicable)"),
+    ).toMatchObject({
+      semanticType: "EMPLOYEE_ID",
+      sensitive: true,
+      requiresReview: true,
+    });
+    expect(
+      classifyQuestion("I accept the Terms and Conditions."),
+    ).toMatchObject({
+      semanticType: "LEGAL_ATTESTATION",
+      requiresReview: true,
+    });
+  });
+
+  it("uses self-identification context to distinguish generic name and date fields", () => {
+    expect(
+      classifyQuestion(
+        "Name",
+        "Voluntary Self-Identification of Disability Form CC-305",
+      ),
+    ).toMatchObject({
+      semanticType: "SELF_ID_NAME",
+    });
+    expect(
+      classifyQuestion(
+        "Date",
+        "Voluntary Self-Identification of Disability Form CC-305",
+      ),
+    ).toMatchObject({
+      semanticType: "SELF_ID_DATE",
     });
   });
 
