@@ -23,6 +23,7 @@ from .hunter_plan_semantic_bridge import (
     answer_matches_question,
     protected_answer_matches_question,
 )
+from .review_reconciliation_v1 import reconcile_provider_review
 from .universal_document_uploader import DocumentSpec, UniversalDocumentUploader
 
 RESUME_UPLOAD_ENV = "MUNSHI_APPLY_RESUME_UPLOAD_ENABLED"
@@ -1495,6 +1496,33 @@ class PlanBrowserAdapter:
                 self.on_event("COVER_LETTER_VERIFIED", {"sha256": result["cover_letter_sha256"]})
             navigation = self._scan()["page"]["navigationCandidates"]
             next_steps = [n for n in navigation if n["action"] == "NEXT" and not n["disabled"]]
+            final_submit_steps = [
+                n
+                for n in navigation
+                if n["action"] == "FINAL_SUBMIT" and not n["disabled"]
+            ]
+            if (
+                provider_for_url(self.page.url) == "WORKDAY"
+                and not result["unresolved"]
+                and not result["validation_errors"]
+                and len(final_submit_steps) == 1
+            ):
+                # Raw provider Review text is transient input only. The
+                # reconciler returns a digest and safe mismatch codes; the raw
+                # rendering is never placed in durable preparation evidence.
+                review_text = str(
+                    self.page.evaluate(
+                        "() => String(document.body?.innerText || '')"
+                    )
+                    or ""
+                )
+                result["review_reconciliation"] = reconcile_provider_review(
+                    review_text=review_text,
+                    prepared_fields=result["review_fields"],
+                    expected_resume_sha256=str(plan["resume"]["artifact_sha256"]),
+                    observed_resume_sha256=str(result.get("resume_sha256") or ""),
+                    final_submission_boundary=True,
+                )
             if result["unresolved"] or result["validation_errors"] or len(next_steps) != 1:
                 return result
             outcome = self.page.evaluate(
