@@ -18,11 +18,6 @@ from .database import Database
 from .models import EventEnvelope, HealthResponse
 from .outbox import OutboxWorker, run_outbox_worker
 from .runtime_resolution_read_v1 import RuntimeResolutionReadModel
-from .universal_semantic_interpreter_v1 import (
-    UniversalSemanticInterpretationError,
-    UniversalSemanticInterpretationService,
-    model_semantics_enabled,
-)
 from .settings import Settings
 from .teach_munshi_telegram import (
     TeachMunshiTelegramWorker,
@@ -31,6 +26,11 @@ from .teach_munshi_telegram import (
 from .teach_munshi_worker import (
     TeachMunshiLearningWorker,
     run_teach_munshi_learning_worker,
+)
+from .universal_semantic_interpreter_v1 import (
+    UniversalSemanticInterpretationError,
+    UniversalSemanticInterpretationService,
+    model_semantics_enabled,
 )
 
 settings = Settings.from_environment()
