@@ -12,7 +12,11 @@ class _Candidate:
         return True
 
     def evaluate(self, _script):
-        return [self.text, self.text, "", "", "", "", ""]
+        return {
+            "selectedContainer": False,
+            "values": [self.text, self.text, "", "", "", "", ""],
+            "id": "workday-option-1",
+        }
 
     def click(self):
         self.page.clicked += 1
@@ -81,12 +85,12 @@ def test_workday_exact_option_waits_for_async_suggestion() -> None:
     assert page.clicked == 1
 
 
-def test_workday_exact_option_can_activate_search_results_with_arrow_down() -> None:
+def test_workday_exact_option_never_guesses_with_arrow_down() -> None:
     page = _Page(selector_visible_at=10_000)
     adapter = _adapter(page)
     trigger = _Trigger(page)
     assert adapter._workday_click_exact_option(
         "Indeed", trigger=trigger, timeout_ms=1000, poll_ms=50
-    ) is True
-    assert page.arrow_down == 1
-    assert page.clicked == 1
+    ) is False
+    assert page.arrow_down == 0
+    assert page.clicked == 0
