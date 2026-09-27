@@ -85,7 +85,8 @@ def test_question_observation_is_structural_and_persists_round_trip(tmp_path: Pa
             "SELECT question_observation_json FROM resolution_tasks WHERE task_id=?",
             (task.task_id,),
         ).fetchone()[0]
-    assert "New Jersey" in raw  # employer option/label metadata is structural, not candidate authority
+    # Employer option/label metadata is structural, not candidate authority.
+    assert "New Jersey" in raw
     assert "canonical_answer" not in raw
     assert "execution_value" not in raw
 
