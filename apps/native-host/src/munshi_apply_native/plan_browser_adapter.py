@@ -93,10 +93,15 @@ class PlanBrowserAdapter:
         current_plan: Callable[[dict[str, Any]], bool],
         runtime_path: Path,
         cover_letter_reader: Callable[[dict[str, Any]], bytes] | None = None,
+        protected_value_resolver: Callable[
+            [dict[str, Any], dict[str, Any]], dict[str, Any]
+        ]
+        | None = None,
     ) -> None:
         self.page = page
         self.artifact_reader = artifact_reader
         self.cover_letter_reader = cover_letter_reader
+        self.protected_value_resolver = protected_value_resolver
         self.current_plan = current_plan
         self.runtime_path = runtime_path
         self.on_event: Callable[[str, dict[str, Any]], None] = lambda _kind, _evidence: None
