@@ -86,7 +86,6 @@ PROTECTED_SEMANTIC_TYPES = frozenset(
         "HISPANIC_LATINO",
         "EEO_SELF_ID",
         "EMPLOYEE_ID",
-        "SELF_ID_DATE",
         "LEGAL_ATTESTATION",
         "CONFLICT_OF_INTEREST",
         "NON_COMPETE",
