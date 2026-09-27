@@ -445,7 +445,7 @@ class PlanBrowserAdapter:
                 return []
             for index in range(count):
                 candidate = locator.nth(index)
-                try:
+                with suppress(Exception):
                     if not candidate.is_visible():
                         continue
                     selected_container, values, token_id = candidate_metadata(candidate)
@@ -466,21 +466,17 @@ class PlanBrowserAdapter:
                         continue
                     seen.add(token)
                     matches.append(candidate)
-                except Exception:
-                    continue
             return matches
 
         def candidates() -> list[Any]:
             scoped: list[Any] = []
             for popup_id in controlled_ids:
                 escaped = self._workday_locator_id(popup_id)
-                try:
+                with suppress(Exception):
                     popup = self.page.locator(f'[id="{escaped}"]')
                     if popup.count() != 1 or not popup.first.is_visible():
                         continue
                     scoped.extend(collect(popup.first.locator(selector), 250))
-                except Exception:
-                    continue
             if controlled_ids:
                 return scoped
             return collect(self.page.locator(selector), 300)
@@ -740,7 +736,7 @@ class PlanBrowserAdapter:
             }
         ):
             for candidate in self._workday_phone_variants(str(value)):
-                try:
+                with suppress(Exception):
                     element = self._element(control_id)
                     element.click()
                     element.press("Control+A")
@@ -760,8 +756,6 @@ class PlanBrowserAdapter:
                             "strategy": "WORKDAY_PHONE_CANONICAL_VARIANT",
                             "verification": "POST_ACTION_PROVIDER_VERIFIED",
                         }
-                except Exception:
-                    continue
             return {
                 "status": "FAILED",
                 "reason": "Workday rejected all equivalent canonical phone renderings",
@@ -798,7 +792,10 @@ class PlanBrowserAdapter:
                     if not clicked or not committed_early:
                         return {
                             "status": "FAILED",
-                            "reason": "Workday exact prompt option did not reach provider-selected state",
+                            "reason": (
+                                "Workday exact prompt option did not reach "
+                                "provider-selected state"
+                            ),
                             "strategy": "WORKDAY_PROVIDER_PROMPT",
                             "verification": "FAILED_CLOSED",
                         }
@@ -813,10 +810,8 @@ class PlanBrowserAdapter:
                 try:
                     element.press("Tab")
                 except Exception:
-                    try:
+                    with suppress(Exception):
                         self.page.keyboard.press("Tab")
-                    except Exception:
-                        pass
             else:
                 element.press("Tab")
 
