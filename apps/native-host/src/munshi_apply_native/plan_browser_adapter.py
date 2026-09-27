@@ -21,6 +21,7 @@ from urllib.parse import urlsplit
 from .execution_policy import prepare_permissions, safe_evidence
 from .hunter_plan_semantic_bridge import (
     answer_matches_question,
+    logical_field_fingerprint,
     protected_answer_matches_question,
 )
 from .review_reconciliation_v1 import reconcile_provider_review
@@ -101,11 +102,16 @@ class PlanBrowserAdapter:
             [dict[str, Any], dict[str, Any]], dict[str, Any]
         ]
         | None = None,
+        legal_attestation_authorizer: Callable[
+            [dict[str, Any], dict[str, Any]], dict[str, Any]
+        ]
+        | None = None,
     ) -> None:
         self.page = page
         self.artifact_reader = artifact_reader
         self.cover_letter_reader = cover_letter_reader
         self.protected_value_resolver = protected_value_resolver
+        self.legal_attestation_authorizer = legal_attestation_authorizer
         self.current_plan = current_plan
         self.runtime_path = runtime_path
         self.on_event: Callable[[str, dict[str, Any]], None] = lambda _kind, _evidence: None
@@ -589,6 +595,75 @@ class PlanBrowserAdapter:
             seen.add(candidate)
             unique.append(candidate)
         return unique
+
+    def _legal_attestation_identity(
+        self,
+        *,
+        question: dict[str, Any],
+        control: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Build a hash-only identity for one exact legal-attestation surface."""
+        control_id = str(control.get("controlId") or "")
+        element = self._element(control_id)
+        surface = element.evaluate(
+            r"""element => {
+              const compact = value => String(value || '').replace(/\s+/g, ' ').trim();
+              let scope = element.closest(
+                'fieldset,section,[role="group"],[data-automation-id*="section" i]'
+              );
+              if (!scope) scope = element.parentElement;
+              const links = scope
+                ? Array.from(scope.querySelectorAll('a[href]')).slice(0, 20).map(link => ({
+                    href: new URL(link.getAttribute('href') || '', document.baseURI).href,
+                    label: compact(
+                      link.innerText
+                      || link.getAttribute('aria-label')
+                      || link.getAttribute('title')
+                      || ''
+                    ),
+                  }))
+                : [];
+              return {
+                scopeText: compact(scope?.innerText || ''),
+                links,
+              };
+            }"""
+        )
+        if not isinstance(surface, dict):
+            surface = {}
+        label = " ".join(
+            str(value or "").strip()
+            for value in (
+                question.get("rawText"),
+                question.get("label"),
+                control.get("label"),
+                control.get("ariaLabel"),
+            )
+            if str(value or "").strip()
+        )
+        fingerprint = logical_field_fingerprint(question, control)
+        if not fingerprint:
+            raise ValueError("Legal attestation has no stable logical field fingerprint")
+        terms_material = {
+            "scope_text_digest": digest(str(surface.get("scopeText") or "")),
+            "links": [
+                {
+                    "href_digest": digest(str(item.get("href") or "")),
+                    "label_digest": digest(str(item.get("label") or "")),
+                }
+                for item in list(surface.get("links") or [])
+                if isinstance(item, dict)
+            ],
+        }
+        return {
+            "semantic_type": "LEGAL_ATTESTATION",
+            "logical_field_fingerprint": digest(fingerprint),
+            "label_digest": digest(label),
+            "terms_identity_digest": digest(terms_material),
+            "provider_host": str(urlsplit(self.page.url).hostname or "")
+            .casefold()
+            .rstrip("."),
+        }
 
     def _workday_fill_control(
         self,
@@ -1408,6 +1483,11 @@ class PlanBrowserAdapter:
                 if control.get("inputType") == "password":
                     continue
 
+                semantic = str(
+                    question.get("semanticType")
+                    or question.get("semantic_type")
+                    or ""
+                ).upper()
                 sensitivity = str(
                     question.get("sensitivityClass")
                     or question.get("sensitivity_class")
@@ -1417,8 +1497,26 @@ class PlanBrowserAdapter:
                     "PROTECTED",
                     "SELF_ID",
                 }
+                legal_attestation_lane = semantic == "LEGAL_ATTESTATION"
 
-                if protected_lane:
+                if legal_attestation_lane:
+                    if self.legal_attestation_authorizer is None:
+                        continue
+                    identity = self._legal_attestation_identity(
+                        question=question,
+                        control=control,
+                    )
+                    proof = self.legal_attestation_authorizer(plan, identity)
+                    if (
+                        proof.get("authorized") is not True
+                        or dict(proof.get("attestation_identity") or {}) != identity
+                        or proof.get("submission_authority") is not False
+                    ):
+                        raise PermissionError(
+                            "Legal attestation authorization proof is invalid"
+                        )
+                    value = "true"
+                elif protected_lane:
                     protected_candidates = [
                         a
                         for a in plan["answers"]
