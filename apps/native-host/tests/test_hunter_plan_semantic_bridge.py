@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 from munshi_apply_native.hunter_plan_semantic_bridge import (
@@ -129,7 +130,16 @@ def test_plan_browser_adapter_is_wired_to_semantic_bridge() -> None:
         / "munshi_apply_native"
         / "plan_browser_adapter.py"
     ).read_text(encoding="utf-8")
-    assert "from .hunter_plan_semantic_bridge import answer_matches_question" in source
+    tree = ast.parse(source)
+    bridge_imports = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        and node.module == "hunter_plan_semantic_bridge"
+        for alias in node.names
+    }
+    assert "answer_matches_question" in bridge_imports
+    assert "protected_answer_matches_question" in bridge_imports
     assert "and answer_matches_question(a, question, control)" in source
 
 
