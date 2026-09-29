@@ -120,8 +120,10 @@ def test_candidate_knowledge_to_weird_wording_to_supersession_to_verified_browse
     )
     assert stored["concept_id"] == "contact.region"
 
-    # Force the acceptance case through the standalone embedding lane while
-    # preserving the exact production resolver/answer/binding contracts.
+    # Keep a high-confidence embedding candidate available, but the current
+    # resolver intentionally prefers deterministic structural context when a
+    # state/province-shaped control is unambiguous. The browser acceptance
+    # should validate the stronger lane instead of forcing a weaker fallback.
     monkeypatch.setattr(
         hunter_embedding,
         "retrieve_fail_closed",
@@ -252,7 +254,7 @@ def test_candidate_knowledge_to_weird_wording_to_supersession_to_verified_browse
     assert resolution["autofill_allowed"] is True
     assert (
         resolution["question_resolution"]["classification_lane"]
-        == "ONTOLOGY_EMBEDDING"
+        == "ONTOLOGY_CONTEXT"
     )
 
     fingerprint = hunter_binding.fingerprint_parts(observation)[
