@@ -559,12 +559,20 @@ function validationState(element: Element): {
   validationMessage: string;
 } {
   const ariaInvalid = element.getAttribute("aria-invalid") === "true";
+  const singleChoiceCheckboxSatisfied =
+    element instanceof HTMLInputElement &&
+    element.type === "checkbox" &&
+    singleChoiceCheckboxGroup(element).length > 1 &&
+    singleChoiceCheckboxGroup(element).some((candidate) => candidate.checked);
   const candidate =
-    element instanceof HTMLInputElement ||
-    element instanceof HTMLSelectElement ||
-    element instanceof HTMLTextAreaElement
-      ? compactText(element.validationMessage)
-      : "";
+    !ariaInvalid &&
+    singleChoiceCheckboxSatisfied
+      ? ""
+      : element instanceof HTMLInputElement ||
+          element instanceof HTMLSelectElement ||
+          element instanceof HTMLTextAreaElement
+        ? compactText(element.validationMessage)
+        : "";
   let ariaMessage = "";
   if (ariaInvalid) {
     const describedBy = element.getAttribute("aria-describedby");
