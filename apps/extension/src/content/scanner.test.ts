@@ -534,6 +534,35 @@ describe("AutoPilot page-state scanner", () => {
     expect(groupControls[0]?.satisfied).toBe(true);
   });
 
+  it("treats one selected required checkbox as satisfying a check-one group", () => {
+    document.body.innerHTML = `
+      <main>
+        <h2>Self Identify</h2>
+        <fieldset>
+          <legend>Voluntary Self-Identification of Disability</legend>
+          <p>Please check one of the boxes below:</p>
+          <label><input type="checkbox" name="disability-choice" value="yes" required />
+            Yes, I have a disability, or have had one in the past
+          </label>
+          <label><input type="checkbox" name="disability-choice" value="no" required checked />
+            No, I do not have a disability and have not had one in the past
+          </label>
+          <label><input type="checkbox" name="disability-choice" value="decline" required />
+            I do not want to answer
+          </label>
+        </fieldset>
+      </main>
+    `;
+
+    const controls = scanDocument().controls.filter(
+      (control) => control.name === "disability-choice",
+    );
+    expect(controls).toHaveLength(3);
+    expect(controls.every((control) => control.required)).toBe(true);
+    expect(controls.every((control) => control.invalid === false)).toBe(true);
+    expect(controls.every((control) => control.satisfied)).toBe(true);
+  });
+
   it("does not collapse multi-select checkbox sets into one choice question", () => {
     document.body.innerHTML = `
       <fieldset>
