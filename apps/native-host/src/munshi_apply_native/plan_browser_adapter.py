@@ -11,7 +11,6 @@ import hashlib
 import json
 import os
 import re
-import time
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
