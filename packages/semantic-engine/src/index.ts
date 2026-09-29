@@ -123,7 +123,7 @@ const rules: readonly Rule[] = [
   {
     id: "school-name",
     pattern:
-      /^(school|school name|university|university name|college|college name|institution|institution name)$/i,
+      /^(school|school name|school or university|university|university name|college|college name|institution|institution name)$/i,
     semanticType: "SCHOOL_NAME",
   },
   { id: "gpa", pattern: /\bg\.?p\.?a\.?\b/i, semanticType: "GPA" },
@@ -360,7 +360,7 @@ const rules: readonly Rule[] = [
   },
   {
     id: "veteran",
-    pattern: /\b(veteran status|military status)\b/i,
+    pattern: /\b(veterans?'? status|military status)\b/i,
     semanticType: "VETERAN_STATUS",
     sensitive: true,
     highRisk: true,
@@ -419,7 +419,7 @@ const rules: readonly Rule[] = [
   {
     id: "employee-id",
     pattern:
-      /^(employee id|employee identifier|employee number)( if applicable)?$/i,
+      /^(employee id|employee identifier|employee number)(?:\s*\(?if applicable\)?)?$/i,
     semanticType: "EMPLOYEE_ID",
     sensitive: true,
     highRisk: true,
