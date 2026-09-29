@@ -14,9 +14,7 @@ export function element(controlId: string): Element | null {
 // Workday search/prompt inputs are query surfaces, not sources of truth. Typed
 // text is never treated as committed unless Workday exposes a selected item or
 // an explicit backing value for the component.
-function isWorkdayPromptControl(
-  node: Element | null,
-): node is HTMLInputElement {
+function isWorkdayPromptControl(node: Element | null): boolean {
   if (!(node instanceof HTMLInputElement)) return false;
 
   const compact = (value: unknown) =>
