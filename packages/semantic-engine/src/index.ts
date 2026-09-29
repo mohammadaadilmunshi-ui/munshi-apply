@@ -272,6 +272,7 @@ const rules: readonly Rule[] = [
     id: "salary",
     pattern: /\b(salary|compensation|pay expectation|desired pay)\b/i,
     semanticType: "SALARY_EXPECTATION",
+    sensitive: false,
     highRisk: true,
   },
   {
