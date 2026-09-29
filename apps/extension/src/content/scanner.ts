@@ -190,9 +190,11 @@ function singleChoiceCheckboxGroup(
   if (group.length < 2) return [];
 
   const scope =
-    element.closest("fieldset, [role='group'], [data-automation-id*='group' i]")
-    ?? element.parentElement?.parentElement
-    ?? element.parentElement;
+    element.closest(
+      "fieldset, [role='group'], [data-automation-id*='group' i]",
+    ) ??
+    element.parentElement?.parentElement ??
+    element.parentElement;
   const context = normalized(
     [
       scope?.querySelector("legend")?.textContent,
@@ -203,7 +205,11 @@ function singleChoiceCheckboxGroup(
       .filter(Boolean)
       .join(" "),
   );
-  if (/select all|check all|choose all|all that apply|any that apply/.test(context)) {
+  if (
+    /select all|check all|choose all|all that apply|any that apply/.test(
+      context,
+    )
+  ) {
     return [];
   }
   if (

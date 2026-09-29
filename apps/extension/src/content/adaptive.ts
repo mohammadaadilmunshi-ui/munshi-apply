@@ -1316,16 +1316,20 @@ function structuralRepeatMetadata(element: Element): {
     /^(work experience|employment|experience|education|school|websites?|certifications?|languages?)\s+(\d{1,3})$/i;
 
   let current: Element | null = element.parentElement;
-  for (let depth = 0; current && depth < 9; depth += 1, current = current.parentElement) {
+  for (
+    let depth = 0;
+    current && depth < 9;
+    depth += 1, current = current.parentElement
+  ) {
     const candidates: string[] = [];
     const aria = compactText(current.getAttribute("aria-label"));
     if (aria) candidates.push(aria);
 
     for (const child of Array.from(current.children)) {
       if (
-        /^H[1-6]$/.test(child.tagName)
-        || child.getAttribute("role") === "heading"
-        || child.tagName === "LEGEND"
+        /^H[1-6]$/.test(child.tagName) ||
+        child.getAttribute("role") === "heading" ||
+        child.tagName === "LEGEND"
       ) {
         const text = compactText(child.textContent);
         if (text) candidates.push(text);

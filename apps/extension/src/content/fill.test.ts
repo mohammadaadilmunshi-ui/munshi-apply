@@ -420,7 +420,7 @@ describe("guarded field filling", () => {
       '<label for="jurisdiction">Primary domicile jurisdiction</label>' +
       '<select id="jurisdiction" name="home_jurisdiction" role="combobox" required>' +
       '<option value="">Choose one</option><option>New Jersey</option>' +
-      '<option>New York</option><option>Pennsylvania</option></select>';
+      "<option>New York</option><option>Pennsylvania</option></select>";
     const question = scanDocument().questions[0]!;
     const result = await applyFillInstructions([
       {

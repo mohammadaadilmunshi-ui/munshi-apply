@@ -451,8 +451,16 @@ export const ReviewObservationSchema = z.object({
   redacted: z.boolean().default(false),
   repeatGroupId: z.string().nullable().optional(),
   repeatIndex: z.number().int().nonnegative().nullable().optional(),
-  artifactSha256: z.string().regex(/^[a-f0-9]{64}$/).nullable().optional(),
-  provenanceDigest: z.string().regex(/^[a-f0-9]{64}$/).nullable().optional(),
+  artifactSha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .nullable()
+    .optional(),
+  provenanceDigest: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .nullable()
+    .optional(),
 });
 export type ReviewObservation = z.infer<typeof ReviewObservationSchema>;
 

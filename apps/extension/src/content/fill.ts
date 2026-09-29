@@ -131,9 +131,9 @@ function fillRadio(element: HTMLInputElement, value: string): boolean {
 
 function checkboxCandidateLabel(element: HTMLInputElement): string {
   return (
-    compactText(inputLabel(element))
-    || compactText(element.getAttribute("aria-label"))
-    || compactText(element.value)
+    compactText(inputLabel(element)) ||
+    compactText(element.getAttribute("aria-label")) ||
+    compactText(element.value)
   );
 }
 
@@ -149,9 +149,11 @@ function singleChoiceCheckboxCandidates(
   if (group.length < 2) return [];
 
   const scope =
-    element.closest("fieldset, [role='group'], [data-automation-id*='group' i]")
-    ?? element.parentElement?.parentElement
-    ?? element.parentElement;
+    element.closest(
+      "fieldset, [role='group'], [data-automation-id*='group' i]",
+    ) ??
+    element.parentElement?.parentElement ??
+    element.parentElement;
   const context = normalized(
     [
       scope?.querySelector("legend")?.textContent,
@@ -161,7 +163,11 @@ function singleChoiceCheckboxCandidates(
       .filter(Boolean)
       .join(" "),
   );
-  if (/select all|check all|choose all|all that apply|any that apply/.test(context)) {
+  if (
+    /select all|check all|choose all|all that apply|any that apply/.test(
+      context,
+    )
+  ) {
     return [];
   }
   if (
@@ -195,8 +201,7 @@ function fillSingleChoiceCheckbox(
     }
   }
   return (
-    match.checked
-    && group.filter((candidate) => candidate.checked).length === 1
+    match.checked && group.filter((candidate) => candidate.checked).length === 1
   );
 }
 
@@ -525,15 +530,22 @@ function recipeValueCommitted(element: HTMLElement, value: string): boolean {
       const requested = normalized(value);
       const group = singleChoiceCheckboxCandidates(element);
       if (
-        group.length > 1
-        && !["true", "yes", "1", "checked", "false", "no", "0", "unchecked"].includes(
-          requested,
-        )
+        group.length > 1 &&
+        ![
+          "true",
+          "yes",
+          "1",
+          "checked",
+          "false",
+          "no",
+          "0",
+          "unchecked",
+        ].includes(requested)
       ) {
         const checked = group.filter((candidate) => candidate.checked);
         return (
-          checked.length === 1
-          && normalized(checkboxCandidateLabel(checked[0]!)) === requested
+          checked.length === 1 &&
+          normalized(checkboxCandidateLabel(checked[0]!)) === requested
         );
       }
       const shouldCheck = ["true", "yes", "1", "checked"].includes(requested);

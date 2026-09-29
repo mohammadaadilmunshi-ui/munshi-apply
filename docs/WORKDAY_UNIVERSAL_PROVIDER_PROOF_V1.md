@@ -82,6 +82,7 @@ Optional provider fields such as employment location or field of study remain bl
 These are protected/self-ID domains. They may be filled only from explicit secure user choices. No provider-neutral heuristic may infer them.
 
 The disability form also contains ordinary structural fields:
+
 - SELF_ID_NAME: canonical legal full name
 - SELF_ID_DATE: current execution date
 - EMPLOYEE_ID: optional and blank unless explicitly known
@@ -97,6 +98,7 @@ Workday support must be based on component shape and provider metadata, not empl
 ### Search-backed prompt / combobox
 
 For Workday prompt controls:
+
 1. focus/click the control;
 2. enter the canonical query;
 3. wait for the popup/listbox identified by aria-controls / Workday data-automation-id;
@@ -110,6 +112,7 @@ Do not treat typed search text as a committed answer.
 ### Segmented phone
 
 Treat the four possible components independently:
+
 - device type;
 - country phone code;
 - phone number;
@@ -143,6 +146,7 @@ At Review, stop preparation and emit a canonical review snapshot. Never cross FI
 Before submit authority is issued, compare the provider Review page against the immutable plan and candidate truth.
 
 Block if any of these occur:
+
 - first/middle/last name duplication or recombination that differs from canonical legal-name parts;
 - phone digits differ from canonical phone;
 - phone extension is populated when no extension fact exists;
@@ -159,6 +163,7 @@ Protected/self-ID values in logs and evidence must be redacted or represented on
 ## Provider-neutral execution contract
 
 The universal resolver emits a CanonicalFieldIntent:
+
 - semantic_type
 - sensitivity_class
 - canonical value or secure resolver ref
@@ -169,6 +174,7 @@ The universal resolver emits a CanonicalFieldIntent:
 - provenance/truth binding
 
 A provider recipe receives the intent and observed control, performs only mechanics, then returns:
+
 - FILLED / SKIPPED_OPTIONAL / NEEDS_INPUT / FAILED
 - interaction strategy
 - provider verification evidence
@@ -179,6 +185,7 @@ This same contract must be usable by Workday, Greenhouse, Lever, Ashby, SmartRec
 ## Test matrix
 
 Add an employer-neutral Workday fixture that models:
+
 1. My Information: referral prompt, previous employee, country, legal name, address, segmented phone.
 2. My Experience: two employment rows, two education rows, resume, websites.
 3. Application Questions: location eligibility, age threshold, sponsorship, salary.
@@ -187,6 +194,7 @@ Add an employer-neutral Workday fixture that models:
 6. Review: rendered summary followed by a final submit button.
 
 Required regressions:
+
 - phone device type cannot satisfy phone number;
 - phone number cannot fill extension;
 - country code is selected independently;

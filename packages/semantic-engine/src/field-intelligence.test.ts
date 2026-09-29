@@ -82,10 +82,7 @@ describe("semantic field equivalence", () => {
       matchedRule: "phone-device-type",
     });
     expect(
-      classifyQuestion(
-        "Country Phone Code",
-        "phoneNumber--countryPhoneCode",
-      ),
+      classifyQuestion("Country Phone Code", "phoneNumber--countryPhoneCode"),
     ).toMatchObject({
       semanticType: "PHONE_COUNTRY_CODE",
     });
@@ -103,13 +100,13 @@ describe("semantic field equivalence", () => {
   });
 
   it("classifies common eligibility, self-id, and legal application prompts", () => {
-    expect(
-      classifyQuestion("Are you at least 18 years of age?"),
-    ).toMatchObject({
-      semanticType: "AGE_18_PLUS",
-      sensitive: true,
-      requiresReview: true,
-    });
+    expect(classifyQuestion("Are you at least 18 years of age?")).toMatchObject(
+      {
+        semanticType: "AGE_18_PLUS",
+        sensitive: true,
+        requiresReview: true,
+      },
+    );
     expect(
       classifyQuestion(
         "Are you eligible to work in the location in which this position is located?",
@@ -126,9 +123,7 @@ describe("semantic field equivalence", () => {
       sensitive: true,
       requiresReview: true,
     });
-    expect(
-      classifyQuestion("Employee ID (if applicable)"),
-    ).toMatchObject({
+    expect(classifyQuestion("Employee ID (if applicable)")).toMatchObject({
       semanticType: "EMPLOYEE_ID",
       sensitive: true,
       requiresReview: true,
@@ -159,6 +154,4 @@ describe("semantic field equivalence", () => {
       semanticType: "SELF_ID_DATE",
     });
   });
-
-
 });

@@ -389,8 +389,6 @@ describe("AutoPilot page-state scanner", () => {
     });
   });
 
-
-
   it("keeps Voluntary Disclosures distinct from self-identification semantics", () => {
     document.body.innerHTML = `
       <main>
@@ -442,7 +440,6 @@ describe("AutoPilot page-state scanner", () => {
       expect.objectContaining({ action: "FINAL_SUBMIT" }),
     );
   });
-
 
   it("binds repeated Workday-style cards from structural row headings when ids are unindexed", () => {
     document.body.innerHTML = `
@@ -499,7 +496,6 @@ describe("AutoPilot page-state scanner", () => {
     expect(employers[0]?.repeatGroupId).not.toBe(schools[0]?.repeatGroupId);
   });
 
-
   it("models explicit check-one checkbox sets as one logical choice group", () => {
     document.body.innerHTML = `
       <main>
@@ -553,5 +549,4 @@ describe("AutoPilot page-state scanner", () => {
       result.questions.filter((question) => question.fieldName === "skills"),
     ).toHaveLength(2);
   });
-
 });

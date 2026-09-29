@@ -82,9 +82,11 @@ Universal Brain must prove:
 The Workday driver must support component classes, not employer selectors.
 
 ### Search-backed prompt
+
 Typed search text is not a committed answer.
 
 Required sequence:
+
 1. focus/open;
 2. type query;
 3. bind popup/listbox through ARIA or Workday component metadata;
@@ -94,15 +96,19 @@ Required sequence:
 7. verify scanner satisfied=true and invalid=false.
 
 ### Segmented phone
+
 Treat device type, country code, number, and extension independently.
 
 ### Choice controls
+
 Native selects, custom Workday selectors, radio groups, and checkbox groups require exact choice matching plus post-action verification.
 
 ### Dates
+
 Use canonical date values, provider formatting, blur, and backing-value verification.
 
 ### Repeated groups
+
 Employment, education, certifications, languages, websites, and similar repeated containers require repeatGroupId + repeatIndex binding. No semantic-only cross-row fill.
 
 ## Gate 4 — page progression
@@ -121,6 +127,7 @@ Typical Workday sequence can include:
 The labels may vary. State recognition must come from observed page semantics and navigation boundaries, not one tenant's text.
 
 At Review:
+
 - preparation stops;
 - no final submit control is clicked;
 - a review snapshot is produced.

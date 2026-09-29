@@ -133,5 +133,4 @@ describe("plan runtime provider-backed evidence", () => {
     expect(protectedField?.satisfied).toBe(true);
     expect(protectedField?.value_digest).toMatch(/^[0-9a-f]{64}$/);
   });
-
 });

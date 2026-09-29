@@ -10,46 +10,54 @@ export function element(controlId: string): Element | null {
   return resolveControlElement(controlId)?.element ?? null;
 }
 
-
 // WORKDAY_SELECTED_PROMPT_VERIFIER_V2
 // Workday search/prompt inputs are query surfaces, not sources of truth. Typed
 // text is never treated as committed unless Workday exposes a selected item or
 // an explicit backing value for the component.
-function isWorkdayPromptControl(node: Element | null): node is HTMLInputElement {
+function isWorkdayPromptControl(
+  node: Element | null,
+): node is HTMLInputElement {
   if (!(node instanceof HTMLInputElement)) return false;
 
   const compact = (value: unknown) =>
-    String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+    String(value || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
   const host = compact(window.location.hostname);
   const role = compact(node.getAttribute("role"));
   const popup = compact(node.getAttribute("aria-haspopup"));
   const autocomplete = compact(node.getAttribute("aria-autocomplete"));
-  const descriptor = compact([
-    node.getAttribute("data-automation-id"),
-    node.parentElement?.getAttribute("data-automation-id"),
-    node.closest("[data-automation-id]")?.getAttribute("data-automation-id"),
-  ].filter(Boolean).join(" "));
+  const descriptor = compact(
+    [
+      node.getAttribute("data-automation-id"),
+      node.parentElement?.getAttribute("data-automation-id"),
+      node.closest("[data-automation-id]")?.getAttribute("data-automation-id"),
+    ]
+      .filter(Boolean)
+      .join(" "),
+  );
 
   const promptShape =
-    role === "combobox"
-    || ["listbox", "tree", "grid"].includes(popup)
-    || ["list", "both"].includes(autocomplete)
-    || /(?:^|\b)(prompt|search|lookup|typeahead)(?:\b|$)/.test(descriptor);
+    role === "combobox" ||
+    ["listbox", "tree", "grid"].includes(popup) ||
+    ["list", "both"].includes(autocomplete) ||
+    /(?:^|\b)(prompt|search|lookup|typeahead)(?:\b|$)/.test(descriptor);
 
   const workdaySurface =
-    host.includes("myworkdayjobs")
-    || host.includes("myworkdaysite")
-    || Boolean(
+    host.includes("myworkdayjobs") ||
+    host.includes("myworkdaysite") ||
+    Boolean(
       node.closest(
-        '[data-automation-id*="prompt" i],'
-        + '[data-automation-id*="search" i],'
-        + '[data-automation-id*="lookup" i]',
+        '[data-automation-id*="prompt" i],' +
+          '[data-automation-id*="search" i],' +
+          '[data-automation-id*="lookup" i]',
       ),
-    )
-    || Boolean(
+    ) ||
+    Boolean(
       document.querySelector(
-        '[data-automation-id="promptOption"],'
-        + '[data-automation-id^="selectedItem"]',
+        '[data-automation-id="promptOption"],' +
+          '[data-automation-id^="selectedItem"]',
       ),
     );
 
@@ -61,11 +69,11 @@ function singleChoiceCheckboxSelectedValue(
   options: readonly string[] | undefined,
 ): string {
   if (
-    !(node instanceof HTMLInputElement)
-    || node.type !== "checkbox"
-    || !node.name
-    || !Array.isArray(options)
-    || options.length < 2
+    !(node instanceof HTMLInputElement) ||
+    node.type !== "checkbox" ||
+    !node.name ||
+    !Array.isArray(options) ||
+    options.length < 2
   ) {
     return "";
   }
@@ -75,25 +83,30 @@ function singleChoiceCheckboxSelectedValue(
     root.querySelectorAll("input[type='checkbox']"),
   ).filter(
     (candidate): candidate is HTMLInputElement =>
-      candidate instanceof HTMLInputElement
-      && candidate.name === node.name
-      && candidate.checked,
+      candidate instanceof HTMLInputElement &&
+      candidate.name === node.name &&
+      candidate.checked,
   );
   if (candidates.length !== 1) return "";
   const selected = candidates[0]!;
   const label = Array.from(selected.labels ?? [])
-    .map((item) => String(item.textContent || "").replace(/\s+/g, " ").trim())
+    .map((item) =>
+      String(item.textContent || "")
+        .replace(/\s+/g, " ")
+        .trim(),
+    )
     .filter(Boolean)
     .join(" ");
-  const fallback =
-    selected.getAttribute("aria-label")
-    || selected.value
-    || "";
-  const value = String(label || fallback).replace(/\s+/g, " ").trim();
+  const fallback = selected.getAttribute("aria-label") || selected.value || "";
+  const value = String(label || fallback)
+    .replace(/\s+/g, " ")
+    .trim();
   return options.some(
     (option) =>
-      String(option || "").replace(/\s+/g, " ").trim().toLowerCase()
-      === value.toLowerCase(),
+      String(option || "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase() === value.toLowerCase(),
   )
     ? value
     : "";
@@ -103,11 +116,13 @@ function workdaySelectedPromptValue(node: Element | null): string {
   if (!isWorkdayPromptControl(node)) return "";
 
   const compact = (value: unknown) =>
-    String(value || "").replace(/\s+/g, " ").trim();
+    String(value || "")
+      .replace(/\s+/g, " ")
+      .trim();
   const direct = compact(
-    node.getAttribute("data-value")
-    || node.getAttribute("aria-valuetext")
-    || "",
+    node.getAttribute("data-value") ||
+      node.getAttribute("aria-valuetext") ||
+      "",
   );
   if (direct) return direct;
 
@@ -117,26 +132,30 @@ function workdaySelectedPromptValue(node: Element | null): string {
       : item.querySelector('[data-automation-id="promptOption"]');
     const candidate = prompt || item;
     return compact(
-      candidate.getAttribute("data-automation-label")
-      || candidate.getAttribute("aria-label")
-      || candidate.getAttribute("title")
-      || candidate.textContent
-      || "",
+      candidate.getAttribute("data-automation-label") ||
+        candidate.getAttribute("aria-label") ||
+        candidate.getAttribute("title") ||
+        candidate.textContent ||
+        "",
     );
   };
 
   const scopes: Element[] = [];
   let scope: Element | null = node.parentElement;
-  for (let depth = 0; scope && depth < 10; depth += 1, scope = scope.parentElement) {
+  for (
+    let depth = 0;
+    scope && depth < 10;
+    depth += 1, scope = scope.parentElement
+  ) {
     scopes.push(scope);
   }
 
   for (const candidateScope of scopes) {
     const selected = Array.from(
       candidateScope.querySelectorAll(
-        '[data-automation-id^="selectedItem"],'
-        + '[role="option"][aria-selected="true"],'
-        + '[data-automation-id="promptOption"][aria-selected="true"]',
+        '[data-automation-id^="selectedItem"],' +
+          '[role="option"][aria-selected="true"],' +
+          '[data-automation-id="promptOption"][aria-selected="true"]',
       ),
     );
     if (!selected.length) continue;
@@ -148,10 +167,7 @@ function workdaySelectedPromptValue(node: Element | null): string {
 }
 
 type BrowserSensitivityClass =
-  | "NORMAL"
-  | "PROTECTED"
-  | "SELF_ID"
-  | "POST_OFFER";
+  "NORMAL" | "PROTECTED" | "SELF_ID" | "POST_OFFER";
 
 const selfIdSemantics = new Set([
   "GENDER",
@@ -204,12 +220,10 @@ export async function describeForm() {
           value = workdaySelectedValue;
         } else if (node.type === "checkbox") {
           value =
-            singleChoiceCheckboxSelectedValue(node, control?.options)
-            || String(node.checked);
+            singleChoiceCheckboxSelectedValue(node, control?.options) ||
+            String(node.checked);
         } else {
-          value = node.type === "radio"
-            ? String(node.checked)
-            : node.value;
+          value = node.type === "radio" ? String(node.checked) : node.value;
         }
       } else if (
         node instanceof HTMLSelectElement ||

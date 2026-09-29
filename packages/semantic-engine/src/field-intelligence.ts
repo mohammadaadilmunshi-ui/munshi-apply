@@ -39,8 +39,7 @@ const aliasRules: readonly AliasRule[] = [
   },
   {
     id: "phone-device-type",
-    pattern:
-      /^(?:phone|telephone|mobile)(?: device)? type(?: select one)?$/,
+    pattern: /^(?:phone|telephone|mobile)(?: device)? type(?: select one)?$/,
     semanticType: "PHONE_DEVICE_TYPE",
     confidence: 0.99,
   },
@@ -119,8 +118,7 @@ const metadataRules: readonly AliasRule[] = [
   },
   {
     id: "metadata-phone-device-type",
-    pattern:
-      /\b(?:phone type|phonetype|phone device type|device type)\b/,
+    pattern: /\b(?:phone type|phonetype|phone device type|device type)\b/,
     semanticType: "PHONE_DEVICE_TYPE",
     confidence: 0.99,
   },

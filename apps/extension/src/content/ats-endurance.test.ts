@@ -326,8 +326,8 @@ describe("ATS-shaped browser endurance matrix", () => {
     if (process.env.MUNSHI_PERF_STRICT === "1") {
       expect(performance.now() - startedAt).toBeLessThan(5_000);
     }
-  // The strict performance assertion above remains the real performance gate.
-  // Give ordinary CI enough wall-clock headroom for slower jsdom hosts so this
-  // endurance case does not become a machine-speed flake.
+    // The strict performance assertion above remains the real performance gate.
+    // Give ordinary CI enough wall-clock headroom for slower jsdom hosts so this
+    // endurance case does not become a machine-speed flake.
   }, 20_000);
 });

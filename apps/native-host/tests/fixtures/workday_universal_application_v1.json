@@ -124,23 +124,12 @@
           "kind": "education",
           "count": 2,
           "requiredBinding": true,
-          "semantics": [
-            "SCHOOL_NAME",
-            "DEGREE",
-            "FIELD_OF_STUDY"
-          ]
+          "semantics": ["SCHOOL_NAME", "DEGREE", "FIELD_OF_STUDY"]
         }
       ],
-      "optionalGroups": [
-        "CERTIFICATIONS",
-        "LANGUAGES"
-      ],
-      "artifacts": [
-        "RESUME"
-      ],
-      "repeatedSimple": [
-        "WEBSITE"
-      ],
+      "optionalGroups": ["CERTIFICATIONS", "LANGUAGES"],
+      "artifacts": ["RESUME"],
+      "repeatedSimple": ["WEBSITE"],
       "navigation": "NEXT"
     },
     {
