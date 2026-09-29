@@ -29,9 +29,10 @@ class _Element:
         return {
             "tag": "input",
             "type": "text",
-            "role": "",
-            "hasPopup": "",
-            "autocomplete": "off",
+            "role": "combobox",
+            "hasPopup": "listbox",
+            "autocomplete": "list",
+            "automationId": "promptSearch",
             "id": "source--source",
             "name": "",
         }
@@ -46,7 +47,7 @@ class _Element:
         self.types.append((value, delay))
 
 
-def test_workday_referral_emits_space_backspace_nudge(monkeypatch):
+def test_workday_referral_uses_exact_option_without_space_backspace_nudge(monkeypatch):
     page = _Page()
     adapter = PlanBrowserAdapter(
         page,
@@ -56,16 +57,24 @@ def test_workday_referral_emits_space_backspace_nudge(monkeypatch):
     )
     element = _Element()
     monkeypatch.setattr(adapter, "_element", lambda _control_id: element)
+
+    exact_option_calls = []
+
+    def _click_exact(value, **kwargs):
+        exact_option_calls.append((value, kwargs.get("trigger")))
+        return value == "Indeed"
+
+    monkeypatch.setattr(adapter, "_workday_click_exact_option", _click_exact)
+
+    # Prompt verification happens before typing, immediately after exact option
+    # activation, and once more after blur. Only provider-selected state counts.
+    committed = iter((False, True, True))
     monkeypatch.setattr(
         adapter,
-        "_workday_click_exact_option",
-        lambda value, **kwargs: value == "Indeed",
+        "_workday_prompt_committed",
+        lambda _element, _answer: next(committed),
     )
-    monkeypatch.setattr(
-        adapter,
-        "_wait_for_control_committed",
-        lambda _control_id: True,
-    )
+
     result = adapter._workday_fill_control(
         control={"controlId": "ctl-ref", "kind": "INPUT"},
         question={
@@ -74,6 +83,13 @@ def test_workday_referral_emits_space_backspace_nudge(monkeypatch):
         },
         value="Indeed",
     )
+
     assert result["status"] == "FILLED"
-    assert element.types[-2:] == [("Indeed", 10), (" ", 25)]
-    assert element.presses[-1] == "Backspace"
+    assert result["strategy"] == "WORKDAY_PROVIDER_PROMPT"
+    assert result["verification"] == "POST_ACTION_PROVIDER_VERIFIED"
+    assert exact_option_calls == [("Indeed", element)]
+
+    # The only typed text is the canonical query. The old blind
+    # "space + Backspace" provider nudge must never return.
+    assert element.types == [("Indeed", 75)]
+    assert element.presses == ["Control+A", "Backspace", "Tab"]
