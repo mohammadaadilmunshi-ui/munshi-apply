@@ -191,7 +191,7 @@ export async function describeForm() {
     page.questions.map(async (question) => {
       const resolved = resolveControlElement(question.controlId);
       const control = resolved?.control;
-      const node = resolved?.element;
+      const node: Element | null = resolved?.element ?? null;
       const workdayPrompt = isWorkdayPromptControl(node);
       const workdaySelectedValue = workdaySelectedPromptValue(node);
       const sensitivityClass = browserSensitivityClass(
