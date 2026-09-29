@@ -20,6 +20,31 @@ describe("scanner application page identity", () => {
     expect(first.documentId).not.toBe(second.documentId);
   });
 
+  it("changes page identity across SPA application steps on the same URL", () => {
+    window.history.replaceState({}, "", "/apply?job=123");
+    document.body.innerHTML = `
+      <main>
+        <h2>My Information</h2>
+        <label>First Name <input name="first_name" /></label>
+        <button type="button">Save and Continue</button>
+      </main>
+    `;
+    const personal = scanDocument();
+
+    document.body.innerHTML = `
+      <main>
+        <h2>My Experience</h2>
+        <label>Employer <input name="employer" /></label>
+        <button type="button">Save and Continue</button>
+      </main>
+    `;
+    const experience = scanDocument();
+
+    expect(personal.applicationState).toBe("PERSONAL");
+    expect(experience.applicationState).toBe("EXPERIENCE");
+    expect(personal.pageId).not.toBe(experience.pageId);
+    expect(personal.documentId).toBe(experience.documentId);
+  });
   it("keeps page identity stable when only tracking parameters change", () => {
     window.history.replaceState({}, "", "/apply?job=123&utm_source=a");
     const first = scanDocument();
