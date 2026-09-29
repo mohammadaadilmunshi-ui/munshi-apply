@@ -1,12 +1,27 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { scanDocument } from "./scanner";
+
+const visibleRectangle: DOMRect = {
+  bottom: 40,
+  height: 30,
+  left: 10,
+  right: 210,
+  top: 10,
+  width: 200,
+  x: 10,
+  y: 10,
+  toJSON: () => ({}),
+};
 
 describe("scanner application page identity", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
     document.title = "Application";
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      visibleRectangle,
+    );
   });
 
   it("changes page identity when an explicit job query changes", () => {
