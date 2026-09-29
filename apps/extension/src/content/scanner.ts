@@ -559,14 +559,15 @@ function validationState(element: Element): {
   validationMessage: string;
 } {
   const ariaInvalid = element.getAttribute("aria-invalid") === "true";
+  const checkboxGroup =
+    element instanceof HTMLInputElement && element.type === "checkbox"
+      ? singleChoiceCheckboxGroup(element)
+      : [];
   const singleChoiceCheckboxSatisfied =
-    element instanceof HTMLInputElement &&
-    element.type === "checkbox" &&
-    singleChoiceCheckboxGroup(element).length > 1 &&
-    singleChoiceCheckboxGroup(element).some((candidate) => candidate.checked);
+    checkboxGroup.length > 1 &&
+    checkboxGroup.some((candidate) => candidate.checked);
   const candidate =
-    !ariaInvalid &&
-    singleChoiceCheckboxSatisfied
+    !ariaInvalid && singleChoiceCheckboxSatisfied
       ? ""
       : element instanceof HTMLInputElement ||
           element instanceof HTMLSelectElement ||
