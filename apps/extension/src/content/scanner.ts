@@ -1297,7 +1297,7 @@ export function scanDocument(): ApplicationPage {
     questions.push(question);
   }
   const url = new URL(window.location.href);
-  const pageSignature = `${applicationUrlIdentityKey(url.href)}|${document.title}`;
+  const documentSignature = `${applicationUrlIdentityKey(url.href)}|${document.title}`;
   const navigation = navigationCandidates(entries);
   const securityCheckpoint = detectSecurityCheckpoint();
   const finalSubmissionBoundary = navigation.some(
@@ -1310,11 +1310,16 @@ export function scanDocument(): ApplicationPage {
     securityCheckpoint,
     finalSubmissionBoundary,
   });
+  // Workday and similar ATSs are SPAs: several application steps can share the
+  // same URL and document title. Keep documentId stable for the browser
+  // document, but make pageId step-aware so preparation accounting and
+  // cross-step evidence never collapse distinct application steps into one.
+  const pageSignature = `${documentSignature}|${applicationState}`;
   const page: ApplicationPage = {
     pageId: `page-${hash(pageSignature)}`,
     tabId: -1,
     frameId: 0,
-    documentId: `doc-${hash(pageSignature)}`,
+    documentId: `doc-${hash(documentSignature)}`,
     url: url.href,
     title: document.title,
     pageContext: compactText(document.body?.textContent).slice(0, 20_000),
