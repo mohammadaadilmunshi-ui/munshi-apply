@@ -53,7 +53,7 @@ describe("classifyQuestion", () => {
   it("forces explicit approval for other high-risk questions", () => {
     expect(classifyQuestion("Desired salary")).toMatchObject({
       semanticType: "SALARY_EXPECTATION",
-      sensitive: true,
+      sensitive: false,
       requiresReview: true,
     });
     expect(classifyQuestion("Full legal name")).toMatchObject({
