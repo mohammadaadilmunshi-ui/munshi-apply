@@ -111,7 +111,9 @@ function singleChoiceCheckboxSelectedValue(
 }
 
 function workdaySelectedPromptValue(node: Element | null): string {
-  if (!isWorkdayPromptControl(node)) return "";
+  if (!(node instanceof HTMLInputElement) || !isWorkdayPromptControl(node)) {
+    return "";
+  }
 
   const compact = (value: unknown) =>
     String(value || "")
