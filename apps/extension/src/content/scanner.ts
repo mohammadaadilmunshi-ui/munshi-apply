@@ -166,6 +166,62 @@ function radioOptionLabel(element: HTMLInputElement): string {
   );
 }
 
+function checkboxOptionLabel(element: HTMLInputElement): string {
+  return (
+    inputLabel(element) ||
+    compactText(element.getAttribute("aria-label")) ||
+    compactText(element.value)
+  );
+}
+
+function singleChoiceCheckboxGroup(
+  element: HTMLInputElement,
+): HTMLInputElement[] {
+  if (element.type !== "checkbox" || !element.name) return [];
+  const root = element.getRootNode();
+  const candidates =
+    root instanceof Document || root instanceof ShadowRoot
+      ? Array.from(root.querySelectorAll("input[type='checkbox']"))
+      : [];
+  const group = candidates.filter(
+    (candidate): candidate is HTMLInputElement =>
+      candidate instanceof HTMLInputElement && candidate.name === element.name,
+  );
+  if (group.length < 2) return [];
+
+  const scope =
+    element.closest(
+      "fieldset, [role='group'], [data-automation-id*='group' i]",
+    ) ??
+    element.parentElement?.parentElement ??
+    element.parentElement;
+  const context = normalized(
+    [
+      scope?.querySelector("legend")?.textContent,
+      scope?.getAttribute("aria-label"),
+      scope?.textContent,
+      nearbyPromptText(element),
+    ]
+      .filter(Boolean)
+      .join(" "),
+  );
+  if (
+    /select all|check all|choose all|all that apply|any that apply/.test(
+      context,
+    )
+  ) {
+    return [];
+  }
+  if (
+    !/(?:check|select|choose)(?: only)? one(?: of)?|one of the (?:boxes|options|choices)/.test(
+      context,
+    )
+  ) {
+    return [];
+  }
+  return group;
+}
+
 function groupLegend(element: Element): string {
   const fieldset = element.closest("fieldset");
   return compactText(fieldset?.querySelector(":scope > legend")?.textContent);
@@ -486,6 +542,12 @@ function optionsFor(element: Element): string[] {
   if (element instanceof HTMLInputElement && element.type === "radio") {
     return radioGroup(element).map(radioOptionLabel).filter(Boolean);
   }
+  if (element instanceof HTMLInputElement && element.type === "checkbox") {
+    const group = singleChoiceCheckboxGroup(element);
+    if (group.length > 1) {
+      return group.map(checkboxOptionLabel).filter(Boolean);
+    }
+  }
   if (element.getAttribute("role") === "combobox") {
     return controlledComboboxOptions(element);
   }
@@ -497,12 +559,21 @@ function validationState(element: Element): {
   validationMessage: string;
 } {
   const ariaInvalid = element.getAttribute("aria-invalid") === "true";
+  const checkboxGroup =
+    element instanceof HTMLInputElement && element.type === "checkbox"
+      ? singleChoiceCheckboxGroup(element)
+      : [];
+  const singleChoiceCheckboxSatisfied =
+    checkboxGroup.length > 1 &&
+    checkboxGroup.some((candidate) => candidate.checked);
   const candidate =
-    element instanceof HTMLInputElement ||
-    element instanceof HTMLSelectElement ||
-    element instanceof HTMLTextAreaElement
-      ? compactText(element.validationMessage)
-      : "";
+    !ariaInvalid && singleChoiceCheckboxSatisfied
+      ? ""
+      : element instanceof HTMLInputElement ||
+          element instanceof HTMLSelectElement ||
+          element instanceof HTMLTextAreaElement
+        ? compactText(element.validationMessage)
+        : "";
   let ariaMessage = "";
   if (ariaInvalid) {
     const describedBy = element.getAttribute("aria-describedby");
@@ -570,7 +641,12 @@ function controlSatisfied(element: Element): boolean {
   if (validationState(element).invalid) return false;
   if (element instanceof HTMLInputElement) {
     if (element.type === "file") return Boolean(element.files?.length);
-    if (element.type === "checkbox") return element.checked;
+    if (element.type === "checkbox") {
+      const group = singleChoiceCheckboxGroup(element);
+      return group.length > 1
+        ? group.some((candidate) => candidate.checked)
+        : element.checked;
+    }
     if (element.type === "radio") {
       return radioGroup(element).some((candidate) => candidate.checked);
     }
@@ -843,6 +919,13 @@ function questionIdentity(entry: ControlEntry, question: Question): string {
   ) {
     return `radio|${entry.element.name}|${question.rawText}`;
   }
+  if (
+    entry.control.kind === "CHECKBOX" &&
+    entry.element instanceof HTMLInputElement &&
+    singleChoiceCheckboxGroup(entry.element).length > 1
+  ) {
+    return `checkbox-one|${entry.element.name}|${question.contextText}`;
+  }
   return entry.control.controlId;
 }
 
@@ -1040,6 +1123,9 @@ const personalTypes = new Set<SemanticType>([
   "COUNTRY",
   "EMAIL",
   "PHONE",
+  "PHONE_DEVICE_TYPE",
+  "PHONE_COUNTRY_CODE",
+  "PHONE_EXTENSION",
 ]);
 const educationTypes = new Set<SemanticType>([
   "EDUCATION",
@@ -1071,6 +1157,7 @@ const eeoTypes = new Set<SemanticType>([
   "DISABILITY_STATUS",
   "GENDER",
   "RACE_ETHNICITY",
+  "HISPANIC_LATINO",
   "EEO_SELF_ID",
 ]);
 const disclosureTypes = new Set<SemanticType>([
@@ -1085,6 +1172,31 @@ function hasQuestionType(
   types: ReadonlySet<SemanticType>,
 ): boolean {
   return questions.some((question) => types.has(question.semanticType));
+}
+
+function structuralPageState(): ApplicationState | null {
+  const headings = Array.from(
+    document.querySelectorAll("h1, h2, h3, [role='heading']"),
+  )
+    .filter(isVisible)
+    .map((element) => normalized(element.textContent))
+    .filter(Boolean);
+
+  for (const heading of headings) {
+    if (/^review(?: application)?$/.test(heading)) return "REVIEW";
+    if (
+      /^(?:self identify|self identification|voluntary self identification(?: of disability)?)$/.test(
+        heading,
+      )
+    ) {
+      return "EEO";
+    }
+    if (/^voluntary disclosures?$/.test(heading)) return "DISCLOSURES";
+    if (/^application questions?$/.test(heading)) return "QUESTIONS";
+    if (/^(?:my )?experience$/.test(heading)) return "EXPERIENCE";
+    if (/^(?:my |personal )?information$/.test(heading)) return "PERSONAL";
+  }
+  return null;
 }
 
 function inferApplicationState(input: {
@@ -1113,6 +1225,14 @@ function inferApplicationState(input: {
   ) {
     return "VERIFY_ACCOUNT";
   }
+
+  // Workday and other multi-step ATSs may reuse the same protected semantics on
+  // different pages. Prefer the active structural page heading before semantic
+  // fallbacks so "Voluntary Disclosures", "Self Identify", and "Review" remain
+  // distinct even when their field families overlap.
+  const structuralState = structuralPageState();
+  if (structuralState) return structuralState;
+
   if (input.finalSubmissionBoundary) return "SUBMISSION";
   if (
     input.navigation.some((candidate) => candidate.action === "REVIEW") ||
@@ -1177,7 +1297,7 @@ export function scanDocument(): ApplicationPage {
     questions.push(question);
   }
   const url = new URL(window.location.href);
-  const pageSignature = `${applicationUrlIdentityKey(url.href)}|${document.title}`;
+  const documentSignature = `${applicationUrlIdentityKey(url.href)}|${document.title}`;
   const navigation = navigationCandidates(entries);
   const securityCheckpoint = detectSecurityCheckpoint();
   const finalSubmissionBoundary = navigation.some(
@@ -1190,11 +1310,16 @@ export function scanDocument(): ApplicationPage {
     securityCheckpoint,
     finalSubmissionBoundary,
   });
+  // Workday and similar ATSs are SPAs: several application steps can share the
+  // same URL and document title. Keep documentId stable for the browser
+  // document, but make pageId step-aware so preparation accounting and
+  // cross-step evidence never collapse distinct application steps into one.
+  const pageSignature = `${documentSignature}|${applicationState}`;
   const page: ApplicationPage = {
     pageId: `page-${hash(pageSignature)}`,
     tabId: -1,
     frameId: 0,
-    documentId: `doc-${hash(pageSignature)}`,
+    documentId: `doc-${hash(documentSignature)}`,
     url: url.href,
     title: document.title,
     pageContext: compactText(document.body?.textContent).slice(0, 20_000),

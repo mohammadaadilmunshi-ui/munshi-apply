@@ -11,7 +11,6 @@ import hashlib
 import json
 import os
 import re
-import time
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
@@ -19,7 +18,12 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from .execution_policy import prepare_permissions, safe_evidence
-from .hunter_plan_semantic_bridge import answer_matches_question
+from .hunter_plan_semantic_bridge import (
+    answer_matches_question,
+    logical_field_fingerprint,
+    protected_answer_matches_question,
+)
+from .review_reconciliation_v1 import reconcile_provider_review
 from .universal_document_uploader import DocumentSpec, UniversalDocumentUploader
 
 RESUME_UPLOAD_ENV = "MUNSHI_APPLY_RESUME_UPLOAD_ENABLED"
@@ -93,10 +97,20 @@ class PlanBrowserAdapter:
         current_plan: Callable[[dict[str, Any]], bool],
         runtime_path: Path,
         cover_letter_reader: Callable[[dict[str, Any]], bytes] | None = None,
+        protected_value_resolver: Callable[
+            [dict[str, Any], dict[str, Any]], dict[str, Any]
+        ]
+        | None = None,
+        legal_attestation_authorizer: Callable[
+            [dict[str, Any], dict[str, Any]], dict[str, Any]
+        ]
+        | None = None,
     ) -> None:
         self.page = page
         self.artifact_reader = artifact_reader
         self.cover_letter_reader = cover_letter_reader
+        self.protected_value_resolver = protected_value_resolver
+        self.legal_attestation_authorizer = legal_attestation_authorizer
         self.current_plan = current_plan
         self.runtime_path = runtime_path
         self.on_event: Callable[[str, dict[str, Any]], None] = lambda _kind, _evidence: None
@@ -265,7 +279,8 @@ class PlanBrowserAdapter:
     def _workday_option_text(value: Any) -> str:
         return " ".join(str(value or "").split()).casefold()
 
-    def _workday_source_selected_value(self, element: Any, answer: str) -> str:
+    def _workday_prompt_selected_value(self, element: Any, answer: str) -> str:
+        """Return an exact provider-backed selected prompt value, never typed query text."""
         wanted = self._workday_option_text(answer)
         if not wanted:
             return ""
@@ -274,28 +289,54 @@ class PlanBrowserAdapter:
                 r"""(element, answer) => {
                   const compact = value => String(value || '').replace(/\s+/g, ' ').trim();
                   const wanted = compact(answer).toLowerCase();
-                  const promptValue = item => {
-                    const prompt = item.matches?.('[data-automation-id="promptOption"]')
+                  const direct = compact(
+                    element.getAttribute('data-value')
+                    || element.getAttribute('aria-valuetext')
+                    || ''
+                  );
+                  if (direct && direct.toLowerCase() === wanted) return direct;
+
+                  const optionValue = item => {
+                    const option = item.matches?.(
+                      '[data-automation-id="promptOption"],'
+                      + '[role="option"],[role="menuitem"]'
+                    )
                       ? item
-                      : item.querySelector?.('[data-automation-id="promptOption"]');
-                    const candidate = prompt || item;
+                      : item.querySelector?.(
+                          '[data-automation-id="promptOption"],'
+                          + '[role="option"],[role="menuitem"]'
+                        );
+                    const candidate = option || item;
                     return compact(
                       candidate.getAttribute?.('data-automation-label')
                       || candidate.getAttribute?.('aria-label')
                       || candidate.getAttribute?.('title')
+                      || candidate.getAttribute?.('data-value')
+                      || candidate.getAttribute?.('data-option-value')
                       || candidate.textContent
                       || ''
                     );
                   };
+
                   let scope = element.parentElement;
-                  for (let depth = 0; scope && depth < 9; depth += 1, scope = scope.parentElement) {
+                  for (
+                    let depth = 0;
+                    scope && depth < 10;
+                    depth += 1, scope = scope.parentElement
+                  ) {
                     const selected = Array.from(
-                      scope.querySelectorAll('[data-automation-id^="selectedItem"]')
+                      scope.querySelectorAll(
+                        '[data-automation-id^="selectedItem"],'
+                        + '[role="option"][aria-selected="true"],'
+                        + '[data-automation-id="promptOption"][aria-selected="true"]'
+                      )
                     );
                     if (!selected.length) continue;
-                    const matches = [...new Set(selected.map(promptValue).filter(Boolean))]
-                      .filter(value => value.toLowerCase() === wanted);
-                    return matches.length === 1 ? matches[0] : '';
+                    const matches = [...new Set(
+                      selected.map(optionValue).filter(Boolean)
+                    )].filter(value => value.toLowerCase() === wanted);
+                    if (matches.length === 1) return matches[0];
+                    if (matches.length > 1) return '';
                   }
                   return '';
                 }""",
@@ -305,25 +346,21 @@ class PlanBrowserAdapter:
             return ""
         return str(result or "").strip()
 
+    def _workday_source_selected_value(self, element: Any, answer: str) -> str:
+        """Compatibility wrapper for older production tests."""
+        return self._workday_prompt_selected_value(element, answer)
+
+    def _workday_prompt_committed(self, element: Any, answer: str) -> bool:
+        selected = self._workday_prompt_selected_value(element, answer)
+        return self._workday_option_text(selected) == self._workday_option_text(answer)
+
     def _workday_source_committed(self, element: Any, answer: str) -> bool:
-        selected = self._workday_source_selected_value(element, answer)
-        if self._workday_option_text(selected) == self._workday_option_text(answer):
-            return True
-        try:
-            state = element.evaluate(
-                r"""(element, answer) => {
-                  const compact = value => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
-                  const wanted = compact(answer);
-                  const dataValue = compact(element.getAttribute('data-value'));
-                  const ariaValue = compact(element.getAttribute('aria-valuetext'));
-                  const invalid = element.getAttribute('aria-invalid') === 'true';
-                  return !invalid && wanted && (dataValue === wanted || ariaValue === wanted);
-                }""",
-                str(answer),
-            )
-            return state is True
-        except Exception:
-            return False
+        """Compatibility wrapper for older production tests."""
+        return self._workday_prompt_committed(element, answer)
+
+    @staticmethod
+    def _workday_locator_id(value: str) -> str:
+        return str(value or "").replace("\\", "\\\\").replace('"', '\\"')
 
     def _workday_click_exact_option(
         self,
@@ -332,21 +369,34 @@ class PlanBrowserAdapter:
         trigger: Any | None = None,
         timeout_ms: int = 4500,
         poll_ms: int = 75,
-        press_enter: bool = True,
+        press_enter: bool = False,
     ) -> bool:
-        """Activate exactly one visible Workday option without fuzzy guessing."""
+        """Activate exactly one visible Workday option from the provider popup.
+
+        Keyboard guessing is intentionally excluded. The press_enter argument is
+        retained only for call-site compatibility and is ignored.
+        """
+        del press_enter
         wanted = self._workday_option_text(answer)
         if not wanted:
             return False
         timeout_ms = max(250, min(int(timeout_ms), 7000))
         poll_ms = max(25, min(int(poll_ms), 250))
 
-        if trigger is not None and press_enter:
+        controlled_ids: list[str] = []
+        if trigger is not None:
             try:
-                trigger.press("Enter")
-                self.page.wait_for_timeout(350)
+                raw_ids = trigger.evaluate(
+                    r"""element => [
+                      element.getAttribute('aria-controls') || '',
+                      element.getAttribute('aria-owns') || ''
+                    ].join(' ')"""
+                )
+                controlled_ids = [
+                    item for item in str(raw_ids or "").split() if item
+                ]
             except Exception:
-                pass
+                controlled_ids = []
 
         selector = (
             "[data-automation-id='promptOption'],"
@@ -356,7 +406,7 @@ class PlanBrowserAdapter:
             "[data-value],[data-option-value]"
         )
 
-        def metadata(candidate: Any) -> tuple[bool, list[Any], str]:
+        def candidate_metadata(candidate: Any) -> tuple[bool, list[Any], str]:
             try:
                 raw = candidate.evaluate(
                     r"""element => ({
@@ -377,27 +427,13 @@ class PlanBrowserAdapter:
                 )
             except Exception:
                 return False, [], ""
-
             if isinstance(raw, dict):
-                selected = bool(raw.get("selectedContainer"))
-                values = list(raw.get("values") or [])
-                token_id = str(raw.get("id") or "")
-                return selected, values, token_id
-            if isinstance(raw, (list, tuple)):
-                return False, list(raw), ""
+                return (
+                    bool(raw.get("selectedContainer")),
+                    list(raw.get("values") or []),
+                    str(raw.get("id") or ""),
+                )
             return False, [raw], ""
-
-        def is_exact(candidate: Any) -> tuple[bool, str]:
-            selected, values, token_id = metadata(candidate)
-            if selected:
-                return False, token_id
-            for raw in values:
-                if self._workday_option_text(raw) == wanted:
-                    return True, token_id
-                for line in str(raw or "").splitlines():
-                    if self._workday_option_text(line) == wanted:
-                        return True, token_id
-            return False, token_id
 
         def collect(locator: Any, limit: int) -> list[Any]:
             matches: list[Any] = []
@@ -408,10 +444,20 @@ class PlanBrowserAdapter:
                 return []
             for index in range(count):
                 candidate = locator.nth(index)
-                try:
+                with suppress(Exception):
                     if not candidate.is_visible():
                         continue
-                    exact, token_id = is_exact(candidate)
+                    selected_container, values, token_id = candidate_metadata(candidate)
+                    if selected_container:
+                        continue
+                    exact = any(
+                        self._workday_option_text(raw) == wanted
+                        or any(
+                            self._workday_option_text(line) == wanted
+                            for line in str(raw or "").splitlines()
+                        )
+                        for raw in values
+                    )
                     if not exact:
                         continue
                     token = token_id or f"candidate:{index}"
@@ -419,18 +465,20 @@ class PlanBrowserAdapter:
                         continue
                     seen.add(token)
                     matches.append(candidate)
-                except Exception:
-                    continue
             return matches
 
-        def selector_matches() -> list[Any]:
+        def candidates() -> list[Any]:
+            scoped: list[Any] = []
+            for popup_id in controlled_ids:
+                escaped = self._workday_locator_id(popup_id)
+                with suppress(Exception):
+                    popup = self.page.locator(f'[id="{escaped}"]')
+                    if popup.count() != 1 or not popup.first.is_visible():
+                        continue
+                    scoped.extend(collect(popup.first.locator(selector), 250))
+            if controlled_ids:
+                return scoped
             return collect(self.page.locator(selector), 300)
-
-        def exact_text_matches() -> list[Any]:
-            try:
-                return collect(self.page.get_by_text(str(answer), exact=True), 50)
-            except Exception:
-                return []
 
         def activate(candidate: Any) -> bool:
             target = candidate
@@ -442,7 +490,6 @@ class PlanBrowserAdapter:
                     target = nearest
             except Exception:
                 target = candidate
-
             try:
                 radio = target.locator(
                     "input[type='radio'],[data-automation-id='radioBtn']"
@@ -451,57 +498,41 @@ class PlanBrowserAdapter:
                     radio.first.click()
                 else:
                     target.click()
+                return True
             except Exception:
                 try:
                     candidate.click()
+                    return True
                 except Exception:
                     return False
-            return True
 
-        deadline = time.monotonic() + (timeout_ms / 1000.0)
-        arrow_sent = False
-        pass_number = 0
-        while time.monotonic() <= deadline:
-            matches = selector_matches()
+        attempts = max(1, (timeout_ms // poll_ms) + 1)
+        for attempt in range(attempts):
+            matches = candidates()
             if len(matches) == 1:
                 return activate(matches[0])
             if len(matches) > 1:
                 return False
-
-            matches = exact_text_matches()
-            if len(matches) == 1:
-                return activate(matches[0])
-            if len(matches) > 1:
-                return False
-
-            if trigger is not None and not arrow_sent and pass_number >= 1:
-                try:
-                    trigger.press("ArrowDown")
-                except Exception:
-                    pass
-                arrow_sent = True
-                self.page.wait_for_timeout(150)
-            else:
+            if attempt + 1 < attempts:
                 self.page.wait_for_timeout(poll_ms)
-            pass_number += 1
         return False
 
     def _workday_public_prompt_fallback(self, element: Any, answer: str) -> bool:
+        """One deterministic slow retype; no blind key or nudge behavior."""
         try:
             element.click()
             element.press("Control+A")
             element.press("Backspace")
-            for char in str(answer):
-                element.type(char, delay=90)
-            element.press("Enter")
-            self.page.wait_for_timeout(750)
+            element.type(str(answer), delay=90)
+            self.page.wait_for_timeout(250)
         except Exception:
             return False
-        if self._workday_click_exact_option(
-            str(answer), trigger=element, press_enter=False, timeout_ms=3500
+        if not self._workday_click_exact_option(
+            str(answer), trigger=element, timeout_ms=3500
         ):
-            return self._workday_source_committed(element, answer)
-        return False
+            return False
+        self.page.wait_for_timeout(250)
+        return self._workday_prompt_committed(element, answer)
 
     def _wait_for_control_committed(
         self,
@@ -561,6 +592,75 @@ class PlanBrowserAdapter:
             unique.append(candidate)
         return unique
 
+    def _legal_attestation_identity(
+        self,
+        *,
+        question: dict[str, Any],
+        control: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Build a hash-only identity for one exact legal-attestation surface."""
+        control_id = str(control.get("controlId") or "")
+        element = self._element(control_id)
+        surface = element.evaluate(
+            r"""element => {
+              const compact = value => String(value || '').replace(/\s+/g, ' ').trim();
+              let scope = element.closest(
+                'fieldset,section,[role="group"],[data-automation-id*="section" i]'
+              );
+              if (!scope) scope = element.parentElement;
+              const links = scope
+                ? Array.from(scope.querySelectorAll('a[href]')).slice(0, 20).map(link => ({
+                    href: new URL(link.getAttribute('href') || '', document.baseURI).href,
+                    label: compact(
+                      link.innerText
+                      || link.getAttribute('aria-label')
+                      || link.getAttribute('title')
+                      || ''
+                    ),
+                  }))
+                : [];
+              return {
+                scopeText: compact(scope?.innerText || ''),
+                links,
+              };
+            }"""
+        )
+        if not isinstance(surface, dict):
+            surface = {}
+        label = " ".join(
+            str(value or "").strip()
+            for value in (
+                question.get("rawText"),
+                question.get("label"),
+                control.get("label"),
+                control.get("ariaLabel"),
+            )
+            if str(value or "").strip()
+        )
+        fingerprint = logical_field_fingerprint(question, control)
+        if not fingerprint:
+            raise ValueError("Legal attestation has no stable logical field fingerprint")
+        terms_material = {
+            "scope_text_digest": digest(str(surface.get("scopeText") or "")),
+            "links": [
+                {
+                    "href_digest": digest(str(item.get("href") or "")),
+                    "label_digest": digest(str(item.get("label") or "")),
+                }
+                for item in list(surface.get("links") or [])
+                if isinstance(item, dict)
+            ],
+        }
+        return {
+            "semantic_type": "LEGAL_ATTESTATION",
+            "logical_field_fingerprint": digest(fingerprint),
+            "label_digest": digest(label),
+            "terms_identity_digest": digest(terms_material),
+            "provider_host": str(urlsplit(self.page.url).hostname or "")
+            .casefold()
+            .rstrip("."),
+        }
+
     def _workday_fill_control(
         self,
         *,
@@ -580,6 +680,7 @@ class PlanBrowserAdapter:
               role: element.getAttribute('role') || '',
               hasPopup: element.getAttribute('aria-haspopup') || '',
               autocomplete: element.getAttribute('aria-autocomplete') || '',
+              automationId: element.getAttribute('data-automation-id') || '',
               id: element.id || '',
               name: element.getAttribute('name') || ''
             })"""
@@ -589,7 +690,7 @@ class PlanBrowserAdapter:
         role = str(metadata.get("role") or "").casefold()
         has_popup = str(metadata.get("hasPopup") or "").casefold()
         aria_autocomplete = str(metadata.get("autocomplete") or "").casefold()
-        element_id = str(metadata.get("id") or "").casefold()
+        automation_id = str(metadata.get("automationId") or "").casefold()
         semantic = str(
             question.get("semanticType") or question.get("semantic_type") or ""
         ).upper()
@@ -597,21 +698,32 @@ class PlanBrowserAdapter:
             question.get("rawText") or question.get("question") or ""
         ).casefold()
         kind = str(control.get("kind") or "").upper()
-        source_prompt = semantic == "REFERRAL" or "source--source" in element_id
+        prompt_like = (
+            tag in {"input", "textarea"}
+            and (
+                role == "combobox"
+                or has_popup in {"listbox", "tree", "grid"}
+                or aria_autocomplete in {"list", "both"}
+                or any(
+                    token in automation_id
+                    for token in ("prompt", "search", "lookup", "typeahead")
+                )
+            )
+        )
         choice_like = (
             kind in {"SELECT", "COMBOBOX"}
             or role in {"combobox", "listbox"}
             or has_popup not in {"", "false", "none"}
             or aria_autocomplete in {"list", "both"}
-            or source_prompt
+            or prompt_like
             or "select one" in question_text
         )
 
-        if source_prompt and self._workday_source_committed(element, value):
+        if prompt_like and self._workday_prompt_committed(element, str(value)):
             return {
                 "status": "FILLED",
-                "reason": "Workday source prompt already has the exact selected item",
-                "strategy": "WORKDAY_SOURCE_SELECTED_ITEM",
+                "reason": "Workday prompt already has the exact selected item",
+                "strategy": "WORKDAY_PROMPT_SELECTED_ITEM",
                 "verification": "POST_ACTION_PROVIDER_VERIFIED",
             }
 
@@ -624,7 +736,7 @@ class PlanBrowserAdapter:
             }
         ):
             for candidate in self._workday_phone_variants(str(value)):
-                try:
+                with suppress(Exception):
                     element = self._element(control_id)
                     element.click()
                     element.press("Control+A")
@@ -644,8 +756,6 @@ class PlanBrowserAdapter:
                             "strategy": "WORKDAY_PHONE_CANONICAL_VARIANT",
                             "verification": "POST_ACTION_PROVIDER_VERIFIED",
                         }
-                except Exception:
-                    continue
             return {
                 "status": "FAILED",
                 "reason": "Workday rejected all equivalent canonical phone renderings",
@@ -660,71 +770,57 @@ class PlanBrowserAdapter:
             element.click()
             element.press("Control+A")
             element.press("Backspace")
-            element.type(str(value), delay=75 if source_prompt else 10)
-
-            if source_prompt:
-                element.type(" ", delay=25)
-                element.press("Backspace")
-                self.page.wait_for_timeout(150)
+            element.type(str(value), delay=75 if prompt_like else 10)
 
             if choice_like:
                 clicked = self._workday_click_exact_option(
-                    str(value), trigger=element, press_enter=True
+                    str(value), trigger=element, press_enter=False
                 )
-                committed_early = (
-                    self._workday_source_committed(element, value)
-                    if source_prompt
-                    else False
-                )
-
-                if source_prompt and clicked and not committed_early:
-                    for key in ("Enter", "Tab"):
-                        try:
-                            element.press(key)
-                        except Exception:
-                            pass
-                        self.page.wait_for_timeout(300)
-                        if self._workday_source_committed(element, value):
-                            committed_early = True
-                            break
-
-                if source_prompt and not committed_early:
-                    fallback_ok = self._workday_public_prompt_fallback(
+                if prompt_like:
+                    self.page.wait_for_timeout(250)
+                    committed_early = self._workday_prompt_committed(
                         element, str(value)
                     )
-                    clicked = clicked or fallback_ok
-                    committed_early = self._workday_source_committed(
-                        element, value
-                    )
-
-                if not clicked and not committed_early:
+                    if not committed_early:
+                        fallback_ok = self._workday_public_prompt_fallback(
+                            element, str(value)
+                        )
+                        clicked = clicked or fallback_ok
+                        committed_early = self._workday_prompt_committed(
+                            element, str(value)
+                        )
+                    if not clicked or not committed_early:
+                        return {
+                            "status": "FAILED",
+                            "reason": (
+                                "Workday exact prompt option did not reach "
+                                "provider-selected state"
+                            ),
+                            "strategy": "WORKDAY_PROVIDER_PROMPT",
+                            "verification": "FAILED_CLOSED",
+                        }
+                elif not clicked:
                     return {
                         "status": "FAILED",
-                        "reason": "Workday exact prompt option did not commit",
-                        "strategy": "WORKDAY_PROVIDER_PROMPT",
+                        "reason": "Workday exact provider option was unavailable",
+                        "strategy": "WORKDAY_PROVIDER_CHOICE",
                         "verification": "FAILED_CLOSED",
                     }
 
                 try:
                     element.press("Tab")
                 except Exception:
-                    try:
+                    with suppress(Exception):
                         self.page.keyboard.press("Tab")
-                    except Exception:
-                        pass
             else:
                 element.press("Tab")
 
             self.page.wait_for_timeout(500)
             committed = (
-                self._workday_source_committed(element, value)
-                if source_prompt
+                self._workday_prompt_committed(element, str(value))
+                if prompt_like
                 else self._wait_for_control_committed(control_id)
             )
-            if source_prompt and not committed:
-                committed = self._wait_for_control_committed(
-                    control_id, timeout_ms=3500
-                )
             return {
                 "status": "FILLED" if committed else "FAILED",
                 "reason": (
@@ -732,7 +828,7 @@ class PlanBrowserAdapter:
                     if committed
                     else "Workday kept the field uncommitted after exact provider interaction"
                 ),
-                "strategy": "WORKDAY_PROVIDER_PROMPT" if source_prompt
+                "strategy": "WORKDAY_PROVIDER_PROMPT" if prompt_like
                     else "WORKDAY_TRUSTED_PLAYWRIGHT",
                 "verification": (
                     "POST_ACTION_PROVIDER_VERIFIED" if committed else "FAILED_CLOSED"
@@ -1278,6 +1374,8 @@ class PlanBrowserAdapter:
         ]
         if self.current_plan(plan) is not True:
             raise ValueError("Hunter plan is stale")
+        accumulated_review_fields: dict[tuple[str, str], dict[str, Any]] = {}
+        prepared_page_ids: set[str] = set()
         for _step in range(10):
             # Cookie/CMP overlays are reversible UI chrome and may otherwise
             # intercept clicks. Dismiss them before each page scan/navigation step.
@@ -1377,23 +1475,77 @@ class PlanBrowserAdapter:
                     continue
                 if not control["visible"]:
                     continue
-                if question["sensitive"] or control.get("inputType") == "password":
-                    continue  # Protected execution requires a scoped resolver, never plain memory.
-                if not normal_fill_enabled:
+                if control.get("inputType") == "password":
                     continue
-                candidates = [
-                    a
-                    for a in plan["answers"]
-                    if a.get("autofill_allowed") is True
-                    and a.get("sensitivity_class") == "NORMAL"
-                    and a.get("execution_value") is not None
-                    and answer_matches_question(a, question, control)
-                ]
-                value = resolved_values.get(control["name"])
-                if value is None and len(candidates) == 1:
-                    value = candidates[0]["execution_value"]
-                if value is None:
-                    continue
+
+                semantic = str(
+                    question.get("semanticType")
+                    or question.get("semantic_type")
+                    or ""
+                ).upper()
+                sensitivity = str(
+                    question.get("sensitivityClass")
+                    or question.get("sensitivity_class")
+                    or ("PROTECTED" if question.get("sensitive") else "NORMAL")
+                ).upper()
+                protected_lane = bool(question.get("sensitive")) or sensitivity in {
+                    "PROTECTED",
+                    "SELF_ID",
+                }
+                legal_attestation_lane = semantic == "LEGAL_ATTESTATION"
+
+                if legal_attestation_lane:
+                    if self.legal_attestation_authorizer is None:
+                        continue
+                    identity = self._legal_attestation_identity(
+                        question=question,
+                        control=control,
+                    )
+                    proof = self.legal_attestation_authorizer(plan, identity)
+                    if (
+                        proof.get("authorized") is not True
+                        or dict(proof.get("attestation_identity") or {}) != identity
+                        or proof.get("submission_authority") is not False
+                    ):
+                        raise PermissionError(
+                            "Legal attestation authorization proof is invalid"
+                        )
+                    value = "true"
+                elif protected_lane:
+                    protected_candidates = [
+                        a
+                        for a in plan["answers"]
+                        if protected_answer_matches_question(a, question, control)
+                    ]
+                    if len(protected_candidates) != 1:
+                        continue
+                    if self.protected_value_resolver is None:
+                        raise RuntimeError(
+                            "Protected Workday/application answer requires scoped Hunter resolver"
+                        )
+                    resolved = self.protected_value_resolver(
+                        plan,
+                        dict(protected_candidates[0]),
+                    )
+                    value = resolved.get("value")
+                    if value is None:
+                        continue
+                else:
+                    if not normal_fill_enabled:
+                        continue
+                    candidates = [
+                        a
+                        for a in plan["answers"]
+                        if a.get("autofill_allowed") is True
+                        and a.get("sensitivity_class") == "NORMAL"
+                        and a.get("execution_value") is not None
+                        and answer_matches_question(a, question, control)
+                    ]
+                    value = resolved_values.get(control["name"])
+                    if value is None and len(candidates) == 1:
+                        value = candidates[0]["execution_value"]
+                    if value is None:
+                        continue
                 result = self._workday_fill_control(
                     control=control,
                     question=question,
@@ -1407,7 +1559,7 @@ class PlanBrowserAdapter:
                                 "controlId": control["controlId"],
                                 "frameId": control["frameId"],
                                 "value": str(value),
-                                "sensitive": False,
+                                "sensitive": bool(protected_lane),
                                 "approved": True,
                             }
                         ],
@@ -1417,12 +1569,53 @@ class PlanBrowserAdapter:
                     {"control_id": control["controlId"], "status": result["status"]},
                 )
             result = self._observe(plan)
+            page_id = str(result.get("page_id") or described["page"].get("pageId") or "")
+            if page_id:
+                prepared_page_ids.add(page_id)
+            for field in list(result.get("review_fields") or []):
+                if not isinstance(field, dict):
+                    continue
+                control_id = str(field.get("control_id") or "")
+                question_key = str(field.get("question_key") or "")
+                identity = control_id or question_key
+                if not identity:
+                    continue
+                accumulated_review_fields[(page_id, identity)] = safe_evidence(dict(field))
+            result["review_fields"] = list(accumulated_review_fields.values())
+            result["prepared_page_count"] = len(prepared_page_ids)
             if result["resume_uploaded"]:
                 self.on_event("RESUME_VERIFIED", {"sha256": result["resume_sha256"]})
             if isinstance(plan.get("cover_letter"), dict) and result.get("cover_letter_uploaded"):
                 self.on_event("COVER_LETTER_VERIFIED", {"sha256": result["cover_letter_sha256"]})
             navigation = self._scan()["page"]["navigationCandidates"]
             next_steps = [n for n in navigation if n["action"] == "NEXT" and not n["disabled"]]
+            final_submit_steps = [
+                n
+                for n in navigation
+                if n["action"] == "FINAL_SUBMIT" and not n["disabled"]
+            ]
+            if (
+                provider_for_url(self.page.url) == "WORKDAY"
+                and not result["unresolved"]
+                and not result["validation_errors"]
+                and len(final_submit_steps) == 1
+            ):
+                # Raw provider Review text is transient input only. The
+                # reconciler returns a digest and safe mismatch codes; the raw
+                # rendering is never placed in durable preparation evidence.
+                review_text = str(
+                    self.page.evaluate(
+                        "() => String(document.body?.innerText || '')"
+                    )
+                    or ""
+                )
+                result["review_reconciliation"] = reconcile_provider_review(
+                    review_text=review_text,
+                    prepared_fields=result["review_fields"],
+                    expected_resume_sha256=str(plan["resume"]["artifact_sha256"]),
+                    observed_resume_sha256=str(result.get("resume_sha256") or ""),
+                    final_submission_boundary=True,
+                )
             if result["unresolved"] or result["validation_errors"] or len(next_steps) != 1:
                 return result
             outcome = self.page.evaluate(

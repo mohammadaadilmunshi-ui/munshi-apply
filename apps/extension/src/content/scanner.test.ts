@@ -109,6 +109,31 @@ describe("AutoPilot page-state scanner", () => {
     expect(scanDocument().securityCheckpoint).toBeNull();
   });
 
+  it("observes segmented phone controls as four distinct semantic questions", () => {
+    document.body.innerHTML = `
+      <section aria-label="Phone">
+        <label for="phone-type">Phone Device Type *</label>
+        <select id="phone-type" name="phoneNumber--phoneType">
+          <option>Select One</option><option>Mobile</option>
+        </select>
+        <label for="phone-code">Country Phone Code *</label>
+        <div id="phone-code" role="combobox" aria-label="Country Phone Code"></div>
+        <label for="phone-number">Phone Number *</label>
+        <input id="phone-number" name="phoneNumber--phoneNumber" type="tel">
+        <label for="phone-ext">Phone Extension</label>
+        <input id="phone-ext" name="phoneNumber--extension" type="text">
+      </section>
+    `;
+
+    const semantics = scanDocument().questions.map(
+      (candidate) => candidate.semanticType,
+    );
+    expect(semantics).toContain("PHONE_DEVICE_TYPE");
+    expect(semantics).toContain("PHONE_COUNTRY_CODE");
+    expect(semantics).toContain("PHONE");
+    expect(semantics).toContain("PHONE_EXTENSION");
+  });
+
   it("ignores passive reCAPTCHA integration until a challenge is active", () => {
     document.body.innerHTML = `
       <label for="resume">Upload CV</label>
@@ -364,5 +389,193 @@ describe("AutoPilot page-state scanner", () => {
     });
   });
 
+  it("keeps Voluntary Disclosures distinct from self-identification semantics", () => {
+    document.body.innerHTML = `
+      <main>
+        <h2>Voluntary Disclosures</h2>
+        <label for="gender">What is your gender? *</label>
+        <select id="gender" required><option>Example choice</option></select>
+        <label for="race">What is your race/ethnicity? *</label>
+        <select id="race" required><option>Example choice</option></select>
+        <label for="veteran">What is your veterans status? *</label>
+        <select id="veteran" required><option>Example choice</option></select>
+        <button type="button">Save and Continue</button>
+      </main>
+    `;
 
+    const result = scanDocument();
+    expect(result.applicationState).toBe("DISCLOSURES");
+  });
+
+  it("recognizes Self Identify as the EEO/self-identification page", () => {
+    document.body.innerHTML = `
+      <main>
+        <h2>Self Identify</h2>
+        <label for="name">Name *</label>
+        <input id="name" required />
+        <p>Voluntary Self-Identification of Disability</p>
+        <label for="disability">Disability status *</label>
+        <select id="disability" required><option>Example choice</option></select>
+        <button type="button">Save and Continue</button>
+      </main>
+    `;
+
+    const result = scanDocument();
+    expect(result.applicationState).toBe("EEO");
+  });
+
+  it("keeps a structurally identified Review page distinct at final submit", () => {
+    document.body.innerHTML = `
+      <main>
+        <h2>Review</h2>
+        <p>Please review your application.</p>
+        <button type="submit">Submit Application</button>
+      </main>
+    `;
+
+    const result = scanDocument();
+    expect(result.finalSubmissionBoundary).toBe(true);
+    expect(result.applicationState).toBe("REVIEW");
+    expect(result.navigationCandidates).toContainEqual(
+      expect.objectContaining({ action: "FINAL_SUBMIT" }),
+    );
+  });
+
+  it("binds repeated Workday-style cards from structural row headings when ids are unindexed", () => {
+    document.body.innerHTML = `
+      <main>
+        <h2>My Experience</h2>
+        <section>
+          <div class="workday-card">
+            <h3>Work Experience 1</h3>
+            <label for="employer-alpha">Employer</label>
+            <input id="employer-alpha" name="employerAlpha" required />
+            <label for="title-alpha">Job Title</label>
+            <input id="title-alpha" name="titleAlpha" required />
+          </div>
+          <div class="workday-card">
+            <h3>Work Experience 2</h3>
+            <label for="employer-beta">Employer</label>
+            <input id="employer-beta" name="employerBeta" required />
+            <label for="title-beta">Job Title</label>
+            <input id="title-beta" name="titleBeta" required />
+          </div>
+          <div class="workday-card">
+            <h3>Education 1</h3>
+            <label for="school-alpha">School or University</label>
+            <input id="school-alpha" name="schoolAlpha" required />
+          </div>
+          <div class="workday-card">
+            <h3>Education 2</h3>
+            <label for="school-beta">School or University</label>
+            <input id="school-beta" name="schoolBeta" required />
+          </div>
+        </section>
+      </main>
+    `;
+
+    const questions = scanDocument().questions;
+    const employers = questions.filter(
+      (candidate) => candidate.semanticType === "EMPLOYER_NAME",
+    );
+    const schools = questions.filter(
+      (candidate) => candidate.semanticType === "SCHOOL_NAME",
+    );
+
+    expect(employers).toHaveLength(2);
+    expect(employers.map((item) => item.repeatIndex)).toEqual([0, 1]);
+    expect(new Set(employers.map((item) => item.repeatGroupId))).toEqual(
+      new Set(["structural:work-experience:#"]),
+    );
+
+    expect(schools).toHaveLength(2);
+    expect(schools.map((item) => item.repeatIndex)).toEqual([0, 1]);
+    expect(new Set(schools.map((item) => item.repeatGroupId))).toEqual(
+      new Set(["structural:education:#"]),
+    );
+    expect(employers[0]?.repeatGroupId).not.toBe(schools[0]?.repeatGroupId);
+  });
+
+  it("models explicit check-one checkbox sets as one logical choice group", () => {
+    document.body.innerHTML = `
+      <main>
+        <h2>Self Identify</h2>
+        <fieldset>
+          <legend>Voluntary Self-Identification of Disability</legend>
+          <p>Please check one of the boxes below:</p>
+          <label><input type="checkbox" name="disability-choice" value="yes" />
+            Yes, I have a disability, or have had one in the past
+          </label>
+          <label><input type="checkbox" name="disability-choice" value="no" checked />
+            No, I do not have a disability and have not had one in the past
+          </label>
+          <label><input type="checkbox" name="disability-choice" value="decline" />
+            I do not want to answer
+          </label>
+        </fieldset>
+      </main>
+    `;
+
+    const result = scanDocument();
+    const groupQuestions = result.questions.filter(
+      (question) => question.fieldName === "disability-choice",
+    );
+    expect(groupQuestions).toHaveLength(1);
+    expect(groupQuestions[0]?.options).toEqual([
+      "Yes, I have a disability, or have had one in the past",
+      "No, I do not have a disability and have not had one in the past",
+      "I do not want to answer",
+    ]);
+
+    const groupControls = result.controls.filter(
+      (control) => control.name === "disability-choice",
+    );
+    expect(groupControls).toHaveLength(3);
+    expect(groupControls[0]?.satisfied).toBe(true);
+  });
+
+  it("treats one selected required checkbox as satisfying a check-one group", () => {
+    document.body.innerHTML = `
+      <main>
+        <h2>Self Identify</h2>
+        <fieldset>
+          <legend>Voluntary Self-Identification of Disability</legend>
+          <p>Please check one of the boxes below:</p>
+          <label><input type="checkbox" name="disability-choice" value="yes" required />
+            Yes, I have a disability, or have had one in the past
+          </label>
+          <label><input type="checkbox" name="disability-choice" value="no" required checked />
+            No, I do not have a disability and have not had one in the past
+          </label>
+          <label><input type="checkbox" name="disability-choice" value="decline" required />
+            I do not want to answer
+          </label>
+        </fieldset>
+      </main>
+    `;
+
+    const controls = scanDocument().controls.filter(
+      (control) => control.name === "disability-choice",
+    );
+    expect(controls).toHaveLength(3);
+    expect(controls.every((control) => control.required)).toBe(true);
+    expect(controls.every((control) => control.invalid === false)).toBe(true);
+    expect(controls.every((control) => control.satisfied)).toBe(true);
+  });
+
+  it("does not collapse multi-select checkbox sets into one choice question", () => {
+    document.body.innerHTML = `
+      <fieldset>
+        <legend>Skills</legend>
+        <p>Select all that apply.</p>
+        <label><input type="checkbox" name="skills" value="analytics" />Analytics</label>
+        <label><input type="checkbox" name="skills" value="hris" />HRIS</label>
+      </fieldset>
+    `;
+
+    const result = scanDocument();
+    expect(
+      result.questions.filter((question) => question.fieldName === "skills"),
+    ).toHaveLength(2);
+  });
 });

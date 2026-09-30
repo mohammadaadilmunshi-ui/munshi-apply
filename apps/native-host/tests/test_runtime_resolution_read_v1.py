@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import pytest
 from contextlib import contextmanager
+
+import pytest
 
 from munshi_apply_native.runtime_resolution_read_v1 import (
     OPEN_STATUSES,

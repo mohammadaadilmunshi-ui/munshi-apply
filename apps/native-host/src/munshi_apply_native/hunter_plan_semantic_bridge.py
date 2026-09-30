@@ -31,6 +31,13 @@ SAFE_SEMANTIC_KEYS: dict[str, frozenset[str]] = {
     "LAST_NAME": frozenset({"contact.last_name"}),
     "EMAIL": frozenset({"contact.email"}),
     "PHONE": frozenset({"contact.phone"}),
+    "PHONE_DEVICE_TYPE": frozenset({"application.phone_device_type"}),
+    "PHONE_COUNTRY_CODE": frozenset({"contact.phone_country_code"}),
+    "PHONE_EXTENSION": frozenset({"contact.phone_extension"}),
+    "SELF_ID_NAME": frozenset({"contact.full_name"}),
+    "ADDRESS": frozenset({"contact.address_line1"}),
+    "STREET_ADDRESS": frozenset({"contact.address_line1"}),
+    "ADDRESS_LINE_2": frozenset({"contact.address_line2"}),
     "LINKEDIN": frozenset({"contact.linkedin"}),
     "PORTFOLIO": frozenset({"contact.portfolio"}),
     "WEBSITE": frozenset({"contact.portfolio"}),
@@ -65,6 +72,8 @@ SAFE_SEMANTIC_KEYS: dict[str, frozenset[str]] = {
 PROTECTED_SEMANTIC_TYPES = frozenset(
     {
         "WORK_AUTHORIZATION_CURRENT",
+        "WORK_LOCATION_ELIGIBILITY",
+        "AGE_18_PLUS",
         "SPONSORSHIP_CURRENT",
         "SPONSORSHIP_FUTURE",
         "IMMIGRATION_ASSISTANCE",
@@ -74,7 +83,10 @@ PROTECTED_SEMANTIC_TYPES = frozenset(
         "DISABILITY_STATUS",
         "GENDER",
         "RACE_ETHNICITY",
+        "HISPANIC_LATINO",
         "EEO_SELF_ID",
+        "EMPLOYEE_ID",
+        "LEGAL_ATTESTATION",
         "CONFLICT_OF_INTEREST",
         "NON_COMPETE",
         "BACKGROUND_CHECK",
@@ -243,6 +255,16 @@ def answer_matches_question(
     Semantic matching is a fallback and is disabled for repeated groups to avoid
     cross-filling one employment/education row into another.
     """
+    semantic = str(question.get("semanticType") or "").strip().upper()
+    answer_sensitivity = str(answer.get("sensitivity_class") or "NORMAL").upper()
+
+    # Protected, self-identification, post-offer, and mandate-scoped policy
+    # concepts never enter the normal semantic/exact-match lane. This check must
+    # precede legacy exact provider-key matching so a coincidental field name
+    # cannot downgrade the stricter Hunter authority path.
+    if semantic in PROTECTED_SEMANTIC_TYPES or answer_sensitivity != "NORMAL":
+        return False
+
     answer_key = str(answer.get("question_key") or "").strip()
     control_name = str(control.get("name") or "").strip()
     if answer_key and control_name and answer_key == control_name:
@@ -269,10 +291,43 @@ def answer_matches_question(
     if _has_repeat_binding(question, control):
         return False
 
-    semantic = str(question.get("semanticType") or "").strip().upper()
-    if semantic in PROTECTED_SEMANTIC_TYPES:
-        return False
     return bool(answer_key and answer_key in semantic_keys(semantic))
+
+
+def protected_answer_matches_question(
+    answer: Mapping[str, Any],
+    question: Mapping[str, Any],
+    control: Mapping[str, Any],
+) -> bool:
+    """Bind one protected/self-ID plan answer to exactly one browser field.
+
+    Unlike normal answers, protected values never use fuzzy semantics, provider
+    wording, or legacy answer-key aliases. The immutable Hunter plan must carry
+    the value-free logical-field fingerprint created from the same structural
+    browser observation, and the current field must reproduce it exactly.
+    """
+    sensitivity = str(answer.get("sensitivity_class") or "").strip().upper()
+    if sensitivity not in {"PROTECTED", "SELF_ID"}:
+        return False
+    if answer.get("autofill_allowed") is not True:
+        return False
+    if answer.get("execution_value") is not None:
+        return False
+    reference = str(answer.get("secure_resolver_ref") or "").strip()
+    if not reference.startswith("hunter-secure://candidate-truth/"):
+        return False
+
+    expected = str(answer.get("universal_binding_fingerprint") or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", expected):
+        return False
+    observed = logical_field_fingerprint(question, control)
+    if observed is None or observed != expected:
+        return False
+
+    semantic = str(question.get("semanticType") or "").strip().upper()
+    if semantic not in PROTECTED_SEMANTIC_TYPES:
+        return False
+    return True
 
 
 def bridge_status() -> dict[str, Any]:

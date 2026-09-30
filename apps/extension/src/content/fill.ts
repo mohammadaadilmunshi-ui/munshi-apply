@@ -129,12 +129,88 @@ function fillRadio(element: HTMLInputElement, value: string): boolean {
   return match.checked;
 }
 
+function checkboxCandidateLabel(element: HTMLInputElement): string {
+  return (
+    compactText(inputLabel(element)) ||
+    compactText(element.getAttribute("aria-label")) ||
+    compactText(element.value)
+  );
+}
+
+function singleChoiceCheckboxCandidates(
+  element: HTMLInputElement,
+): HTMLInputElement[] {
+  if (element.type !== "checkbox" || !element.name) return [];
+  const root = element.getRootNode();
+  if (!(root instanceof Document || root instanceof ShadowRoot)) return [];
+  const group = Array.from(
+    root.querySelectorAll<HTMLInputElement>("input[type='checkbox']"),
+  ).filter((candidate) => candidate.name === element.name);
+  if (group.length < 2) return [];
+
+  const scope =
+    element.closest(
+      "fieldset, [role='group'], [data-automation-id*='group' i]",
+    ) ??
+    element.parentElement?.parentElement ??
+    element.parentElement;
+  const context = normalized(
+    [
+      scope?.querySelector("legend")?.textContent,
+      scope?.getAttribute("aria-label"),
+      scope?.textContent,
+    ]
+      .filter(Boolean)
+      .join(" "),
+  );
+  if (
+    /select all|check all|choose all|all that apply|any that apply/.test(
+      context,
+    )
+  ) {
+    return [];
+  }
+  if (
+    !/(?:check|select|choose)(?: only)? one(?: of)?|one of the (?:boxes|options|choices)/.test(
+      context,
+    )
+  ) {
+    return [];
+  }
+  return group;
+}
+
+function fillSingleChoiceCheckbox(
+  element: HTMLInputElement,
+  value: string,
+): boolean {
+  const requested = normalized(value);
+  const group = singleChoiceCheckboxCandidates(element);
+  if (group.length < 2 || !requested) return false;
+  const matches = group.filter(
+    (candidate) => normalized(checkboxCandidateLabel(candidate)) === requested,
+  );
+  if (matches.length !== 1) return false;
+  const match = matches[0]!;
+  for (const candidate of group) {
+    const shouldCheck = candidate === match;
+    if (candidate.checked !== shouldCheck) candidate.click();
+    if (candidate.checked !== shouldCheck) {
+      setNativeChecked(candidate, shouldCheck);
+      dispatchValueEvents(candidate);
+    }
+  }
+  return (
+    match.checked && group.filter((candidate) => candidate.checked).length === 1
+  );
+}
+
 function fillCheckbox(element: HTMLInputElement, value: string): boolean {
   const requested = normalized(value);
   const truthy = ["true", "yes", "1", "checked"];
   const falsy = ["false", "no", "0", "unchecked"];
   if (!truthy.includes(requested) && !falsy.includes(requested)) {
-    return false;
+    return fillSingleChoiceCheckbox(element, value);
   }
 
   const shouldCheck = truthy.includes(requested);
@@ -452,6 +528,26 @@ function recipeValueCommitted(element: HTMLElement, value: string): boolean {
     if (element.type === "radio") return radioVerified(element, value);
     if (element.type === "checkbox") {
       const requested = normalized(value);
+      const group = singleChoiceCheckboxCandidates(element);
+      if (
+        group.length > 1 &&
+        ![
+          "true",
+          "yes",
+          "1",
+          "checked",
+          "false",
+          "no",
+          "0",
+          "unchecked",
+        ].includes(requested)
+      ) {
+        const checked = group.filter((candidate) => candidate.checked);
+        return (
+          checked.length === 1 &&
+          normalized(checkboxCandidateLabel(checked[0]!)) === requested
+        );
+      }
       const shouldCheck = ["true", "yes", "1", "checked"].includes(requested);
       return element.checked === shouldCheck;
     }

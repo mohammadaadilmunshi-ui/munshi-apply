@@ -18,11 +18,6 @@ from .database import Database
 from .models import EventEnvelope, HealthResponse
 from .outbox import OutboxWorker, run_outbox_worker
 from .runtime_resolution_read_v1 import RuntimeResolutionReadModel
-from .universal_semantic_interpreter_v1 import (
-    UniversalSemanticInterpretationError,
-    UniversalSemanticInterpretationService,
-    model_semantics_enabled,
-)
 from .settings import Settings
 from .teach_munshi_telegram import (
     TeachMunshiTelegramWorker,
@@ -31,6 +26,11 @@ from .teach_munshi_telegram import (
 from .teach_munshi_worker import (
     TeachMunshiLearningWorker,
     run_teach_munshi_learning_worker,
+)
+from .universal_semantic_interpreter_v1 import (
+    UniversalSemanticInterpretationError,
+    UniversalSemanticInterpretationService,
+    model_semantics_enabled,
 )
 
 settings = Settings.from_environment()
@@ -226,7 +226,7 @@ def freeze_complete_loop_review(
     session_id: str,
     service: CompleteApplicationLoopService = Depends(_loop_service),  # noqa: B008
 ) -> dict[str, Any]:
-    """Freeze the prepared state for Hunter's single customer review."""
+    """Freeze prepared browser state for Hunter's internal integrity review."""
     try:
         return service.build_review(session_id=session_id)
     except (LookupError, PermissionError, RuntimeError, ValueError) as error:
@@ -243,7 +243,8 @@ def reject_separate_complete_loop_approval(
         status_code=status.HTTP_410_GONE,
         detail=(
             "Separate final approval was retired. Use the single Hunter "
-            "Approve & Submit action bound to the frozen review digest."
+            "pre-browser Approve & Submit mandate; provider Review is internal "
+            "integrity evidence only."
         ),
     )
 

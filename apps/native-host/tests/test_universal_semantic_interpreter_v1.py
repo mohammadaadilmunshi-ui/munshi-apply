@@ -173,7 +173,7 @@ def test_semantic_http_endpoint_reuses_owner_auth_and_returns_value_free_result(
         n8n_webhook_secret=None,
         outbox_poll_seconds=0.01,
         log_level="INFO",
-        command_secret="semantic-command-secret",
+        command_secret="semantic-command-secret",  # noqa: S106
     )
     monkeypatch.setenv("MUNSHI_UNIVERSAL_MODEL_SEMANTICS_ENABLED", "true")
 
@@ -350,7 +350,11 @@ def test_local_semantic_reason_text_is_bounded_observability_not_authority(
                     {
                         "concept_id": "contact.region",
                         "confidence": 0.94,
-                        "reason_code": "This field is asking for the candidate state or province of residence " * 8,
+                        "reason_code": (
+                            "This field is asking for the candidate state or "
+                            "province of residence "
+                        )
+                        * 8,
                     }
                 )
             }

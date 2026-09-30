@@ -112,7 +112,8 @@ class ResolutionTaskStore:
                     INSERT INTO resolution_tasks (
                         task_id, schema_version, application_id, session_id,
                         checkpoint_id, page_id, control_id, question_id, question,
-                        semantic_type, question_observation_json, category, status, risk_level, auto_resolvable,
+                        semantic_type, question_observation_json, category, status,
+                        risk_level, auto_resolvable,
                         requires_user, grouping_scope, group_key, source_refs_json,
                         evidence_refs_json, attempted_resolvers_json, reason,
                         resolution_json, created_at, updated_at
@@ -176,7 +177,8 @@ class ResolutionTaskStore:
                 """
                 UPDATE resolution_tasks
                 SET session_id = ?, checkpoint_id = ?, page_id = ?, control_id = ?,
-                    question_id = ?, question_observation_json = ?, category = ?, status = ?, risk_level = ?,
+                    question_id = ?, question_observation_json = ?, category = ?,
+                    status = ?, risk_level = ?,
                     auto_resolvable = ?, requires_user = ?, grouping_scope = ?,
                     group_key = ?, evidence_refs_json = ?, attempted_resolvers_json = ?,
                     reason = ?, resolution_json = ?, updated_at = ?

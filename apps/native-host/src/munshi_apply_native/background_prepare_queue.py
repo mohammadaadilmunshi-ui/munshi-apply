@@ -603,14 +603,21 @@ class DurablePreparationQueue:
             raise ValueError("Technical waiting retry browser form changed")
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            open_count = int(connection.execute(
-                "SELECT COUNT(*) AS n FROM resolution_tasks WHERE session_id=? AND status IN ('PENDING','RESOLVING','WAITING_FOR_USER')",
-                (session_id,),
-            ).fetchone()["n"])
+            open_count = int(
+                connection.execute(
+                    """SELECT COUNT(*) AS n
+                       FROM resolution_tasks
+                       WHERE session_id=?
+                         AND status IN ('PENDING','RESOLVING','WAITING_FOR_USER')""",
+                    (session_id,),
+                ).fetchone()["n"]
+            )
             if open_count != 0:
                 raise ValueError("Technical waiting retry cannot bypass unresolved user input")
             row = connection.execute(
-                "SELECT * FROM complete_application_prepare_jobs WHERE session_id=? AND tenant_id=? AND user_id=?",
+                """SELECT *
+                   FROM complete_application_prepare_jobs
+                   WHERE session_id=? AND tenant_id=? AND user_id=?""",
                 (session_id, tenant_id, user_id),
             ).fetchone()
             if row is None:
@@ -620,7 +627,8 @@ class DurablePreparationQueue:
                 raise ValueError("Technical waiting retry requires WAITING_INPUT job")
             if row["cancel_requested_at"] is not None:
                 raise ValueError("Cancelled preparation cannot be retried")
-            attempts=int(row["attempt_count"]); maximum=int(row["max_attempts"])
+            attempts = int(row["attempt_count"])
+            maximum = int(row["max_attempts"])
             if attempts != maximum:
                 raise ValueError("Technical waiting retry requires exhausted retry budget")
             if maximum >= 10:

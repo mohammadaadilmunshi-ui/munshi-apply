@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 from munshi_apply_native.hunter_plan_semantic_bridge import (
@@ -7,6 +8,7 @@ from munshi_apply_native.hunter_plan_semantic_bridge import (
     answer_matches_question,
     bridge_status,
     logical_field_fingerprint,
+    protected_answer_matches_question,
     semantic_keys,
 )
 
@@ -128,7 +130,16 @@ def test_plan_browser_adapter_is_wired_to_semantic_bridge() -> None:
         / "munshi_apply_native"
         / "plan_browser_adapter.py"
     ).read_text(encoding="utf-8")
-    assert "from .hunter_plan_semantic_bridge import answer_matches_question" in source
+    tree = ast.parse(source)
+    bridge_imports = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        and node.module == "hunter_plan_semantic_bridge"
+        for alias in node.names
+    }
+    assert "answer_matches_question" in bridge_imports
+    assert "protected_answer_matches_question" in bridge_imports
     assert "and answer_matches_question(a, question, control)" in source
 
 
@@ -276,6 +287,162 @@ def test_matching_universal_fingerprint_cannot_bypass_protected_boundary() -> No
 def test_bridge_reports_universal_binding_authority() -> None:
     status = bridge_status()
     assert status["universal_binding_authority"] == "hunter_application_plan"
+
+
+def test_segmented_phone_semantics_map_to_distinct_hunter_keys() -> None:
+    assert semantic_keys("PHONE") == frozenset({"contact.phone"})
+    assert semantic_keys("PHONE_DEVICE_TYPE") == frozenset(
+        {"application.phone_device_type"}
+    )
+    assert semantic_keys("PHONE_COUNTRY_CODE") == frozenset(
+        {"contact.phone_country_code"}
+    )
+    assert semantic_keys("PHONE_EXTENSION") == frozenset(
+        {"contact.phone_extension"}
+    )
+    assert len(
+        {
+            next(iter(semantic_keys("PHONE"))),
+            next(iter(semantic_keys("PHONE_DEVICE_TYPE"))),
+            next(iter(semantic_keys("PHONE_COUNTRY_CODE"))),
+            next(iter(semantic_keys("PHONE_EXTENSION"))),
+        }
+    ) == 4
+
+
+def test_structural_self_id_name_remains_normal_but_policy_fields_do_not() -> None:
+    assert semantic_keys("SELF_ID_NAME") == frozenset({"contact.full_name"})
+    for semantic in (
+        "WORK_LOCATION_ELIGIBILITY",
+        "AGE_18_PLUS",
+        "HISPANIC_LATINO",
+        "EMPLOYEE_ID",
+        "SELF_ID_DATE",
+        "LEGAL_ATTESTATION",
+    ):
+        assert semantic_keys(semantic) == frozenset()
+
+
+def test_protected_semantic_cannot_bypass_boundary_via_exact_provider_key() -> None:
+    answer = _answer("provider.exact.key")
+    assert answer_matches_question(
+        answer,
+        _question("AGE_18_PLUS", "Are you at least 18 years of age?"),
+        _control("provider.exact.key"),
+    ) is False
+
+
+def test_non_normal_answer_cannot_bypass_boundary_via_exact_question_text() -> None:
+    answer = {
+        **_answer("provider.answer", "Do you identify as Hispanic or Latino?"),
+        "sensitivity_class": "SELF_ID",
+    }
+    assert answer_matches_question(
+        answer,
+        _question("UNKNOWN", "Do you identify as Hispanic or Latino?"),
+        _control("unrelated-control"),
+    ) is False
+
+
+def _protected_answer_for(
+    question: dict[str, object],
+    control: dict[str, object],
+    *,
+    sensitivity: str = "PROTECTED",
+) -> dict[str, object]:
+    fingerprint = logical_field_fingerprint(question, control)
+    assert fingerprint is not None
+    return {
+        "question_key": "application_defaults.protected_example",
+        "normalized_question": str(question.get("rawText") or ""),
+        "sensitivity_class": sensitivity,
+        "execution_value": None,
+        "secure_resolver_ref": (
+            "hunter-secure://candidate-truth/"
+            "application_defaults/protected_example"
+        ),
+        "autofill_allowed": True,
+        "universal_binding_fingerprint": fingerprint,
+    }
+
+
+def test_protected_answer_requires_exact_logical_field_fingerprint() -> None:
+    question = _rich_question(
+        semantic_type="AGE_18_PLUS",
+        raw_text="Are you at least 18 years of age?",
+        label="Are you at least 18 years of age?",
+    )
+    control = _rich_control()
+    answer = _protected_answer_for(question, control)
+
+    assert protected_answer_matches_question(answer, question, control) is True
+
+    changed = dict(question)
+    changed["sectionHeading"] = "Different protected section"
+    assert protected_answer_matches_question(answer, changed, control) is False
+
+
+def test_protected_answer_rejects_missing_or_invalid_secure_binding() -> None:
+    question = _rich_question(
+        semantic_type="WORK_LOCATION_ELIGIBILITY",
+        raw_text="Are you eligible to work in this location?",
+        label="Are you eligible to work in this location?",
+    )
+    control = _rich_control()
+    answer = _protected_answer_for(question, control)
+
+    missing_fingerprint = dict(answer)
+    missing_fingerprint["universal_binding_fingerprint"] = None
+    assert (
+        protected_answer_matches_question(
+            missing_fingerprint, question, control
+        )
+        is False
+    )
+
+    wrong_reference = dict(answer)
+    wrong_reference["secure_resolver_ref"] = "not-a-secure-reference"
+    assert protected_answer_matches_question(wrong_reference, question, control) is False
+
+
+def test_protected_answer_never_accepts_normal_answer_lane() -> None:
+    question = _rich_question(
+        semantic_type="HISPANIC_LATINO",
+        raw_text="Do you identify as Hispanic or Latino?",
+        label="Do you identify as Hispanic or Latino?",
+    )
+    control = _rich_control()
+    normal = {
+        **_answer("application_defaults.hispanic_latino"),
+        "universal_binding_fingerprint": logical_field_fingerprint(question, control),
+    }
+    assert protected_answer_matches_question(normal, question, control) is False
+
+
+def test_protected_answer_repeat_binding_cannot_cross_rows() -> None:
+    question = _rich_question(
+        semantic_type="DISABILITY_STATUS",
+        raw_text="Disability status",
+        label="Disability status",
+        repeat_group_id="protected-group",
+        repeat_index=0,
+    )
+    control = _rich_control(
+        repeat_group_id="protected-group",
+        repeat_index=0,
+    )
+    answer = _protected_answer_for(question, control, sensitivity="SELF_ID")
+
+    other_question = dict(question)
+    other_question["repeatIndex"] = 1
+    other_control = dict(control)
+    other_control["repeatIndex"] = 1
+    assert (
+        protected_answer_matches_question(
+            answer, other_question, other_control
+        )
+        is False
+    )
 
 
 def test_stable_question_id_matches_when_control_name_is_empty() -> None:

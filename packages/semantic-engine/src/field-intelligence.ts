@@ -39,15 +39,21 @@ const aliasRules: readonly AliasRule[] = [
   },
   {
     id: "phone-device-type",
+    pattern: /^(?:phone|telephone|mobile)(?: device)? type(?: select one)?$/,
+    semanticType: "PHONE_DEVICE_TYPE",
+    confidence: 0.99,
+  },
+  {
+    id: "phone-country-code",
     pattern:
-      /^(?:phone|telephone|mobile)(?: device)? type(?: select one)?$/,
-    semanticType: "UNKNOWN",
+      /^(?:country phone code|phone country code|country calling code|calling code|dial(?:ing|ling) code)$/,
+    semanticType: "PHONE_COUNTRY_CODE",
     confidence: 0.99,
   },
   {
     id: "phone-extension",
-    pattern: /^(?:phone(?: number)? )?extension$/,
-    semanticType: "UNKNOWN",
+    pattern: /^(?:phone(?: number)? )?extension$|^ext$/,
+    semanticType: "PHONE_EXTENSION",
     confidence: 0.99,
   },
   {
@@ -109,6 +115,25 @@ const metadataRules: readonly AliasRule[] = [
     id: "metadata-email",
     pattern: /\b(?:email|email address|emailaddress)\b/,
     semanticType: "EMAIL",
+  },
+  {
+    id: "metadata-phone-device-type",
+    pattern: /\b(?:phone type|phonetype|phone device type|device type)\b/,
+    semanticType: "PHONE_DEVICE_TYPE",
+    confidence: 0.99,
+  },
+  {
+    id: "metadata-phone-country-code",
+    pattern:
+      /\b(?:country phone code|phone country code|country calling code|calling code|dialing code|dialling code)\b/,
+    semanticType: "PHONE_COUNTRY_CODE",
+    confidence: 0.99,
+  },
+  {
+    id: "metadata-phone-extension",
+    pattern: /\b(?:phone extension|phone number extension|extension)\b/,
+    semanticType: "PHONE_EXTENSION",
+    confidence: 0.99,
   },
   {
     id: "metadata-phone",

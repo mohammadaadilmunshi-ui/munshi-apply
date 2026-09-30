@@ -56,13 +56,20 @@ const rules: readonly Rule[] = [
   { id: "email", pattern: /\b(e-?mail)\b/i, semanticType: "EMAIL" },
   {
     id: "phone-device-type",
-    pattern: /\bphone(?: device)? type\b/i,
-    semanticType: "UNKNOWN",
+    pattern: /\b(phone|telephone|mobile)(?: device)? type\b/i,
+    semanticType: "PHONE_DEVICE_TYPE",
+  },
+  {
+    id: "phone-country-code",
+    pattern:
+      /\b(country phone code|phone country code|country calling code|calling code|dial(?:ing|ling) code)\b/i,
+    semanticType: "PHONE_COUNTRY_CODE",
   },
   {
     id: "phone-extension",
-    pattern: /\bphone(?: number)? extension\b|^extension$/i,
-    semanticType: "UNKNOWN",
+    pattern:
+      /\bphone(?: number)? extension\b|\btelephone extension\b|^extension$|^ext\.?$/i,
+    semanticType: "PHONE_EXTENSION",
   },
   {
     id: "phone",
@@ -116,7 +123,7 @@ const rules: readonly Rule[] = [
   {
     id: "school-name",
     pattern:
-      /^(school|school name|university|university name|college|college name|institution|institution name)$/i,
+      /^(school|school name|school or university|university|university name|college|college name|institution|institution name)$/i,
     semanticType: "SCHOOL_NAME",
   },
   { id: "gpa", pattern: /\bg\.?p\.?a\.?\b/i, semanticType: "GPA" },
@@ -208,6 +215,22 @@ const rules: readonly Rule[] = [
     semanticType: "LANGUAGE_PROFICIENCY",
   },
   {
+    id: "work-location-eligibility",
+    pattern:
+      /\b(eligible|eligibility)\b.{0,80}\b(work|employment)\b.{0,80}\b(location|position|role)\b|\beligible to work in (?:the )?location\b/i,
+    semanticType: "WORK_LOCATION_ELIGIBILITY",
+    sensitive: true,
+    highRisk: true,
+  },
+  {
+    id: "age-18-plus",
+    pattern:
+      /\b(at least|minimum(?: age)? of)\s+18\b|\b18\s+years?\s+of\s+age\b|\bage\s+18\s+or\s+older\b/i,
+    semanticType: "AGE_18_PLUS",
+    sensitive: true,
+    highRisk: true,
+  },
+  {
     id: "authorization",
     pattern:
       /\b(legally authorized|authorization to work|authorized to work)\b/i,
@@ -249,6 +272,7 @@ const rules: readonly Rule[] = [
     id: "salary",
     pattern: /\b(salary|compensation|pay expectation|desired pay)\b/i,
     semanticType: "SALARY_EXPECTATION",
+    sensitive: false,
     highRisk: true,
   },
   {
@@ -337,7 +361,7 @@ const rules: readonly Rule[] = [
   },
   {
     id: "veteran",
-    pattern: /\b(veteran status|military status)\b/i,
+    pattern: /\b(veterans?'? status|military status)\b/i,
     semanticType: "VETERAN_STATUS",
     sensitive: true,
     highRisk: true,
@@ -346,6 +370,14 @@ const rules: readonly Rule[] = [
     id: "disability",
     pattern: /\b(disability|disabled)\b/i,
     semanticType: "DISABILITY_STATUS",
+    sensitive: true,
+    highRisk: true,
+  },
+  {
+    id: "hispanic-latino",
+    pattern:
+      /\b(hispanic|latino|latina|latinx)\b.{0,50}\b(identify|identity|origin|ethnicity)?\b/i,
+    semanticType: "HISPANIC_LATINO",
     sensitive: true,
     highRisk: true,
   },
@@ -383,6 +415,21 @@ const rules: readonly Rule[] = [
     pattern: /\b(non[- ]compete|noncompete|restrictive covenant)\b/i,
     semanticType: "NON_COMPETE",
     sensitive: true,
+    highRisk: true,
+  },
+  {
+    id: "employee-id",
+    pattern:
+      /^(employee id|employee identifier|employee number)(?:\s*\(?if applicable\)?)?$/i,
+    semanticType: "EMPLOYEE_ID",
+    sensitive: true,
+    highRisk: true,
+  },
+  {
+    id: "legal-attestation",
+    pattern:
+      /\b(i )?(accept|agree to|acknowledge)\b.{0,80}\b(terms(?: and conditions)?|conditions|certification|attestation)\b/i,
+    semanticType: "LEGAL_ATTESTATION",
     highRisk: true,
   },
   {
@@ -441,6 +488,18 @@ const rules: readonly Rule[] = [
 ];
 
 const contextualRules: readonly Rule[] = [
+  {
+    id: "self-id-name-context",
+    pattern:
+      /\b(voluntary self[- ]identification|self identify|self identification|cc[- ]?305|disability form)\b.{0,220}\bname\b/i,
+    semanticType: "SELF_ID_NAME",
+  },
+  {
+    id: "self-id-date-context",
+    pattern:
+      /\b(voluntary self[- ]identification|self identify|self identification|cc[- ]?305|disability form)\b.{0,220}\bdate\b/i,
+    semanticType: "SELF_ID_DATE",
+  },
   {
     id: "personal-title-context",
     pattern:
