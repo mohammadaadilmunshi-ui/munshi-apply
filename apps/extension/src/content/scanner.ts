@@ -148,7 +148,9 @@ function hash(value: string): string {
   return (result >>> 0).toString(36);
 }
 
-function labelsByFor(root: Document | ShadowRoot): Map<string, HTMLLabelElement[]> {
+function labelsByFor(
+  root: Document | ShadowRoot,
+): Map<string, HTMLLabelElement[]> {
   const cached = labelForCache.get(root);
   if (cached) return cached;
   const index = new Map<string, HTMLLabelElement[]>();
@@ -165,10 +167,7 @@ function labelsByFor(root: Document | ShadowRoot): Map<string, HTMLLabelElement[
 function associatedLabels(element: Element): HTMLLabelElement[] {
   const labels: HTMLLabelElement[] = [];
   const root = element.getRootNode();
-  if (
-    element.id &&
-    (root instanceof Document || root instanceof ShadowRoot)
-  ) {
+  if (element.id && (root instanceof Document || root instanceof ShadowRoot)) {
     labels.push(...(labelsByFor(root).get(element.id) ?? []));
   }
   const wrapping = element.closest("label");
