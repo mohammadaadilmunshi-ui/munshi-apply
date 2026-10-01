@@ -384,7 +384,8 @@ def _supersession_target_locked(
     tasks = connection.execute(
         """SELECT task_id,control_id,question,semantic_type,group_key,risk_level
            FROM resolution_tasks
-           WHERE session_id=? AND checkpoint_id=? AND status='WAITING_FOR_USER'""",
+           WHERE session_id=? AND checkpoint_id=?
+             AND status IN ('PENDING','RESOLVING','WAITING_FOR_USER')""",
         (supersession.session_id, supersession.checkpoint_id),
     ).fetchall()
     # Browser execution identity and Candidate-Truth semantic identity are
@@ -476,6 +477,7 @@ def _commit_supersession_locked(
     updated_job = connection.execute(
         """UPDATE complete_application_prepare_jobs
            SET plan_id=?,state='QUEUED',available_at=?,last_error=NULL,
+               continuation_pending=1,continuation_in_flight=0,
                finished_at=NULL,updated_at=?
            WHERE job_id=? AND session_id=? AND plan_id=?
              AND state='WAITING_INPUT' AND cancel_requested_at IS NULL""",
@@ -493,7 +495,8 @@ def _commit_supersession_locked(
     connection.execute(
         """UPDATE resolution_tasks
            SET status='EXPIRED',updated_at=?
-           WHERE session_id=? AND checkpoint_id=? AND status='WAITING_FOR_USER'""",
+           WHERE session_id=? AND checkpoint_id=?
+             AND status IN ('PENDING','RESOLVING','WAITING_FOR_USER')""",
         (accepted_at, supersession.session_id, supersession.checkpoint_id),
     )
     replay_identity = f"{supersession.session_id}:plan-superseded:{envelope.plan_id}"
