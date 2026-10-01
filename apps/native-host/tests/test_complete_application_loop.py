@@ -168,12 +168,31 @@ def ready(loop):
     assert pending.state == "NEEDS_INPUT"
     tasks = service.resolutions.list(application_id=session.application_id)
     assert len(tasks) == 1
+    assert tasks[0].status == "PENDING"
+    assert tasks[0].auto_resolvable is True
+    assert tasks[0].requires_user is False
     service.resolve_task(task_id=tasks[0].task_id, value="https://example.test/portfolio")
     prepared = service.prepare_session(session_id=session.session_id, adapter=browser)
     assert prepared.state == "READY_FOR_REVIEW"
     review = service.build_review(session_id=session.session_id)
     service.approve_review(review_id=review["review_id"])
     return service, db, browser, session, review
+
+def test_normal_runtime_question_is_hunter_semantic_pending(loop):
+    service, _db, browser = loop
+    session = service.start_session(plan_id="application-plan-1")
+    pending = service.prepare_session(session_id=session.session_id, adapter=browser)
+    assert pending.state == "NEEDS_INPUT"
+
+    tasks = service.resolutions.list(application_id=session.application_id)
+    assert len(tasks) == 1
+    task = tasks[0]
+    assert task.status == "PENDING"
+    assert task.risk_level == "MEDIUM"
+    assert task.auto_resolvable is True
+    assert task.requires_user is False
+    assert "sensitivity:NORMAL" in task.source_refs
+
 
 
 def _seed_authority(loop, review, session, *, accept=True):
