@@ -384,7 +384,8 @@ def _supersession_target_locked(
     tasks = connection.execute(
         """SELECT task_id,control_id,question,semantic_type,group_key,risk_level
            FROM resolution_tasks
-           WHERE session_id=? AND checkpoint_id=? AND status='WAITING_FOR_USER'""",
+           WHERE session_id=? AND checkpoint_id=?
+             AND status IN ('PENDING','RESOLVING','WAITING_FOR_USER')""",
         (supersession.session_id, supersession.checkpoint_id),
     ).fetchall()
     # Browser execution identity and Candidate-Truth semantic identity are
