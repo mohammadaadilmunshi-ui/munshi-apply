@@ -157,10 +157,7 @@ function hash(value: string): string {
 function explicitLabelsFor(element: HTMLElement): HTMLLabelElement[] {
   const id = element.id;
   const root = element.getRootNode();
-  if (
-    !id ||
-    !(root instanceof Document || root instanceof ShadowRoot)
-  ) {
+  if (!id || !(root instanceof Document || root instanceof ShadowRoot)) {
     return [];
   }
   let byFor = labelsByForCache.get(root);
@@ -181,7 +178,8 @@ function explicitLabelsFor(element: HTMLElement): HTMLLabelElement[] {
 
 function inputLabel(element: HTMLInputElement): string {
   const explicit = explicitLabelsFor(element);
-  const labels = explicit.length > 0 ? explicit : Array.from(element.labels ?? []);
+  const labels =
+    explicit.length > 0 ? explicit : Array.from(element.labels ?? []);
   return labels
     .map((label) => compactText(label.textContent))
     .filter(Boolean)
