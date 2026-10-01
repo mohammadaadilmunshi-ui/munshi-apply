@@ -74,6 +74,9 @@ def _waiting_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             "reason": "Required answer is unresolved",
         },
     )
+    assert task.status == "PENDING"
+    assert task.auto_resolvable is True
+    assert task.requires_user is False
     with database.connect() as connection:
         connection.execute(
             """UPDATE complete_application_sessions
@@ -161,7 +164,9 @@ def test_supersession_atomically_rebinds_same_waiting_session_and_replays(
             (session.session_id,),
         ).fetchone()
         stored_job = connection.execute(
-            "SELECT plan_id,state FROM complete_application_prepare_jobs WHERE job_id=?",
+            """SELECT plan_id,state,attempt_count,max_attempts,
+                      continuation_count,continuation_pending
+                 FROM complete_application_prepare_jobs WHERE job_id=?""",
             (job["job_id"],),
         ).fetchone()
         tasks = connection.execute(
@@ -181,6 +186,9 @@ def test_supersession_atomically_rebinds_same_waiting_session_and_replays(
     assert stored_session["state"] == "NEEDS_INPUT"
     assert stored_job["plan_id"] == replacement["plan_id"]
     assert stored_job["state"] == "QUEUED"
+    assert stored_job["attempt_count"] == 0
+    assert stored_job["continuation_count"] == 1
+    assert stored_job["continuation_pending"] == 1
     assert {row["status"] for row in tasks} == {"EXPIRED"}
     assert lineage_count == 1
     assert session_count == 1
@@ -188,6 +196,11 @@ def test_supersession_atomically_rebinds_same_waiting_session_and_replays(
     assert queue.get(
         job_id=str(job["job_id"]), tenant_id="tenant-a", user_id="member-a"
     )["state"] == "QUEUED"
+    resumed = queue.claim_next(worker_id="worker-continuation")
+    assert resumed is not None
+    assert resumed["attempt_count"] == 0
+    assert resumed["continuation_count"] == 1
+    assert resumed["continuation_pending"] == 0
 
 
 def test_supersession_rejects_stale_browser_context_without_partial_write(
