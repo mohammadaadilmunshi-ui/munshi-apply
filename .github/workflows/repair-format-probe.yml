@@ -1,0 +1,25 @@
+name: Repair formatting probe
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prettier-diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - name: Print canonical Prettier diff
+        run: |
+          npx prettier --write apps/extension/src/content/scanner.ts
+          git diff -- apps/extension/src/content/scanner.ts
