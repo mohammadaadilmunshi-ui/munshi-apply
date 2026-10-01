@@ -35,10 +35,16 @@ type RepeatMetadata = {
   index: number | null;
 };
 
-let structuralRepeatContainerCache = new WeakMap<Element, RepeatMetadata | null>();
+let structuralRepeatContainerCache = new WeakMap<
+  Element,
+  RepeatMetadata | null
+>();
 
 export function resetAdaptiveScanCaches(): void {
-  structuralRepeatContainerCache = new WeakMap<Element, RepeatMetadata | null>();
+  structuralRepeatContainerCache = new WeakMap<
+    Element,
+    RepeatMetadata | null
+  >();
 }
 
 export function compactText(value: string | null | undefined): string {
