@@ -41,6 +41,7 @@ EXPECTED_MIGRATIONS = [
     "031_hosted_account_session_lifecycle.sql",
     "032_resolution_task_question_observation.sql",
     "033_failed_safely_execution_retry.sql",
+    "034_prepare_continuation_counters.sql",
 ]
 
 
@@ -51,8 +52,8 @@ def test_migrations_are_idempotent(tmp_path: Path) -> None:
     assert database.migrate() == []
     health = database.health()
     assert health["status"] == "healthy"
-    assert health["migration_count"] == 33
-    assert health["schema_version"] == "033_failed_safely_execution_retry.sql"
+    assert health["migration_count"] == 34
+    assert health["schema_version"] == "034_prepare_continuation_counters.sql"
 
 
 def test_failed_safely_retry_migration_preserves_session_and_event_history(
@@ -112,7 +113,10 @@ def test_failed_safely_retry_migration_preserves_session_and_event_history(
         )
 
     current = Database(database_path, migrations)
-    assert current.migrate() == ["033_failed_safely_execution_retry.sql"]
+    assert current.migrate() == [
+        "033_failed_safely_execution_retry.sql",
+        "034_prepare_continuation_counters.sql",
+    ]
     with current.connect() as connection:
         assert tuple(
             connection.execute(
