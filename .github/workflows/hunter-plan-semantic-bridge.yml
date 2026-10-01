@@ -51,7 +51,7 @@ jobs:
             apps/native-host/src/munshi_apply_native/hunter_plan_semantic_bridge.py
           grep -F 'Hunter plan is stale' \
             apps/native-host/src/munshi_apply_native/plan_browser_adapter.py
-          grep -F 'question["sensitive"]' \
+          grep -F 'question.get("sensitive")' \
             apps/native-host/src/munshi_apply_native/plan_browser_adapter.py
           grep -F 'validate_submit_observation' \
             apps/native-host/src/munshi_apply_native/plan_browser_adapter.py
