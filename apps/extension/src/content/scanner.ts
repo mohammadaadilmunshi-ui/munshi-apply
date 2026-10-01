@@ -35,6 +35,10 @@ let labelsByForCache = new WeakMap<
   Document | ShadowRoot,
   Map<string, HTMLLabelElement[]>
 >();
+let repeatAncestorCache = new WeakMap<
+  Element,
+  { groupId: string | null; index: number | null } | null
+>();
 
 function resetScanCaches(): void {
   sectionHeadingCache = new WeakMap<Document | ShadowRoot, Element[]>();
@@ -43,6 +47,10 @@ function resetScanCaches(): void {
   labelsByForCache = new WeakMap<
     Document | ShadowRoot,
     Map<string, HTMLLabelElement[]>
+  >();
+  repeatAncestorCache = new WeakMap<
+    Element,
+    { groupId: string | null; index: number | null } | null
   >();
 }
 
@@ -715,7 +723,7 @@ function createControl(element: Element): Control | null {
   const validation = validationState(element);
   const validationMessage =
     validationMessageFor(element) || validation.validationMessage;
-  const repeat = repeatMetadataFor(element);
+  const repeat = repeatMetadataFor(element, repeatAncestorCache);
   const fileFingerprint =
     element instanceof HTMLInputElement && element.type === "file"
       ? fileFingerprintFor(element)
