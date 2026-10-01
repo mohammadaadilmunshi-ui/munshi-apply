@@ -235,7 +235,7 @@ class DurablePreparationQueue:
         recovered = connection.execute(
             """UPDATE complete_application_prepare_jobs
                SET state='QUEUED',lease_owner=NULL,lease_expires_at=NULL,
-                   heartbeat_at=NULL,available_at=?,
+                   heartbeat_at=NULL,continuation_in_flight=0,available_at=?,
                    last_error='Recovered expired pre-submit worker lease',
                    updated_at=?
                WHERE state='RUNNING' AND lease_expires_at IS NOT NULL
@@ -272,7 +272,7 @@ class DurablePreparationQueue:
                    WHERE state='QUEUED'
                      AND cancel_requested_at IS NULL
                      AND available_at<=?
-                     AND attempt_count<max_attempts
+                     AND (continuation_pending=1 OR attempt_count<max_attempts)
                    ORDER BY created_at,job_id
                    LIMIT 1""",
                 (timestamp,),
@@ -283,10 +283,12 @@ class DurablePreparationQueue:
             updated = connection.execute(
                 """UPDATE complete_application_prepare_jobs
                    SET state='RUNNING',attempt_count=attempt_count+1,
+                       continuation_in_flight=continuation_pending,
+                       continuation_pending=0,
                        lease_owner=?,lease_expires_at=?,heartbeat_at=?,updated_at=?
                    WHERE job_id=? AND state='QUEUED'
                      AND cancel_requested_at IS NULL
-                     AND attempt_count<max_attempts""",
+                     AND (continuation_pending=1 OR attempt_count<max_attempts)""",
                 (worker, lease_expires, timestamp, timestamp, job_id),
             )
             if updated.rowcount != 1:
@@ -398,6 +400,14 @@ class DurablePreparationQueue:
             connection.execute(
                 """UPDATE complete_application_prepare_jobs
                    SET state=?,lease_owner=NULL,lease_expires_at=NULL,heartbeat_at=NULL,
+                       attempt_count=CASE
+                           WHEN continuation_in_flight=1 THEN MAX(attempt_count-1,0)
+                           ELSE attempt_count
+                       END,
+                       continuation_count=continuation_count+CASE
+                           WHEN continuation_in_flight=1 THEN 1 ELSE 0
+                       END,
+                       continuation_in_flight=0,
                        finished_at=?,updated_at=?
                    WHERE job_id=? AND state='RUNNING' AND lease_owner=?""",
                 (target, finished_at, timestamp, job_id, worker_id),
@@ -442,6 +452,7 @@ class DurablePreparationQueue:
             connection.execute(
                 """UPDATE complete_application_prepare_jobs
                    SET state=?,lease_owner=NULL,lease_expires_at=NULL,heartbeat_at=NULL,
+                       continuation_in_flight=0,
                        available_at=?,last_error=?,finished_at=?,updated_at=?
                    WHERE job_id=? AND state='RUNNING' AND lease_owner=?""",
                 (
@@ -488,6 +499,7 @@ class DurablePreparationQueue:
                 connection.execute(
                     """UPDATE complete_application_prepare_jobs
                        SET state='QUEUED',available_at=?,last_error=NULL,
+                           continuation_pending=1,continuation_in_flight=0,
                            finished_at=NULL,updated_at=?
                        WHERE job_id=? AND state='WAITING_INPUT'
                          AND cancel_requested_at IS NULL""",
@@ -555,6 +567,7 @@ class DurablePreparationQueue:
                 """UPDATE complete_application_prepare_jobs
                    SET state='QUEUED',max_attempts=?,available_at=?,
                        lease_owner=NULL,lease_expires_at=NULL,heartbeat_at=NULL,
+                       continuation_pending=0,continuation_in_flight=0,
                        last_error=NULL,finished_at=NULL,updated_at=?
                    WHERE job_id=? AND state='FAILED_SAFELY'
                      AND attempt_count=? AND max_attempts=?
@@ -636,7 +649,8 @@ class DurablePreparationQueue:
             updated=connection.execute(
                 """UPDATE complete_application_prepare_jobs
                    SET state='QUEUED',max_attempts=?,available_at=?,lease_owner=NULL,
-                       lease_expires_at=NULL,heartbeat_at=NULL,last_error=NULL,
+                       lease_expires_at=NULL,heartbeat_at=NULL,
+                       continuation_pending=0,continuation_in_flight=0,last_error=NULL,
                        finished_at=NULL,updated_at=?
                    WHERE job_id=? AND state='WAITING_INPUT'
                      AND attempt_count=? AND max_attempts=?
