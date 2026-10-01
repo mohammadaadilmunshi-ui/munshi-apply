@@ -30,6 +30,17 @@ export type FileFingerprint = {
 
 const fileFingerprints = new WeakMap<HTMLInputElement, FileFingerprint>();
 
+type RepeatMetadata = {
+  groupId: string | null;
+  index: number | null;
+};
+
+let structuralRepeatContainerCache = new WeakMap<Element, RepeatMetadata | null>();
+
+export function resetAdaptiveScanCaches(): void {
+  structuralRepeatContainerCache = new WeakMap<Element, RepeatMetadata | null>();
+}
+
 export function compactText(value: string | null | undefined): string {
   return (value ?? "").replace(/\s+/g, " ").trim();
 }
@@ -1308,51 +1319,59 @@ export function interactionConfidenceFor(element: Element): number {
   return 0.55;
 }
 
-function structuralRepeatMetadata(element: Element): {
-  groupId: string | null;
-  index: number | null;
-} {
+function repeatMetadataForContainer(current: Element): RepeatMetadata | null {
+  if (structuralRepeatContainerCache.has(current)) {
+    return structuralRepeatContainerCache.get(current) ?? null;
+  }
+
   const repeatHeading =
     /^(work experience|employment|experience|education|school|websites?|certifications?|languages?)\s+(\d{1,3})$/i;
+  const candidates: string[] = [];
+  const aria = compactText(current.getAttribute("aria-label"));
+  if (aria) candidates.push(aria);
 
+  for (const child of Array.from(current.children)) {
+    if (
+      /^H[1-6]$/.test(child.tagName) ||
+      child.getAttribute("role") === "heading" ||
+      child.tagName === "LEGEND"
+    ) {
+      const text = compactText(child.textContent);
+      if (text) candidates.push(text);
+    }
+  }
+
+  for (const text of candidates) {
+    const match = text.match(repeatHeading);
+    if (!match) continue;
+    const ordinal = Number(match[2]);
+    if (!Number.isSafeInteger(ordinal) || ordinal < 0) continue;
+    const normalizedGroup = normalizedText(match[1])
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    if (!normalizedGroup) continue;
+    const index = ordinal > 0 ? ordinal - 1 : 0;
+    const result = {
+      groupId: `structural:${normalizedGroup}:#`,
+      index,
+    };
+    structuralRepeatContainerCache.set(current, result);
+    return result;
+  }
+
+  structuralRepeatContainerCache.set(current, null);
+  return null;
+}
+
+function structuralRepeatMetadata(element: Element): RepeatMetadata {
   let current: Element | null = element.parentElement;
   for (
     let depth = 0;
     current && depth < 9;
     depth += 1, current = current.parentElement
   ) {
-    const candidates: string[] = [];
-    const aria = compactText(current.getAttribute("aria-label"));
-    if (aria) candidates.push(aria);
-
-    for (const child of Array.from(current.children)) {
-      if (
-        /^H[1-6]$/.test(child.tagName) ||
-        child.getAttribute("role") === "heading" ||
-        child.tagName === "LEGEND"
-      ) {
-        const text = compactText(child.textContent);
-        if (text) candidates.push(text);
-      }
-    }
-
-    for (const text of candidates) {
-      const match = text.match(repeatHeading);
-      if (!match) continue;
-      const ordinal = Number(match[2]);
-      if (!Number.isSafeInteger(ordinal) || ordinal < 0) continue;
-      const normalizedGroup = normalizedText(match[1])
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-+|-+$/g, "");
-      if (!normalizedGroup) continue;
-      // Human-facing repeated-card headings are conventionally one-based
-      // ("Experience 1", "Experience 2"). Canonical repeat indexes are zero-based.
-      const index = ordinal > 0 ? ordinal - 1 : 0;
-      return {
-        groupId: `structural:${normalizedGroup}:#`,
-        index,
-      };
-    }
+    const result = repeatMetadataForContainer(current);
+    if (result) return result;
   }
   return { groupId: null, index: null };
 }
