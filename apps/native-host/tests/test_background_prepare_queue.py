@@ -172,12 +172,15 @@ def test_cancel_running_is_cooperative_at_preparation_boundary(queued):
     assert finished["state"] == "CANCELLED"
 
 
-def test_needs_input_can_requeue_after_resolution(queued):
+def test_needs_input_can_requeue_after_resolution_without_spending_retry_budget(queued):
     _, _, session, queue, job = queued
-    assert queue.claim_next(
+    first = queue.claim_next(
         worker_id="worker-a",
         now="2026-09-08T03:00:00+00:00",
     )
+    assert first is not None
+    assert first["attempt_count"] == 1
+
     waiting = queue.finish(
         job_id=job["job_id"],
         worker_id="worker-a",
@@ -185,6 +188,7 @@ def test_needs_input_can_requeue_after_resolution(queued):
         now="2026-09-08T03:00:01+00:00",
     )
     assert waiting["state"] == "WAITING_INPUT"
+    assert waiting["attempt_count"] == 1
 
     requeued = queue.requeue_session(
         session_id=session.session_id,
@@ -194,6 +198,72 @@ def test_needs_input_can_requeue_after_resolution(queued):
     )
     assert requeued is not None
     assert requeued["state"] == "QUEUED"
+    assert requeued["continuation_pending"] == 1
+
+    continuation = queue.claim_next(
+        worker_id="worker-b",
+        now="2026-09-08T03:00:03+00:00",
+    )
+    assert continuation is not None
+    assert continuation["continuation_in_flight"] == 1
+    assert continuation["attempt_count"] == 2
+
+    finished = queue.finish(
+        job_id=job["job_id"],
+        worker_id="worker-b",
+        session_state="READY_FOR_REVIEW",
+        now="2026-09-08T03:00:04+00:00",
+    )
+    assert finished["state"] == "READY_FOR_REVIEW"
+    assert finished["attempt_count"] == 1
+    assert finished["continuation_count"] == 1
+    assert finished["continuation_in_flight"] == 0
+
+
+def test_semantic_continuation_runs_even_when_mechanical_budget_is_exhausted(queued):
+    db, _, session, queue, job = queued
+    with db.connect() as connection:
+        connection.execute(
+            """UPDATE complete_application_sessions
+               SET state='NEEDS_INPUT'
+               WHERE session_id=?""",
+            (session.session_id,),
+        )
+        connection.execute(
+            """UPDATE complete_application_prepare_jobs
+               SET state='WAITING_INPUT',attempt_count=3,max_attempts=3
+               WHERE job_id=?""",
+            (job["job_id"],),
+        )
+        connection.commit()
+
+    requeued = queue.requeue_session(
+        session_id=session.session_id,
+        tenant_id="tenant-a",
+        user_id="member-a",
+        now="2026-09-08T03:10:00+00:00",
+    )
+    assert requeued is not None
+    assert requeued["continuation_pending"] == 1
+
+    continuation = queue.claim_next(
+        worker_id="worker-continuation",
+        now="2026-09-08T03:10:01+00:00",
+    )
+    assert continuation is not None
+    assert continuation["attempt_count"] == 4
+    assert continuation["continuation_in_flight"] == 1
+
+    finished = queue.finish(
+        job_id=job["job_id"],
+        worker_id="worker-continuation",
+        session_state="READY_FOR_REVIEW",
+        now="2026-09-08T03:10:02+00:00",
+    )
+    assert finished["attempt_count"] == 3
+    assert finished["max_attempts"] == 3
+    assert finished["continuation_count"] == 1
+    assert finished["state"] == "READY_FOR_REVIEW"
 
 
 class _FakeService:
