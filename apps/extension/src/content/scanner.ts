@@ -24,6 +24,7 @@ import {
   isCustomDateControl,
   isPopupChoiceControl,
   repeatMetadataFor,
+  resetAdaptiveScanCaches,
   validationMessageFor,
 } from "./adaptive";
 import { createBoundedHintStore } from "./bounded-hint-store";
@@ -37,6 +38,7 @@ let computedStyleCache = new WeakMap<HTMLElement, CSSStyleDeclaration>();
 let hiddenStateCache = new WeakMap<HTMLElement, boolean>();
 
 function resetScanCaches(): void {
+  resetAdaptiveScanCaches();
   sectionHeadingCache = new WeakMap<Document | ShadowRoot, Element[]>();
   labelForCache = new WeakMap<
     Document | ShadowRoot,
@@ -1097,7 +1099,8 @@ function hasVisibleCaptchaPrompt(body: string): boolean {
 }
 
 function detectSecurityCheckpoint(): SecurityCheckpointKind | null {
-  const body = visibleSecurityText();
+  const visibleTexts = visibleSecurityTexts();
+  const body = visibleTexts.join(" ").slice(0, 120_000);
   if (
     hasActiveCaptchaFrame() ||
     hasVisibleSecurityElement(
@@ -1117,7 +1120,6 @@ function detectSecurityCheckpoint(): SecurityCheckpointKind | null {
   if (/\b(multi[- ]factor|two[- ]factor|2fa|authenticator app)\b/.test(body)) {
     return "MFA";
   }
-  const visibleTexts = visibleSecurityTexts();
   if (
     hasVisibleSecurityElement("input[autocomplete='one-time-code']") ||
     visibleTexts.some(
