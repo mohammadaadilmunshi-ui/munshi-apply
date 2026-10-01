@@ -13,6 +13,14 @@ ROOT = Path(__file__).resolve().parents[3]
 BASH = "/bin/bash"
 
 
+def test_staging_compose_wires_complete_loop_control_plane_fail_closed() -> None:
+    source = (ROOT / "deploy/staging/compose.yaml").read_text(encoding="utf-8")
+    assert 'MUNSHI_APPLY_COMMAND_SECRET: "${MUNSHI_APPLY_COMMAND_SECRET:?MUNSHI_APPLY_COMMAND_SECRET is required}"' in source
+    assert 'MUNSHI_APPLY_PLAN_SUPERSESSION_ENABLED: "${MUNSHI_APPLY_PLAN_SUPERSESSION_ENABLED:-false}"' in source
+    assert 'MUNSHI_APPLY_PRODUCTION_SUBMIT_AUTHORITY_ENABLED: "${MUNSHI_APPLY_PRODUCTION_SUBMIT_AUTHORITY_ENABLED:-false}"' in source
+    assert 'MUNSHI_FINAL_SUBMIT_ENABLED: "false"' in source
+
+
 def test_production_compose_has_separate_api_prepare_submit_authority() -> None:
     source = (ROOT / "deploy/production/compose.yaml").read_text(encoding="utf-8")
     assert "prepare-worker:" in source
