@@ -494,6 +494,14 @@ class CompleteApplicationLoopService:
         protected_levels = {"PROTECTED", "SELF_ID", "CREDENTIAL", "POST_OFFER"}
         risk = "HIGH" if sensitivity in protected_levels else "MEDIUM"
         grouping = "NONE" if category == "CAPTCHA" else "EXACT_QUESTION"
+        # Apply owns browser mechanics, not semantic answerability. NORMAL
+        # application questions remain pending for Hunter/Universal Brain before
+        # any user checkpoint is declared. Protected/mechanical checkpoints stay
+        # fail-closed and user-bound.
+        hunter_semantic_pending = sensitivity == "NORMAL" and category != "CAPTCHA"
+        task_status = "PENDING" if hunter_semantic_pending else "WAITING_FOR_USER"
+        auto_resolvable = bool(hunter_semantic_pending)
+        requires_user = not hunter_semantic_pending
         now = datetime.now(UTC)
         task = ResolutionTaskPayload.model_validate(
             {
@@ -511,10 +519,10 @@ class CompleteApplicationLoopService:
                     dict(unresolved.get("question_observation") or {}) or None
                 ),
                 "category": category,
-                "status": "WAITING_FOR_USER",
+                "status": task_status,
                 "riskLevel": risk,
-                "autoResolvable": False,
-                "requiresUser": True,
+                "autoResolvable": auto_resolvable,
+                "requiresUser": requires_user,
                 "groupingScope": grouping,
                 "groupKey": None if grouping == "NONE" else question_key,
                 "sourceRefs": [

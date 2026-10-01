@@ -1308,10 +1308,15 @@ export function interactionConfidenceFor(element: Element): number {
   return 0.55;
 }
 
-function structuralRepeatMetadata(element: Element): {
+type RepeatMetadata = {
   groupId: string | null;
   index: number | null;
-} {
+};
+
+function structuralRepeatMetadata(
+  element: Element,
+  ancestorCache?: WeakMap<Element, RepeatMetadata | null>,
+): RepeatMetadata {
   const repeatHeading =
     /^(work experience|employment|experience|education|school|websites?|certifications?|languages?)\s+(\d{1,3})$/i;
 
@@ -1321,6 +1326,12 @@ function structuralRepeatMetadata(element: Element): {
     current && depth < 9;
     depth += 1, current = current.parentElement
   ) {
+    if (ancestorCache?.has(current)) {
+      const cached = ancestorCache.get(current);
+      if (cached) return cached;
+      continue;
+    }
+
     const candidates: string[] = [];
     const aria = compactText(current.getAttribute("aria-label"));
     if (aria) candidates.push(aria);
@@ -1336,6 +1347,7 @@ function structuralRepeatMetadata(element: Element): {
       }
     }
 
+    let found: RepeatMetadata | null = null;
     for (const text of candidates) {
       const match = text.match(repeatHeading);
       if (!match) continue;
@@ -1348,22 +1360,25 @@ function structuralRepeatMetadata(element: Element): {
       // Human-facing repeated-card headings are conventionally one-based
       // ("Experience 1", "Experience 2"). Canonical repeat indexes are zero-based.
       const index = ordinal > 0 ? ordinal - 1 : 0;
-      return {
+      found = {
         groupId: `structural:${normalizedGroup}:#`,
         index,
       };
+      break;
     }
+    ancestorCache?.set(current, found);
+    if (found) return found;
   }
   return { groupId: null, index: null };
 }
 
-export function repeatMetadataFor(element: Element): {
-  groupId: string | null;
-  index: number | null;
-} {
+export function repeatMetadataFor(
+  element: Element,
+  ancestorCache?: WeakMap<Element, RepeatMetadata | null>,
+): RepeatMetadata {
   // Prefer an explicit repeated-card heading when present. This survives ATS
   // rerenders where generated input names/ids lose or change their row number.
-  const structural = structuralRepeatMetadata(element);
+  const structural = structuralRepeatMetadata(element, ancestorCache);
   if (structural.groupId !== null && structural.index !== null) {
     return structural;
   }

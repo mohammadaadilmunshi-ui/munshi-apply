@@ -31,11 +31,27 @@ import { createBoundedHintStore } from "./bounded-hint-store";
 let sectionHeadingCache = new WeakMap<Document | ShadowRoot, Element[]>();
 let computedStyleCache = new WeakMap<HTMLElement, CSSStyleDeclaration>();
 let hiddenStateCache = new WeakMap<HTMLElement, boolean>();
+let labelsByForCache = new WeakMap<
+  Document | ShadowRoot,
+  Map<string, HTMLLabelElement[]>
+>();
+let repeatAncestorCache = new WeakMap<
+  Element,
+  { groupId: string | null; index: number | null } | null
+>();
 
 function resetScanCaches(): void {
   sectionHeadingCache = new WeakMap<Document | ShadowRoot, Element[]>();
   computedStyleCache = new WeakMap<HTMLElement, CSSStyleDeclaration>();
   hiddenStateCache = new WeakMap<HTMLElement, boolean>();
+  labelsByForCache = new WeakMap<
+    Document | ShadowRoot,
+    Map<string, HTMLLabelElement[]>
+  >();
+  repeatAncestorCache = new WeakMap<
+    Element,
+    { groupId: string | null; index: number | null } | null
+  >();
 }
 
 function computedStyleFor(element: HTMLElement): CSSStyleDeclaration {
@@ -138,8 +154,33 @@ function hash(value: string): string {
   return (result >>> 0).toString(36);
 }
 
+function explicitLabelsFor(element: HTMLElement): HTMLLabelElement[] {
+  const id = element.id;
+  const root = element.getRootNode();
+  if (!id || !(root instanceof Document || root instanceof ShadowRoot)) {
+    return [];
+  }
+  let byFor = labelsByForCache.get(root);
+  if (!byFor) {
+    byFor = new Map<string, HTMLLabelElement[]>();
+    for (const candidate of Array.from(root.querySelectorAll("label[for]"))) {
+      if (!(candidate instanceof HTMLLabelElement) || !candidate.htmlFor) {
+        continue;
+      }
+      const labels = byFor.get(candidate.htmlFor) ?? [];
+      labels.push(candidate);
+      byFor.set(candidate.htmlFor, labels);
+    }
+    labelsByForCache.set(root, byFor);
+  }
+  return byFor.get(id) ?? [];
+}
+
 function inputLabel(element: HTMLInputElement): string {
-  return Array.from(element.labels ?? [])
+  const explicit = explicitLabelsFor(element);
+  const labels =
+    explicit.length > 0 ? explicit : Array.from(element.labels ?? []);
+  return labels
     .map((label) => compactText(label.textContent))
     .filter(Boolean)
     .join(" ");
@@ -282,16 +323,8 @@ function usablePromptText(value: string): string {
 }
 
 function nearbyPromptText(element: Element): string {
-  if (element.id) {
-    const root = element.getRootNode();
-    const labels =
-      root instanceof Document || root instanceof ShadowRoot
-        ? Array.from(root.querySelectorAll("label[for]")).filter(
-            (label) =>
-              label instanceof HTMLLabelElement && label.htmlFor === element.id,
-          )
-        : [];
-    const direct = labels
+  if (element instanceof HTMLElement && element.id) {
+    const direct = explicitLabelsFor(element)
       .map((item) => usablePromptText(item.textContent ?? ""))
       .find(Boolean);
     if (direct) return direct;
@@ -688,7 +721,7 @@ function createControl(element: Element): Control | null {
   const validation = validationState(element);
   const validationMessage =
     validationMessageFor(element) || validation.validationMessage;
-  const repeat = repeatMetadataFor(element);
+  const repeat = repeatMetadataFor(element, repeatAncestorCache);
   const fileFingerprint =
     element instanceof HTMLInputElement && element.type === "file"
       ? fileFingerprintFor(element)

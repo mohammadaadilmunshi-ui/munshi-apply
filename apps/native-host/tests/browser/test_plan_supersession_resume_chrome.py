@@ -132,14 +132,16 @@ def test_runtime_supersession_requeues_same_session_and_reaches_ready_for_review
             (session.session_id,),
         ).fetchone()
         task_rows = connection.execute(
-            """SELECT task_id,control_id,question,semantic_type,group_key
+            """SELECT task_id,control_id,question,semantic_type,group_key,status
                FROM resolution_tasks
-               WHERE session_id=? AND status='WAITING_FOR_USER'
+               WHERE session_id=?
+                 AND status IN ('PENDING','RESOLVING','WAITING_FOR_USER')
                ORDER BY group_key""",
             (session.session_id,),
         ).fetchall()
     assert stored_session is not None
     assert task_rows
+    assert {str(row["status"]) for row in task_rows} == {"PENDING"}
     replacement = H._plan(
         plan_id="application-plan-runtime-2",
         idempotency_key="plan-runtime-key-2",
@@ -357,14 +359,16 @@ def test_universal_binding_survives_dom_id_rerender_and_semantic_degradation(
         ).fetchone()
         task_rows = connection.execute(
             """SELECT task_id,control_id,question,semantic_type,group_key,
-                      question_observation_json
+                      question_observation_json,status
                FROM resolution_tasks
-               WHERE session_id=? AND status='WAITING_FOR_USER'
+               WHERE session_id=?
+                 AND status IN ('PENDING','RESOLVING','WAITING_FOR_USER')
                ORDER BY group_key""",
             (session.session_id,),
         ).fetchall()
     assert stored_session is not None
     assert len(task_rows) == 2
+    assert {str(row["status"]) for row in task_rows} == {"PENDING"}
 
     answers = []
     for index, row in enumerate(task_rows):

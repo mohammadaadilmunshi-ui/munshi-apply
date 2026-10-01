@@ -161,7 +161,8 @@ def test_supersession_atomically_rebinds_same_waiting_session_and_replays(
             (session.session_id,),
         ).fetchone()
         stored_job = connection.execute(
-            "SELECT plan_id,state FROM complete_application_prepare_jobs WHERE job_id=?",
+            """SELECT plan_id,state,continuation_pending,continuation_in_flight
+                 FROM complete_application_prepare_jobs WHERE job_id=?""",
             (job["job_id"],),
         ).fetchone()
         tasks = connection.execute(
@@ -181,6 +182,8 @@ def test_supersession_atomically_rebinds_same_waiting_session_and_replays(
     assert stored_session["state"] == "NEEDS_INPUT"
     assert stored_job["plan_id"] == replacement["plan_id"]
     assert stored_job["state"] == "QUEUED"
+    assert stored_job["continuation_pending"] == 1
+    assert stored_job["continuation_in_flight"] == 0
     assert {row["status"] for row in tasks} == {"EXPIRED"}
     assert lineage_count == 1
     assert session_count == 1
