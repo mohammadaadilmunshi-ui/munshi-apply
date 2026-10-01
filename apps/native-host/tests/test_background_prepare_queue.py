@@ -194,6 +194,18 @@ def test_needs_input_can_requeue_after_resolution(queued):
     )
     assert requeued is not None
     assert requeued["state"] == "QUEUED"
+    assert requeued["attempt_count"] == 1
+    assert requeued["continuation_count"] == 1
+    assert requeued["continuation_pending"] == 1
+
+    resumed = queue.claim_next(
+        worker_id="worker-b",
+        now="2026-09-08T03:00:03+00:00",
+    )
+    assert resumed is not None
+    assert resumed["attempt_count"] == 1
+    assert resumed["continuation_count"] == 1
+    assert resumed["continuation_pending"] == 0
 
 
 class _FakeService:
@@ -349,6 +361,18 @@ def test_waiting_input_without_open_tasks_can_receive_one_bound_retry(queued):
         expected_browser_form_digest=browser_digest,
         now="2026-09-08T04:00:00+00:00",
     )
-    assert retried["state"]=="QUEUED"
-    assert retried["attempt_count"]==3
-    assert retried["max_attempts"]==4
+    assert retried["state"] == "QUEUED"
+    assert retried["attempt_count"] == 3
+    assert retried["max_attempts"] == 3
+    assert retried["continuation_count"] == 1
+    assert retried["continuation_pending"] == 1
+
+    resumed = queue.claim_next(
+        worker_id="worker-continuation",
+        now="2026-09-08T04:00:01+00:00",
+    )
+    assert resumed is not None
+    assert resumed["attempt_count"] == 3
+    assert resumed["max_attempts"] == 3
+    assert resumed["continuation_count"] == 1
+    assert resumed["continuation_pending"] == 0

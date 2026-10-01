@@ -272,7 +272,7 @@ class DurablePreparationQueue:
                    WHERE state='QUEUED'
                      AND cancel_requested_at IS NULL
                      AND available_at<=?
-                     AND attempt_count<max_attempts
+                     AND (continuation_pending=1 OR attempt_count<max_attempts)
                    ORDER BY created_at,job_id
                    LIMIT 1""",
                 (timestamp,),
@@ -282,11 +282,14 @@ class DurablePreparationQueue:
             job_id = str(row["job_id"])
             updated = connection.execute(
                 """UPDATE complete_application_prepare_jobs
-                   SET state='RUNNING',attempt_count=attempt_count+1,
+                   SET state='RUNNING',
+                       attempt_count=attempt_count + CASE
+                           WHEN continuation_pending=1 THEN 0 ELSE 1 END,
+                       continuation_pending=0,
                        lease_owner=?,lease_expires_at=?,heartbeat_at=?,updated_at=?
                    WHERE job_id=? AND state='QUEUED'
                      AND cancel_requested_at IS NULL
-                     AND attempt_count<max_attempts""",
+                     AND (continuation_pending=1 OR attempt_count<max_attempts)""",
                 (worker, lease_expires, timestamp, timestamp, job_id),
             )
             if updated.rowcount != 1:
@@ -488,6 +491,8 @@ class DurablePreparationQueue:
                 connection.execute(
                     """UPDATE complete_application_prepare_jobs
                        SET state='QUEUED',available_at=?,last_error=NULL,
+                           continuation_count=continuation_count+1,
+                           continuation_pending=1,
                            finished_at=NULL,updated_at=?
                        WHERE job_id=? AND state='WAITING_INPUT'
                          AND cancel_requested_at IS NULL""",
@@ -554,6 +559,7 @@ class DurablePreparationQueue:
             updated = connection.execute(
                 """UPDATE complete_application_prepare_jobs
                    SET state='QUEUED',max_attempts=?,available_at=?,
+                       continuation_pending=0,
                        lease_owner=NULL,lease_expires_at=NULL,heartbeat_at=NULL,
                        last_error=NULL,finished_at=NULL,updated_at=?
                    WHERE job_id=? AND state='FAILED_SAFELY'
@@ -589,6 +595,11 @@ class DurablePreparationQueue:
         expected_browser_form_digest: str,
         now: str | None = None,
     ) -> dict[str, Any]:
+        """Resume the same durable attempt after its waiting condition cleared.
+
+        This is a continuation, not a mechanical retry. It therefore preserves
+        attempt_count/max_attempts and increments continuation_count instead.
+        """
         timestamp = now or _now()
         session = self._owned_session(
             session_id=session_id,
@@ -613,7 +624,7 @@ class DurablePreparationQueue:
                 ).fetchone()["n"]
             )
             if open_count != 0:
-                raise ValueError("Technical waiting retry cannot bypass unresolved user input")
+                raise ValueError("Technical waiting retry cannot bypass unresolved input")
             row = connection.execute(
                 """SELECT *
                    FROM complete_application_prepare_jobs
@@ -622,30 +633,25 @@ class DurablePreparationQueue:
             ).fetchone()
             if row is None:
                 raise LookupError("Preparation job was not found")
-            row=dict(row)
+            row = dict(row)
             if str(row["state"]) != "WAITING_INPUT":
                 raise ValueError("Technical waiting retry requires WAITING_INPUT job")
             if row["cancel_requested_at"] is not None:
                 raise ValueError("Cancelled preparation cannot be retried")
-            attempts = int(row["attempt_count"])
-            maximum = int(row["max_attempts"])
-            if attempts != maximum:
-                raise ValueError("Technical waiting retry requires exhausted retry budget")
-            if maximum >= 10:
-                raise ValueError("Technical retry ceiling is exhausted")
-            updated=connection.execute(
+            updated = connection.execute(
                 """UPDATE complete_application_prepare_jobs
-                   SET state='QUEUED',max_attempts=?,available_at=?,lease_owner=NULL,
+                   SET state='QUEUED',available_at=?,lease_owner=NULL,
                        lease_expires_at=NULL,heartbeat_at=NULL,last_error=NULL,
+                       continuation_count=continuation_count+1,
+                       continuation_pending=1,
                        finished_at=NULL,updated_at=?
                    WHERE job_id=? AND state='WAITING_INPUT'
-                     AND attempt_count=? AND max_attempts=?
                      AND cancel_requested_at IS NULL""",
-                (maximum+1,timestamp,timestamp,row["job_id"],attempts,maximum),
+                (timestamp, timestamp, row["job_id"]),
             )
             if updated.rowcount != 1:
-                raise RuntimeError("Technical waiting retry lost its atomic state binding")
-            result=connection.execute(
+                raise RuntimeError("Technical waiting continuation lost its atomic state binding")
+            result = connection.execute(
                 "SELECT * FROM complete_application_prepare_jobs WHERE job_id=?",
                 (row["job_id"],),
             ).fetchone()

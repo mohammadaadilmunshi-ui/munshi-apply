@@ -492,8 +492,14 @@ class CompleteApplicationLoopService:
         sensitivity = str(unresolved.get("sensitivity") or "NORMAL").upper()
         category = "CAPTCHA" if semantic.casefold() == "captcha" else "MISSING_FACT"
         protected_levels = {"PROTECTED", "SELF_ID", "CREDENTIAL", "POST_OFFER"}
-        risk = "HIGH" if sensitivity in protected_levels else "MEDIUM"
+        protected_checkpoint = category == "CAPTCHA" or sensitivity in protected_levels
+        risk = "HIGH" if protected_checkpoint else "MEDIUM"
         grouping = "NONE" if category == "CAPTCHA" else "EXACT_QUESTION"
+        # Apply owns browser mechanics, not semantic answerability. NORMAL
+        # browser-discovered fields stay value-free and pending until Hunter's
+        # canonical resolver decides whether they are answerable. Protected
+        # checkpoints remain fail-closed and user-required.
+        task_status = "WAITING_FOR_USER" if protected_checkpoint else "PENDING"
         now = datetime.now(UTC)
         task = ResolutionTaskPayload.model_validate(
             {
@@ -511,10 +517,10 @@ class CompleteApplicationLoopService:
                     dict(unresolved.get("question_observation") or {}) or None
                 ),
                 "category": category,
-                "status": "WAITING_FOR_USER",
+                "status": task_status,
                 "riskLevel": risk,
-                "autoResolvable": False,
-                "requiresUser": True,
+                "autoResolvable": not protected_checkpoint,
+                "requiresUser": protected_checkpoint,
                 "groupingScope": grouping,
                 "groupKey": None if grouping == "NONE" else question_key,
                 "sourceRefs": [

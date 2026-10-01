@@ -24,16 +24,26 @@ import {
   isCustomDateControl,
   isPopupChoiceControl,
   repeatMetadataFor,
+  resetAdaptiveScanCaches,
   validationMessageFor,
 } from "./adaptive";
 import { createBoundedHintStore } from "./bounded-hint-store";
 
 let sectionHeadingCache = new WeakMap<Document | ShadowRoot, Element[]>();
+let labelForCache = new WeakMap<
+  Document | ShadowRoot,
+  Map<string, HTMLLabelElement[]>
+>();
 let computedStyleCache = new WeakMap<HTMLElement, CSSStyleDeclaration>();
 let hiddenStateCache = new WeakMap<HTMLElement, boolean>();
 
 function resetScanCaches(): void {
+  resetAdaptiveScanCaches();
   sectionHeadingCache = new WeakMap<Document | ShadowRoot, Element[]>();
+  labelForCache = new WeakMap<
+    Document | ShadowRoot,
+    Map<string, HTMLLabelElement[]>
+  >();
   computedStyleCache = new WeakMap<HTMLElement, CSSStyleDeclaration>();
   hiddenStateCache = new WeakMap<HTMLElement, boolean>();
 }
@@ -138,8 +148,37 @@ function hash(value: string): string {
   return (result >>> 0).toString(36);
 }
 
+function labelsByFor(
+  root: Document | ShadowRoot,
+): Map<string, HTMLLabelElement[]> {
+  const cached = labelForCache.get(root);
+  if (cached) return cached;
+  const index = new Map<string, HTMLLabelElement[]>();
+  for (const candidate of Array.from(root.querySelectorAll("label[for]"))) {
+    if (!(candidate instanceof HTMLLabelElement) || !candidate.htmlFor) continue;
+    const values = index.get(candidate.htmlFor) ?? [];
+    values.push(candidate);
+    index.set(candidate.htmlFor, values);
+  }
+  labelForCache.set(root, index);
+  return index;
+}
+
+function associatedLabels(element: Element): HTMLLabelElement[] {
+  const labels: HTMLLabelElement[] = [];
+  const root = element.getRootNode();
+  if (element.id && (root instanceof Document || root instanceof ShadowRoot)) {
+    labels.push(...(labelsByFor(root).get(element.id) ?? []));
+  }
+  const wrapping = element.closest("label");
+  if (wrapping instanceof HTMLLabelElement && !labels.includes(wrapping)) {
+    labels.push(wrapping);
+  }
+  return labels;
+}
+
 function inputLabel(element: HTMLInputElement): string {
-  return Array.from(element.labels ?? [])
+  return associatedLabels(element)
     .map((label) => compactText(label.textContent))
     .filter(Boolean)
     .join(" ");
@@ -286,10 +325,7 @@ function nearbyPromptText(element: Element): string {
     const root = element.getRootNode();
     const labels =
       root instanceof Document || root instanceof ShadowRoot
-        ? Array.from(root.querySelectorAll("label[for]")).filter(
-            (label) =>
-              label instanceof HTMLLabelElement && label.htmlFor === element.id,
-          )
+        ? labelsByFor(root).get(element.id) ?? []
         : [];
     const direct = labels
       .map((item) => usablePromptText(item.textContent ?? ""))
@@ -370,7 +406,7 @@ function labelFor(element: Element): string {
     element instanceof HTMLSelectElement ||
     element instanceof HTMLTextAreaElement
   ) {
-    const labels = Array.from(element.labels)
+    const labels = associatedLabels(element)
       .map((label) => usablePromptText(label.textContent ?? ""))
       .filter(Boolean)
       .join(" ");
@@ -1062,7 +1098,8 @@ function hasVisibleCaptchaPrompt(body: string): boolean {
 }
 
 function detectSecurityCheckpoint(): SecurityCheckpointKind | null {
-  const body = visibleSecurityText();
+  const visibleTexts = visibleSecurityTexts();
+  const body = visibleTexts.join(" ").slice(0, 120_000);
   if (
     hasActiveCaptchaFrame() ||
     hasVisibleSecurityElement(
@@ -1082,7 +1119,6 @@ function detectSecurityCheckpoint(): SecurityCheckpointKind | null {
   if (/\b(multi[- ]factor|two[- ]factor|2fa|authenticator app)\b/.test(body)) {
     return "MFA";
   }
-  const visibleTexts = visibleSecurityTexts();
   if (
     hasVisibleSecurityElement("input[autocomplete='one-time-code']") ||
     visibleTexts.some(
