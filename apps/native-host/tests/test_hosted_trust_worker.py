@@ -235,7 +235,7 @@ def test_production_runner_wires_runtime_root_for_pre_submit_recovery(
         lambda *args, **kwargs: runner,
     )
     settings = SimpleNamespace(
-        handoff_hmac_secret="secret",
+        handoff_hmac_secret=object(),
         runtime_root=Path("/data/runtime"),
     )
 
