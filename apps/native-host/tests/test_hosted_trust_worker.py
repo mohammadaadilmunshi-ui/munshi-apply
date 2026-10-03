@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from munshi_apply_native import hosted_trust_worker as trust_worker
 from munshi_apply_native.hosted_trust_worker import (
     TrustAwareAdapterFactory,
     TrustAwareCompleteApplicationLoopService,
@@ -202,6 +204,45 @@ def test_normal_delegate_outcome_is_preserved():
     result = proxy.prepare_session(session_id="session-1", adapter=object())
     assert result.state == "READY_FOR_REVIEW"
     assert trust.waiting == []
+
+
+def test_production_runner_wires_runtime_root_for_pre_submit_recovery(
+    monkeypatch,
+):
+    captured = {}
+    queue = object()
+    trust_store = object()
+    base_factory = object()
+    wrapped_factory = object()
+    runner = object()
+    monkeypatch.setenv(trust_worker.BRIDGE_URL_ENV, "https://hunter.internal")
+    monkeypatch.setattr(trust_worker, "DurablePreparationQueue", lambda _db: queue)
+    monkeypatch.setattr(trust_worker, "TrustCheckpointStore", lambda _db: trust_store)
+
+    def capture_base_factory(*args, **kwargs):
+        captured.update(kwargs)
+        return base_factory
+
+    monkeypatch.setattr(trust_worker, "HostedAdapterFactory", capture_base_factory)
+    monkeypatch.setattr(
+        trust_worker,
+        "TrustAwareAdapterFactory",
+        lambda base, checkpoints: wrapped_factory,
+    )
+    monkeypatch.setattr(
+        trust_worker,
+        "TrustAwareHostedPreparationRunner",
+        lambda *args, **kwargs: runner,
+    )
+    settings = SimpleNamespace(
+        handoff_hmac_secret=object(),
+        runtime_root=Path("/data/runtime"),
+    )
+
+    result = trust_worker.build_runner(object(), settings)
+
+    assert result is runner
+    assert captured["runtime_root"] == Path("/data/runtime")
 
 
 

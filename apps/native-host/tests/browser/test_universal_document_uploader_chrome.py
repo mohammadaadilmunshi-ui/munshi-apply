@@ -193,6 +193,38 @@ def test_file_chooser_button_path():
         pw.stop()
 
 
+def test_file_chooser_waits_for_delayed_provider_filename_acknowledgement():
+    pw, browser = _browser()
+    try:
+        page = browser.new_page()
+        page.set_content(
+            """
+            <input id="hidden-file" type="file" style="display:none">
+            <button id="upload-resume">Upload Resume</button>
+            <div id="status"></div>
+            <script>
+              const input = document.querySelector('#hidden-file');
+              const button = document.querySelector('#upload-resume');
+              const status = document.querySelector('#status');
+              button.addEventListener('click', () => input.click());
+              input.addEventListener('change', () => {
+                const filename = input.files[0] ? input.files[0].name : '';
+                input.remove();
+                setTimeout(() => { status.textContent = filename; }, 350);
+              });
+            </script>
+            """
+        )
+        uploader = UniversalDocumentUploader(page)
+        proxies = uploader._proxy_targets()
+        target = next(item for item in proxies if item["role"] == "resume")
+        assert uploader._filechooser_upload(target=target, spec=_resume()) is True
+        assert page.locator("#status").inner_text() == "resume.pdf"
+    finally:
+        browser.close()
+        pw.stop()
+
+
 def test_drag_drop_zone_path():
     pw, browser = _browser()
     try:

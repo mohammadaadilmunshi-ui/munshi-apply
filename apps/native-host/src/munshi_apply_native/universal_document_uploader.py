@@ -251,6 +251,16 @@ class UniversalDocumentUploader:
                 continue
         return False
 
+    def _wait_for_acknowledgement(self, spec: DocumentSpec) -> bool:
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            if self._verify_hash_any_native(spec.sha256) or self._filename_acknowledged(
+                filename=spec.filename
+            ):
+                return True
+            self.page.wait_for_timeout(100)
+        return False
+
     def _filename_acknowledged(self, *, filename: str) -> bool:
         wanted = str(filename or "").strip()
         if not wanted:
@@ -332,19 +342,17 @@ class UniversalDocumentUploader:
             chooser_info.value.set_files(spec.playwright_payload())
         except Exception:
             return False
-        if self._verify_hash_any_native(spec.sha256) or self._filename_acknowledged(
-            filename=spec.filename
-        ):
-            self.on_event(
-                "DOCUMENT_UPLOAD_VERIFIED",
-                {
-                    "strategy": "file_chooser",
-                    "roles": [spec.role],
-                    "frame_url": target["frame_url"],
-                },
-            )
-            return True
-        return False
+        if not self._wait_for_acknowledgement(spec):
+            return False
+        self.on_event(
+            "DOCUMENT_UPLOAD_VERIFIED",
+            {
+                "strategy": "file_chooser",
+                "roles": [spec.role],
+                "frame_url": target["frame_url"],
+            },
+        )
+        return True
 
     def _drop_upload(
         self,
@@ -385,19 +393,17 @@ class UniversalDocumentUploader:
             return False
         if delivered is not True:
             return False
-        if self._verify_hash_any_native(spec.sha256) or self._filename_acknowledged(
-            filename=spec.filename
-        ):
-            self.on_event(
-                "DOCUMENT_UPLOAD_VERIFIED",
-                {
-                    "strategy": "drag_drop",
-                    "roles": [spec.role],
-                    "frame_url": target["frame_url"],
-                },
-            )
-            return True
-        return False
+        if not self._wait_for_acknowledgement(spec):
+            return False
+        self.on_event(
+            "DOCUMENT_UPLOAD_VERIFIED",
+            {
+                "strategy": "drag_drop",
+                "roles": [spec.role],
+                "frame_url": target["frame_url"],
+            },
+        )
+        return True
 
     def upload(
         self,
