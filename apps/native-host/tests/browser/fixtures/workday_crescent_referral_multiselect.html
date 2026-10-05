@@ -1,0 +1,123 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Crescent Referral Multiselect Fixture</title>
+  </head>
+  <body>
+    <main id="application-root">
+      <h1>HR Analyst - Total Rewards</h1>
+      <form id="application-form" action="/fixture/applications" method="post">
+        <section class="page" data-page="0">
+          <h2>My Information</h2>
+          <!-- EXACT observed Crescent Energy Workday structure: the referral
+               input carries NO role, NO aria-haspopup, NO aria-autocomplete,
+               NO data-automation-id and NO name. The Workday multiselect
+               component identity lives only on ancestor wrappers. -->
+          <div
+            id="referral-multiSelectContainer"
+            data-automation-id="multiSelectContainer"
+          >
+            <label for="source--source">How Did You Hear About Us?*</label>
+            <div data-automation-id="multiselectInputContainer">
+              <input
+                id="source--source"
+                type="text"
+                autocomplete="off"
+                placeholder="Search"
+                aria-required="true"
+              />
+            </div>
+            <div id="referral-options" hidden>
+              <div
+                role="option"
+                data-automation-id="promptOption"
+                data-option-id="indeed"
+              >
+                Indeed
+              </div>
+              <div
+                role="option"
+                data-automation-id="promptOption"
+                data-option-id="linkedin"
+              >
+                LinkedIn
+              </div>
+            </div>
+            <div id="referral-selected"></div>
+          </div>
+          <button id="fixture-submit" type="submit">Submit</button>
+        </section>
+      </form>
+    </main>
+    <script>
+      // Fixture flags:
+      //   window.__fixtureFailSelection: option clicks never expose a
+      //     provider-selected item (fail-closed verification lane).
+      //   window.__fixtureSubmitClicked: sentinel proving no submit occurred.
+      //   window.__fixtureNextClicked: sentinel proving no navigation occurred.
+      window.__fixtureFailSelection = false;
+      window.__fixtureSubmitClicked = false;
+      window.__fixtureNextClicked = false;
+      const compact = (value) =>
+        String(value || "")
+          .replace(/\s+/g, " ")
+          .trim();
+      const input = document.getElementById("source--source");
+      const options = document.getElementById("referral-options");
+      const selectedRoot = document.getElementById("referral-selected");
+      const form = document.getElementById("application-form");
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        window.__fixtureSubmitClicked = true;
+      });
+      document
+        .getElementById("fixture-submit")
+        .addEventListener("click", () => {
+          window.__fixtureSubmitClicked = true;
+        });
+      const refreshOptions = () => {
+        const query = compact(input.value).toLowerCase();
+        let visible = 0;
+        options
+          .querySelectorAll("[data-automation-id='promptOption']")
+          .forEach((option) => {
+            const match =
+              query &&
+              compact(option.textContent).toLowerCase().startsWith(query);
+            option.hidden = !match;
+            if (match) visible += 1;
+          });
+        options.hidden = visible === 0;
+      };
+      input.addEventListener("input", refreshOptions);
+      input.addEventListener("focus", refreshOptions);
+      options
+        .querySelectorAll("[data-automation-id='promptOption']")
+        .forEach((option) => {
+          option.addEventListener("click", () => {
+            const value = compact(option.textContent);
+            // Workday discards typed filter text; only a provider-selected
+            // item is truth.
+            input.value = "";
+            options.hidden = true;
+            options
+              .querySelectorAll("[data-automation-id='promptOption']")
+              .forEach((candidate) => {
+                candidate.setAttribute("aria-selected", "false");
+                candidate.hidden = true;
+              });
+            if (!window.__fixtureFailSelection) {
+              const chip = document.createElement("div");
+              chip.setAttribute("data-automation-id", "selectedItem-referral");
+              chip.textContent = value;
+              selectedRoot.replaceChildren(chip);
+            } else {
+              selectedRoot.replaceChildren();
+            }
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+          });
+        });
+    </script>
+  </body>
+</html>

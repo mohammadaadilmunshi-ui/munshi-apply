@@ -133,4 +133,70 @@ describe("plan runtime provider-backed evidence", () => {
     expect(protectedField?.satisfied).toBe(true);
     expect(protectedField?.value_digest).toMatch(/^[0-9a-f]{64}$/);
   });
+
+  it("recognizes a Workday multiselect input identified only by ancestors", async () => {
+    // Exact observed Crescent Energy Workday structure: the input carries no
+    // role, no aria-haspopup, no aria-autocomplete, no data-automation-id and
+    // no name. Workday's component identity lives only on the
+    // multiselectInputContainer / multiSelectContainer ancestor wrappers.
+    document.body.innerHTML = `
+      <div data-automation-id="multiSelectContainer">
+        <label for="source--source">How Did You Hear About Us?*</label>
+        <div data-automation-id="multiselectInputContainer">
+          <input
+            id="source--source"
+            type="text"
+            autocomplete="off"
+            placeholder="Search"
+          />
+        </div>
+        <div hidden>
+          <div role="option" data-automation-id="promptOption">Indeed</div>
+          <div role="option" data-automation-id="promptOption">LinkedIn</div>
+        </div>
+      </div>
+    `;
+
+    const described = await describeForm();
+    const field = described.fields.find((candidate) => {
+      const observation = candidate.question_observation ?? {};
+      return observation.id === "source--source";
+    });
+
+    expect(field).toBeDefined();
+    // Typed filter query text alone must never count as a committed value.
+    expect(field?.display_value).toBe("");
+    expect(field?.satisfied).toBe(false);
+  });
+
+  it("accepts the Workday multiselect selected item as the committed value", async () => {
+    document.body.innerHTML = `
+      <div data-automation-id="multiSelectContainer">
+        <label for="source--source">How Did You Hear About Us?*</label>
+        <div data-automation-id="multiselectInputContainer">
+          <input
+            id="source--source"
+            type="text"
+            autocomplete="off"
+            placeholder="Search"
+          />
+        </div>
+        <div hidden>
+          <div role="option" data-automation-id="promptOption">Indeed</div>
+          <div role="option" data-automation-id="promptOption">LinkedIn</div>
+        </div>
+        <div data-automation-id="selectedItem-referral">Indeed</div>
+      </div>
+    `;
+
+    const described = await describeForm();
+    const field = described.fields.find((candidate) => {
+      const observation = candidate.question_observation ?? {};
+      return observation.id === "source--source";
+    });
+
+    expect(field).toBeDefined();
+    expect(field?.display_value?.toLowerCase()).toBe("indeed");
+    expect(field?.satisfied).toBe(true);
+  });
 });
