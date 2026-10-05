@@ -29,10 +29,18 @@
               />
             </div>
             <div id="referral-options" hidden>
-              <div role="option" data-automation-id="promptOption" data-option-id="indeed">
+              <div
+                role="option"
+                data-automation-id="promptOption"
+                data-option-id="indeed"
+              >
                 Indeed
               </div>
-              <div role="option" data-automation-id="promptOption" data-option-id="linkedin">
+              <div
+                role="option"
+                data-automation-id="promptOption"
+                data-option-id="linkedin"
+              >
                 LinkedIn
               </div>
             </div>
@@ -63,39 +71,42 @@
         event.preventDefault();
         window.__fixtureSubmitClicked = true;
       });
-      document.getElementById("fixture-submit").addEventListener("click", () => {
-        window.__fixtureSubmitClicked = true;
-      });
+      document
+        .getElementById("fixture-submit")
+        .addEventListener("click", () => {
+          window.__fixtureSubmitClicked = true;
+        });
       const refreshOptions = () => {
         const query = compact(input.value).toLowerCase();
         let visible = 0;
-        options.querySelectorAll("[data-automation-id='promptOption']").forEach(
-          (option) => {
-            const match = query && compact(option.textContent)
-              .toLowerCase()
-              .startsWith(query);
+        options
+          .querySelectorAll("[data-automation-id='promptOption']")
+          .forEach((option) => {
+            const match =
+              query &&
+              compact(option.textContent).toLowerCase().startsWith(query);
             option.hidden = !match;
             if (match) visible += 1;
-          },
-        );
+          });
         options.hidden = visible === 0;
       };
       input.addEventListener("input", refreshOptions);
       input.addEventListener("focus", refreshOptions);
-      options.querySelectorAll("[data-automation-id='promptOption']").forEach(
-        (option) => {
+      options
+        .querySelectorAll("[data-automation-id='promptOption']")
+        .forEach((option) => {
           option.addEventListener("click", () => {
             const value = compact(option.textContent);
             // Workday discards typed filter text; only a provider-selected
             // item is truth.
             input.value = "";
             options.hidden = true;
-            options.querySelectorAll("[data-automation-id='promptOption']").forEach(
-              (candidate) => {
+            options
+              .querySelectorAll("[data-automation-id='promptOption']")
+              .forEach((candidate) => {
                 candidate.setAttribute("aria-selected", "false");
                 candidate.hidden = true;
-              },
-            );
+              });
             if (!window.__fixtureFailSelection) {
               const chip = document.createElement("div");
               chip.setAttribute("data-automation-id", "selectedItem-referral");
@@ -106,8 +117,7 @@
             }
             input.dispatchEvent(new Event("change", { bubbles: true }));
           });
-        },
-      );
+        });
     </script>
   </body>
 </html>
