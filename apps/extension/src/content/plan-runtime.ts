@@ -14,6 +14,10 @@ export function element(controlId: string): Element | null {
 // Workday search/prompt inputs are query surfaces, not sources of truth. Typed
 // text is never treated as committed unless Workday exposes a selected item or
 // an explicit backing value for the component.
+// Workday's multiselect component keeps its identifying automation ids on
+// ancestor wrappers (multiselectInputContainer / multiSelectContainer) while the
+// input itself carries no ARIA prompt semantics, so component recognition must
+// be ancestor-aware.
 function isWorkdayPromptControl(node: Element | null): boolean {
   if (!(node instanceof HTMLInputElement)) return false;
 
@@ -26,11 +30,24 @@ function isWorkdayPromptControl(node: Element | null): boolean {
   const role = compact(node.getAttribute("role"));
   const popup = compact(node.getAttribute("aria-haspopup"));
   const autocomplete = compact(node.getAttribute("aria-autocomplete"));
+  const ancestorAutomationIds: string[] = [];
+  let ancestor = node.parentElement;
+  for (
+    let depth = 0;
+    ancestor && depth < 8;
+    depth += 1, ancestor = ancestor.parentElement
+  ) {
+    const value = compact(ancestor.getAttribute("data-automation-id"));
+    if (value && !ancestorAutomationIds.includes(value)) {
+      ancestorAutomationIds.push(value);
+    }
+  }
   const descriptor = compact(
     [
       node.getAttribute("data-automation-id"),
       node.parentElement?.getAttribute("data-automation-id"),
       node.closest("[data-automation-id]")?.getAttribute("data-automation-id"),
+      ...ancestorAutomationIds,
     ]
       .filter(Boolean)
       .join(" "),
@@ -40,7 +57,9 @@ function isWorkdayPromptControl(node: Element | null): boolean {
     role === "combobox" ||
     ["listbox", "tree", "grid"].includes(popup) ||
     ["list", "both"].includes(autocomplete) ||
-    /(?:^|\b)(prompt|search|lookup|typeahead)(?:\b|$)/.test(descriptor);
+    /(?:^|\b)(prompt|search|lookup|typeahead|multiselectinputcontainer|multiselectcontainer)(?:\b|$)/.test(
+      descriptor,
+    );
 
   const workdaySurface =
     host.includes("myworkdayjobs") ||

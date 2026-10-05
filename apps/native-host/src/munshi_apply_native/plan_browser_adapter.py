@@ -682,7 +682,20 @@ class PlanBrowserAdapter:
               autocomplete: element.getAttribute('aria-autocomplete') || '',
               automationId: element.getAttribute('data-automation-id') || '',
               id: element.id || '',
-              name: element.getAttribute('name') || ''
+              name: element.getAttribute('name') || '',
+              ancestorAutomationIds: (() => {
+                const out = [];
+                let node = element.parentElement;
+                for (let depth = 0; node && depth < 8; depth += 1, node = node.parentElement) {
+                  const value = node.getAttribute
+                    ? (node.getAttribute('data-automation-id') || '')
+                    : '';
+                  if (value && out.indexOf(String(value).toLowerCase()) === -1) {
+                    out.push(String(value).toLowerCase());
+                  }
+                }
+                return out;
+              })()
             })"""
         )
         tag = str(metadata.get("tag") or "")
@@ -691,6 +704,20 @@ class PlanBrowserAdapter:
         has_popup = str(metadata.get("hasPopup") or "").casefold()
         aria_autocomplete = str(metadata.get("autocomplete") or "").casefold()
         automation_id = str(metadata.get("automationId") or "").casefold()
+        ancestor_automation_ids = [
+            str(value or "").casefold()
+            for value in (metadata.get("ancestorAutomationIds") or [])
+        ]
+        # Workday's multiselect component identifies itself only through
+        # ancestor wrappers (multiselectInputContainer / multiSelectContainer);
+        # the input itself carries no ARIA prompt semantics. Recognition must
+        # stay ancestor-aware or these components fall into the plain-text lane
+        # and typed filter text is discarded by the provider.
+        multiselect_ancestor = any(
+            token in value
+            for value in ancestor_automation_ids
+            for token in ("multiselectinputcontainer", "multiselectcontainer")
+        )
         semantic = str(
             question.get("semanticType") or question.get("semantic_type") or ""
         ).upper()
@@ -708,6 +735,7 @@ class PlanBrowserAdapter:
                     token in automation_id
                     for token in ("prompt", "search", "lookup", "typeahead")
                 )
+                or multiselect_ancestor
             )
         )
         choice_like = (
