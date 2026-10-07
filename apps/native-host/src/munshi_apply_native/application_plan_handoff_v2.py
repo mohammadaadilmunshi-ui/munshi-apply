@@ -28,6 +28,7 @@ SUPERSESSION_VERSION = "munshi-application-plan-supersession-v1"
 PLAN_VERSION = "munshi-application-plan-v2"
 LIVE_HANDOFF_ENV = "MUNSHI_APPLY_LIVE_HANDOFF_ENABLED"
 RUNTIME_SUPERSESSION_ENV = "MUNSHI_APPLY_PLAN_SUPERSESSION_ENABLED"
+STALE_PREPARATION_PLAN_ERROR = "Hosted preparation plan is stale"
 KNOWN_PROVIDER_RECIPES = frozenset(
     {
         "GREENHOUSE",
@@ -357,8 +358,13 @@ def _supersession_target_locked(
     if prepare_job is None:
         raise ValueError("Runtime plan supersession has no durable preparation job")
     prepare_job = dict(prepare_job)
+    prepare_state = str(prepare_job["state"])
+    stale_failed_plan = (
+        prepare_state == "FAILED_SAFELY"
+        and str(prepare_job["last_error"] or "") == STALE_PREPARATION_PLAN_ERROR
+    )
     if (
-        str(prepare_job["state"]) != "WAITING_INPUT"
+        (prepare_state != "WAITING_INPUT" and not stale_failed_plan)
         or str(prepare_job["plan_id"]) != supersession.prior_plan_id
         or str(prepare_job["application_id"]) != envelope.application_id
         or str(prepare_job["provider"]).upper() != envelope.provider.upper()
@@ -480,7 +486,11 @@ def _commit_supersession_locked(
                continuation_pending=1,continuation_in_flight=0,
                finished_at=NULL,updated_at=?
            WHERE job_id=? AND session_id=? AND plan_id=?
-             AND state='WAITING_INPUT' AND cancel_requested_at IS NULL""",
+             AND (
+                 state='WAITING_INPUT'
+                 OR (state='FAILED_SAFELY' AND last_error=?)
+             )
+             AND cancel_requested_at IS NULL""",
         (
             envelope.plan_id,
             accepted_at,
@@ -488,6 +498,7 @@ def _commit_supersession_locked(
             prepare_job["job_id"],
             supersession.session_id,
             supersession.prior_plan_id,
+            STALE_PREPARATION_PLAN_ERROR,
         ),
     )
     if updated_job.rowcount != 1:
