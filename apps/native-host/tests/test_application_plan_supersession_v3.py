@@ -487,3 +487,61 @@ def test_same_plan_replay_does_not_resurrect_unrelated_or_exhausted_execution(
     assert (stored["state"],stored["last_error"],stored["attempt_count"]) == (
         "FAILED_SAFELY",error,attempts
     )
+
+
+
+def test_committed_v3_supersession_replay_revives_only_original_stale_failed_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    consumer, database, queue, prior, session, job, task = _waiting_fixture(
+        tmp_path, monkeypatch
+    )
+    replacement, envelope = _replacement_envelope(prior, session, task)
+    body, headers = H._signed(envelope, timestamp=1001)
+    accepted = consumer.accept(body, headers, now=1001)
+    assert accepted.accepted and not accepted.replayed
+
+    with database.connect() as connection:
+        connection.execute(
+            """UPDATE complete_application_prepare_jobs
+               SET state='FAILED_SAFELY',
+                   last_error='Hosted preparation plan is stale',
+                   attempt_count=2,max_attempts=3,
+                   continuation_pending=0,continuation_in_flight=0
+               WHERE job_id=?""",
+            (job["job_id"],),
+        )
+
+    replay = consumer.accept(body, headers, now=1001)
+    assert replay.accepted and replay.replayed
+    assert replay.resumed_session_id == session.session_id
+    assert replay.preparation_job_id == job["job_id"]
+    with database.connect() as connection:
+        actual = connection.execute(
+            """SELECT plan_id,state,last_error,attempt_count,max_attempts,
+                      continuation_pending,continuation_in_flight
+               FROM complete_application_prepare_jobs WHERE job_id=?""",
+            (job["job_id"],),
+        ).fetchone()
+        assert connection.execute(
+            "SELECT COUNT(*) FROM complete_application_sessions"
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT COUNT(*) FROM complete_application_prepare_jobs"
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT COUNT(*) FROM final_submit_commands"
+        ).fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT COUNT(*) FROM application_submission_receipts"
+        ).fetchone()[0] == 0
+    assert actual["plan_id"] == replacement["plan_id"]
+    assert actual["state"] == "QUEUED"
+    assert actual["last_error"] is None
+    assert actual["attempt_count"] == 2
+    assert actual["max_attempts"] == 3
+    assert actual["continuation_pending"] == 1
+    assert actual["continuation_in_flight"] == 0
+    assert queue.get(
+        job_id=job["job_id"], tenant_id="tenant-a", user_id="member-a"
+    )["state"] == "QUEUED"
