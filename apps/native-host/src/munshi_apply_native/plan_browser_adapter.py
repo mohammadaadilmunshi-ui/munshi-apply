@@ -1404,6 +1404,9 @@ class PlanBrowserAdapter:
             raise ValueError("Hunter plan is stale")
         accumulated_review_fields: dict[tuple[str, str], dict[str, Any]] = {}
         prepared_page_ids: set[str] = set()
+        # Value-free diagnostics for real Workday controls. This evidence does
+        # not change what gets filled and never includes candidate answer text.
+        field_action_evidence: list[dict[str, Any]] = []
         for _step in range(10):
             # Cookie/CMP overlays are reversible UI chrome and may otherwise
             # intercept clicks. Dismiss them before each page scan/navigation step.
@@ -1573,6 +1576,17 @@ class PlanBrowserAdapter:
                     if value is None and len(candidates) == 1:
                         value = candidates[0]["execution_value"]
                     if value is None:
+                        if (
+                            provider_for_url(self.page.url) == "WORKDAY"
+                            and semantic in {"REFERRAL", "PHONE", "PHONE_DEVICE_TYPE"}
+                        ):
+                            field_action_evidence.append({
+                                "control_id": str(control["controlId"]),
+                                "semantic_type": semantic,
+                                "plan_match_count": len(candidates),
+                                "status": "NO_APPROVED_VALUE",
+                                "strategy": "NOT_ATTEMPTED",
+                            })
                         continue
                 result = self._workday_fill_control(
                     control=control,
@@ -1592,11 +1606,39 @@ class PlanBrowserAdapter:
                             }
                         ],
                     )[0]
+                if (
+                    provider_for_url(self.page.url) == "WORKDAY"
+                    and semantic in {"REFERRAL", "PHONE", "PHONE_DEVICE_TYPE"}
+                    and not protected_lane
+                ):
+                    strategy = str(result.get("strategy") or "")
+                    verification = str(result.get("verification") or "")
+                    field_action_evidence.append({
+                        "control_id": str(control["controlId"]),
+                        "semantic_type": semantic,
+                        "plan_match_count": len(candidates) if not legal_attestation_lane else 0,
+                        "status": (
+                            str(result.get("status") or "")
+                            if result.get("status") in {"FILLED", "FAILED"}
+                            else "OTHER"
+                        ),
+                        "strategy": strategy if strategy in {
+                            "WORKDAY_PROVIDER_PROMPT",
+                            "WORKDAY_PHONE_CANONICAL_VARIANT",
+                            "WORKDAY_TRUSTED_PLAYWRIGHT",
+                            "WORKDAY_PROVIDER_CHOICE",
+                            "WORKDAY_PROMPT_SELECTED_ITEM",
+                        } else "OTHER",
+                        "verification": verification if verification in {
+                            "POST_ACTION_PROVIDER_VERIFIED", "FAILED_CLOSED",
+                        } else "UNKNOWN",
+                    })
                 self.on_event(
                     "FIELD_VERIFIED" if result["status"] == "FILLED" else "NEEDS_INPUT",
                     {"control_id": control["controlId"], "status": result["status"]},
                 )
             result = self._observe(plan)
+            result["field_action_evidence"] = field_action_evidence[-120:]
             page_id = str(result.get("page_id") or described["page"].get("pageId") or "")
             if page_id:
                 prepared_page_ids.add(page_id)

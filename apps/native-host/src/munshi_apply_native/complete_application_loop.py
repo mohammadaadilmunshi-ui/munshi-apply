@@ -803,6 +803,9 @@ class CompleteApplicationLoopService:
             "form_digest": form_digest,
             "review_fields": review_fields,
             "review_reconciliation": review_reconciliation,
+            "field_action_evidence": safe_evidence(
+                list(prepared.get("field_action_evidence") or [])
+            ),
         }
         if cover_letter is not None:
             event_evidence["cover_letter_field_present"] = (

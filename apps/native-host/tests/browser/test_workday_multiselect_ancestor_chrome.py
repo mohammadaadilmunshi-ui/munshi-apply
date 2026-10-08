@@ -205,6 +205,15 @@ def test_crescent_referral_prepare_form_completes_without_submit():
 
         assert prepared["unresolved"] == []
         assert prepared["validation_errors"] == []
+        trace = prepared["field_action_evidence"]
+        assert any(
+            item["semantic_type"] == "REFERRAL"
+            and item["status"] == "FILLED"
+            and item["strategy"] == "WORKDAY_PROVIDER_PROMPT"
+            and item["plan_match_count"] == 1
+            for item in trace
+        ), trace
+        assert "Indeed" not in repr(trace)
         field = _referral_field(adapter._scan())
         assert field["satisfied"] is True
 
@@ -263,6 +272,14 @@ def test_crescent_referral_fails_closed_without_provider_selected_state():
             resolved_values={},
         )
         assert prepared["unresolved"] != []
+        trace = prepared["field_action_evidence"]
+        assert any(
+            item["semantic_type"] == "REFERRAL"
+            and item["status"] == "FAILED"
+            and item["verification"] == "FAILED_CLOSED"
+            for item in trace
+        ), trace
+        assert "Indeed" not in repr(trace)
 
         assert page.evaluate("() => window.__fixtureSubmitClicked") is False
         assert page.locator("body").get_attribute("data-submitted") is None
