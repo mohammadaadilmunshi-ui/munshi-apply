@@ -590,6 +590,100 @@ def _supersession_replay_locked(
         raise ValueError("Committed plan supersession execution binding is invalid")
     return supersession.session_id, str(row["prepare_job_id"])
 
+
+def _recover_stale_current_plan_replay_locked(
+    connection: sqlite3.Connection,
+    envelope: ApplicationPlanEnvelope,
+    *,
+    accepted_at: str,
+) -> tuple[str, str] | None:
+    """Requeue only the same signed, already accepted, currently bound plan.
+
+    Hunter validates executable/current plan freshness before signing each
+    delivery. The worker independently revalidates it before browser work.
+    This strictly repairs the durable stale-plan failure left by an earlier
+    attempt; it never creates an application, session, plan, or submit command.
+    """
+    if envelope.supersession is not None:
+        return None
+
+    # If Apply has accepted a newer replacement, never wake an ancestor.
+    if connection.execute(
+        """SELECT 1 FROM career_os_application_plan_supersessions
+           WHERE application_id=? AND prior_plan_id=? LIMIT 1""",
+        (envelope.application_id, envelope.plan_id),
+    ).fetchone() is not None:
+        return None
+
+    sessions = connection.execute(
+        """SELECT session_id FROM complete_application_sessions
+           WHERE application_id=? AND plan_id=? AND state='NEEDS_INPUT'""",
+        (envelope.application_id, envelope.plan_id),
+    ).fetchall()
+    if len(sessions) != 1:
+        return None
+    session_id = str(sessions[0]["session_id"])
+    jobs = connection.execute(
+        """SELECT job_id FROM complete_application_prepare_jobs
+           WHERE session_id=? AND application_id=? AND plan_id=?
+             AND tenant_id=? AND user_id=?
+             AND state='FAILED_SAFELY' AND last_error=?
+             AND attempt_count < max_attempts
+             AND cancel_requested_at IS NULL
+             AND lease_owner IS NULL AND lease_expires_at IS NULL
+             AND continuation_in_flight=0""",
+        (
+            session_id,
+            envelope.application_id,
+            envelope.plan_id,
+            envelope.tenant_id,
+            envelope.user_id,
+            STALE_PREPARATION_PLAN_ERROR,
+        ),
+    ).fetchall()
+    if len(jobs) != 1:
+        return None
+
+    # Review/submit/receipt evidence is an irreversible boundary.
+    for query in (
+        "SELECT 1 FROM final_application_reviews WHERE application_id=? LIMIT 1",
+        "SELECT 1 FROM final_submit_commands WHERE application_id=? LIMIT 1",
+        "SELECT 1 FROM application_submission_receipts WHERE application_id=? LIMIT 1",
+    ):
+        if connection.execute(
+            query, (envelope.application_id,)
+        ).fetchone() is not None:
+            return None
+
+    job_id = str(jobs[0]["job_id"])
+    updated = connection.execute(
+        """UPDATE complete_application_prepare_jobs
+           SET state='QUEUED',last_error=NULL,finished_at=NULL,
+               available_at=?,updated_at=?,
+               continuation_pending=1,continuation_in_flight=0
+           WHERE job_id=? AND session_id=? AND application_id=? AND plan_id=?
+             AND tenant_id=? AND user_id=?
+             AND state='FAILED_SAFELY' AND last_error=?
+             AND attempt_count < max_attempts
+             AND cancel_requested_at IS NULL
+             AND lease_owner IS NULL AND lease_expires_at IS NULL
+             AND continuation_in_flight=0""",
+        (
+            accepted_at,
+            accepted_at,
+            job_id,
+            session_id,
+            envelope.application_id,
+            envelope.plan_id,
+            envelope.tenant_id,
+            envelope.user_id,
+            STALE_PREPARATION_PLAN_ERROR,
+        ),
+    )
+    if updated.rowcount != 1:
+        raise RuntimeError("Current-plan stale preparation recovery lost its atomic guard")
+    return session_id, job_id
+
 class ApplicationPlanHandoffConsumer:
     def __init__(
         self,
@@ -679,6 +773,10 @@ class ApplicationPlanHandoffConsumer:
                             error="idempotency or replay payload conflict",
                         )
                     replay_binding = _supersession_replay_locked(connection, envelope)
+                    if replay_binding is None:
+                        replay_binding = _recover_stale_current_plan_replay_locked(
+                            connection, envelope, accepted_at=accepted_at
+                        )
                     if replay_binding is not None:
                         resumed_session_id, preparation_job_id = replay_binding
                     return PlanHandoffResult(
@@ -706,6 +804,10 @@ class ApplicationPlanHandoffConsumer:
                             error="handoff replay content conflict",
                         )
                     replay_binding = _supersession_replay_locked(connection, envelope)
+                    if replay_binding is None:
+                        replay_binding = _recover_stale_current_plan_replay_locked(
+                            connection, envelope, accepted_at=accepted_at
+                        )
                     if replay_binding is not None:
                         resumed_session_id, preparation_job_id = replay_binding
                     return PlanHandoffResult(

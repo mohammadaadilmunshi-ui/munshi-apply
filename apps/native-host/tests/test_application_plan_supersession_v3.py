@@ -376,3 +376,114 @@ def test_supersession_rejects_unrelated_failed_safely_job_without_partial_write(
     assert stored_job["plan_id"] == prior["plan_id"]
     assert stored_job["state"] == "FAILED_SAFELY"
     assert stored_job["last_error"] == "Different preparation failure"
+
+
+
+def test_signed_same_plan_replay_requeues_only_stale_failed_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    consumer, database, queue, plan, session, job, _ = _waiting_fixture(
+        tmp_path, monkeypatch
+    )
+    with database.connect() as connection:
+        connection.execute(
+            """UPDATE complete_application_prepare_jobs
+               SET state='FAILED_SAFELY',
+                   last_error='Hosted preparation plan is stale',
+                   attempt_count=2,max_attempts=3,
+                   finished_at='2026-10-05T00:00:00+00:00'
+               WHERE job_id=?""",
+            (job["job_id"],),
+        )
+
+    body, headers = H._signed(H._envelope(plan=plan), timestamp=1001)
+    recovered = consumer.accept(body, headers, now=1001)
+    repeated = consumer.accept(body, headers, now=1001)
+
+    assert recovered.accepted is True
+    assert recovered.replayed is True
+    assert recovered.resumed_session_id == session.session_id
+    assert recovered.preparation_job_id == job["job_id"]
+    assert repeated.accepted is True
+    assert repeated.replayed is True
+    with database.connect() as connection:
+        stored = connection.execute(
+            """SELECT state,plan_id,attempt_count,max_attempts,last_error,
+                      continuation_pending,continuation_in_flight,finished_at
+               FROM complete_application_prepare_jobs WHERE job_id=?""",
+            (job["job_id"],),
+        ).fetchone()
+        sess = connection.execute(
+            "SELECT state,plan_id FROM complete_application_sessions WHERE session_id=?",
+            (session.session_id,),
+        ).fetchone()
+        assert connection.execute(
+            "SELECT COUNT(*) FROM complete_application_sessions"
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT COUNT(*) FROM complete_application_prepare_jobs"
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT COUNT(*) FROM final_submit_commands"
+        ).fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT COUNT(*) FROM application_submission_receipts"
+        ).fetchone()[0] == 0
+    assert stored["state"] == "QUEUED"
+    assert stored["plan_id"] == plan["plan_id"]
+    assert stored["attempt_count"] == 2
+    assert stored["max_attempts"] == 3
+    assert stored["last_error"] is None
+    assert stored["continuation_pending"] == 1
+    assert stored["continuation_in_flight"] == 0
+    assert stored["finished_at"] is None
+    assert sess["state"] == "NEEDS_INPUT"
+    assert sess["plan_id"] == plan["plan_id"]
+    assert queue.get(
+        job_id=str(job["job_id"]), tenant_id="tenant-a", user_id="member-a"
+    )["state"] == "QUEUED"
+
+
+@pytest.mark.parametrize(
+    "error,attempts,session_state",
+    [
+        ("Other failure", 2, "NEEDS_INPUT"),
+        ("Hosted preparation plan is stale", 3, "NEEDS_INPUT"),
+        ("Hosted preparation plan is stale", 2, "READY_FOR_REVIEW"),
+    ],
+)
+def test_same_plan_replay_does_not_resurrect_unrelated_or_exhausted_execution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    error: str,
+    attempts: int,
+    session_state: str,
+) -> None:
+    consumer, database, _, plan, session, job, _ = _waiting_fixture(
+        tmp_path, monkeypatch
+    )
+    with database.connect() as connection:
+        connection.execute(
+            """UPDATE complete_application_prepare_jobs
+               SET state='FAILED_SAFELY',last_error=?,
+                   attempt_count=?,max_attempts=3
+               WHERE job_id=?""",
+            (error, attempts, job["job_id"]),
+        )
+        connection.execute(
+            "UPDATE complete_application_sessions SET state=? WHERE session_id=?",
+            (session_state, session.session_id),
+        )
+    body, headers = H._signed(H._envelope(plan=plan), timestamp=1001)
+    result = consumer.accept(body, headers, now=1001)
+    assert result.accepted is True and result.replayed is True
+    assert result.preparation_job_id is None
+    with database.connect() as connection:
+        stored = connection.execute(
+            """SELECT state,last_error,attempt_count
+               FROM complete_application_prepare_jobs WHERE job_id=?""",
+            (job["job_id"],),
+        ).fetchone()
+    assert (stored["state"],stored["last_error"],stored["attempt_count"]) == (
+        "FAILED_SAFELY",error,attempts
+    )
