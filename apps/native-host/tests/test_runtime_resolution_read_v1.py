@@ -189,3 +189,13 @@ def test_application_binding_mismatch_fails_closed():
 
 def test_read_model_never_grants_submission_authority():
     assert SUBMISSION_AUTHORITY is False
+
+def test_old_checkpoint_open_question_not_exposed_as_current():
+    old = FakeTask(task_id="previous-checkpoint")
+    old._payload["checkpoint_id"] = "checkpoint-previous"
+    current = FakeTask(task_id="current-checkpoint")
+    view = model([old, current]).for_prepare_job(
+        job_id="prepare-job-1", tenant_id="tenant-a", user_id="user-a"
+    )
+    assert view["open_task_count"] == 1
+    assert [t["task_id"] for t in view["resolution_tasks"]] == ["current-checkpoint"]

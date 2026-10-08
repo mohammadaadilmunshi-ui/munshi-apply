@@ -72,22 +72,6 @@ class RuntimeResolutionReadModel:
         job = self.queue.get(job_id=str(job_id), tenant_id=str(tenant_id), user_id=str(user_id))
         application_id = str(job["application_id"])
         session_id = str(job["session_id"])
-        candidates = self.tasks.list(application_id=application_id, limit=500)
-        safe: list[dict[str, Any]] = []
-        for task in candidates:
-            if str(task.application_id) != application_id:
-                raise RuntimeError("Resolution task application binding changed")
-            if str(task.session_id or "") != session_id:
-                continue
-            if str(task.status) not in OPEN_STATUSES:
-                continue
-            safe.append(_safe_task(task))
-        safe.sort(
-            key=lambda row: (
-                str(row.get("question_id") or ""),
-                str(row.get("task_id") or ""),
-            )
-        )
         with self.database.connect() as connection:
             session = connection.execute(
                 """SELECT browser_form_digest,checkpoint_id,state
@@ -99,6 +83,25 @@ class RuntimeResolutionReadModel:
             raise RuntimeError("Resolution task session ledger is unavailable")
         browser_form_digest = str(session["browser_form_digest"] or "")
         checkpoint_id = str(session["checkpoint_id"] or "")
+        candidates = self.tasks.list(application_id=application_id, limit=500)
+        safe: list[dict[str, Any]] = []
+        for task in candidates:
+            if str(task.application_id) != application_id:
+                raise RuntimeError("Resolution task application binding changed")
+            if str(task.session_id or "") != session_id:
+                continue
+            if str(task.status) not in OPEN_STATUSES:
+                continue
+            record = _safe_task(task)
+            if str(record.get("checkpoint_id") or "") != checkpoint_id:
+                continue
+            safe.append(record)
+        safe.sort(
+            key=lambda row: (
+                str(row.get("question_id") or ""),
+                str(row.get("task_id") or ""),
+            )
+        )
         if safe and (len(browser_form_digest) != 64 or not checkpoint_id):
             raise RuntimeError("Resolution task session is missing browser binding evidence")
         return {
