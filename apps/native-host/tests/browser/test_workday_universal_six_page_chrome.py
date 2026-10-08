@@ -228,7 +228,9 @@ def _bind_normal_plan_answers(adapter: PlanBrowserAdapter, page, plan: dict) -> 
     "normal_answer_mode",
     ["resolved_values", "immutable_plan"],
 )
-def test_workday_six_page_fixture_prepares_to_reconciled_review_without_submit(normal_answer_mode: str):
+def test_workday_six_page_fixture_prepares_to_reconciled_review_without_submit(
+    normal_answer_mode: str,
+):
     browser_path = resolve_browser_executable()
     fixture = (
         _root()
