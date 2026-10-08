@@ -23,8 +23,10 @@ disabled even if the read-only observer loses its connection.
   database through explicit owner-configured, host-key checked, read-only SSH.
   This cannot update the database, start a new application or click Submit.
 - Raw answer values, applicant data, phone digits, passwords and event evidence
-  payloads are not transmitted. Duplicate sessions and unavailable monitoring
-  are explicitly shown as blockers.
+  payloads are not transmitted. The latest session is selected for observation;
+  historical sessions from older plans do not falsely block the inspector.
+  Tied latest session timestamps and unavailable monitoring remain blockers.
+  This recency selection is informational and cannot authorize execution.
 - Selecting a hosted identity disables the older independent local AutoPilot
   Start and Resume for that extension view. The hosted worker is unaffected.
 - Local AI draft approval UI remains only for the old independent draft

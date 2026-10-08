@@ -123,6 +123,13 @@ def test_remote_status_script_reads_only_state_and_never_raw_answers(tmp_path):
         ("apply-session-1", APPLICATION_ID, "application-plan-1",
          "NEEDS_INPUT", "checkpoint-1", "2026-10-08T19:54:00Z"),
     )
+    # A previous plan's durable session is history, not another active run.
+    # Crescent has several such records in the production database.
+    db.execute(
+        "INSERT INTO complete_application_sessions VALUES (?,?,?,?,?,?)",
+        ("apply-session-older", APPLICATION_ID, "application-plan-old",
+         "FAILED_SAFELY", None, "2026-10-03T17:00:00Z"),
+    )
     db.execute(
         "INSERT INTO complete_application_prepare_jobs VALUES (?,?,?,?,?,?)",
         ("prepare-job-1", "apply-session-1", "WAITING_INPUT", 2, 3,
@@ -149,9 +156,40 @@ def test_remote_status_script_reads_only_state_and_never_raw_answers(tmp_path):
     )
     status = json.loads(result.stdout)
     assert status["source"] == "NETCUP_APPLY_DATABASE"
+    assert status["state"] == "FOUND"
+    assert status["session"]["session_id"] == "apply-session-1"
     assert status["session"]["checkpoint_id"] == "checkpoint-1"
     assert status["prepare_job"]["attempt_count"] == 2
     assert status["pending_controls"][0]["semantic_type"] == "REFERRAL"
     assert status["events"][0]["event_type"] == "FORM_PREPARED"
     assert status["counts"]["employer_receipts"] == 0
     assert "do not show" not in result.stdout
+
+
+def test_remote_status_script_fails_closed_on_tied_latest_sessions(tmp_path):
+    db_path = tmp_path / "apply.sqlite"
+    with sqlite3.connect(db_path) as db:
+        db.execute(
+            "CREATE TABLE complete_application_sessions "
+            "(session_id TEXT,application_id TEXT,plan_id TEXT,state TEXT,"
+            "checkpoint_id TEXT,updated_at TEXT)"
+        )
+        db.executemany(
+            "INSERT INTO complete_application_sessions VALUES (?,?,?,?,?,?)",
+            [
+                ("apply-session-a", APPLICATION_ID, "plan-a",
+                 "NEEDS_INPUT", "checkpoint-a", "2026-10-08T19:54:00Z"),
+                ("apply-session-b", APPLICATION_ID, "plan-b",
+                 "NEEDS_INPUT", "checkpoint-b", "2026-10-08T19:54:00Z"),
+            ],
+        )
+    code = monitor._REMOTE_READ_ONLY.replace(
+        "/data/munshi-apply.sqlite", str(db_path)
+    )
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", code, APPLICATION_ID],
+        check=True, capture_output=True, text=True,
+    )
+    status = json.loads(result.stdout)
+    assert status["state"] == "AMBIGUOUS"
+    assert "session" not in status
