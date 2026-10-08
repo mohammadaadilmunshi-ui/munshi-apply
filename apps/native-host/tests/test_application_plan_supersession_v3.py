@@ -487,3 +487,71 @@ def test_same_plan_replay_does_not_resurrect_unrelated_or_exhausted_execution(
     assert (stored["state"],stored["last_error"],stored["attempt_count"]) == (
         "FAILED_SAFELY",error,attempts
     )
+
+
+
+def test_existing_v3_supersession_replay_requeues_stale_failed_original_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reproduce Crescent: latest plan is ALREADY an accepted V3 replacement."""
+    consumer, database, queue, prior, session, job, task = _waiting_fixture(
+        tmp_path, monkeypatch
+    )
+    replacement, envelope = _replacement_envelope(prior, session, task)
+    body, headers = H._signed(envelope, timestamp=1001)
+    original_accept = consumer.accept(body, headers, now=1001)
+    assert original_accept.accepted and not original_accept.replayed
+
+    # The browser worker then stranded THIS SAME updated plan/job on a stale
+    # plan error, while Hunter has since verified this exact plan is current.
+    with database.connect() as connection:
+        connection.execute(
+            """UPDATE complete_application_prepare_jobs
+               SET state='FAILED_SAFELY',
+                   last_error='Hosted preparation plan is stale',
+                   attempt_count=2,max_attempts=3,
+                   finished_at='2026-10-05T00:00:00+00:00'
+               WHERE job_id=?""",
+            (job["job_id"],),
+        )
+    replay = consumer.accept(body, headers, now=1001)
+    assert replay.accepted and replay.replayed
+    assert replay.resumed_session_id == session.session_id
+    assert replay.preparation_job_id == job["job_id"]
+
+    with database.connect() as connection:
+        j = connection.execute(
+            """SELECT state,last_error,plan_id,attempt_count,max_attempts,
+                      continuation_pending,finished_at
+               FROM complete_application_prepare_jobs WHERE job_id=?""",
+            (job["job_id"],),
+        ).fetchone()
+        s = connection.execute(
+            "SELECT state,plan_id FROM complete_application_sessions WHERE session_id=?",
+            (session.session_id,),
+        ).fetchone()
+        assert connection.execute(
+            "SELECT COUNT(*) FROM complete_application_prepare_jobs"
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT COUNT(*) FROM complete_application_sessions"
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT COUNT(*) FROM final_submit_commands"
+        ).fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT COUNT(*) FROM application_submission_receipts"
+        ).fetchone()[0] == 0
+
+    assert j["state"] == "QUEUED"
+    assert j["last_error"] is None
+    assert j["plan_id"] == replacement["plan_id"]
+    assert j["attempt_count"] == 2
+    assert j["max_attempts"] == 3
+    assert j["continuation_pending"] == 1
+    assert j["finished_at"] is None
+    assert s["state"] == "NEEDS_INPUT"
+    assert s["plan_id"] == replacement["plan_id"]
+    assert queue.get(
+        job_id=str(job["job_id"]), tenant_id="tenant-a", user_id="member-a"
+    )["state"] == "QUEUED"
