@@ -33,10 +33,14 @@ def rows(sql,args=()):
 sessions=rows(
     "SELECT session_id,application_id,plan_id,state,checkpoint_id,updated_at "
     "FROM complete_application_sessions WHERE application_id=? "
-    "ORDER BY updated_at DESC LIMIT 2",(application_id,))
-if len(sessions)>1:
+    "ORDER BY updated_at DESC, session_id DESC LIMIT 2",(application_id,))
+# Previous plans leave historical Apply sessions behind. History by itself
+# is not a duplicate running application: select the most recently updated
+# session, but fail closed when the newest two cannot be ordered by recency.
+# This is OBSERVATION only, never authorization for browser execution.
+if len(sessions)>1 and sessions[0]["updated_at"] == sessions[1]["updated_at"]:
     print(json.dumps({"state":"AMBIGUOUS","source":"NETCUP_APPLY_DATABASE",
-      "reason":"More than one Apply session exists; execution must be reconciled."}))
+      "reason":"Current Apply session identity is tied; reconcile before acting."}))
     sys.exit(0)
 if not sessions:
     print(json.dumps({"state":"NOT_FOUND","source":"NETCUP_APPLY_DATABASE"}))
