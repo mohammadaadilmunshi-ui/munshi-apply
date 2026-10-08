@@ -387,13 +387,27 @@ def _supersession_target_locked(
                 "Runtime plan supersession cannot replace a reviewed or submitted session"
             )
 
+    checkpoint = connection.execute(
+        """SELECT pending_control_ids_json FROM application_checkpoints
+           WHERE checkpoint_id=? AND application_id=? AND state='QUESTIONS'""",
+        (supersession.checkpoint_id, envelope.application_id),
+    ).fetchone()
+    if checkpoint is None:
+        raise ValueError("Runtime supersession browser checkpoint is missing")
+    pending = json.loads(str(checkpoint["pending_control_ids_json"]))["items"]
+    expected_ids = {str(q.control_id) for q in supersession.unresolved_questions}
+    if len(pending) != len(set(pending)) or set(pending) != expected_ids:
+        raise ValueError("Runtime supersession differs from browser checkpoint controls")
+    # Historical open tasks may reference an older checkpoint for the SAME
+    # still-pending field; match only exact current browser control identities.
     tasks = connection.execute(
         """SELECT task_id,control_id,question,semantic_type,group_key,risk_level
            FROM resolution_tasks
-           WHERE session_id=? AND checkpoint_id=?
+           WHERE session_id=? AND application_id=?
              AND status IN ('PENDING','RESOLVING','WAITING_FOR_USER')""",
-        (supersession.session_id, supersession.checkpoint_id),
+        (supersession.session_id, envelope.application_id),
     ).fetchall()
+    tasks = [row for row in tasks if str(row["control_id"] or "") in expected_ids]
     # Browser execution identity and Candidate-Truth semantic identity are
     # deliberately distinct. The browser checkpoint is bound by its unique
     # control_id; Hunter may map the same field to a canonical semantic
@@ -510,6 +524,15 @@ def _commit_supersession_locked(
              AND status IN ('PENDING','RESOLVING','WAITING_FOR_USER')""",
         (accepted_at, supersession.session_id, supersession.checkpoint_id),
     )
+    # Expire historical open copies of only the exact checkpoint-bound
+    # questions validated above. Never expire unrelated questions.
+    for item in supersession.unresolved_questions:
+        connection.execute(
+            """UPDATE resolution_tasks SET status='EXPIRED',updated_at=?
+               WHERE session_id=? AND application_id=? AND control_id=?
+                 AND status IN ('PENDING','RESOLVING','WAITING_FOR_USER')""",
+            (accepted_at, supersession.session_id, envelope.application_id, item.control_id),
+        )
     replay_identity = f"{supersession.session_id}:plan-superseded:{envelope.plan_id}"
     event_id = "plan-rebind-" + hashlib.sha256(
         replay_identity.encode("utf-8")

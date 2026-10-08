@@ -482,7 +482,7 @@ class CompleteApplicationLoopService:
         task_id = (
             "plan-resolution-"
             + hashlib.sha256(
-                f"{session['plan_id']}\0{session['session_id']}\0{question_key}".encode()
+                f"{session['plan_id']}\0{session['session_id']}\0{checkpoint['checkpoint_id']}\0{question_key}".encode()
             ).hexdigest()[:32]
         )
         existing = self.resolutions.get(task_id)

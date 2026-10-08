@@ -61,7 +61,20 @@ def _waiting_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         tenant_id="tenant-a",
         user_id="member-a",
     )
-    checkpoint = {"checkpoint_id": "checkpoint-runtime-1", "page_id": "page-runtime-1"}
+    checkpoint = {
+        "checkpoint_id": "checkpoint-runtime-1",
+        "application_id": session.application_id,
+        "sequence": 0,
+        "state": "QUESTIONS",
+        "page_id": "page-runtime-1",
+        "page_fingerprint": "fixture-runtime-1",
+        "completed_control_ids": [],
+        "pending_control_ids": ["first_name"],
+        "selected_resume_id": None,
+        "selected_resume_sha256": None,
+        "created_at": "2026-10-05T00:00:00+00:00",
+    }
+    service.checkpoints.save(checkpoint)
     task = service._resolution_task(
         session=service._session(session.session_id),
         checkpoint=checkpoint,
@@ -545,3 +558,103 @@ def test_committed_v3_supersession_replay_revives_only_original_stale_failed_job
     assert queue.get(
         job_id=job["job_id"], tenant_id="tenant-a", user_id="member-a"
     )["state"] == "QUEUED"
+
+def test_historical_open_task_is_reconciled_only_when_current_checkpoint_proves_pending(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    consumer, database, queue, prior, session, job, task = _waiting_fixture(
+        tmp_path, monkeypatch
+    )
+    service = CompleteApplicationLoopService(
+        database, tenant_id="tenant-a", user_id="member-a"
+    )
+    checkpoint_id = "checkpoint-runtime-2"
+    service.checkpoints.save({
+        "checkpoint_id": checkpoint_id,
+        "application_id": session.application_id,
+        "sequence": 1,
+        "state": "QUESTIONS",
+        "page_id": "page-runtime-2",
+        "page_fingerprint": "fixture-runtime-2",
+        "completed_control_ids": [],
+        "pending_control_ids": [str(task.control_id)],
+        "selected_resume_id": None,
+        "selected_resume_sha256": None,
+        "created_at": "2026-10-06T00:00:00+00:00",
+    })
+    with database.connect() as connection:
+        connection.execute(
+            "UPDATE complete_application_sessions SET checkpoint_id=? WHERE session_id=?",
+            (checkpoint_id, session.session_id),
+        )
+    replacement, envelope = _replacement_envelope(prior, session, task)
+    envelope["supersession"]["checkpoint_id"] = checkpoint_id
+    body, headers = H._signed(envelope, timestamp=1001)
+    result = consumer.accept(body, headers, now=1001)
+    assert result.accepted and result.resumed_session_id == session.session_id
+    assert result.preparation_job_id == job["job_id"]
+    with database.connect() as connection:
+        old = connection.execute(
+            "SELECT status,checkpoint_id FROM resolution_tasks WHERE task_id=?",
+            (task.task_id,),
+        ).fetchone()
+        assert (old["status"], old["checkpoint_id"]) == (
+            "EXPIRED", "checkpoint-runtime-1"
+        )
+        assert connection.execute(
+            "SELECT COUNT(*) FROM complete_application_sessions"
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT COUNT(*) FROM complete_application_prepare_jobs"
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT COUNT(*) FROM final_submit_commands"
+        ).fetchone()[0] == 0
+    assert queue.get(
+        job_id=job["job_id"], tenant_id="tenant-a", user_id="member-a"
+    )["state"] == "QUEUED"
+
+
+def test_historical_task_without_current_browser_pending_proof_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    consumer, database, _queue, prior, session, job, task = _waiting_fixture(
+        tmp_path, monkeypatch
+    )
+    service = CompleteApplicationLoopService(
+        database, tenant_id="tenant-a", user_id="member-a"
+    )
+    service.checkpoints.save({
+        "checkpoint_id": "checkpoint-runtime-2",
+        "application_id": session.application_id,
+        "sequence": 1,
+        "state": "QUESTIONS",
+        "page_id": "page-runtime-2",
+        "page_fingerprint": "fixture-runtime-2",
+        "completed_control_ids": [],
+        "pending_control_ids": ["different-control"],
+        "selected_resume_id": None,
+        "selected_resume_sha256": None,
+        "created_at": "2026-10-06T00:00:00+00:00",
+    })
+    with database.connect() as connection:
+        connection.execute(
+            """UPDATE complete_application_sessions
+               SET checkpoint_id='checkpoint-runtime-2'
+               WHERE session_id=?""",
+            (session.session_id,),
+        )
+    _, envelope = _replacement_envelope(prior, session, task)
+    envelope["supersession"]["checkpoint_id"] = "checkpoint-runtime-2"
+    body, headers = H._signed(envelope, timestamp=1001)
+    result = consumer.accept(body, headers, now=1001)
+    assert result.accepted is False
+    assert "browser checkpoint controls" in str(result.error)
+    with database.connect() as connection:
+        assert connection.execute(
+            "SELECT status FROM resolution_tasks WHERE task_id=?", (task.task_id,)
+        ).fetchone()[0] == "PENDING"
+        assert connection.execute(
+            "SELECT state FROM complete_application_prepare_jobs WHERE job_id=?",
+            (job["job_id"],),
+        ).fetchone()[0] == "WAITING_INPUT"
