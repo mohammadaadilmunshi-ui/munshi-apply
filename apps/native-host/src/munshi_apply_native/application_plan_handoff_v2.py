@@ -604,9 +604,9 @@ def _recover_stale_current_plan_replay_locked(
     This strictly repairs the durable stale-plan failure left by an earlier
     attempt; it never creates an application, session, plan, or submit command.
     """
-    if envelope.supersession is not None:
-        return None
-
+    # V2 handoffs and already accepted V3 supersession handoffs may BOTH need
+    # same-plan stale-failure recovery. In the V3 case, the caller first verifies
+    # the committed supersession ledger with _supersession_replay_locked().
     # If Apply has accepted a newer replacement, never wake an ancestor.
     if connection.execute(
         """SELECT 1 FROM career_os_application_plan_supersessions
@@ -773,10 +773,15 @@ class ApplicationPlanHandoffConsumer:
                             error="idempotency or replay payload conflict",
                         )
                     replay_binding = _supersession_replay_locked(connection, envelope)
-                    if replay_binding is None:
-                        replay_binding = _recover_stale_current_plan_replay_locked(
-                            connection, envelope, accepted_at=accepted_at
-                        )
+                    recovered = _recover_stale_current_plan_replay_locked(
+                        connection, envelope, accepted_at=accepted_at
+                    )
+                    if recovered is not None:
+                        if replay_binding is not None and recovered != replay_binding:
+                            raise RuntimeError(
+                                "Current-plan replay recovery conflicts with committed supersession"
+                            )
+                        replay_binding = recovered
                     if replay_binding is not None:
                         resumed_session_id, preparation_job_id = replay_binding
                     return PlanHandoffResult(
@@ -804,10 +809,15 @@ class ApplicationPlanHandoffConsumer:
                             error="handoff replay content conflict",
                         )
                     replay_binding = _supersession_replay_locked(connection, envelope)
-                    if replay_binding is None:
-                        replay_binding = _recover_stale_current_plan_replay_locked(
-                            connection, envelope, accepted_at=accepted_at
-                        )
+                    recovered = _recover_stale_current_plan_replay_locked(
+                        connection, envelope, accepted_at=accepted_at
+                    )
+                    if recovered is not None:
+                        if replay_binding is not None and recovered != replay_binding:
+                            raise RuntimeError(
+                                "Current-plan replay recovery conflicts with committed supersession"
+                            )
+                        replay_binding = recovered
                     if replay_binding is not None:
                         resumed_session_id, preparation_job_id = replay_binding
                     return PlanHandoffResult(
