@@ -740,3 +740,46 @@ def test_workday_review_mismatch_never_reaches_ready_for_review(loop):
     evidence = json.loads(str(event["evidence_json"]))
     assert evidence["reason"] == "provider_review_reconciliation_failed"
     assert evidence["mismatch_codes"] == ["PHONE_EXTENSION_WITHOUT_FACT"]
+
+def test_field_action_evidence_is_persisted_without_candidate_values(loop):
+    service, db, browser = loop
+    original = browser.prepare_form
+
+    def with_action_evidence(*, plan, checkpoint, resolved_values):
+        output = original(plan=plan, checkpoint=checkpoint, resolved_values=resolved_values)
+        output["field_action_evidence"] = [
+            {
+                "control_id": "ctl-h9otse",
+                "semantic_type": "REFERRAL",
+                "status": "FAILED",
+                "plan_match_count": 1,
+                "strategy": "WORKDAY_PROVIDER_PROMPT",
+                "verification": "FAILED_CLOSED",
+            }
+        ]
+        return output
+
+    browser.prepare_form = with_action_evidence
+    session = service.start_session(plan_id="application-plan-1")
+    prepared = service.prepare_session(session_id=session.session_id, adapter=browser)
+    assert prepared.state == "NEEDS_INPUT"
+    with db.connect() as connection:
+        row = connection.execute(
+            """SELECT evidence_json FROM complete_application_execution_events
+               WHERE session_id=? AND event_type='FORM_PREPARED'
+               ORDER BY occurred_at DESC LIMIT 1""",
+            (session.session_id,),
+        ).fetchone()
+    assert row is not None
+    trace = json.loads(row["evidence_json"])["field_action_evidence"]
+    assert trace == [
+        {
+            "control_id": "ctl-h9otse",
+            "semantic_type": "REFERRAL",
+            "status": "FAILED",
+            "plan_match_count": 1,
+            "strategy": "WORKDAY_PROVIDER_PROMPT",
+            "verification": "FAILED_CLOSED",
+        }
+    ]
+    assert "Indeed" not in repr(trace)
