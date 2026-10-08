@@ -472,6 +472,53 @@ function parseCreatedResult(
   return { created: candidate.created };
 }
 
+export type HostedRunStatus = {
+  source: "NETCUP_APPLY_DATABASE";
+  state: "FOUND" | "NOT_FOUND" | "AMBIGUOUS";
+  application_id?: string;
+  reason?: string;
+  read_only?: true;
+  session?: {
+    session_id: string;
+    application_id: string;
+    plan_id: string;
+    state: string;
+    checkpoint_id: string | null;
+    updated_at: string;
+  };
+  prepare_job?: {
+    job_id: string;
+    state: string;
+    attempt_count: number;
+    max_attempts: number;
+    updated_at: string;
+  } | null;
+  pending_controls?: Array<{
+    control_id: string;
+    semantic_type: string;
+    status: string;
+    checkpoint_id: string;
+  }>;
+  events?: Array<{ event_type: string; occurred_at: string }>;
+  counts?: {
+    final_reviews: number;
+    submit_commands: number;
+    employer_receipts: number;
+  };
+};
+
+export async function getHostedRunStatus(
+  applicationId: string,
+): Promise<HostedRunStatus> {
+  return sendNative<HostedRunStatus>(
+    {
+      type: "GET_HOSTED_RUN_STATUS",
+      payload: { applicationId },
+    },
+    26_000,
+  );
+}
+
 export async function getNativeHealth(
   timeoutMilliseconds = 3_000,
 ): Promise<unknown> {

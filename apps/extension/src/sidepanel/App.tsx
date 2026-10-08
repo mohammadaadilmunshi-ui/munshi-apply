@@ -60,6 +60,7 @@ import {
 import { AIControlCenter } from "./AIControlCenter";
 import { AIDraftReview } from "./AIDraftReview";
 import { AutoPilotControlCenter } from "./AutoPilotControlCenter";
+import { HostedRunInspector } from "./HostedRunInspector";
 import { ResumeVaultPanel } from "./ResumeVaultPanel";
 import {
   canAutoApproveRememberedAnswer,
@@ -288,6 +289,8 @@ function profileConflictLabel(key: string): string {
 
 export function App() {
   const [view, setView] = useState<View>("application");
+  // Fail closed while the persisted hosted identity is still loading.
+  const [hostedRunFound, setHostedRunFound] = useState(true);
   const [page, setPage] = useState<ApplicationPage | null>(null);
   const [profile, setProfile] = useState<ProfileSnapshot>(emptyProfile);
   const [profileLoaded, setProfileLoaded] = useState(false);
@@ -1604,15 +1607,25 @@ export function App() {
       )}
 
       {view === "autopilot" && (
-        <AutoPilotControlCenter
-          page={page}
-          answers={answers}
-          applicationId={activeApplicationId || page?.pageId || ""}
-          selectedResumeId={selectedResumeId || null}
-          selectedResumeSha256={selectedResume?.sha256 ?? null}
-          nativeAvailable={native.status === "healthy"}
-          onStatusChange={setAutoPilotStatus}
-        />
+        <>
+          <HostedRunInspector
+            nativeAvailable={
+              native.status === "healthy" &&
+              native.data.capabilities?.hosted_run_monitor === true
+            }
+            onHostedRunFound={setHostedRunFound}
+          />
+          <AutoPilotControlCenter
+            page={page}
+            answers={answers}
+            applicationId={activeApplicationId || page?.pageId || ""}
+            selectedResumeId={selectedResumeId || null}
+            selectedResumeSha256={selectedResume?.sha256 ?? null}
+            nativeAvailable={native.status === "healthy"}
+            hostedRunFound={hostedRunFound}
+            onStatusChange={setAutoPilotStatus}
+          />
+        </>
       )}
 
       {view === "profile" && (

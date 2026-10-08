@@ -62,6 +62,7 @@ export type NativeRuntimeHealth = {
     job_signal_identity_binding?: boolean;
     application_analytics?: boolean;
     resolution_tasks?: boolean;
+    hosted_run_monitor?: boolean;
   };
 };
 
@@ -355,6 +356,16 @@ export function saveProfile(profile: ProfileSnapshot): Promise<ProfileSaveAck> {
 
 export async function getHealth(): Promise<ExtensionRuntimeHealth> {
   return (await send({ type: "PING" })) as ExtensionRuntimeHealth;
+}
+
+export async function getHostedRunStatusFromExtension(
+  applicationId: string,
+): Promise<import("./native").HostedRunStatus> {
+  return (await withTimeout(
+    send({ type: "GET_HOSTED_RUN_STATUS", payload: { applicationId } }),
+    30_000,
+    "The canonical hosted-run status check timed out.",
+  )) as import("./native").HostedRunStatus;
 }
 
 export async function getNativeHealth(): Promise<NativeRuntimeHealth> {
