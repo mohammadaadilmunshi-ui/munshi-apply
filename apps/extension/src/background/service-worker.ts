@@ -44,6 +44,7 @@ import {
   ensureNativeApplication,
   getLatestNativeApplicationCheckpoint,
   getNativeHealth,
+  getHostedRunStatus,
   getPromotedInteractionRecipe,
   markAIDraftUsed,
   recordInteractionRecipeAttempt,
@@ -809,6 +810,18 @@ async function routeMessage(
         return { ok: true, data: await extensionHealth() };
       case "NATIVE_HEALTH":
         return { ok: true, data: await getNativeHealth() };
+      case "GET_HOSTED_RUN_STATUS":
+        // Local background/native bridge is owner-only; application content
+        // scripts are never allowed to read hosted run metadata.
+        if (sender.tab !== undefined) {
+          throw new Error(
+            "Hosted-run status is only available in MUNSHI's side panel.",
+          );
+        }
+        return {
+          ok: true,
+          data: await getHostedRunStatus(request.payload.applicationId),
+        };
       case "GET_PROFILE": {
         let localProfile = await loadAuthoritativeProfileSnapshot();
         if (localProfile) {

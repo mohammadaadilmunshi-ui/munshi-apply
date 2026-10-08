@@ -19,6 +19,7 @@ from .autonomous_apply_credentials import (
 from .checkpoint_store import ApplicationCheckpointStore
 from .database import Database
 from .document_ingestion import DocumentIngestionService
+from .hosted_run_monitor import get_hosted_run_status
 from .interaction_fallback_service import InteractionFallbackService
 from .interaction_recipe_listing import list_interaction_recipes
 from .interaction_recipe_service import InteractionRecipeService
@@ -53,6 +54,7 @@ NATIVE_CAPABILITIES: dict[str, bool] = {
     "application_analytics": True,
     "resolution_tasks": True,
     "autonomous_apply_credentials": True,
+    "hosted_run_monitor": True,
 }
 
 
@@ -166,6 +168,9 @@ def handle(
         health["protocol_version"] = NATIVE_PROTOCOL_VERSION
         health["capabilities"] = dict(NATIVE_CAPABILITIES)
         return {"ok": True, "data": health}
+
+    if message_type == "GET_HOSTED_RUN_STATUS":
+        return {"ok": True, "data": get_hosted_run_status(message.get("payload"))}
 
     resolution_response = handle_resolution_task_message(message, database)
     if resolution_response is not None:

@@ -47,6 +47,7 @@ export function AutoPilotControlCenter({
   selectedResumeId,
   selectedResumeSha256,
   nativeAvailable,
+  hostedRunFound = false,
   onStatusChange,
 }: {
   page: ApplicationPage | null;
@@ -55,6 +56,7 @@ export function AutoPilotControlCenter({
   selectedResumeId: string | null;
   selectedResumeSha256: string | null;
   nativeAvailable: boolean;
+  hostedRunFound?: boolean;
   onStatusChange?: (status: AutoPilotControllerStatus | null) => void;
 }) {
   const [status, setStatus] = useState<AutoPilotControllerStatus | null>(null);
@@ -259,6 +261,17 @@ export function AutoPilotControlCenter({
         </span>
       </div>
 
+      {hostedRunFound && (
+        <div className="safety-callout">
+          <strong>Hosted application selected</strong>
+          <span>
+            Local tab AutoPilot is disabled for this application. Follow the
+            exact hosted session, checkpoint and employer receipt in the
+            inspector above. The extension does not perform a second review or
+            independently cross the final-submit boundary.
+          </span>
+        </div>
+      )}
       {!nativeAvailable && (
         <div className="safety-callout">
           <strong>Native companion required</strong>
@@ -524,7 +537,13 @@ export function AutoPilotControlCenter({
             <button
               className="primary"
               type="button"
-              disabled={busy || !nativeAvailable || !canProgress || sessionOpen}
+              disabled={
+                busy ||
+                hostedRunFound ||
+                !nativeAvailable ||
+                !canProgress ||
+                sessionOpen
+              }
               onClick={() =>
                 void run(
                   () =>
@@ -559,7 +578,7 @@ export function AutoPilotControlCenter({
             <button
               className="quiet"
               type="button"
-              disabled={busy || !resumable || !canProgress}
+              disabled={busy || hostedRunFound || !resumable || !canProgress}
               onClick={() =>
                 void run(
                   () =>

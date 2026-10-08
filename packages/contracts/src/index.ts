@@ -570,6 +570,7 @@ export type ExtensionRequest =
   | { type: "APPLY_FILL_PLAN"; payload: FillPlan }
   | { type: "PAGE_SNAPSHOT"; payload: ApplicationPage }
   | { type: "NATIVE_HEALTH" }
+  | { type: "GET_HOSTED_RUN_STATUS"; payload: { applicationId: string } }
   | { type: "PING" };
 
 export type ExtensionResponse =
