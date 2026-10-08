@@ -187,7 +187,48 @@ def _bind_protected_answers(adapter: PlanBrowserAdapter, page, plan: dict):
     return protected_values
 
 
-def test_workday_six_page_fixture_prepares_to_reconciled_review_without_submit():
+def _bind_normal_plan_answers(adapter: PlanBrowserAdapter, page, plan: dict) -> set[str]:
+    """Create immutable, scanner-bound approved answers without browser value overrides.
+
+    The original six-page acceptance case injects resolved_values directly.
+    This lane covers the separate production dependency: actual plan answers
+    matching Workday controls, including repeated education/employment groups.
+    """
+    bound: set[str] = set()
+    for page_index in range(5):
+        page.evaluate("index => window.fixtureShowPage(index)", page_index)
+        described = adapter._scan()
+        controls = {
+            str(item["controlId"]): item
+            for item in described["page"]["controls"]
+        }
+        for question in described["page"]["questions"]:
+            control = controls.get(str(question.get("controlId") or ""))
+            if not control:
+                continue
+            name = str(control.get("name") or "")
+            if name not in NORMAL_VALUES or name in bound:
+                continue
+            fingerprint = logical_field_fingerprint(question, control)
+            assert fingerprint, f"No logical-field identity for {name}"
+            plan["answers"].append({
+                "question_key": "runtime-question:" + str(control["controlId"]),
+                "normalized_question": "",
+                "sensitivity_class": "NORMAL",
+                "autofill_allowed": True,
+                "execution_value": NORMAL_VALUES[name],
+                "universal_binding_fingerprint": fingerprint,
+            })
+            bound.add(name)
+    page.evaluate("() => window.fixtureShowPage(0)")
+    return bound
+
+
+@pytest.mark.parametrize(
+    "normal_answer_mode",
+    ["resolved_values", "immutable_plan"],
+)
+def test_workday_six_page_fixture_prepares_to_reconciled_review_without_submit(normal_answer_mode: str):
     browser_path = resolve_browser_executable()
     fixture = (
         _root()
@@ -238,11 +279,17 @@ def test_workday_six_page_fixture_prepares_to_reconciled_review_without_submit()
             legal_attestation_authorizer=legal_authorizer,
         )
         protected_values.update(_bind_protected_answers(adapter, page, plan))
+        if normal_answer_mode == "immutable_plan":
+            bound = _bind_normal_plan_answers(adapter, page, plan)
+            assert {"phone", "referral", "employment_0_title", "education_0_school"} <= bound
+            supplied = {}
+        else:
+            supplied = NORMAL_VALUES
 
         prepared = adapter.prepare_form(
             plan=plan,
             checkpoint=None,
-            resolved_values=NORMAL_VALUES,
+            resolved_values=supplied,
         )
 
         assert page.locator("body").get_attribute("data-page") == "5"
