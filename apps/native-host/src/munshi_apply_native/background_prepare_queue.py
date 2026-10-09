@@ -13,6 +13,7 @@ A later hosted-browser tranche supplies the concrete PlanBrowserAdapter factory.
 """
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -660,6 +661,167 @@ class DurablePreparationQueue:
             if updated.rowcount != 1:
                 raise RuntimeError("Technical waiting retry lost its atomic state binding")
             result=connection.execute(
+                "SELECT * FROM complete_application_prepare_jobs WHERE job_id=?",
+                (row["job_id"],),
+            ).fetchone()
+            assert result is not None
+            return dict(result)
+
+
+    def retry_waiting_session_after_verified_provider_fix(
+        self,
+        *,
+        session_id: str,
+        tenant_id: str,
+        user_id: str,
+        expected_plan_id: str,
+        expected_checkpoint_id: str,
+        expected_browser_form_digest: str,
+        expected_control_id: str,
+        now: str | None = None,
+    ) -> dict[str, Any]:
+        """Grant one post-fix attempt on an approved NORMAL Workday referral.
+
+        Unlike answer continuation, this operation does not claim new candidate
+        facts and never bypasses user/protected questions. The evidence must
+        prove a failed exact-provider popup after a single signed plan match.
+        The existing session, accepted plan, and résumé remain unchanged.
+        """
+        timestamp = now or _now()
+        session = self._owned_session(
+            session_id=session_id, tenant_id=tenant_id, user_id=user_id
+        )
+        if (
+            str(session["state"]) != "NEEDS_INPUT"
+            or str(session["provider"]).upper() != "WORKDAY"
+            or str(session["plan_id"]) != str(expected_plan_id)
+            or str(session["checkpoint_id"]) != str(expected_checkpoint_id)
+            or str(session["browser_form_digest"]) != str(expected_browser_form_digest)
+        ):
+            raise ValueError("Provider mechanics retry session identity changed")
+        if not expected_control_id or not expected_checkpoint_id:
+            raise ValueError("Provider mechanics retry requires exact control/checkpoint")
+
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """SELECT * FROM complete_application_prepare_jobs
+                   WHERE session_id=? AND tenant_id=? AND user_id=?""",
+                (session_id, tenant_id, user_id),
+            ).fetchone()
+            if row is None:
+                raise LookupError("Provider mechanics preparation job was not found")
+            row = dict(row)
+            if (
+                str(row["state"]) != "WAITING_INPUT"
+                or str(row["plan_id"]) != str(expected_plan_id)
+                or str(row["application_id"]) != str(session["application_id"])
+                or str(row["provider"]).upper() != "WORKDAY"
+                or row["cancel_requested_at"] is not None
+                or row["lease_owner"] is not None
+                or bool(row["continuation_pending"])
+                or bool(row["continuation_in_flight"])
+            ):
+                raise ValueError("Provider mechanics job is not eligible for retry")
+            attempts = int(row["attempt_count"])
+            maximum = int(row["max_attempts"])
+            if attempts != maximum or maximum >= 10:
+                raise ValueError("Provider mechanics retry requires bounded exhausted budget")
+
+            accepted_plan = connection.execute(
+                """SELECT acceptance_state,plan_json FROM career_os_application_plans
+                   WHERE plan_id=? AND tenant_id=? AND user_id=?""",
+                (expected_plan_id, tenant_id, user_id),
+            ).fetchone()
+            if (
+                accepted_plan is None
+                or str(accepted_plan["acceptance_state"]) != "PLAN_ACCEPTED"
+                or json.loads(accepted_plan["plan_json"] or "{}").get(
+                    "submission_authority"
+                ) is not False
+            ):
+                raise ValueError("Provider mechanics retry requires non-submit accepted plan")
+
+            open_tasks = connection.execute(
+                """SELECT checkpoint_id,control_id,semantic_type,status,
+                          auto_resolvable,requires_user
+                   FROM resolution_tasks
+                   WHERE session_id=?
+                     AND status IN ('PENDING','RESOLVING','WAITING_FOR_USER')""",
+                (session_id,),
+            ).fetchall()
+            if (
+                not open_tasks
+                or len(open_tasks) > 8
+                or not any(
+                    str(t["checkpoint_id"]) == str(expected_checkpoint_id)
+                    for t in open_tasks
+                )
+                or any(
+                    str(t["control_id"]) != str(expected_control_id)
+                    or str(t["semantic_type"]) != "REFERRAL"
+                    or str(t["status"]) != "PENDING"
+                    or not bool(t["auto_resolvable"])
+                    or bool(t["requires_user"])
+                    for t in open_tasks
+                )
+            ):
+                raise ValueError("Provider mechanics retry found different unresolved input")
+
+            for query in (
+                "SELECT COUNT(*) AS n FROM final_application_reviews WHERE application_id=?",
+                "SELECT COUNT(*) AS n FROM final_submit_commands WHERE application_id=?",
+                "SELECT COUNT(*) AS n FROM application_submission_receipts WHERE application_id=?",
+            ):
+                count = int(
+                    connection.execute(
+                        query, (session["application_id"],)
+                    ).fetchone()["n"]
+                )
+                if count:
+                    raise ValueError("Provider mechanics retry would cross review/submit")
+
+            event = connection.execute(
+                """SELECT evidence_json FROM complete_application_execution_events
+                   WHERE session_id=? AND event_type='FORM_PREPARED'
+                   ORDER BY occurred_at DESC LIMIT 1""",
+                (session_id,),
+            ).fetchone()
+            if event is None:
+                raise ValueError("Provider mechanics retry lacks browser evidence")
+            evidence = json.loads(event["evidence_json"] or "{}")
+            if not any(
+                isinstance(item, dict)
+                and str(item.get("control_id")) == str(expected_control_id)
+                and str(item.get("semantic_type")) == "REFERRAL"
+                and str(item.get("strategy")) == "WORKDAY_PROVIDER_PROMPT"
+                and item.get("plan_match_count") == 1
+                and str(item.get("verification")) == "FAILED_CLOSED"
+                and str(item.get("option_diagnostic")) == "EXACT_OPTION_NOT_VISIBLE"
+                for item in (evidence.get("field_action_evidence") or [])
+            ):
+                raise ValueError("Provider mechanics retry lacks approved option proof")
+
+            changed = connection.execute(
+                """UPDATE complete_application_prepare_jobs
+                   SET state='QUEUED',max_attempts=?,available_at=?,
+                       lease_owner=NULL,lease_expires_at=NULL,heartbeat_at=NULL,
+                       continuation_pending=0,continuation_in_flight=0,
+                       last_error=NULL,finished_at=NULL,updated_at=?
+                   WHERE job_id=? AND tenant_id=? AND user_id=?
+                     AND plan_id=? AND state='WAITING_INPUT'
+                     AND attempt_count=? AND max_attempts=?
+                     AND cancel_requested_at IS NULL AND lease_owner IS NULL
+                     AND continuation_pending=0 AND continuation_in_flight=0""",
+                (
+                    maximum + 1, timestamp, timestamp,
+                    row["job_id"], tenant_id, user_id,
+                    expected_plan_id, attempts, maximum,
+                ),
+            )
+            if changed.rowcount != 1:
+                raise RuntimeError("Provider mechanics retry lost atomic state binding")
+            result = connection.execute(
                 "SELECT * FROM complete_application_prepare_jobs WHERE job_id=?",
                 (row["job_id"],),
             ).fetchone()
