@@ -160,6 +160,101 @@ def test_dashboard_autoapply_config_and_secret_are_response_signed(monkeypatch):
     client.close()
 
 
+
+def test_plan_current_retries_only_transient_bridge_failures(monkeypatch):
+    monkeypatch.setattr(module.time, "sleep", lambda _seconds: None)
+    calls = []
+
+    def intermittent(request):
+        calls.append(len(calls))
+        if len(calls) == 1:
+            return httpx.Response(503)
+        if len(calls) == 2:
+            raise httpx.ReadTimeout("temporary read timeout")
+        return _signed_response(request)
+
+    client = HunterExecutionBridgeClient(
+        base_url="https://hunter.internal", secret=SECRET,
+        tenant_id="tenant-a", user_id="member-a",
+        transport=httpx.MockTransport(intermittent),
+    )
+    assert client.plan_is_current(_plan()) is True
+    assert len(calls) == 3
+    client.close()
+
+
+@pytest.mark.parametrize("status", [401, 403, 409])
+def test_plan_current_never_retries_authority_rejections(monkeypatch, status):
+    monkeypatch.setattr(module.time, "sleep", lambda _seconds: None)
+    calls = []
+
+    def rejecting(_request):
+        calls.append(status)
+        return httpx.Response(status)
+
+    client = HunterExecutionBridgeClient(
+        base_url="https://hunter.internal", secret=SECRET,
+        tenant_id="tenant-a", user_id="member-a",
+        transport=httpx.MockTransport(rejecting),
+    )
+    assert client.plan_is_current(_plan()) is False
+    assert calls == [status]
+    client.close()
+
+
+def test_plan_current_temporary_server_failure_never_grants_without_signature(
+    monkeypatch,
+):
+    monkeypatch.setattr(module.time, "sleep", lambda _seconds: None)
+    calls = []
+
+    def always_unavailable(_request):
+        calls.append(1)
+        return httpx.Response(503)
+
+    client = HunterExecutionBridgeClient(
+        base_url="https://hunter.internal", secret=SECRET,
+        tenant_id="tenant-a", user_id="member-a",
+        transport=httpx.MockTransport(always_unavailable),
+    )
+    assert client.plan_is_current(_plan()) is False
+    assert len(calls) == 3
+    client.close()
+
+
+def test_plan_current_signed_revocation_fails_without_retries(monkeypatch):
+    monkeypatch.setattr(module.time, "sleep", lambda _seconds: None)
+    calls = []
+
+    def revoked(request):
+        calls.append(1)
+        signed = _signed_response(request)
+        payload = json.loads(request.content)
+        body = json.loads(signed.content)
+        body["fresh"] = False
+        content = json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
+        digest = hashlib.sha256(content).hexdigest()
+        signature = hmac.new(
+            SECRET.encode(),
+            f"{payload['request_id']}.{payload['purpose']}.{digest}."
+            f"{payload['plan_digest']}".encode(),
+            hashlib.sha256,
+        ).hexdigest()
+        headers = dict(signed.headers)
+        headers["X-Munshi-Response-SHA256"] = digest
+        headers["X-Munshi-Response-Signature"] = f"sha256={signature}"
+        return httpx.Response(200, content=content, headers=headers)
+
+    client = HunterExecutionBridgeClient(
+        base_url="https://hunter.internal", secret=SECRET,
+        tenant_id="tenant-a", user_id="member-a",
+        transport=httpx.MockTransport(revoked),
+    )
+    assert client.plan_is_current(_plan()) is False
+    assert calls == [1]
+    client.close()
+
+
 def test_tampered_response_fails_closed(monkeypatch):
     monkeypatch.setattr(module.time, "time", lambda: 1000)
 

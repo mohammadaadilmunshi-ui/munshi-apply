@@ -133,25 +133,46 @@ class HunterExecutionBridgeClient:
         return body
 
     def plan_is_current(self, plan: dict[str, Any]) -> bool:
-        try:
-            p = self._payload(plan, PURPOSE_PLAN_CURRENT)
-            body = self._canonical(p)
-            r = self.client.post(
-                f"{self.base_url}/api/application-execution/plan-current",
-                content=body,
-                headers=self._headers(p, body),
-            )
-            out = json.loads(self._verify(response=r, payload=p, purpose=PURPOSE_PLAN_CURRENT))
-            return (
-                out.get("version") == RESPONSE_VERSION
-                and out.get("request_id") == p["request_id"]
-                and out.get("plan_id") == p["plan_id"]
-                and out.get("plan_digest") == p["plan_digest"]
-                and out.get("fresh") is True
-                and out.get("submission_authority") is False
-            )
-        except Exception:
-            return False
+        """Require a signed fresh-plan response; retry transient bridge failures only.
+
+        A genuine 409 stale-plan response, invalid HMAC/digest, or an explicit
+        signed fresh=False answer always fails CLOSED immediately. HTTP 5xx,
+        429 and transport timeouts are bounded and never treated as freshness.
+        """
+        for attempt in range(3):
+            try:
+                p = self._payload(plan, PURPOSE_PLAN_CURRENT)
+                body = self._canonical(p)
+                r = self.client.post(
+                    f"{self.base_url}/api/application-execution/plan-current",
+                    content=body,
+                    headers=self._headers(p, body),
+                )
+                if r.status_code in {429, 500, 502, 503, 504}:
+                    if attempt < 2:
+                        time.sleep(0.5 * (2 ** attempt))
+                        continue
+                    return False
+                out = json.loads(
+                    self._verify(response=r, payload=p, purpose=PURPOSE_PLAN_CURRENT)
+                )
+                return (
+                    out.get("version") == RESPONSE_VERSION
+                    and out.get("request_id") == p["request_id"]
+                    and out.get("plan_id") == p["plan_id"]
+                    and out.get("plan_digest") == p["plan_digest"]
+                    and out.get("fresh") is True
+                    and out.get("submission_authority") is False
+                )
+            except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError):
+                if attempt < 2:
+                    time.sleep(0.5 * (2 ** attempt))
+                    continue
+                return False
+            except Exception:
+                # Nontransient and invalid signed responses never grant authority.
+                return False
+        return False
 
     def _artifact(self, plan: dict[str, Any], *, purpose: str, endpoint: str) -> bytes:
         p = self._payload(plan, purpose)
