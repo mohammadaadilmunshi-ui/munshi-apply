@@ -377,8 +377,12 @@ class PlanBrowserAdapter:
         retained only for call-site compatibility and is ignored.
         """
         del press_enter
+        # Value-free reason retained for release diagnostics. No candidate
+        # answer, popup text, DOM, or employer page content is logged.
+        self._workday_option_diagnostic = "UNATTEMPTED"
         wanted = self._workday_option_text(answer)
         if not wanted:
+            self._workday_option_diagnostic = "EMPTY_APPROVED_VALUE"
             return False
         timeout_ms = max(250, min(int(timeout_ms), 7000))
         poll_ms = max(25, min(int(poll_ms), 250))
@@ -406,7 +410,7 @@ class PlanBrowserAdapter:
             "[data-value],[data-option-value]"
         )
 
-        def candidate_metadata(candidate: Any) -> tuple[bool, list[Any], str]:
+        def candidate_metadata(candidate: Any) -> tuple[bool, list[Any], str, str]:
             try:
                 raw = candidate.evaluate(
                     r"""element => ({
@@ -422,18 +426,38 @@ class PlanBrowserAdapter:
                         element.getAttribute('data-option-value') || '',
                         element.getAttribute('data-automation-label') || ''
                       ],
-                      id: element.id || ''
+                      id: element.id || '',
+                      // Several Workday popup selectors can match the SAME
+                      // option and a nested option label. Identify the
+                      // actionable ancestor, not each selector match.
+                      optionDomIdentity: (() => {
+                        const actionable = element.closest(
+                          '[role="option"],[role="menuitem"],'
+                          + '[data-automation-id="promptOption"],'
+                          + '[data-automation-id="dropdownOption"]'
+                        ) || element;
+                        const path = [];
+                        let node = actionable;
+                        while (node && node.parentElement) {
+                          path.push(Array.prototype.indexOf.call(
+                            node.parentElement.children, node
+                          ));
+                          node = node.parentElement;
+                        }
+                        return path.reverse().join('.');
+                      })()
                     })"""
                 )
             except Exception:
-                return False, [], ""
+                return False, [], "", ""
             if isinstance(raw, dict):
                 return (
                     bool(raw.get("selectedContainer")),
                     list(raw.get("values") or []),
                     str(raw.get("id") or ""),
+                    str(raw.get("optionDomIdentity") or ""),
                 )
-            return False, [raw], ""
+            return False, [raw], "", ""
 
         def collect(locator: Any, limit: int) -> list[Any]:
             matches: list[Any] = []
@@ -447,7 +471,9 @@ class PlanBrowserAdapter:
                 with suppress(Exception):
                     if not candidate.is_visible():
                         continue
-                    selected_container, values, token_id = candidate_metadata(candidate)
+                    selected_container, values, token_id, dom_identity = (
+                        candidate_metadata(candidate)
+                    )
                     if selected_container:
                         continue
                     exact = any(
@@ -460,7 +486,7 @@ class PlanBrowserAdapter:
                     )
                     if not exact:
                         continue
-                    token = token_id or f"candidate:{index}"
+                    token = dom_identity or token_id or f"candidate:{index}"
                     if token in seen:
                         continue
                     seen.add(token)
@@ -510,11 +536,18 @@ class PlanBrowserAdapter:
         for attempt in range(attempts):
             matches = candidates()
             if len(matches) == 1:
-                return activate(matches[0])
+                activated = activate(matches[0])
+                self._workday_option_diagnostic = (
+                    "EXACT_OPTION_ACTIVATED" if activated
+                    else "EXACT_OPTION_CLICK_REJECTED"
+                )
+                return activated
             if len(matches) > 1:
+                self._workday_option_diagnostic = "DISTINCT_EXACT_OPTIONS_AMBIGUOUS"
                 return False
             if attempt + 1 < attempts:
                 self.page.wait_for_timeout(poll_ms)
+        self._workday_option_diagnostic = "EXACT_OPTION_NOT_VISIBLE"
         return False
 
     def _workday_public_prompt_fallback(self, element: Any, answer: str) -> bool:
@@ -1632,6 +1665,11 @@ class PlanBrowserAdapter:
                         "verification": verification if verification in {
                             "POST_ACTION_PROVIDER_VERIFIED", "FAILED_CLOSED",
                         } else "UNKNOWN",
+                        "option_diagnostic": (
+                            str(getattr(self, "_workday_option_diagnostic", "UNKNOWN"))
+                            if semantic == "REFERRAL" and result.get("status") == "FAILED"
+                            else None
+                        ),
                     })
                 self.on_event(
                     "FIELD_VERIFIED" if result["status"] == "FILLED" else "NEEDS_INPUT",

@@ -284,3 +284,94 @@ def test_crescent_referral_fails_closed_without_provider_selected_state():
         assert page.evaluate("() => window.__fixtureSubmitClicked") is False
         assert page.locator("body").get_attribute("data-submitted") is None
         browser.close()
+
+
+def test_crescent_referral_with_removable_selected_chip():
+    """Real Workday displays a remove icon beside the selected 'Indeed' chip.
+
+    A provider-backed choice can have non-value text in the selectedItem
+    wrapper. Never use the filter input alone to declare success.
+    """
+    browser_path = resolve_browser_executable()
+    plan = _plan()
+    html = _fixture_html().replace(
+        "chip.textContent = value;",
+        """chip.innerHTML = '<button type="button" aria-label="Remove"'
+          + ' data-automation-id="removeItem">×</button>'
+          + '<span data-automation-id="selectedItemLabel">' + value + '</span>';""",
+    )
+    assert html != _fixture_html()
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True, executable_path=browser_path)
+        page = browser.new_page()
+        _route(page, html)
+        page.goto(WORKDAY_URL, wait_until="domcontentloaded")
+        adapter = _adapter(page, plan)
+        control, question = _referral_control_and_question(adapter)
+        result = adapter._workday_fill_control(
+            control=control, question=question, value="Indeed"
+        )
+        assert result["status"] == "FILLED", result
+        assert result["verification"] == "POST_ACTION_PROVIDER_VERIFIED"
+        assert page.locator('[data-automation-id="removeItem"]').count() == 1
+        assert page.locator('[data-automation-id="selectedItemLabel"]').inner_text() == "Indeed"
+        assert page.evaluate("() => window.__fixtureSubmitClicked") is False
+        browser.close()
+
+
+def test_crescent_referral_nested_duplicate_option_is_one_choice():
+    """One provider option may match two nested selectors in the DOM.
+
+    This must still be one exact option; distinct real choices remain
+    ambiguous and fail closed.
+    """
+    browser_path = resolve_browser_executable()
+    plan = _plan()
+    html = _fixture_html().replace(
+        "                Indeed\n              </div>",
+        '                <span data-option-value="Indeed">Indeed</span>\n              </div>',
+        1,
+    )
+    assert html != _fixture_html()
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True, executable_path=browser_path)
+        page = browser.new_page()
+        _route(page, html)
+        page.goto(WORKDAY_URL, wait_until="domcontentloaded")
+        adapter = _adapter(page, plan)
+        control, question = _referral_control_and_question(adapter)
+        result = adapter._workday_fill_control(
+            control=control, question=question, value="Indeed"
+        )
+        assert result["status"] == "FILLED", result
+        assert result["verification"] == "POST_ACTION_PROVIDER_VERIFIED"
+        assert page.locator('[data-automation-id="selectedItem-referral"]').count() == 1
+        assert page.evaluate("() => window.__fixtureSubmitClicked") is False
+        browser.close()
+
+
+def test_crescent_two_distinct_exact_referral_options_fail_closed():
+    """DOM deduplication cannot silently merge two distinct provider options."""
+    browser_path = resolve_browser_executable()
+    plan = _plan()
+    html = _fixture_html().replace(
+        'data-option-id="linkedin"',
+        'data-option-id="alternate-indeed"',
+        1,
+    ).replace('                LinkedIn\n', '                Indeed\n', 1)
+    assert html != _fixture_html()
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True, executable_path=browser_path)
+        page = browser.new_page()
+        _route(page, html)
+        page.goto(WORKDAY_URL, wait_until="domcontentloaded")
+        adapter = _adapter(page, plan)
+        control, question = _referral_control_and_question(adapter)
+        result = adapter._workday_fill_control(
+            control=control, question=question, value="Indeed"
+        )
+        assert result["status"] == "FAILED", result
+        assert result["verification"] == "FAILED_CLOSED"
+        assert page.locator('[data-automation-id^="selectedItem"]').count() == 0
+        assert page.evaluate("() => window.__fixtureSubmitClicked") is False
+        browser.close()
