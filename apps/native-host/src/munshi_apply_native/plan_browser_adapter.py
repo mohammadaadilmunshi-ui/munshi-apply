@@ -502,7 +502,11 @@ class PlanBrowserAdapter:
                     if popup.count() != 1 or not popup.first.is_visible():
                         continue
                     scoped.extend(collect(popup.first.locator(selector), 250))
-            if controlled_ids:
+            # Workday can move the displayed popup into a React portal while
+            # leaving aria-controls pointing to an empty/hidden list. Prefer
+            # the associated popup when it has matches, but never treat an
+            # empty scoped list as proof the exact option is absent globally.
+            if scoped:
                 return scoped
             return collect(self.page.locator(selector), 300)
 
@@ -549,6 +553,64 @@ class PlanBrowserAdapter:
                 self.page.wait_for_timeout(poll_ms)
         self._workday_option_diagnostic = "EXACT_OPTION_NOT_VISIBLE"
         return False
+
+    def _workday_open_scoped_prompt_chooser(self, element: Any) -> bool:
+        """Open one verified multiselect's own Workday chooser; never submit.
+
+        Search inputs in Workday multiSelectContainer can accept filter text
+        without rendering any menu. A nearby popup icon or chooser button
+        must first be clicked. The action is restricted to the same ancestor
+        component as the observed input and requires exactly one explicit
+        chooser affordance.
+        """
+        self._workday_chooser_diagnostic = "CHOOSER_NOT_FOUND"
+        try:
+            # element is a Playwright ElementHandle (not a Locator).
+            # Keep the trusted .click() path: evaluate_handle only retrieves
+            # the nearest observed Workday component, not an executable action.
+            scope_handle = element.evaluate_handle(
+                """element => element.closest(
+                    '[data-automation-id="multiSelectContainer"]'
+                )"""
+            )
+            scope = scope_handle.as_element()
+            if scope is None or not scope.is_visible():
+                self._workday_chooser_diagnostic = "NO_SCOPED_MULTISELECT"
+                return False
+            controls = scope.query_selector_all(
+                "button[data-automation-id*='prompt' i],"
+                "button[data-automation-id*='dropdown' i],"
+                "button[data-automation-id*='search' i],"
+                "button[aria-haspopup='listbox'],"
+                "button[aria-label*='option' i],"
+                "button[aria-label*='select' i],"
+                "[data-automation-id='promptIcon'],"
+                "[data-automation-id='dropdownIcon']"
+            )
+            visible: list[Any] = []
+            for candidate in controls[:20]:
+                if not candidate.is_visible():
+                    continue
+                if candidate.evaluate(
+                    """element => Boolean(
+                         element.closest('button[type="submit"]')
+                         || element.closest('[data-automation-id^="selectedItem"]')
+                         || element.getAttribute('aria-disabled') === 'true'
+                       )"""
+                ):
+                    continue
+                visible.append(candidate)
+            if not visible:
+                return False
+            if len(visible) != 1:
+                self._workday_chooser_diagnostic = "MULTIPLE_SCOPED_CHOOSERS"
+                return False
+            visible[0].click(timeout=2000)
+            self._workday_chooser_diagnostic = "SCOPED_CHOOSER_OPENED"
+            return True
+        except Exception:
+            self._workday_chooser_diagnostic = "SCOPED_CHOOSER_CLICK_FAILED"
+            return False
 
     def _workday_public_prompt_fallback(self, element: Any, answer: str) -> bool:
         """One deterministic slow retype; no blind key or nudge behavior."""
@@ -838,6 +900,12 @@ class PlanBrowserAdapter:
                     str(value), trigger=element, press_enter=False
                 )
                 if prompt_like:
+                    if not clicked and self._workday_open_scoped_prompt_chooser(
+                        element
+                    ):
+                        clicked = self._workday_click_exact_option(
+                            str(value), trigger=element, timeout_ms=4500
+                        )
                     self.page.wait_for_timeout(250)
                     committed_early = self._workday_prompt_committed(
                         element, str(value)
@@ -1667,6 +1735,11 @@ class PlanBrowserAdapter:
                         } else "UNKNOWN",
                         "option_diagnostic": (
                             str(getattr(self, "_workday_option_diagnostic", "UNKNOWN"))
+                            if semantic == "REFERRAL" and result.get("status") == "FAILED"
+                            else None
+                        ),
+                        "chooser_diagnostic": (
+                            str(getattr(self, "_workday_chooser_diagnostic", "UNATTEMPTED"))
                             if semantic == "REFERRAL" and result.get("status") == "FAILED"
                             else None
                         ),

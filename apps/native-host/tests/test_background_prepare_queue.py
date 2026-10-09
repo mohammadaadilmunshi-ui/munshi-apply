@@ -422,3 +422,134 @@ def test_waiting_input_without_open_tasks_can_receive_one_bound_retry(queued):
     assert retried["state"]=="QUEUED"
     assert retried["attempt_count"]==3
     assert retried["max_attempts"]==4
+
+
+def _provider_mechanics_waiting_fixture(queued):
+    """One approved, blocked Workday control across two historical checkpoints."""
+    import json
+
+    db, _, session, queue, job = queued
+    checkpoint_id = "checkpoint-provider-current"
+    digest = "b" * 64
+    occurred = "2026-10-09T18:51:20+00:00"
+    with db.connect() as connection:
+        connection.execute(
+            """UPDATE complete_application_sessions
+               SET state='NEEDS_INPUT',provider='WORKDAY',
+                   checkpoint_id=?,browser_form_digest=?
+               WHERE session_id=?""",
+            (checkpoint_id, digest, session.session_id),
+        )
+        connection.execute(
+            """UPDATE complete_application_prepare_jobs
+               SET state='WAITING_INPUT',provider='WORKDAY',
+                   attempt_count=4,max_attempts=4
+               WHERE job_id=?""",
+            (job["job_id"],),
+        )
+        for index, cp in enumerate(("checkpoint-older", checkpoint_id)):
+            connection.execute(
+                """INSERT INTO resolution_tasks (
+                       task_id,schema_version,application_id,session_id,
+                       checkpoint_id,page_id,control_id,question_id,question,
+                       semantic_type,category,status,risk_level,auto_resolvable,
+                       requires_user,grouping_scope,group_key,reason,created_at,updated_at
+                   ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    f"task-provider-{index}", 1, job["application_id"],
+                    session.session_id, cp, "page-first", "ctl-referral",
+                    "question-referral", "Referral source", "REFERRAL",
+                    "MISSING_FACT", "PENDING", "MEDIUM", 1, 0,
+                    "EXACT_QUESTION", "group-referral",
+                    "Required browser-invalid answer", occurred, occurred,
+                ),
+            )
+        evidence = {
+            "field_action_evidence": [{
+                "control_id": "ctl-referral",
+                "semantic_type": "REFERRAL",
+                "status": "FAILED",
+                "strategy": "WORKDAY_PROVIDER_PROMPT",
+                "plan_match_count": 1,
+                "verification": "FAILED_CLOSED",
+                "option_diagnostic": "EXACT_OPTION_NOT_VISIBLE",
+            }],
+        }
+        connection.execute(
+            """INSERT INTO complete_application_execution_events (
+                   event_id,application_id,plan_id,session_id,provider,
+                   event_type,replay_identity,evidence_json,occurred_at
+               ) VALUES (?,?,?,?,?,?,?,?,?)""",
+            (
+                "event-provider-failed", job["application_id"], job["plan_id"],
+                session.session_id, "WORKDAY", "FORM_PREPARED",
+                "provider-form-prepared", json.dumps(evidence), occurred,
+            ),
+        )
+        connection.commit()
+    arguments = dict(
+        session_id=session.session_id,
+        tenant_id="tenant-a",
+        user_id="member-a",
+        expected_plan_id=job["plan_id"],
+        expected_checkpoint_id=checkpoint_id,
+        expected_browser_form_digest=digest,
+        expected_control_id="ctl-referral",
+        now="2026-10-09T19:00:00+00:00",
+    )
+    return db, queue, job, arguments
+
+
+def test_waiting_provider_fix_retry_preserves_signed_plan_and_only_one_attempt(queued):
+    db, queue, job, arguments = _provider_mechanics_waiting_fixture(queued)
+    result = queue.retry_waiting_session_after_verified_provider_fix(**arguments)
+    assert result["state"] == "QUEUED"
+    assert result["attempt_count"] == 4
+    assert result["max_attempts"] == 5
+    assert result["plan_id"] == job["plan_id"]
+    assert result["continuation_pending"] == 0
+    with pytest.raises(ValueError, match="not eligible"):
+        queue.retry_waiting_session_after_verified_provider_fix(**arguments)
+    with db.connect() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM final_submit_commands WHERE application_id=?",
+            (job["application_id"],),
+        ).fetchone()[0] == 0
+
+
+@pytest.mark.parametrize(
+    "corruption",
+    ["requires_user", "different_semantic", "no_current_checkpoint", "no_proof"],
+)
+def test_waiting_provider_fix_rejects_unsafe_input_or_missing_proof(queued, corruption):
+    db, queue, job, arguments = _provider_mechanics_waiting_fixture(queued)
+    with db.connect() as connection:
+        if corruption == "requires_user":
+            connection.execute(
+                "UPDATE resolution_tasks SET requires_user=1 WHERE session_id=?",
+                (arguments["session_id"],),
+            )
+        elif corruption == "different_semantic":
+            connection.execute(
+                "UPDATE resolution_tasks SET semantic_type='SELF_ID' WHERE session_id=?",
+                (arguments["session_id"],),
+            )
+        elif corruption == "no_current_checkpoint":
+            connection.execute(
+                "UPDATE resolution_tasks SET checkpoint_id='wrong' WHERE session_id=?",
+                (arguments["session_id"],),
+            )
+        elif corruption == "no_proof":
+            connection.execute(
+                "UPDATE complete_application_execution_events SET evidence_json='{}'"
+                " WHERE session_id=?",
+                (arguments["session_id"],),
+            )
+        connection.commit()
+    with pytest.raises(ValueError):
+        queue.retry_waiting_session_after_verified_provider_fix(**arguments)
+    unchanged = queue.get(
+        job_id=job["job_id"], tenant_id="tenant-a", user_id="member-a"
+    )
+    assert unchanged["state"] == "WAITING_INPUT"
+    assert unchanged["max_attempts"] == 4

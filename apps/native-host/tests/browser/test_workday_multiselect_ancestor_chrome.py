@@ -375,3 +375,94 @@ def test_crescent_two_distinct_exact_referral_options_fail_closed():
         assert page.locator('[data-automation-id^="selectedItem"]').count() == 0
         assert page.evaluate("() => window.__fixtureSubmitClicked") is False
         browser.close()
+
+
+def test_crescent_referral_opens_exactly_one_scoped_chooser_before_selecting():
+    """An icon-gated popup must open without any blind Enter/Submit action."""
+    browser_path = resolve_browser_executable()
+    plan = _plan()
+    html = _fixture_html()
+    html = html.replace(
+        '<div id="referral-options" hidden>',
+        '<button type="button" id="open-chooser" '
+        'data-automation-id="promptIcon">Choose</button>'
+        '<div id="referral-options" hidden>',
+        1,
+    )
+    html = html.replace(
+        '      const refreshOptions = () => {',
+        '      window.__fixtureChooserOpen = false;\n'
+        '      const refreshOptions = () => {',
+        1,
+    )
+    html = html.replace(
+        '              query &&',
+        '              window.__fixtureChooserOpen && query &&',
+        1,
+    )
+    html = html.replace(
+        '      input.addEventListener("input", refreshOptions);',
+        '''      document.getElementById("open-chooser")
+          .addEventListener("click", () => {
+            window.__fixtureChooserOpen = true;
+            refreshOptions();
+          });
+      input.addEventListener("input", refreshOptions);''',
+        1,
+    )
+    assert 'window.__fixtureChooserOpen = false' in html
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True, executable_path=browser_path)
+        page = browser.new_page()
+        _route(page, html)
+        page.goto(WORKDAY_URL, wait_until="domcontentloaded")
+        adapter = _adapter(page, plan)
+        control, question = _referral_control_and_question(adapter)
+        result = adapter._workday_fill_control(
+            control=control, question=question, value="Indeed"
+        )
+        assert result["status"] == "FILLED", (
+            result,
+            getattr(adapter, "_workday_option_diagnostic", None),
+            getattr(adapter, "_workday_chooser_diagnostic", None),
+            page.evaluate("window.__fixtureChooserOpen"),
+            page.locator("#referral-options").is_visible(),
+            page.locator("#source--source").input_value(),
+        )
+        assert result["verification"] == "POST_ACTION_PROVIDER_VERIFIED"
+        assert page.evaluate("window.__fixtureChooserOpen") is True
+        assert page.locator('[data-automation-id="selectedItem-referral"]').inner_text() == "Indeed"
+        assert page.evaluate("window.__fixtureSubmitClicked") is False
+        browser.close()
+
+
+def test_crescent_referral_react_portal_with_stale_aria_controls():
+    """A stale popup link must not hide one provider-exact option elsewhere."""
+    browser_path = resolve_browser_executable()
+    plan = _plan()
+    html = _fixture_html().replace(
+        'id="source--source"',
+        'id="source--source" aria-controls="hidden-stale-popup"',
+        1,
+    ).replace(
+        '<div id="referral-selected"></div>',
+        '<div id="hidden-stale-popup" hidden></div>'
+        '<div id="referral-selected"></div>',
+        1,
+    )
+    assert 'aria-controls="hidden-stale-popup"' in html
+    with playwright.sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True, executable_path=browser_path)
+        page = browser.new_page()
+        _route(page, html)
+        page.goto(WORKDAY_URL, wait_until="domcontentloaded")
+        adapter = _adapter(page, plan)
+        control, question = _referral_control_and_question(adapter)
+        result = adapter._workday_fill_control(
+            control=control, question=question, value="Indeed"
+        )
+        assert result["status"] == "FILLED", result
+        assert result["verification"] == "POST_ACTION_PROVIDER_VERIFIED"
+        assert page.locator('[data-automation-id="selectedItem-referral"]').inner_text() == "Indeed"
+        assert page.evaluate("window.__fixtureSubmitClicked") is False
+        browser.close()
