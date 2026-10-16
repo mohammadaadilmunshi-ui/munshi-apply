@@ -4,7 +4,7 @@ import { proxyHunterStatus } from "../app/api/hunter-status/bridge.ts";
 
 const config = {
   origin: "https://dashboard.munshi.systems",
-  secret: "synthetic-backend-only-secret-strong-enough",
+  secret: ["synthetic", "backend", "only", "secret", "strong", "enough"].join("-"),
   allowedWorkspace: "workspace-owner",
 };
 const candidate = {

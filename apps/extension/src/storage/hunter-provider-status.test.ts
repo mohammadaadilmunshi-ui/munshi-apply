@@ -40,10 +40,12 @@ describe("Hunter shared provider status", () => {
     });
     vi.stubGlobal("fetch", mocked);
     const outcome = await getHunterProviderState(
-      connection, "application-exact-123"
+      connection,
+      "application-exact-123",
     );
     expect(outcome.phase).toBe("linked");
-    if (outcome.phase !== "linked") throw new Error("Unexpected disconnected status");
+    if (outcome.phase !== "linked")
+      throw new Error("Unexpected disconnected status");
     expect(outcome.status.status_label).toContain("receipt not verified");
     expect(outcome.status.employer_receipt_confirmed).toBe(false);
     expect(JSON.stringify(outcome)).not.toContain("privateName");
@@ -53,54 +55,90 @@ describe("Hunter shared provider status", () => {
   it("fails closed on unknown application identity without request", async () => {
     const mocked = vi.fn();
     vi.stubGlobal("fetch", mocked);
-    expect((await getHunterProviderState(connection, "../candidate")).phase)
-      .toBe("not-linked");
+    expect(
+      (await getHunterProviderState(connection, "../candidate")).phase,
+    ).toBe("not-linked");
     expect(mocked).not.toHaveBeenCalled();
   });
 
   it("requires a verified receipt state for confirmation", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () =>
-      new Response(JSON.stringify({
-        ...status,
-        employer_receipt_confirmed: true,
-      }), { headers: { "content-type": "application/json" } })
-    ));
-    expect((await getHunterProviderState(connection, "application-exact-123")).phase)
-      .toBe("unavailable");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              ...status,
+              employer_receipt_confirmed: true,
+            }),
+            { headers: { "content-type": "application/json" } },
+          ),
+      ),
+    );
+    expect(
+      (await getHunterProviderState(connection, "application-exact-123")).phase,
+    ).toBe("unavailable");
   });
 
   it("treats unlinked and unconfigured as different states", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 404 })));
-    expect((await getHunterProviderState(connection, "application-exact-123")).phase)
-      .toBe("not-linked");
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 503 })));
-    expect((await getHunterProviderState(connection, "application-exact-123")).phase)
-      .toBe("unavailable");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{}", { status: 404 })),
+    );
+    expect(
+      (await getHunterProviderState(connection, "application-exact-123")).phase,
+    ).toBe("not-linked");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{}", { status: 503 })),
+    );
+    expect(
+      (await getHunterProviderState(connection, "application-exact-123")).phase,
+    ).toBe("unavailable");
   });
 });
 
-
-
 describe("Hunter status UI privacy", () => {
   it("does not display untrusted provider status text or a false job ID", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () =>
-      new Response(JSON.stringify({
-        ...status,
-        provider_state: "PAUSED",
-        status_label: "Candidate private@example.com must not leak",
-      }), { headers: { "content-type": "application/json" } })
-    ));
-    const safe = await getHunterProviderState(connection, "application-exact-123");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              ...status,
+              provider_state: "PAUSED",
+              status_label: "Candidate private@example.com must not leak",
+            }),
+            { headers: { "content-type": "application/json" } },
+          ),
+      ),
+    );
+    const safe = await getHunterProviderState(
+      connection,
+      "application-exact-123",
+    );
     expect(safe.phase).toBe("linked");
     if (safe.phase === "linked") {
       expect(safe.status.status_label).toBe("Needs attention");
     }
-    vi.stubGlobal("fetch", vi.fn(async () =>
-      new Response(JSON.stringify({
-        ...status, job_id: -12,
-      }), { headers: { "content-type": "application/json" } })
-    ));
-    const invalid = await getHunterProviderState(connection, "application-exact-123");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              ...status,
+              job_id: -12,
+            }),
+            { headers: { "content-type": "application/json" } },
+          ),
+      ),
+    );
+    const invalid = await getHunterProviderState(
+      connection,
+      "application-exact-123",
+    );
     expect(invalid.phase).toBe("unavailable");
   });
 });
