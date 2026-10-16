@@ -753,9 +753,14 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false;
-    if (cloud.status !== "connected" || !activeApplicationId.startsWith("application-")) {
+    if (
+      cloud.status !== "connected" ||
+      !activeApplicationId.startsWith("application-")
+    ) {
       setHunterMirror({ phase: "not-linked" });
-      return () => { cancelled = true; };
+      return () => {
+        cancelled = true;
+      };
     }
     void getCloudConnection()
       .then((connection) =>
@@ -769,7 +774,9 @@ export function App() {
       .catch(() => {
         if (!cancelled) setHunterMirror({ phase: "unavailable" });
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [cloud.status, activeApplicationId]);
 
   const reviewCount = useMemo(
@@ -1643,11 +1650,15 @@ export function App() {
           {hunterMirror.phase === "linked" ? (
             <>
               <p>
-                {hunterMirror.status.engine === "TSENTA" ? "Tsenta" : "MUNSHI Native"}
-                {" · "}{hunterMirror.status.status_label}
+                {hunterMirror.status.engine === "TSENTA"
+                  ? "Tsenta"
+                  : "MUNSHI Native"}
+                {" · "}
+                {hunterMirror.status.status_label}
               </p>
               <p>
-                Employer receipt: {hunterMirror.status.employer_receipt_confirmed
+                Employer receipt:{" "}
+                {hunterMirror.status.employer_receipt_confirmed
                   ? "Independently verified"
                   : "Not independently verified"}
               </p>
@@ -2010,17 +2021,22 @@ export function App() {
           <dl className="diagnostics">
             <div>
               <dt>Hunter provider state</dt>
-              <dd>{hunterMirror.phase === "linked"
-                ? hunterMirror.status.status_label
-                : hunterMirror.phase === "not-linked"
-                  ? "Exact application not linked"
-                  : "Bridge unavailable"}</dd>
+              <dd>
+                {hunterMirror.phase === "linked"
+                  ? hunterMirror.status.status_label
+                  : hunterMirror.phase === "not-linked"
+                    ? "Exact application not linked"
+                    : "Bridge unavailable"}
+              </dd>
             </div>
             <div>
               <dt>Employer receipt</dt>
-              <dd>{hunterMirror.phase === "linked" &&
+              <dd>
+                {hunterMirror.phase === "linked" &&
                 hunterMirror.status.employer_receipt_confirmed
-                ? "Independently verified" : "Not independently verified"}</dd>
+                  ? "Independently verified"
+                  : "Not independently verified"}
+              </dd>
             </div>
             <div>
               <dt>Extension runtime</dt>

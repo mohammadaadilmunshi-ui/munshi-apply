@@ -6,8 +6,13 @@ export type HunterProviderState = {
   job_id: number;
   route_id: string;
   engine: "NATIVE" | "TSENTA";
-  provider_state: "PREPARATION" | "FILLING" | "PAUSED" | "FAILED" |
-    "PROVIDER_SUBMITTED" | "EMPLOYER_CONFIRMED";
+  provider_state:
+    | "PREPARATION"
+    | "FILLING"
+    | "PAUSED"
+    | "FAILED"
+    | "PROVIDER_SUBMITTED"
+    | "EMPLOYER_CONFIRMED";
   status_label: string;
   employer_receipt_confirmed: boolean;
   attempt_count: number;
@@ -21,8 +26,12 @@ export type HunterProviderResult =
 
 const exactApplication = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const knownStates = new Set([
-  "PREPARATION", "FILLING", "PAUSED", "FAILED",
-  "PROVIDER_SUBMITTED", "EMPLOYER_CONFIRMED",
+  "PREPARATION",
+  "FILLING",
+  "PAUSED",
+  "FAILED",
+  "PROVIDER_SUBMITTED",
+  "EMPLOYER_CONFIRMED",
 ]);
 
 export async function getHunterProviderState(
@@ -36,12 +45,13 @@ export async function getHunterProviderState(
     let response: Response;
     try {
       response = await fetch(
-        connection.baseUrl + "/api/hunter-status?applicationId=" +
+        connection.baseUrl +
+          "/api/hunter-status?applicationId=" +
           encodeURIComponent(applicationId),
         {
           headers: {
-            "Accept": "application/json",
-            "Authorization": "Bearer " + connection.credential,
+            Accept: "application/json",
+            Authorization: "Bearer " + connection.credential,
           },
           signal: controller.signal,
           cache: "no-store",
@@ -68,11 +78,13 @@ export async function getHunterProviderState(
       Number(value.attempt_count) < 0 ||
       typeof value.employer_receipt_confirmed !== "boolean" ||
       value.submission_authority !== false
-    ) return { phase: "unavailable" };
+    )
+      return { phase: "unavailable" };
     if (
       value.employer_receipt_confirmed === true &&
       value.provider_state !== "EMPLOYER_CONFIRMED"
-    ) return { phase: "unavailable" };
+    )
+      return { phase: "unavailable" };
     return {
       phase: "linked",
       status: {
@@ -81,7 +93,8 @@ export async function getHunterProviderState(
         job_id: Number(value.job_id),
         route_id: value.route_id,
         engine: value.engine as HunterProviderState["engine"],
-        provider_state: value.provider_state as HunterProviderState["provider_state"],
+        provider_state:
+          value.provider_state as HunterProviderState["provider_state"],
         status_label:
           value.provider_state === "EMPLOYER_CONFIRMED" &&
           value.employer_receipt_confirmed === true
@@ -95,8 +108,10 @@ export async function getHunterProviderState(
                   : "Application preparation in progress",
         employer_receipt_confirmed: value.employer_receipt_confirmed as boolean,
         attempt_count: Number(value.attempt_count),
-        updated_at: typeof value.updated_at === "string"
-          ? value.updated_at.slice(0, 40) : null,
+        updated_at:
+          typeof value.updated_at === "string"
+            ? value.updated_at.slice(0, 40)
+            : null,
         submission_authority: false,
       },
     };

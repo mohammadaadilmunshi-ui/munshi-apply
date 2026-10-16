@@ -25,6 +25,7 @@ Extension: apps/extension/src/storage/hunter-provider-status.ts and sidepanel/Ap
 Contract tests: apps/owner-workspace/tests/hunter-status-bridge.test.mjs and apps/extension/src/storage/hunter-provider-status.test.ts.
 
 Checks:
+
 - npm ci --ignore-scripts --no-audit --no-fund
 - npx vitest run apps/extension/src/storage/hunter-provider-status.test.ts
 - node --test apps/owner-workspace/tests/hunter-status-bridge.test.mjs
