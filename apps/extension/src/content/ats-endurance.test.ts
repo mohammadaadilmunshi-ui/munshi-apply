@@ -50,6 +50,47 @@ beforeEach(() => {
 describe("ATS-shaped browser endurance matrix", () => {
   it.each([
     [
+      "Unrecognized ATS with ordinary semantic controls",
+      `
+        <main data-platform="future-ats-vendor-with-no-adapter">
+          <label for="candidate-region">Region *</label>
+          <input id="candidate-region" name="region" type="text" required>
+          <fieldset>
+            <legend>Are you authorized to work in this country?</legend>
+            <label><input name="authorization" type="radio" value="yes">Yes</label>
+            <label><input name="authorization" type="radio" value="no">No</label>
+          </fieldset>
+          <button type="button">Continue application</button>
+        </main>
+      `,
+      "NEXT",
+    ],
+    [
+      "Dayforce-style multi-step form",
+      `
+        <section data-applicant-form="step-one">
+          <label for="phone">Phone number</label><input id="phone" type="tel">
+          <label for="city">City</label><input id="city" type="text">
+          <button type="button">Next</button>
+        </section>
+      `,
+      "NEXT",
+    ],
+    [
+      "Oracle-style accessible dependent controls",
+      `
+        <main>
+          <label for="country">Country *</label>
+          <select id="country" required><option value="">Select</option>
+            <option value="us">United States</option></select>
+          <label for="region">Region</label>
+          <input id="region" type="text">
+          <button type="button">Continue</button>
+        </main>
+      `,
+      "NEXT",
+    ],
+    [
       "Workday-style grouped fields",
       `
         <main data-automation-id="jobApplicationPage">
