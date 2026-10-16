@@ -78,3 +78,29 @@ describe("Hunter shared provider status", () => {
       .toBe("unavailable");
   });
 });
+
+
+
+describe("Hunter status UI privacy", () => {
+  it("does not display untrusted provider status text or a false job ID", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(JSON.stringify({
+        ...status,
+        provider_state: "PAUSED",
+        status_label: "Candidate private@example.com must not leak",
+      }), { headers: { "content-type": "application/json" } })
+    ));
+    const safe = await getHunterProviderState(connection, "application-exact-123");
+    expect(safe.phase).toBe("linked");
+    if (safe.phase === "linked") {
+      expect(safe.status.status_label).toBe("Needs attention");
+    }
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(JSON.stringify({
+        ...status, job_id: -12,
+      }), { headers: { "content-type": "application/json" } })
+    ));
+    const invalid = await getHunterProviderState(connection, "application-exact-123");
+    expect(invalid.phase).toBe("unavailable");
+  });
+});

@@ -52,6 +52,7 @@ function sanitizedStatus(raw: unknown, expectedId: string): HunterProviderStatus
     value.version !== "munshi-application-provider-summary-v1" ||
     value.application_id !== expectedId ||
     !Number.isSafeInteger(value.job_id) ||
+    Number(value.job_id) <= 0 ||
     !identity.test(String(value.route_id ?? "")) ||
     !["NATIVE", "TSENTA"].includes(String(value.engine ?? "")) ||
     !states.has(String(value.provider_state ?? "")) ||

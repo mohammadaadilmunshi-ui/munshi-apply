@@ -59,11 +59,13 @@ export async function getHunterProviderState(
       value.version !== "munshi-application-provider-summary-v1" ||
       value.application_id !== applicationId ||
       !Number.isSafeInteger(value.job_id) ||
+      Number(value.job_id) <= 0 ||
       typeof value.route_id !== "string" ||
       !exactApplication.test(value.route_id) ||
       !["NATIVE", "TSENTA"].includes(String(value.engine)) ||
       !knownStates.has(String(value.provider_state)) ||
       !Number.isSafeInteger(value.attempt_count) ||
+      Number(value.attempt_count) < 0 ||
       typeof value.employer_receipt_confirmed !== "boolean" ||
       value.submission_authority !== false
     ) return { phase: "unavailable" };
@@ -80,12 +82,17 @@ export async function getHunterProviderState(
         route_id: value.route_id,
         engine: value.engine as HunterProviderState["engine"],
         provider_state: value.provider_state as HunterProviderState["provider_state"],
-        status_label: value.provider_state === "PROVIDER_SUBMITTED"
-          ? "Provider reports submitted (receipt not verified)"
-          : value.provider_state === "EMPLOYER_CONFIRMED" &&
-            value.employer_receipt_confirmed === true
+        status_label:
+          value.provider_state === "EMPLOYER_CONFIRMED" &&
+          value.employer_receipt_confirmed === true
             ? "Employer confirmation verified"
-            : String(value.status_label ?? "Application status pending").slice(0, 96),
+            : value.provider_state === "PROVIDER_SUBMITTED"
+              ? "Provider reports submitted (receipt not verified)"
+              : value.provider_state === "FAILED"
+                ? "Stopped safely"
+                : value.provider_state === "PAUSED"
+                  ? "Needs attention"
+                  : "Application preparation in progress",
         employer_receipt_confirmed: value.employer_receipt_confirmed as boolean,
         attempt_count: Number(value.attempt_count),
         updated_at: typeof value.updated_at === "string"
