@@ -86,10 +86,27 @@ grep -qx 'MUNSHI_FINAL_REVIEW_ENABLED=true' <<<"$api_env"
 grep -qx 'MUNSHI_FINAL_SUBMIT_ENABLED=false' <<<"$api_env"
 
 prepare_env="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$prepare_id")"
-for kv in   'MUNSHI_ENVIRONMENT=production'   'MUNSHI_APPLY_BACKGROUND_PREPARE_ENABLED=true'   'MUNSHI_APPLY_HOSTED_PREPARE_WORKER_ENABLED=true'   'MUNSHI_APPLY_RESUME_UPLOAD_ENABLED=true'   'MUNSHI_APPLY_NORMAL_ANSWER_AUTOFILL_ENABLED=true'   'MUNSHI_FINAL_SUBMIT_ENABLED=false'
+for kv in   'MUNSHI_ENVIRONMENT=production'   'MUNSHI_BROWSER_EXECUTABLE=/usr/bin/chromium'   'MUNSHI_APPLY_BROWSER_HEADLESS=true'   'MUNSHI_APPLY_BROWSER_HEALTH_PATH=/data/browser-runtime-health.json'   'MUNSHI_APPLY_BACKGROUND_PREPARE_ENABLED=true'   'MUNSHI_APPLY_HOSTED_PREPARE_WORKER_ENABLED=true'   'MUNSHI_APPLY_RESUME_UPLOAD_ENABLED=true'   'MUNSHI_APPLY_NORMAL_ANSWER_AUTOFILL_ENABLED=true'   'MUNSHI_FINAL_SUBMIT_ENABLED=false'
 do
   grep -qx "$kv" <<<"$prepare_env" || { echo "prepare worker contract mismatch: $kv" >&2; exit 26; }
 done
+docker exec "$prepare_id" test -x /usr/bin/chromium
+docker exec -i "$prepare_id" python - <<'PY'
+import json
+from pathlib import Path
+
+path = Path("/data/browser-runtime-health.json")
+if not path.is_file():
+    raise SystemExit("Apply production browser health evidence is absent")
+payload = json.loads(path.read_text(encoding="utf-8"))
+if payload.get("status") != "PASS":
+    raise SystemExit("Apply production browser health is not PASS")
+if payload.get("headless") is not True:
+    raise SystemExit("Apply production browser is not headless")
+if payload.get("executable") != "/usr/bin/chromium":
+    raise SystemExit("Apply production browser executable is not the container Chromium")
+print("APPLY_PRODUCTION_BROWSER_RUNTIME_HEALTH=PASS")
+PY
 
 if [[ "$EXPECT_SUBMIT" == "on" ]]; then
   [[ -n "$submit_id" ]] || { echo "Apply production submit worker is not running" >&2; exit 30; }

@@ -34,6 +34,10 @@ def test_staging_compose_wires_complete_loop_control_plane_fail_closed() -> None
     for name, expected in required_occurrences.items():
         assert source.count(name + ': "false"') == expected
     assert source.count('MUNSHI_APPLY_HOSTED_SUBMIT_WORKER_ENABLED: "false"') == 1
+    assert source.count('MUNSHI_APPLY_BROWSER_HEADLESS: "true"') == 2
+    assert source.count(
+        "MUNSHI_APPLY_BROWSER_HEALTH_PATH: /data/browser-runtime-health.json"
+    ) == 2
     for name in (
         "MUNSHI_APPLY_PRODUCTION_SUBMIT_AUTHORITY_ENABLED",
         "MUNSHI_FINAL_SUBMIT_ENABLED",
@@ -79,6 +83,9 @@ def test_production_transport_is_rollback_guarded_and_staging_is_protected() -> 
     assert "--expect-submit" in verify
     assert "APPLY_PRODUCTION_SUBMIT_WORKER_ACTIVE=NO" in verify
     assert "APPLY_PRODUCTION_SUBMIT_WORKER_ACTIVE=YES" in verify
+    assert "APPLY_PRODUCTION_BROWSER_RUNTIME_HEALTH=PASS" in verify
+    assert 'payload.get("executable") != "/usr/bin/chromium"' in verify
+    assert 'payload.get("headless") is not True' in verify
     assert "ROLLBACK APPLY FULL-SUBMIT ACTIVATION" in activate
     assert "safe.directory=$REPO" in verify
     assert "safe.directory=$REPO" in activate
@@ -113,6 +120,17 @@ def test_production_shell_scripts_parse() -> None:
             [BASH, "-n", str(ROOT / relative)],
             check=True,
         )
+
+
+def test_staging_verifier_proves_optional_netcup_browser_worker() -> None:
+    source = (
+        ROOT / "deploy/netcup/verify_apply_staging_runtime_contract.sh"
+    ).read_text(encoding="utf-8")
+    assert "--require-prepare" in source
+    assert "APPLY_STAGING_PREPARE_WORKER_ACTIVE=YES" in source
+    assert "APPLY_STAGING_BROWSER_RUNTIME_HEALTH=PASS" in source
+    assert 'payload.get("executable") != "/usr/bin/chromium"' in source
+    assert 'payload.get("headless") is not True' in source
 
 
 def test_docker_python_heredocs_keep_stdin_open() -> None:
