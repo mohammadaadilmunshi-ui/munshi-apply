@@ -33,7 +33,7 @@ Checks:
 - npm run build --workspace @munshi-apply/extension
 - independently install the owner-workspace lockfile and run its TypeScript and deployment build.
 
-This change is not a license to upload profiles, retry applications, submit applications or bypass employer protection. The extension version remains the checkout's source version; reconcile earlier installed-version 0.2.12 reports before a release.
+This change is not a license to upload profiles, retry applications, submit applications or bypass employer protection. The release-aligned worktree is based on the actual version 0.2.12 branch and preserves the hosted-run inspector. Before replacing the installed extension, prove the exact browser installation and native host version agree with the release artifact.
 
 ## Deployment blockers
 
@@ -53,3 +53,15 @@ An audited original-dashboard Caddy route must permit only that GET path family
 and forward it to Hunter FastAPI while leaving Basic Auth on the rest of
 dashboard.munshi.systems. Requests without the bridge secret fail at HTTP 401.
 Never send the general Hunter API token to Cloudflare or the extension.
+
+## Production-aligned 0.2.12 merge
+
+The status bridge was cherry-picked onto the current production-aligned
+sync/production-41b602f-20260927 branch (baseline c9a5214), not the older
+0.2.11 security branch. The merge retained HostedRunInspector and wired the
+new provider state panel alongside it. Full npm run check passed on the
+release-aligned source (650 unit tests, typecheck, build, artifact and secret
+scan), plus owner workspace TypeScript, five bridge contract tests, nine
+deployment-contract tests and staging transport static guard.
+
+The original dashboard stays the only user-facing release destination.

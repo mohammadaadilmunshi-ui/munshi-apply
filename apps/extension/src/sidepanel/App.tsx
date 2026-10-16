@@ -1644,33 +1644,33 @@ export function App() {
 
       {view === "autopilot" && (
         <>
-        <section aria-label="Hunter application status">
-          <p className="eyebrow">Original MUNSHI dashboard</p>
-          <h2>Application engine</h2>
-          {hunterMirror.phase === "linked" ? (
-            <>
+          <section aria-label="Hunter application status">
+            <p className="eyebrow">Original MUNSHI dashboard</p>
+            <h2>Application engine</h2>
+            {hunterMirror.phase === "linked" ? (
+              <>
+                <p>
+                  {hunterMirror.status.engine === "TSENTA"
+                    ? "Tsenta"
+                    : "MUNSHI Native"}
+                  {" · "}
+                  {hunterMirror.status.status_label}
+                </p>
+                <p>
+                  Employer receipt:{" "}
+                  {hunterMirror.status.employer_receipt_confirmed
+                    ? "Independently verified"
+                    : "Not independently verified"}
+                </p>
+              </>
+            ) : (
               <p>
-                {hunterMirror.status.engine === "TSENTA"
-                  ? "Tsenta"
-                  : "MUNSHI Native"}
-                {" · "}
-                {hunterMirror.status.status_label}
+                {hunterMirror.phase === "not-linked"
+                  ? "No exact Hunter application match for this session."
+                  : "Hunter status bridge is unavailable. Check the original dashboard."}
               </p>
-              <p>
-                Employer receipt:{" "}
-                {hunterMirror.status.employer_receipt_confirmed
-                  ? "Independently verified"
-                  : "Not independently verified"}
-              </p>
-            </>
-          ) : (
-            <p>
-              {hunterMirror.phase === "not-linked"
-                ? "No exact Hunter application match for this session."
-                : "Hunter status bridge is unavailable. Check the original dashboard."}
-            </p>
-          )}
-        </section>
+            )}
+          </section>
           <HostedRunInspector
             nativeAvailable={
               native.status === "healthy" &&
