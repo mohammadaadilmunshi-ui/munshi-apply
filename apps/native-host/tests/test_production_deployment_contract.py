@@ -25,12 +25,24 @@ def test_staging_compose_wires_complete_loop_control_plane_fail_closed() -> None
         '"${MUNSHI_APPLY_PLAN_SUPERSESSION_ENABLED:-false}"'
         in source
     )
-    assert (
-        'MUNSHI_APPLY_PRODUCTION_SUBMIT_AUTHORITY_ENABLED: '
-        '"${MUNSHI_APPLY_PRODUCTION_SUBMIT_AUTHORITY_ENABLED:-false}"'
-        in source
-    )
-    assert 'MUNSHI_FINAL_SUBMIT_ENABLED: "false"' in source
+    # Immutable staging flags: no runtime env may grant submit authority.
+    required_occurrences = {
+        "MUNSHI_APPLY_PRODUCTION_SUBMIT_AUTHORITY_ENABLED": 2,
+        "MUNSHI_FINAL_REVIEW_ENABLED": 3,
+        "MUNSHI_FINAL_SUBMIT_ENABLED": 3,
+    }
+    for name, expected in required_occurrences.items():
+        assert source.count(name + ': "false"') == expected
+    assert source.count('MUNSHI_APPLY_HOSTED_SUBMIT_WORKER_ENABLED: "false"') == 1
+    for name in (
+        "MUNSHI_APPLY_PRODUCTION_SUBMIT_AUTHORITY_ENABLED",
+        "MUNSHI_FINAL_SUBMIT_ENABLED",
+        "MUNSHI_FINAL_REVIEW_ENABLED",
+        "MUNSHI_APPLY_HOSTED_SUBMIT_WORKER_ENABLED",
+    ):
+        for line in source.splitlines():
+            if line.strip().startswith(name + ":"):
+                assert line.strip() == name + ': "false"'
 
 
 def test_production_compose_has_separate_api_prepare_submit_authority() -> None:

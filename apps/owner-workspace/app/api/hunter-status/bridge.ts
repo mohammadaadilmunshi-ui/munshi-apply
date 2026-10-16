@@ -32,8 +32,7 @@ function validateOrigin(raw: string): string | null {
     const parsed = new URL(raw);
     if (
       parsed.protocol !== "https:" ||
-      (!parsed.hostname.endsWith(".munshi.systems") &&
-        parsed.hostname !== "munshi.systems") ||
+      parsed.hostname !== "dashboard.munshi.systems" ||
       parsed.port ||
       parsed.username || parsed.password ||
       parsed.search || parsed.hash ||
@@ -114,7 +113,7 @@ export async function proxyHunterStatus(
       {
         method: "GET",
         headers: {
-          "X-Hunter-Secret": config.secret,
+          "X-Munshi-Status-Bridge-Secret": config.secret,
           "Accept": "application/json",
         },
         redirect: "manual",
