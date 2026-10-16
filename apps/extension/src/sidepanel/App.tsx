@@ -57,6 +57,10 @@ import {
   type CloudHealth,
   type CloudSnapshot,
 } from "../storage/cloud";
+import {
+  getHunterProviderState,
+  type HunterProviderResult,
+} from "../storage/hunter-provider-status";
 import { AIControlCenter } from "./AIControlCenter";
 import { AIDraftReview } from "./AIDraftReview";
 import { AutoPilotControlCenter } from "./AutoPilotControlCenter";
@@ -739,6 +743,31 @@ export function App() {
   const activeApplicationId = runtimeOwnsCurrentPage
     ? autoPilotStatus!.session.applicationId
     : (page?.pageId ?? "");
+
+  const [hunterMirror, setHunterMirror] = useState<HunterProviderResult>({
+    phase: "not-linked",
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    if (cloud.status !== "connected" || !activeApplicationId.startsWith("application-")) {
+      setHunterMirror({ phase: "not-linked" });
+      return () => { cancelled = true; };
+    }
+    void getCloudConnection()
+      .then((connection) =>
+        connection
+          ? getHunterProviderState(connection, activeApplicationId)
+          : { phase: "unavailable" as const },
+      )
+      .then((next) => {
+        if (!cancelled) setHunterMirror(next);
+      })
+      .catch(() => {
+        if (!cancelled) setHunterMirror({ phase: "unavailable" });
+      });
+    return () => { cancelled = true; };
+  }, [cloud.status, activeApplicationId]);
 
   const reviewCount = useMemo(
     () =>
@@ -1604,6 +1633,32 @@ export function App() {
       )}
 
       {view === "autopilot" && (
+        <section aria-label="Hunter application status">
+          <p className="eyebrow">Original MUNSHI dashboard</p>
+          <h2>Application engine</h2>
+          {hunterMirror.phase === "linked" ? (
+            <>
+              <p>
+                {hunterMirror.status.engine === "TSENTA" ? "Tsenta" : "MUNSHI Native"}
+                {" · "}{hunterMirror.status.status_label}
+              </p>
+              <p>
+                Employer receipt: {hunterMirror.status.employer_receipt_confirmed
+                  ? "Independently verified"
+                  : "Not independently verified"}
+              </p>
+            </>
+          ) : (
+            <p>
+              {hunterMirror.phase === "not-linked"
+                ? "No exact Hunter application match for this session."
+                : "Hunter status bridge is unavailable. Check the original dashboard."}
+            </p>
+          )}
+        </section>
+      )}
+
+      {view === "autopilot" && (
         <AutoPilotControlCenter
           page={page}
           answers={answers}
@@ -1943,6 +1998,20 @@ export function App() {
           <p className="eyebrow">Runtime diagnostics</p>
           <h2>Foundation health</h2>
           <dl className="diagnostics">
+            <div>
+              <dt>Hunter provider state</dt>
+              <dd>{hunterMirror.phase === "linked"
+                ? hunterMirror.status.status_label
+                : hunterMirror.phase === "not-linked"
+                  ? "Exact application not linked"
+                  : "Bridge unavailable"}</dd>
+            </div>
+            <div>
+              <dt>Employer receipt</dt>
+              <dd>{hunterMirror.phase === "linked" &&
+                hunterMirror.status.employer_receipt_confirmed
+                ? "Independently verified" : "Not independently verified"}</dd>
+            </div>
             <div>
               <dt>Extension runtime</dt>
               <dd>{health}</dd>
