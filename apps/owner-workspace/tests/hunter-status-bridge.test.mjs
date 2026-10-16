@@ -35,7 +35,7 @@ test("exact workspace and application returns only sanitized status", async () =
     assert.equal(url.origin, config.origin);
     assert.equal(url.pathname,
       "/api/application-provider-status/by-application/application-exact-123");
-    assert.equal(init.headers["X-Hunter-Secret"], config.secret);
+    assert.equal(init.headers["X-Munshi-Status-Bridge-Secret"], config.secret);
     assert.equal(init.method, "GET");
     return response(candidate);
   };
@@ -66,6 +66,8 @@ test("missing or unsafe upstream origin fails closed", async () => {
     "https://evil.example",
     "http://127.0.0.1:8080",
     "https://dashboard.munshi.systems.evil.com",
+    "https://staging-dashboard.munshi.systems",
+    "https://other.munshi.systems",
     "https://user:pass@dashboard.munshi.systems",
   ]) {
     const result = await proxyHunterStatus(
