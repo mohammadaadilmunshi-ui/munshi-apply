@@ -75,6 +75,63 @@ print(json.dumps({"source":"NETCUP_APPLY_DATABASE","state":"FOUND",
 """
 
 
+def reconcile_readonly_hosted_state(result: dict[str, Any]) -> dict[str, Any]:
+    """Resolve stale session labels against the authoritative prepare queue.
+
+    Does not write or retry a session. Historical Apply sessions frequently
+    retain SESSION_STARTING after their preparation jobs end, so this
+    observation must distinguish an actually running browser from a completed
+    failed job. Never claim receipt verification based on row counts.
+    """
+    if result.get("state") != "FOUND":
+        return result
+
+    observation = dict(result)
+    session = dict(observation.get("session") or {})
+    job = dict(observation.get("prepare_job") or {})
+    session_state = str(session.get("state") or "").strip().upper()
+    job_state = str(job.get("state") or "").strip().upper()
+
+    if job_state in {"FAILED_SAFELY", "BLOCKED", "CANCELLED"}:
+        observation["effective_state"] = job_state
+        observation["next_action"] = (
+            "Inspect the failed preparation and create a fresh, reviewed plan; "
+            "do not automatically retry an old employer browser session."
+            if job_state == "FAILED_SAFELY" else
+            "Inspect the protected checkpoint or cancellation before proceeding."
+        )
+        observation["session_state_mismatch"] = session_state != job_state
+    elif job_state == "WAITING_INPUT":
+        observation["effective_state"] = "NEEDS_INPUT"
+        observation["next_action"] = (
+            "Review unresolved employer questions or protected checkpoints; "
+            "the existing run must not submit while input is pending."
+        )
+        observation["session_state_mismatch"] = session_state != "NEEDS_INPUT"
+    elif job_state == "READY_FOR_REVIEW":
+        has_review = int((observation.get("counts") or {}).get("final_reviews") or 0) > 0
+        observation["effective_state"] = (
+            "READY_FOR_REVIEW" if has_review else "REVIEW_NOT_FROZEN"
+        )
+        observation["next_action"] = (
+            "Verify the exact frozen review and authority before final submission."
+            if has_review else
+            "A preparation job reports review-ready but no frozen review exists."
+        )
+        observation["session_state_mismatch"] = not has_review
+    else:
+        observation["effective_state"] = session_state or "UNKNOWN"
+        observation["next_action"] = (
+            "Continue observing this run; no final submission is confirmed."
+        )
+        observation["session_state_mismatch"] = False
+
+    observation["submission_verified"] = False
+    # A raw count of rows in application_submission_receipts does not provide
+    # the independent employer confirmation required by the Hunter ledger.
+    return observation
+
+
 def config_location() -> Path:
     override = os.environ.get("MUNSHI_HOSTED_RUN_MONITOR_CONFIG")
     return Path(override).expanduser() if override else _CONFIG_DEFAULT
@@ -151,4 +208,4 @@ def get_hosted_run_status(payload: Any) -> dict[str, Any]:
         )
     ):
         raise RuntimeError("Hosted-run observer returned untrusted application state.")
-    return result
+    return reconcile_readonly_hosted_state(result)
