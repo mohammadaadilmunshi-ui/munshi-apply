@@ -294,7 +294,10 @@ class PlanBrowserAdapter:
             and oneclick.scheme == "https"
             and actual.scheme == oneclick.scheme
             and actual.netloc == oneclick.netloc
-            and (actual.path == oneclick.path or actual.path.startswith(oneclick.path.rstrip("/") + "/"))
+            and (
+                actual.path == oneclick.path
+                or actual.path.startswith(oneclick.path.rstrip("/") + "/")
+            )
         )
         same = exact or application_child or smartrecruiters_child
         scan = self._scan()["page"]
@@ -1152,7 +1155,11 @@ class PlanBrowserAdapter:
         if self.current_plan(plan) is not True:
             raise ValueError("Hunter plan is stale")
 
-        expected = str(plan.get("job", {}).get("apply_url") or plan.get("job", {}).get("job_url") or "")
+        expected = str(
+            plan.get("job", {}).get("apply_url")
+            or plan.get("job", {}).get("job_url")
+            or ""
+        )
         if self.page.url == expected and provider_for_url(expected) == "SMARTRECRUITERS":
             anchors = self.page.evaluate(
                 """() => Array.from(document.querySelectorAll('a[href]'))
