@@ -395,8 +395,8 @@ class UniversalDocumentUploader:
                 native: set[str] = set()
                 try:
                     native.update(self._file_hashes(locator))
-                except Exception:  # noqa: S112 - React may detach its file input
-                    pass
+                except Exception:  # React may detach its file input
+                    native.clear()
                 captured = self._captured_hashes(probe)
                 for spec in specs:
                     expected = spec.sha256.lower()

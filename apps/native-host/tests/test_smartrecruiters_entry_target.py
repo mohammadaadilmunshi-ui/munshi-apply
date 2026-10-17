@@ -1,7 +1,5 @@
 from munshi_apply_native.plan_browser_adapter import smartrecruiters_verified_oneclick
 
-
-
 BASE = "https://jobs.smartrecruiters.com/DohlerGmbH/744000154149608-human-resources-coordinator"
 GOOD = (
     "https://jobs.smartrecruiters.com/oneclick-ui/company/DohlerGmbH/"
