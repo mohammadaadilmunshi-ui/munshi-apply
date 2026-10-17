@@ -25,12 +25,28 @@ def test_staging_compose_wires_complete_loop_control_plane_fail_closed() -> None
         '"${MUNSHI_APPLY_PLAN_SUPERSESSION_ENABLED:-false}"'
         in source
     )
-    assert (
-        'MUNSHI_APPLY_PRODUCTION_SUBMIT_AUTHORITY_ENABLED: '
-        '"${MUNSHI_APPLY_PRODUCTION_SUBMIT_AUTHORITY_ENABLED:-false}"'
-        in source
-    )
-    assert 'MUNSHI_FINAL_SUBMIT_ENABLED: "false"' in source
+    # Immutable staging flags: no runtime env may grant submit authority.
+    required_occurrences = {
+        "MUNSHI_APPLY_PRODUCTION_SUBMIT_AUTHORITY_ENABLED": 2,
+        "MUNSHI_FINAL_REVIEW_ENABLED": 3,
+        "MUNSHI_FINAL_SUBMIT_ENABLED": 3,
+    }
+    for name, expected in required_occurrences.items():
+        assert source.count(name + ': "false"') == expected
+    assert source.count('MUNSHI_APPLY_HOSTED_SUBMIT_WORKER_ENABLED: "false"') == 1
+    assert source.count('MUNSHI_APPLY_BROWSER_HEADLESS: "true"') == 2
+    assert source.count(
+        "MUNSHI_APPLY_BROWSER_HEALTH_PATH: /data/browser-runtime-health.json"
+    ) == 2
+    for name in (
+        "MUNSHI_APPLY_PRODUCTION_SUBMIT_AUTHORITY_ENABLED",
+        "MUNSHI_FINAL_SUBMIT_ENABLED",
+        "MUNSHI_FINAL_REVIEW_ENABLED",
+        "MUNSHI_APPLY_HOSTED_SUBMIT_WORKER_ENABLED",
+    ):
+        for line in source.splitlines():
+            if line.strip().startswith(name + ":"):
+                assert line.strip() == name + ': "false"'
 
 
 def test_production_compose_has_separate_api_prepare_submit_authority() -> None:
@@ -67,10 +83,29 @@ def test_production_transport_is_rollback_guarded_and_staging_is_protected() -> 
     assert "--expect-submit" in verify
     assert "APPLY_PRODUCTION_SUBMIT_WORKER_ACTIVE=NO" in verify
     assert "APPLY_PRODUCTION_SUBMIT_WORKER_ACTIVE=YES" in verify
+    assert "APPLY_PRODUCTION_BROWSER_RUNTIME_HEALTH=PASS" in verify
+    assert 'payload.get("executable") != "/usr/bin/chromium"' in verify
+    assert 'payload.get("headless") is not True' in verify
     assert "ROLLBACK APPLY FULL-SUBMIT ACTIVATION" in activate
     assert "safe.directory=$REPO" in verify
     assert "safe.directory=$REPO" in activate
     assert "APPLY_PRODUCTION_FINAL_SUBMIT=ENABLED" in activate
+
+
+def test_code_release_preserves_enabled_submit_worker_and_no_flag_downgrade() -> None:
+    script = (
+        ROOT / "deploy/netcup/deploy_apply_production_release.sh"
+    ).read_text(encoding="utf-8")
+    assert "READY_TO_SUBMIT" in script
+    assert "pending_at_swap" in script
+    assert "Application became ready/submitting during build" in script
+    assert '[[ "$old_submit_running" == "1" ]]' in script
+    assert "PRESERVE ENABLED SUBMIT AUTHORITY" in script
+    assert "up -d --force-recreate apply prepare-worker submit-worker" in script
+    assert '"$VERIFY" --expected-sha "$commit" --expect-submit on' in script
+    assert "MUNSHI_APPLY_PRODUCTION_SUBMIT_AUTHORITY_ENABLED=false" not in script
+    assert "stop submit-worker" not in script
+    assert "FINAL_SUBMIT_ENABLED=false" not in script
 
 
 def test_hosted_submit_worker_delivers_verified_production_receipt() -> None:
@@ -101,6 +136,17 @@ def test_production_shell_scripts_parse() -> None:
             [BASH, "-n", str(ROOT / relative)],
             check=True,
         )
+
+
+def test_staging_verifier_proves_optional_netcup_browser_worker() -> None:
+    source = (
+        ROOT / "deploy/netcup/verify_apply_staging_runtime_contract.sh"
+    ).read_text(encoding="utf-8")
+    assert "--require-prepare" in source
+    assert "APPLY_STAGING_PREPARE_WORKER_ACTIVE=YES" in source
+    assert "APPLY_STAGING_BROWSER_RUNTIME_HEALTH=PASS" in source
+    assert 'payload.get("executable") != "/usr/bin/chromium"' in source
+    assert 'payload.get("headless") is not True' in source
 
 
 def test_docker_python_heredocs_keep_stdin_open() -> None:

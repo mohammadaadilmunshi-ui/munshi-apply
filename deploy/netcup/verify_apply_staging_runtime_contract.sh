@@ -62,6 +62,7 @@ load_target_config() {
   export MUNSHI_ENVIRONMENT="$DEPLOY_ENVIRONMENT"
 }
 EXPECTED_SHA=""
+REQUIRE_PREPARE="false"
 
 
 
@@ -69,6 +70,7 @@ while (($#)); do
   case "$1" in
     --target) target="${2:-}"; shift 2 ;;
     --expected-sha) EXPECTED_SHA="${2:-}"; shift 2 ;;
+    --require-prepare) REQUIRE_PREPARE="true"; shift ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -172,6 +174,56 @@ submit_ids="$(docker ps -q \
   exit 20
 }
 echo "APPLY_STAGING_SUBMIT_WORKER_ACTIVE=NO"
+
+mapfile -t prepare_ids < <(docker ps -q \
+  --filter "label=com.docker.compose.project=$PROJECT" \
+  --filter 'label=com.docker.compose.service=prepare-worker')
+[[ "${#prepare_ids[@]}" -le 1 ]] || {
+  echo "multiple Apply staging prepare workers are active" >&2
+  exit 20
+}
+if [[ "${#prepare_ids[@]}" -eq 0 ]]; then
+  [[ "$REQUIRE_PREPARE" == "false" ]] || {
+    echo "Apply staging prepare worker is required but not active" >&2
+    exit 20
+  }
+  echo "APPLY_STAGING_PREPARE_WORKER_ACTIVE=NO"
+else
+  prepare_id="${prepare_ids[0]}"
+  prepare_env="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$prepare_id")"
+  for kv in \
+    'MUNSHI_ENVIRONMENT=staging' \
+    'MUNSHI_BROWSER_EXECUTABLE=/usr/bin/chromium' \
+    'MUNSHI_APPLY_BROWSER_HEADLESS=true' \
+    'MUNSHI_APPLY_BROWSER_HEALTH_PATH=/data/browser-runtime-health.json' \
+    'MUNSHI_APPLY_HOSTED_PREPARE_WORKER_ENABLED=true' \
+    'MUNSHI_FINAL_REVIEW_ENABLED=false' \
+    'MUNSHI_FINAL_SUBMIT_ENABLED=false'
+  do
+    grep -qx "$kv" <<<"$prepare_env" || {
+      echo "Apply staging prepare worker contract mismatch: $kv" >&2
+      exit 20
+    }
+  done
+  docker exec "$prepare_id" test -x /usr/bin/chromium
+  docker exec -i "$prepare_id" python - <<'PY'
+import json
+from pathlib import Path
+
+path = Path("/data/browser-runtime-health.json")
+if not path.is_file():
+    raise SystemExit("Apply staging browser health evidence is absent")
+payload = json.loads(path.read_text(encoding="utf-8"))
+if payload.get("status") != "PASS":
+    raise SystemExit("Apply staging browser health is not PASS")
+if payload.get("headless") is not True:
+    raise SystemExit("Apply staging browser is not headless")
+if payload.get("executable") != "/usr/bin/chromium":
+    raise SystemExit("Apply staging browser executable is not the container Chromium")
+print("APPLY_STAGING_BROWSER_RUNTIME_HEALTH=PASS")
+PY
+  echo "APPLY_STAGING_PREPARE_WORKER_ACTIVE=YES"
+fi
 
 mapfile -t apply_ids < <(docker ps -q \
   --filter "label=com.docker.compose.project=$PROJECT" \
