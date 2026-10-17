@@ -35,12 +35,19 @@ def _setup(page, *, status=200):
         + ''.join(f'<a href="{ENTRY}">I&apos;m interested</a>' for _ in range(3))
         + '</body></html>'
     )
-    form = '<html><body><label for="resume">Resume / CV</label><input id="resume" type="file" name="resume"></body></html>'
+    form = (
+        '<html><body><label for="resume">Resume / CV</label>'
+        '<input id="resume" type="file" name="resume"></body></html>'
+    )
 
     def handle(route):
         url = route.request.url
         if "/oneclick-ui/" in url:
-            route.fulfill(status=status, body=form if status == 200 else "Access temporarily restricted", content_type="text/html")
+            route.fulfill(
+                status=status,
+                body=form if status == 200 else "Access temporarily restricted",
+                content_type="text/html",
+            )
         elif url == BASE:
             route.fulfill(status=200, body=listing, content_type="text/html")
         else:
