@@ -92,6 +92,22 @@ def test_production_transport_is_rollback_guarded_and_staging_is_protected() -> 
     assert "APPLY_PRODUCTION_FINAL_SUBMIT=ENABLED" in activate
 
 
+def test_code_release_preserves_enabled_submit_worker_and_no_flag_downgrade() -> None:
+    script = (
+        ROOT / "deploy/netcup/deploy_apply_production_release.sh"
+    ).read_text(encoding="utf-8")
+    assert "READY_TO_SUBMIT" in script
+    assert "pending_at_swap" in script
+    assert "Application became ready/submitting during build" in script
+    assert '[[ "$old_submit_running" == "1" ]]' in script
+    assert "PRESERVE ENABLED SUBMIT AUTHORITY" in script
+    assert "up -d --force-recreate apply prepare-worker submit-worker" in script
+    assert '"$VERIFY" --expected-sha "$commit" --expect-submit on' in script
+    assert "MUNSHI_APPLY_PRODUCTION_SUBMIT_AUTHORITY_ENABLED=false" not in script
+    assert "stop submit-worker" not in script
+    assert "FINAL_SUBMIT_ENABLED=false" not in script
+
+
 def test_hosted_submit_worker_delivers_verified_production_receipt() -> None:
     source = (
         ROOT / "apps/native-host/src/munshi_apply_native/hosted_submit_worker.py"
