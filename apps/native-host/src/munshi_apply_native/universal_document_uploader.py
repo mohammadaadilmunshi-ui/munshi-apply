@@ -14,6 +14,7 @@ import base64
 import binascii
 import hashlib
 import re
+import secrets
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -241,6 +242,84 @@ class UniversalDocumentUploader:
             hashes.append(hashlib.sha256(data).hexdigest())
         return hashes
 
+    def _begin_capture(self) -> str:
+        """Retain actual browser File objects before a reactive widget detaches.
+
+        FileReader data is never persisted or logged. This is not proof the
+        employer server accepted the upload; it proves the browser held bytes.
+        """
+        probe = secrets.token_hex(12)
+        for frame in list(self.page.frames):
+            try:
+                frame.evaluate(
+                    r"""probe => {
+                      const store = window.__munshiEphemeralUploadProof
+                        || (window.__munshiEphemeralUploadProof = {});
+                      const files = [];
+                      const onChange = event => {
+                        if (event.target && event.target.files) {
+                          files.push(...Array.from(event.target.files));
+                        }
+                      };
+                      const onDrop = event => {
+                        if (event.dataTransfer && event.dataTransfer.files) {
+                          files.push(...Array.from(event.dataTransfer.files));
+                        }
+                      };
+                      document.addEventListener('change', onChange, true);
+                      document.addEventListener('drop', onDrop, true);
+                      store[probe] = {files, onChange, onDrop};
+                    }""",
+                    probe,
+                )
+            except Exception:  # noqa: S112 - cross-origin or detached frame
+                continue
+        return probe
+
+    def _captured_hashes(self, probe: str) -> set[str]:
+        hashes: set[str] = set()
+        for frame in list(self.page.frames):
+            try:
+                values = frame.evaluate(
+                    r"""async probe => {
+                      const entry = window.__munshiEphemeralUploadProof?.[probe];
+                      if (!entry) return [];
+                      return Promise.all(entry.files.map(file => new Promise(
+                        (resolve, reject) => {
+                          const reader = new FileReader();
+                          reader.onload = () => resolve(String(reader.result || ''));
+                          reader.onerror = () => reject(reader.error);
+                          reader.readAsDataURL(file);
+                        }
+                      )));
+                    }""",
+                    probe,
+                )
+                for raw in values or []:
+                    encoded = str(raw or "").split(",", 1)
+                    if len(encoded) == 2:
+                        data = base64.b64decode(encoded[1], validate=True)
+                        hashes.add(hashlib.sha256(data).hexdigest())
+            except Exception:  # noqa: S112 - do not claim unverifiable bytes
+                continue
+        return hashes
+
+    def _end_capture(self, probe: str) -> None:
+        for frame in list(self.page.frames):
+            try:
+                frame.evaluate(
+                    r"""probe => {
+                      const entry = window.__munshiEphemeralUploadProof?.[probe];
+                      if (!entry) return;
+                      document.removeEventListener('change', entry.onChange, true);
+                      document.removeEventListener('drop', entry.onDrop, true);
+                      delete window.__munshiEphemeralUploadProof[probe];
+                    }""",
+                    probe,
+                )
+            except Exception:  # noqa: S112 - cleanup best effort
+                continue
+
     def _verify_hash_any_native(self, expected_sha256: str) -> bool:
         expected = str(expected_sha256 or "").strip().lower()
         for target in self._native_targets():
@@ -251,11 +330,18 @@ class UniversalDocumentUploader:
                 continue
         return False
 
-    def _wait_for_acknowledgement(self, spec: DocumentSpec) -> bool:
+    def _wait_for_acknowledgement(
+        self, spec: DocumentSpec, *, probe: str, ack_preexisting: bool
+    ) -> bool:
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline:
-            if self._verify_hash_any_native(spec.sha256) or self._filename_acknowledged(
-                filename=spec.filename
+            # A filename alone is not cryptographic upload proof.
+            if self._verify_hash_any_native(spec.sha256):
+                return True
+            if (
+                spec.sha256.lower() in self._captured_hashes(probe)
+                and not ack_preexisting
+                and self._filename_acknowledged(filename=spec.filename)
             ):
                 return True
             self.page.wait_for_timeout(100)
@@ -296,39 +382,45 @@ class UniversalDocumentUploader:
     ) -> dict[str, str]:
         locator = target["locator"]
         payloads = [spec.playwright_payload() for spec in specs]
-        locator.set_input_files(payloads if len(payloads) > 1 else payloads[0])
-        observed: set[str] = set()
+        acknowledgements_before = {
+            spec.role: self._filename_acknowledged(filename=spec.filename)
+            for spec in specs
+        }
+        probe = self._begin_capture()
         try:
-            observed.update(self._file_hashes(locator))
-        except Exception:  # noqa: S110 - detached inputs are verified via replacement UI
-            # React upload controls commonly replace the native input as soon
-            # as the change event fires. The exact bytes were handed to the
-            # browser above; verify the replacement UI acknowledges the exact
-            # filename instead of waiting on the detached locator.
-            pass
-        verified: dict[str, str] = {}
-        deadline = time.monotonic() + 5.0
-        while time.monotonic() < deadline:
-            for spec in specs:
-                if spec.role in verified:
-                    continue
-                if spec.sha256.lower() in observed or self._filename_acknowledged(
-                    filename=spec.filename
-                ):
-                    verified[spec.role] = spec.sha256.lower()
-            if len(verified) == len(specs):
-                break
-            self.page.wait_for_timeout(100)
-        if verified:
-            self.on_event(
-                "DOCUMENT_UPLOAD_VERIFIED",
-                {
-                    "strategy": "native_file_input",
-                    "roles": sorted(verified),
-                    "frame_url": target["frame_url"],
-                },
-            )
-        return verified
+            locator.set_input_files(payloads if len(payloads) > 1 else payloads[0])
+            verified: dict[str, str] = {}
+            deadline = time.monotonic() + 5.0
+            while time.monotonic() < deadline:
+                native: set[str] = set()
+                try:
+                    native.update(self._file_hashes(locator))
+                except Exception:  # noqa: S112 - React may detach its file input
+                    pass
+                captured = self._captured_hashes(probe)
+                for spec in specs:
+                    expected = spec.sha256.lower()
+                    if expected in native or (
+                        expected in captured
+                        and not acknowledgements_before[spec.role]
+                        and self._filename_acknowledged(filename=spec.filename)
+                    ):
+                        verified[spec.role] = expected
+                if len(verified) == len(specs):
+                    break
+                self.page.wait_for_timeout(100)
+            if verified:
+                self.on_event(
+                    "DOCUMENT_UPLOAD_VERIFIED",
+                    {
+                        "strategy": "native_file_input",
+                        "roles": sorted(verified),
+                        "frame_url": target["frame_url"],
+                    },
+                )
+            return verified
+        finally:
+            self._end_capture(probe)
 
     def _filechooser_upload(
         self,
@@ -336,23 +428,30 @@ class UniversalDocumentUploader:
         target: dict[str, Any],
         spec: DocumentSpec,
     ) -> bool:
+        ack_preexisting = self._filename_acknowledged(filename=spec.filename)
+        probe = self._begin_capture()
         try:
-            with self.page.expect_file_chooser(timeout=1500) as chooser_info:
-                target["locator"].click(timeout=1500)
-            chooser_info.value.set_files(spec.playwright_payload())
-        except Exception:
-            return False
-        if not self._wait_for_acknowledgement(spec):
-            return False
-        self.on_event(
-            "DOCUMENT_UPLOAD_VERIFIED",
-            {
-                "strategy": "file_chooser",
-                "roles": [spec.role],
-                "frame_url": target["frame_url"],
-            },
-        )
-        return True
+            try:
+                with self.page.expect_file_chooser(timeout=1500) as chooser_info:
+                    target["locator"].click(timeout=1500)
+                chooser_info.value.set_files(spec.playwright_payload())
+            except Exception:
+                return False
+            if not self._wait_for_acknowledgement(
+                spec, probe=probe, ack_preexisting=ack_preexisting
+            ):
+                return False
+            self.on_event(
+                "DOCUMENT_UPLOAD_VERIFIED",
+                {
+                    "strategy": "file_chooser",
+                    "roles": [spec.role],
+                    "frame_url": target["frame_url"],
+                },
+            )
+            return True
+        finally:
+            self._end_capture(probe)
 
     def _drop_upload(
         self,
@@ -360,6 +459,8 @@ class UniversalDocumentUploader:
         target: dict[str, Any],
         spec: DocumentSpec,
     ) -> bool:
+        ack_preexisting = self._filename_acknowledged(filename=spec.filename)
+        probe = self._begin_capture()
         encoded = base64.b64encode(spec.data).decode("ascii")
         try:
             delivered = target["locator"].evaluate(
@@ -390,10 +491,15 @@ class UniversalDocumentUploader:
                 },
             )
         except Exception:
+            self._end_capture(probe)
             return False
         if delivered is not True:
+            self._end_capture(probe)
             return False
-        if not self._wait_for_acknowledgement(spec):
+        if not self._wait_for_acknowledgement(
+            spec, probe=probe, ack_preexisting=ack_preexisting
+        ):
+            self._end_capture(probe)
             return False
         self.on_event(
             "DOCUMENT_UPLOAD_VERIFIED",
@@ -473,4 +579,24 @@ class UniversalDocumentUploader:
             ):
                 verified["cover_letter"] = cover_letter.sha256.lower()
 
+        for spec in (resume, cover_letter):
+            if spec is None or spec.role in verified:
+                continue
+            available_roles = [target["role"] for target in native + proxy]
+            reason = (
+                "UPLOAD_CONTROL_NOT_FOUND"
+                if not available_roles
+                else "UPLOAD_CONTROL_AMBIGUOUS"
+                if available_roles.count(spec.role) > 1
+                else "UPLOAD_WIDGET_UNVERIFIED"
+            )
+            self.on_event(
+                "DOCUMENT_UPLOAD_UNVERIFIED",
+                {
+                    "role": spec.role,
+                    "reason": reason,
+                    "native_input_count": len(native),
+                    "proxy_count": len(proxy),
+                },
+            )
         return verified

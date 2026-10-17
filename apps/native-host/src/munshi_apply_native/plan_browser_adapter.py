@@ -15,7 +15,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from .execution_policy import prepare_permissions, safe_evidence
 from .hunter_plan_semantic_bridge import (
@@ -79,6 +79,45 @@ KNOWN_PROVIDER_RECIPES = {
 }
 
 
+def smartrecruiters_verified_oneclick(
+    source_url: str, anchors: list[dict[str, str]]
+) -> str:
+    """Select one exact-company, same-host GET entry from a public SR job page.
+
+    The listing often has multiple identical "I'm interested" links. The
+    smartr.me alternative and different-company URLs are not eligible.
+    This returns a navigation target, never submission authority.
+    """
+    source = urlsplit(source_url)
+    if source.scheme != "https" or (source.hostname or "").lower() != "jobs.smartrecruiters.com":
+        return ""
+    match = re.fullmatch(r"/([A-Za-z0-9_-]+)/[0-9]+-[a-z0-9-]+/?", source.path, re.I)
+    if not match:
+        return ""
+    company = match.group(1)
+    destinations: set[str] = set()
+    for item in anchors:
+        if str(item.get("label") or "").strip().casefold() != "i'm interested":
+            continue
+        url = str(item.get("href") or "").strip()
+        parts = urlsplit(url)
+        if parts.scheme != "https" or (parts.hostname or "").lower() != "jobs.smartrecruiters.com":
+            continue
+        dest = re.fullmatch(
+            r"/oneclick-ui/company/([A-Za-z0-9_-]+)/publication/([0-9a-f-]{36})/?",
+            parts.path,
+            re.I,
+        )
+        if not dest or dest.group(1).casefold() != company.casefold():
+            continue
+        if parse_qs(parts.query).get("dcr_ci") != [company]:
+            continue
+        if parts.fragment or parts.username or parts.password or parts.port:
+            continue
+        destinations.add(url)
+    return next(iter(destinations)) if len(destinations) == 1 else ""
+
+
 def provider_for_url(url: str) -> str:
     """Return an optimization recipe hint, never an execution eligibility verdict."""
     host = (urlsplit(url).hostname or "").casefold().rstrip(".")
@@ -118,6 +157,7 @@ class PlanBrowserAdapter:
         # within this adapter/session.  It is always plan-bound and never sourced
         # from provider text, filenames, or optimistic DOM state.
         self._verified_uploads: dict[tuple[str, str], str] = {}
+        self._verified_smartrecruiters_entry: tuple[str, str] | None = None
 
     def _scan(self) -> dict[str, Any]:
         if not self.page.evaluate("typeof MunshiPlanRuntime !== 'undefined'"):
@@ -241,7 +281,22 @@ class PlanBrowserAdapter:
                 or actual.path.startswith(application_path + "/")
             )
         )
-        same = exact or application_child
+        oneclick = urlsplit(
+            self._verified_smartrecruiters_entry[1]
+            if self._verified_smartrecruiters_entry is not None
+            and self._verified_smartrecruiters_entry[0] == str(plan.get("plan_id") or "")
+            else ""
+        )
+        # This additional identity proof exists only after following a
+        # single company-bound link from the exact employer posting.
+        smartrecruiters_child = (
+            provider_for_url(expected.geturl()) == "SMARTRECRUITERS"
+            and oneclick.scheme == "https"
+            and actual.scheme == oneclick.scheme
+            and actual.netloc == oneclick.netloc
+            and (actual.path == oneclick.path or actual.path.startswith(oneclick.path.rstrip("/") + "/"))
+        )
+        same = exact or application_child or smartrecruiters_child
         scan = self._scan()["page"]
         provider_policy = dict(plan.get("provider_policy") or {})
         declared_provider = str(provider_policy.get("provider") or "GENERIC").upper()
@@ -1096,6 +1151,37 @@ class PlanBrowserAdapter:
         """
         if self.current_plan(plan) is not True:
             raise ValueError("Hunter plan is stale")
+
+        expected = str(plan.get("job", {}).get("apply_url") or plan.get("job", {}).get("job_url") or "")
+        if self.page.url == expected and provider_for_url(expected) == "SMARTRECRUITERS":
+            anchors = self.page.evaluate(
+                """() => Array.from(document.querySelectorAll('a[href]'))
+                  .filter(el => {
+                    const style = getComputedStyle(el);
+                    return style.display !== 'none' && style.visibility !== 'hidden';
+                  })
+                  .map(el => ({ label: (el.innerText || '').trim(), href: el.href }))
+                  .slice(0, 100)"""
+            )
+            target = smartrecruiters_verified_oneclick(expected, anchors)
+            if target:
+                # Navigation is GET-only. A 403/challenge is a hard stop,
+                # never a signal to rotate IPs or bypass employer controls.
+                response = self.page.goto(target, wait_until="domcontentloaded", timeout=20000)
+                status = int(response.status) if response is not None else 0
+                if status < 200 or status >= 300:
+                    self.on_event("APPLICATION_ENTRY_RESTRICTED", {
+                        "provider": "SMARTRECRUITERS", "http_status": status
+                    })
+                    raise ValueError("SmartRecruiters application entry restricted")
+                self._verified_smartrecruiters_entry = (
+                    str(plan.get("plan_id") or ""), target
+                )
+                self.on_event("APPLICATION_ENTRY_ADVANCED", {
+                    "strategy": "smartrecruiters_verified_oneclick_get"
+                })
+                return True
+
         described = self._scan()
         page = described["page"]
         controls = {
