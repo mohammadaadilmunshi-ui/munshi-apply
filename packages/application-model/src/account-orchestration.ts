@@ -100,17 +100,19 @@ export function portalScopeFromUrl(rawUrl: string): string {
   if (!hasSharedTenantHost(hostname)) return hostname;
   // Tenant-qualified Workday hosts already identify the employer. Locale,
   // path and language variants must not cause duplicate candidate accounts.
-  const genericHost = /^(?:wd[0-9]+|myworkdayjobs|myworkdaysite|myworkday)\./.test(
-    hostname,
-  );
+  const genericHost =
+    /^(?:wd[0-9]+|myworkdayjobs|myworkdaysite|myworkday)\./.test(hostname);
   if (!genericHost) return hostname;
   const tenant = url.pathname
     .split("/")
     .map((part) => part.trim().toLocaleLowerCase("en-US"))
     .filter(Boolean)
-    .find((part) =>
-      !/^[a-z]{2}(?:-[a-z]{2})?$/.test(part) &&
-      !["job", "jobs", "candidate", "login", "signin", "sign-in"].includes(part),
+    .find(
+      (part) =>
+        !/^[a-z]{2}(?:-[a-z]{2})?$/.test(part) &&
+        !["job", "jobs", "candidate", "login", "signin", "sign-in"].includes(
+          part,
+        ),
     );
   return tenant ? hostname + "/" + tenant : hostname;
 }
