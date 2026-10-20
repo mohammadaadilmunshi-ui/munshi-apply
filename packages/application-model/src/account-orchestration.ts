@@ -98,11 +98,23 @@ export function portalScopeFromUrl(rawUrl: string): string {
   const url = new URL(rawUrl);
   const hostname = url.hostname.toLocaleLowerCase("en-US");
   if (!hasSharedTenantHost(hostname)) return hostname;
+  // Tenant-qualified Workday hosts already identify the employer. Locale,
+  // path and language variants must not cause duplicate candidate accounts.
+  const genericHost =
+    /^(?:wd[0-9]+|myworkdayjobs|myworkdaysite|myworkday)\./.test(hostname);
+  if (!genericHost) return hostname;
   const tenant = url.pathname
     .split("/")
     .map((part) => part.trim().toLocaleLowerCase("en-US"))
-    .find(Boolean);
-  return tenant ? `${hostname}/${tenant}` : hostname;
+    .filter(Boolean)
+    .find(
+      (part) =>
+        !/^[a-z]{2}(?:-[a-z]{2})?$/.test(part) &&
+        !["job", "jobs", "candidate", "login", "signin", "sign-in"].includes(
+          part,
+        ),
+    );
+  return tenant ? hostname + "/" + tenant : hostname;
 }
 
 function hasAccountRoute(page: ApplicationPage): boolean {
@@ -203,9 +215,10 @@ function canConsumeOrdinaryEmailVerification(
   return (
     capabilities?.ordinaryEmailVerification === true &&
     capabilities?.mailboxRuntimeAvailable === true &&
-    capabilities.verificationKind !== null &&
-    capabilities.verificationKind !== undefined &&
-    capabilities.verificationKind !== "SECURITY_INTERVENTION"
+    // Password-reset and magic-login links require different account-bound
+    // authority; neither is ordinary candidate email verification.
+    (capabilities.verificationKind === "EMAIL_CODE" ||
+      capabilities.verificationKind === "EMAIL_LINK")
   );
 }
 

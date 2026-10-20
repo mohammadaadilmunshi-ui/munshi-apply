@@ -182,7 +182,7 @@ describe("capability-gated account automation", () => {
     );
   });
 
-  it("automates an explicitly correlated candidate-controlled magic login link", () => {
+  it("does not silently treat a magic login link as an ordinary account confirmation", () => {
     const magic = buildAccountOrchestrationPlan({
       page: page({
         url: "https://example.com/candidate/verify",
@@ -195,13 +195,9 @@ describe("capability-gated account automation", () => {
         verificationKind: "MAGIC_LOGIN_LINK",
       },
     });
-    expect(magic.canAutoAct).toBe(true);
-    expect(magic.actions).toEqual([
-      "WAIT_FOR_EMAIL_VERIFICATION",
-      "OPEN_VERIFICATION_LINK",
-      "VERIFY_ACCOUNT",
-      "CONTINUE_EXACT_APPLICATION",
-    ]);
+    expect(magic.canAutoAct).toBe(false);
+    expect(magic.state).toBe("OWNER_ACTION_REQUIRED");
+    expect(magic.actions).toEqual(["VERIFY_ACCOUNT"]);
   });
 
   it("routes protected security challenges to ISSUE", () => {
