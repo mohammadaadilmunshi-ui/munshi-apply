@@ -3,11 +3,6 @@ name: Predeploy AutoApply Acceptance
 on:
   pull_request:
   workflow_dispatch:
-    inputs:
-      public_release_approval:
-        description: "Owner-only public release approval phrase"
-        required: false
-        type: string
 
 permissions:
   contents: read
@@ -64,29 +59,11 @@ jobs:
             apps/native-host/tests/test_complete_application_loop.py \
             apps/native-host/tests/test_submit_atomic_review.py
 
-      - name: Require owner authorization for temporary public release
+      - name: Require private repository before release
         env:
           REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
-          EVENT_NAME: ${{ github.event_name }}
-          ACTOR: ${{ github.actor }}
-          OWNER: ${{ github.repository_owner }}
-          PUBLIC_APPROVAL: ${{ inputs.public_release_approval }}
         run: |
-          set -euo pipefail
-          if [[ "$REPOSITORY_PRIVATE" == "true" ]]; then
-            echo "RELEASE_VISIBILITY_GATE=PRIVATE_PASS"
-            exit 0
-          fi
-          if [[ "$EVENT_NAME" == "pull_request" ]]; then
-            echo "PUBLIC_PR_CODE_TESTS=PASS"
-            echo "PRODUCTION_RELEASE_AUTHORIZED=NO"
-            exit 0
-          fi
-          if [[ "$EVENT_NAME" != "workflow_dispatch" \
-             || "$ACTOR" != "$OWNER" \
-             || "$PUBLIC_APPROVAL" != "I_APPROVE_PUBLIC_RELEASE" ]]; then
-            echo "PREDEPLOY_BLOCKED: public release requires exact owner-only manual approval."
+          test "${REPOSITORY_PRIVATE}" = "true" || {
+            echo "PREDEPLOY_BLOCKED: munshi-apply must be private before release."
             exit 1
-          fi
-          npm run secret:scan
-          echo "RELEASE_VISIBILITY_GATE=OWNER_APPROVED_PUBLIC_PASS"
+          }
