@@ -13,22 +13,21 @@ def create_database(tmp_path: Path) -> Database:
     database.migrate()
     now = datetime.now(UTC).isoformat()
     with database.connect() as connection:
-        connection.execute(
-            """
-            INSERT INTO applications (
-                application_id, job_id, status, resume_id, job_signal_score,
-                submitted_at, created_at, updated_at
-            ) VALUES ('app-1', NULL, 'DETECTED', NULL, NULL, NULL, ?, ?)
-            """,
-            (now, now),
-        )
+        for application_id in ("app-1", "app-2", "app-3"):
+            connection.execute(
+                """INSERT INTO applications (
+                    application_id, job_id, status, resume_id, job_signal_score,
+                    submitted_at, created_at, updated_at
+                ) VALUES (?, NULL, 'DETECTED', NULL, NULL, NULL, ?, ?)""",
+                (application_id, now, now),
+            )
     return database
 
 
 def attempt(index: int) -> dict[str, object]:
     return {
         "attemptId": f"attempt-{index}",
-        "applicationId": "app-1",
+        "applicationId": f"app-{index + 1}",
         "siteOrigin": "https://jobs.example.test",
         "componentFingerprint": "cfp-message",
         "semanticType": "COUNTRY",

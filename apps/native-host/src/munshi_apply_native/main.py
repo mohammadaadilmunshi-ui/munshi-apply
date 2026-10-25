@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import secrets
+import sqlite3
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
@@ -16,6 +17,7 @@ from .background_prepare_queue import DurablePreparationQueue
 from .complete_application_loop import CompleteApplicationLoopService
 from .database import Database
 from .models import EventEnvelope, HealthResponse
+from .native_form_learning_v1 import native_learning_snapshot
 from .outbox import OutboxWorker, run_outbox_worker
 from .runtime_resolution_read_v1 import RuntimeResolutionReadModel
 from .settings import Settings
@@ -165,6 +167,22 @@ def health() -> dict[str, Any]:
         "teach_telegram_configured": teach_telegram_configured,
         "version": __version__,
     }
+
+
+@app.get("/v1/native-learning/snapshot")
+def get_native_learning_snapshot(
+    service: CompleteApplicationLoopService = Depends(_loop_service),  # noqa: B008
+) -> dict[str, Any]:
+    """Read only this owner's verified mechanics and Native receipt evidence."""
+    try:
+        return native_learning_snapshot(
+            database, tenant_id=service.tenant_id, user_id=service.user_id
+        )
+    except (sqlite3.Error, ValueError, RuntimeError) as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Native learning evidence is temporarily unavailable.",
+        ) from error
 
 
 @app.post("/v1/events", status_code=202)

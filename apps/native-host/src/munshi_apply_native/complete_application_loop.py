@@ -806,6 +806,11 @@ class CompleteApplicationLoopService:
             "field_action_evidence": safe_evidence(
                 list(prepared.get("field_action_evidence") or [])
             ),
+            # Provenance-only mechanics learning. Neither answer values nor
+            # learned submit authority can enter this event evidence.
+            "native_field_learning_evidence": safe_evidence(
+                list(prepared.get("native_field_learning_evidence") or [])[:120]
+            ),
         }
         if cover_letter is not None:
             event_evidence["cover_letter_field_present"] = (

@@ -364,11 +364,27 @@ function resolveSalaryAcceptance(
   return null;
 }
 
-function startAvailabilityDateFromQuestion(rawText: string): number | null {
+function calendarDateKey(raw: string): string | null {
+  const value = raw.trim();
+  // ISO date-only strings are UTC in JavaScript; named dates are interpreted
+  // in the process timezone. Normalize both to calendar days before comparing.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const parsed = new Date(`${value}T00:00:00.000Z`);
+    return !Number.isNaN(parsed.getTime()) &&
+      parsed.toISOString().slice(0, 10) === value
+      ? value
+      : null;
+  }
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) return null;
+  const date = new Date(timestamp);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function startAvailabilityDateFromQuestion(rawText: string): string | null {
   const match = rawText.match(/\bavailable to start on\s+(.+?)(?:\?|\*|$)/i);
   if (!match?.[1]) return null;
-  const timestamp = Date.parse(match[1].trim());
-  return Number.isNaN(timestamp) ? null : timestamp;
+  return calendarDateKey(match[1]);
 }
 
 function resolveBooleanAvailabilityDate(
@@ -404,8 +420,8 @@ function resolveBooleanAvailabilityDate(
     );
   }
 
-  const earliestDate = Date.parse(stringifyFactValue(fact.value).trim());
-  if (Number.isNaN(earliestDate)) {
+  const earliestDate = calendarDateKey(stringifyFactValue(fact.value));
+  if (earliestDate === null) {
     return unresolved(
       question,
       fact.key,

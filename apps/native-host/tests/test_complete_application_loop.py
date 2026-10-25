@@ -757,6 +757,18 @@ def test_field_action_evidence_is_persisted_without_candidate_values(loop):
                 "verification": "FAILED_CLOSED",
             }
         ]
+        output["native_field_learning_evidence"] = [
+            {
+                "version": "munshi-native-form-action-v1",
+                "ats_family": "GREENHOUSE",
+                "field_fingerprint": "a" * 64,
+                "semantic_type": "PORTFOLIO",
+                "control_kind": "text",
+                "strategy": "GENERIC_RUNTIME",
+                "attempt_status": "FILLED",
+                "verification_status": "POST_SCAN_COMMITTED",
+            }
+        ]
         return output
 
     browser.prepare_form = with_action_evidence
@@ -783,3 +795,7 @@ def test_field_action_evidence_is_persisted_without_candidate_values(loop):
         }
     ]
     assert "Indeed" not in repr(trace)
+    learned = json.loads(row["evidence_json"])["native_field_learning_evidence"]
+    assert len(learned) == 1
+    assert learned[0]["verification_status"] == "POST_SCAN_COMMITTED"
+    assert "execution_value" not in json.dumps(learned)

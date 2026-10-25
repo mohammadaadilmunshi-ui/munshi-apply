@@ -16,22 +16,29 @@ def service(tmp_path: Path) -> tuple[Database, AccountTeachService]:
     database = Database(tmp_path / "test.sqlite", migrations)
     database.migrate()
     with database.connect() as connection:
-        connection.execute(
-            """
-            INSERT INTO applications (
-                application_id, job_id, status, resume_id, job_signal_score,
-                submitted_at, created_at, updated_at
-            ) VALUES ('app-1', NULL, 'DETECTED', NULL, NULL, NULL, ?, ?)
-            """,
-            (NOW, NOW),
-        )
+        for application_id in ("app-1", "app-2", "app-3"):
+            connection.execute(
+                """
+                INSERT INTO applications (
+                    application_id, job_id, status, resume_id, job_signal_score,
+                    submitted_at, created_at, updated_at
+                ) VALUES (?, NULL, 'DETECTED', NULL, NULL, NULL, ?, ?)
+                """,
+                (application_id, NOW, NOW),
+            )
     return database, AccountTeachService(database)
 
 
-def lesson(observation: str, semantic: str, actions: list[dict[str, object]]) -> dict[str, object]:
+def lesson(
+    observation: str,
+    semantic: str,
+    actions: list[dict[str, object]],
+    *,
+    application_id: str = "app-1",
+) -> dict[str, object]:
     return {
         "observationId": observation,
-        "applicationId": "app-1",
+        "applicationId": application_id,
         "siteOrigin": "https://wd5.myworkdayjobs.com",
         "componentFingerprint": "cfp-account-control",
         "semanticType": semantic,
@@ -135,6 +142,7 @@ def test_three_verified_successes_promote_and_two_verified_failures_roll_back(tm
                 f"promote-{index}",
                 "ATS_ACCOUNT_MAGIC_LOGIN",
                 actions,
+                application_id=f"app-{index}",
             )
         )
         assert teach.drain(limit=1)["learned"] == 1
@@ -170,6 +178,65 @@ def test_three_verified_successes_promote_and_two_verified_failures_roll_back(tm
     assert first["state"] == "PROMOTED"
     assert second["state"] == "ROLLED_BACK"
     assert second["lifecycle_state"] == "QUARANTINED"
+
+
+def test_account_teach_repeated_lessons_for_one_application_stay_shadow(
+    tmp_path: Path,
+) -> None:
+    database, teach = service(tmp_path)
+    actions = [{"type": "OPEN_VERIFICATION_LINK"}]
+    for index in range(5):
+        teach.capture(lesson(f"same-job-{index}", "ATS_ACCOUNT_MAGIC_LOGIN", actions))
+        assert teach.drain(limit=1)["learned"] == 1
+    assert teach.lookup_promoted(
+        {
+            "siteOrigin": "https://wd5.myworkdayjobs.com",
+            "componentFingerprint": "cfp-account-control",
+            "semanticType": "ATS_ACCOUNT_MAGIC_LOGIN",
+            "atsFamily": "WORKDAY",
+            "tenantKey": "example",
+            "uiFingerprint": "account-ui-v1",
+        }
+    ) is None
+    with database.connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM recipe_attempts").fetchone()[0] == 5
+        assert connection.execute(
+            "SELECT COUNT(DISTINCT application_id) FROM recipe_attempts WHERE success=1 AND verified=1"
+        ).fetchone()[0] == 1
+
+
+def test_account_recipe_can_promote_from_independent_verified_native_outcomes(
+    tmp_path: Path,
+) -> None:
+    database, teach = service(tmp_path)
+    teach.capture(
+        lesson("first-native-proof", "ATS_ACCOUNT_MAGIC_LOGIN", [{"type": "OPEN_VERIFICATION_LINK"}])
+    )
+    assert teach.drain(limit=1)["learned"] == 1
+    with database.connect() as connection:
+        recipe_id = connection.execute("SELECT recipe_id FROM interaction_recipes").fetchone()[0]
+
+    repeated = teach.record_verified_outcome(
+        recipe_id,
+        application_id="app-1",
+        success=True,
+        occurred_at=NOW,
+    )
+    assert repeated["state"] == "SHADOW"
+    second = teach.record_verified_outcome(
+        recipe_id,
+        application_id="app-2",
+        success=True,
+        occurred_at=NOW,
+    )
+    assert second["state"] == "SHADOW"
+    third = teach.record_verified_outcome(
+        recipe_id,
+        application_id="app-3",
+        success=True,
+        occurred_at=NOW,
+    )
+    assert third["state"] == "PROMOTED"
 
 
 def test_unverified_or_security_challenge_never_enters_account_teach(tmp_path: Path) -> None:
@@ -213,6 +280,7 @@ def test_ref_only_sonnet_login_mechanics_promote_without_secret_values(
                 f"auth-mechanics-{index}",
                 "AUTH_LOGIN_MECHANICS",
                 actions,
+                application_id=f"app-{index + 1}",
             )
         )
         assert captured["containsSecretMaterial"] is False

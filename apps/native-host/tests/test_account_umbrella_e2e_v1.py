@@ -16,13 +16,14 @@ def _database(tmp_path: Path) -> Database:
     database = Database(tmp_path / "umbrella.sqlite", migrations)
     database.migrate()
     with database.connect() as connection:
-        connection.execute(
-            """INSERT INTO applications(
+        for application_id in ("app-umbrella", "app-umbrella-2", "app-umbrella-3"):
+            connection.execute(
+                """INSERT INTO applications(
                    application_id,job_id,status,resume_id,job_signal_score,
                    submitted_at,created_at,updated_at
-               ) VALUES('app-umbrella',NULL,'DETECTED',NULL,NULL,NULL,?,?)""",
-            (NOW, NOW),
-        )
+                ) VALUES(?,NULL,'DETECTED',NULL,NULL,NULL,?,?)""",
+                (application_id, NOW, NOW),
+            )
     AccountStore(database).upsert(
         {
             "accountId": "account-umbrella",
@@ -129,6 +130,7 @@ def test_umbrella_learning_promotes_only_verified_secretless_account_mechanics(
     for index in range(3):
         lesson = dict(payload)
         lesson["observationId"] = f"learning-{index}"
+        lesson["applicationId"] = ("app-umbrella", "app-umbrella-2", "app-umbrella-3")[index]
         assert teach.capture(lesson)["containsSecretMaterial"] is False
         assert teach.drain(limit=1)["learned"] == 1
     promoted = teach.lookup_promoted(

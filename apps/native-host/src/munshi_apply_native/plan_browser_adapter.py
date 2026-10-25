@@ -23,6 +23,7 @@ from .hunter_plan_semantic_bridge import (
     logical_field_fingerprint,
     protected_answer_matches_question,
 )
+from .native_form_learning_v1 import finalize_action, observe_action
 from .review_reconciliation_v1 import reconcile_provider_review
 from .universal_document_uploader import DocumentSpec, UniversalDocumentUploader
 
@@ -1601,7 +1602,9 @@ class PlanBrowserAdapter:
         # Value-free diagnostics for real Workday controls. This evidence does
         # not change what gets filled and never includes candidate answer text.
         field_action_evidence: list[dict[str, Any]] = []
+        native_field_learning_evidence: list[dict[str, Any]] = []
         for _step in range(10):
+            page_learning_candidates: list[tuple[str, dict[str, Any]]] = []
             # Cookie/CMP overlays are reversible UI chrome and may otherwise
             # intercept clicks. Dismiss them before each page scan/navigation step.
             self._dismiss_cookie_consent()
@@ -1841,8 +1844,29 @@ class PlanBrowserAdapter:
                     "FIELD_VERIFIED" if result["status"] == "FILLED" else "NEEDS_INPUT",
                     {"control_id": control["controlId"], "status": result["status"]},
                 )
+                # The action itself is not proof. Keep only value-free field
+                # mechanics until a subsequent DOM scan verifies commitment.
+                try:
+                    learning = observe_action(
+                        question=question,
+                        control=control,
+                        result=result,
+                        ats_family=provider_for_url(self.page.url),
+                        sensitivity=("PROTECTED" if protected_lane else sensitivity),
+                    )
+                except (TypeError, ValueError, KeyError):
+                    # Telemetry may never interrupt a valid application fill.
+                    learning = None
+                if learning is not None:
+                    page_learning_candidates.append((str(control["controlId"]), learning))
             result = self._observe(plan)
             result["field_action_evidence"] = field_action_evidence[-120:]
+            committed = set(str(value) for value in result.get("completed_control_ids") or [])
+            native_field_learning_evidence.extend(
+                finalize_action(action, committed=(control_id in committed))
+                for control_id, action in page_learning_candidates
+            )
+            result["native_field_learning_evidence"] = native_field_learning_evidence[-120:]
             page_id = str(result.get("page_id") or described["page"].get("pageId") or "")
             if page_id:
                 prepared_page_ids.add(page_id)

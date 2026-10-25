@@ -30,10 +30,12 @@ def insert_application(database: Database, application_id: str = "app-1") -> Non
         )
 
 
-def payload(attempt_id: str, *, success: bool = True) -> dict[str, object]:
+def payload(
+    attempt_id: str, *, success: bool = True, application_id: str = "app-1"
+) -> dict[str, object]:
     return {
         "attemptId": attempt_id,
-        "applicationId": "app-1",
+        "applicationId": application_id,
         "siteOrigin": "https://jobs.example.test",
         "componentFingerprint": "cfp-safe123",
         "semanticType": "COUNTRY",
@@ -48,9 +50,10 @@ def contextual_payload(
     attempt_id: str,
     *,
     tenant: str = "tenant-a",
+    application_id: str = "app-1",
 ) -> dict[str, object]:
     return {
-        **payload(attempt_id),
+        **payload(attempt_id, application_id=application_id),
         "atsFamily": "workday",
         "tenantKey": tenant,
         "uiFingerprint": "uif-workday-country-v1",
@@ -82,9 +85,11 @@ def test_recipe_stays_shadow_then_promotes_after_three_successes(
 ) -> None:
     database, service = create_service(tmp_path)
     insert_application(database)
+    insert_application(database, "app-2")
+    insert_application(database, "app-3")
     first = service.record(payload("attempt-1"))
-    second = service.record(payload("attempt-2"))
-    third = service.record(payload("attempt-3"))
+    second = service.record(payload("attempt-2", application_id="app-2"))
+    third = service.record(payload("attempt-3", application_id="app-3"))
     assert first["state"] == "SHADOW"
     assert second["state"] == "SHADOW"
     assert third["state"] == "PROMOTED"
@@ -95,13 +100,38 @@ def test_recipe_stays_shadow_then_promotes_after_three_successes(
     assert all("value" not in action for action in promoted["actions"])
 
 
+def test_retrying_one_application_does_not_promote_or_inflate_independent_evidence(
+    tmp_path: Path,
+) -> None:
+    database, service = create_service(tmp_path)
+    insert_application(database)
+    for index in range(7):
+        result = service.record(payload(f"retry-{index}"))
+    assert result["verifiedSuccesses"] == 7
+    assert result["state"] == "SHADOW"
+    assert service.lookup(binding())["state"] == "SHADOW"
+
+
+def test_missing_application_identity_never_counts_toward_promotion(tmp_path: Path) -> None:
+    database, service = create_service(tmp_path)
+    insert_application(database)
+    for index in range(5):
+        attempt = payload(f"anonymous-{index}")
+        attempt.pop("applicationId")
+        result = service.record(attempt)
+    assert result["verifiedSuccesses"] == 5
+    assert result["state"] == "SHADOW"
+
+
 def test_promoted_recipe_rolls_back_and_quarantines_after_failures(
     tmp_path: Path,
 ) -> None:
     database, service = create_service(tmp_path)
     insert_application(database)
+    insert_application(database, "app-2")
+    insert_application(database, "app-3")
     for index in range(3):
-        service.record(payload(f"success-{index}"))
+        service.record(payload(f"success-{index}", application_id=f"app-{index + 1}"))
     promoted = service.lookup(binding())
     assert promoted is not None
     first_failure = service.record_outcome(
@@ -146,6 +176,8 @@ def test_taught_recipe_requires_three_successes_before_promotion(
 ) -> None:
     database, service = create_service(tmp_path)
     insert_application(database)
+    insert_application(database, "app-2")
+    insert_application(database, "app-3")
     taught = service.teach(
         {
             **binding(),
@@ -165,7 +197,7 @@ def test_taught_recipe_requires_three_successes_before_promotion(
         {
             "recipeId": taught["recipeId"],
             "attemptId": "automatic-trial-1",
-            "applicationId": "app-1",
+            "applicationId": "app-2",
             "success": True,
             "verified": True,
             "failureReason": None,
@@ -176,7 +208,7 @@ def test_taught_recipe_requires_three_successes_before_promotion(
         {
             "recipeId": taught["recipeId"],
             "attemptId": "automatic-trial-2",
-            "applicationId": "app-1",
+            "applicationId": "app-3",
             "success": True,
             "verified": True,
             "failureReason": None,
@@ -189,8 +221,12 @@ def test_taught_recipe_requires_three_successes_before_promotion(
 def test_recipe_context_prevents_tenant_or_ui_drift_reuse(tmp_path: Path) -> None:
     database, service = create_service(tmp_path)
     insert_application(database)
+    insert_application(database, "app-2")
+    insert_application(database, "app-3")
     for index in range(3):
-        result = service.record(contextual_payload(f"context-{index}"))
+        result = service.record(
+            contextual_payload(f"context-{index}", application_id=f"app-{index + 1}")
+        )
     assert result["state"] == "PROMOTED"
     assert result["atsFamily"] == "WORKDAY"
     assert result["tenantKey"] == "tenant-a"
