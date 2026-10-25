@@ -44,7 +44,7 @@ Additional high-risk invariants:
   `test_complete_application_loop.py`, and the account/unknown-provider
   integration tests.
 - Assert repeated sessions/versions of one application stay `SHADOW`.
-- Assert three verified independent applications may advance a *mechanics*
+- Assert three verified independent applications may advance a _mechanics_
   recipe only; form telemetry remains `SHADOW_ONLY` until held-out replay.
 - Assert a verified failure quarantines/rolls back the proper recipe and never
   causes an automatic repeat of a final employer submit.
@@ -63,7 +63,7 @@ Additional high-risk invariants:
    expected controls, uploads, multi-page movement, and intentional failures.
    Add BrassRing, Dayforce, SAP SuccessFactors, SmartRecruiters and other ATS
    fixtures as legal demonstrator pages/evidence become available. Prioritize
-   actual unverified Native controls and external *form* evidence, not status
+   actual unverified Native controls and external _form_ evidence, not status
    totals or public provider marketing claims.
 3. Compare predicted semantic/control matches against independent expected
    fields; capture exact strategy, separate verification result, failure reason,
