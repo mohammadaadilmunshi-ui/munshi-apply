@@ -18,15 +18,14 @@ def create_services(
     database.migrate()
     now = datetime.now(UTC).isoformat()
     with database.connect() as connection:
-        connection.execute(
-            """
-            INSERT INTO applications (
-                application_id, job_id, status, resume_id, job_signal_score,
-                submitted_at, created_at, updated_at
-            ) VALUES ('app-1', NULL, 'DETECTED', NULL, NULL, NULL, ?, ?)
-            """,
-            (now, now),
-        )
+        for application_id in ("app-1", "app-2", "app-3"):
+            connection.execute(
+                """INSERT INTO applications (
+                    application_id, job_id, status, resume_id, job_signal_score,
+                    submitted_at, created_at, updated_at
+                ) VALUES (?, NULL, 'DETECTED', NULL, NULL, NULL, ?, ?)""",
+                (application_id, now, now),
+            )
     return database, TeachMunshiService(database), InteractionRecipeService(database)
 
 
@@ -47,10 +46,11 @@ def lesson(
     teacher_kind: str = "MODEL",
     provider: str | None = "anthropic",
     semantic_type: str = "COUNTRY",
+    application_id: str = "app-1",
 ) -> dict[str, object]:
     payload: dict[str, object] = {
         "observationId": observation_id,
-        "applicationId": "app-1",
+        "applicationId": application_id,
         "siteOrigin": "https://jobs.example.test",
         "componentFingerprint": "cfp-workday-country",
         "semanticType": semantic_type,
@@ -155,7 +155,9 @@ def test_background_drain_creates_shadow_without_model_call(tmp_path: Path) -> N
 def test_three_verified_lessons_promote_for_deterministic_reuse(tmp_path: Path) -> None:
     _, teach, recipes = create_services(tmp_path)
     for index, provider in enumerate(("anthropic", "openai", "gemini"), start=1):
-        teach.capture(lesson(f"success-{index}", provider=provider))
+        teach.capture(
+            lesson(f"success-{index}", provider=provider, application_id=f"app-{index}")
+        )
         assert teach.drain(limit=1)["providerCallMade"] is False
 
     promoted = recipes.lookup(
@@ -179,7 +181,13 @@ def test_three_verified_lessons_promote_for_deterministic_reuse(tmp_path: Path) 
 def test_promoted_lesson_rolls_back_after_two_verified_failures(tmp_path: Path) -> None:
     _, teach, recipes = create_services(tmp_path)
     for index in range(3):
-        teach.capture(lesson(f"success-{index}", provider="anthropic"))
+        teach.capture(
+            lesson(
+                f"success-{index}",
+                provider="anthropic",
+                application_id=f"app-{index + 1}",
+            )
+        )
         teach.drain(limit=1)
     promoted = recipes.lookup(
         {

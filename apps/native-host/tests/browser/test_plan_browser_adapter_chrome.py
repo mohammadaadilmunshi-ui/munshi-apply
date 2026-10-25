@@ -198,6 +198,14 @@ def test_real_chrome_prepares_exact_artifact_and_generic_navigation_refuses_subm
         assert page.locator("#first_name").input_value() == "Aadil"
         assert page.locator("#last_name").input_value() == "Munshi"
 
+        # Learning records mechanics only after the independent form rescan;
+        # never persist the applicant's name or other answer values.
+        learning = prepared["native_field_learning_evidence"]
+        assert learning
+        assert any(item["verification_status"] == "POST_SCAN_COMMITTED" for item in learning)
+        assert "Aadil" not in json.dumps(learning)
+        assert "Munshi" not in json.dumps(learning)
+
         described = page.evaluate("MunshiPlanRuntime.describeForm()")
         final_submit = [
             item for item in described["page"]["navigationCandidates"]

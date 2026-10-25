@@ -193,3 +193,59 @@ def test_remote_status_script_fails_closed_on_tied_latest_sessions(tmp_path):
     status = json.loads(result.stdout)
     assert status["state"] == "AMBIGUOUS"
     assert "session" not in status
+
+
+
+def test_terminal_prepare_failure_overrides_stale_session_starting():
+    snapshot = {
+        "state": "FOUND",
+        "session": {"session_id": "s1", "state": "SESSION_STARTING"},
+        "prepare_job": {"state": "FAILED_SAFELY", "attempt_count": 3},
+        "counts": {"employer_receipts": 0, "final_reviews": 0},
+    }
+    status = monitor.reconcile_readonly_hosted_state(snapshot)
+    assert status["effective_state"] == "FAILED_SAFELY"
+    assert status["session_state_mismatch"] is True
+    assert status["submission_verified"] is False
+    assert "do not automatically retry" in status["next_action"].lower()
+    assert snapshot.get("effective_state") is None
+
+
+def test_waiting_input_dominates_historical_session_state():
+    status = monitor.reconcile_readonly_hosted_state({
+        "state": "FOUND",
+        "session": {"state": "PREPARING"},
+        "prepare_job": {"state": "WAITING_INPUT"},
+        "counts": {"final_reviews": 0},
+    })
+    assert status["effective_state"] == "NEEDS_INPUT"
+    assert status["session_state_mismatch"] is True
+    assert "must not submit" in status["next_action"]
+
+
+def test_ready_for_review_requires_actual_frozen_review():
+    missing = monitor.reconcile_readonly_hosted_state({
+        "state": "FOUND", "session": {"state": "READY_FOR_REVIEW"},
+        "prepare_job": {"state": "READY_FOR_REVIEW"},
+        "counts": {"final_reviews": 0},
+    })
+    assert missing["effective_state"] == "REVIEW_NOT_FROZEN"
+    ready = monitor.reconcile_readonly_hosted_state({
+        "state": "FOUND", "session": {"state": "READY_FOR_REVIEW"},
+        "prepare_job": {"state": "READY_FOR_REVIEW"},
+        "counts": {"final_reviews": 1},
+    })
+    assert ready["effective_state"] == "READY_FOR_REVIEW"
+    assert ready["submission_verified"] is False
+
+
+def test_employer_receipt_counts_never_imply_verified_submission():
+    status = monitor.reconcile_readonly_hosted_state({
+        "state": "FOUND", "session": {"state": "SUBMITTING"},
+        "prepare_job": None, "counts": {"employer_receipts": 1},
+    })
+    assert status["effective_state"] == "SUBMITTING"
+    assert status["submission_verified"] is False
+    assert monitor.reconcile_readonly_hosted_state({"state": "AMBIGUOUS"}) == {
+        "state": "AMBIGUOUS"
+    }

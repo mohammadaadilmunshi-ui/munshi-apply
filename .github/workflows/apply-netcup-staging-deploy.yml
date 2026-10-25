@@ -135,8 +135,8 @@ jobs:
       - name: Configure restricted deployment SSH
         shell: bash
         env:
-          MUNSHI_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.MUNSHI_DEPLOY_SSH_PRIVATE_KEY }}
-          MUNSHI_DEPLOY_KNOWN_HOSTS: ${{ secrets.MUNSHI_DEPLOY_KNOWN_HOSTS }}
+          MUNSHI_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.NETCUP_APPLY_STAGING_SSH_PRIVATE_KEY }}
+          MUNSHI_DEPLOY_KNOWN_HOSTS: ${{ secrets.NETCUP_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
           install -d -m 700 "$HOME/.ssh"
@@ -148,8 +148,8 @@ jobs:
       - name: Deploy exact SHA to named target
         shell: bash
         env:
-          MUNSHI_DEPLOY_HOST: ${{ secrets.MUNSHI_DEPLOY_HOST }}
-          MUNSHI_DEPLOY_USER: ${{ secrets.MUNSHI_DEPLOY_USER }}
+          MUNSHI_DEPLOY_HOST: ${{ secrets.NETCUP_HOST }}
+          MUNSHI_DEPLOY_USER: ${{ secrets.NETCUP_APPLY_STAGING_DEPLOY_USER }}
           DEPLOY_TARGET: ${{ needs.validate-and-test.outputs.deploy_target }}
           DEPLOY_SHA: ${{ needs.validate-and-test.outputs.commit_sha }}
           DEPLOY_BRANCH: ${{ needs.validate-and-test.outputs.source_branch }}

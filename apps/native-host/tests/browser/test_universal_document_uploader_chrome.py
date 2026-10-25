@@ -326,3 +326,46 @@ def test_multiple_ambiguous_single_file_targets_fail_closed():
     finally:
         browser.close()
         pw.stop()
+
+
+
+def test_stale_filename_does_not_prove_drag_drop_upload():
+    pw, browser = _browser()
+    try:
+        page = browser.new_page()
+        page.set_content(
+            """
+            <div id="resume-drop" class="dropzone" role="region">Drop resume here</div>
+            <span id="stale">resume.pdf</span>
+            """
+        )
+        uploader = UniversalDocumentUploader(page)
+        target = next(
+            item for item in uploader._proxy_targets()
+            if item["role"] == "resume"
+        )
+        assert uploader._drop_upload(target=target, spec=_resume()) is False
+    finally:
+        browser.close()
+        pw.stop()
+
+
+def test_absent_upload_controls_emit_safe_diagnostic():
+    pw, browser = _browser()
+    try:
+        page = browser.new_page()
+        page.set_content("<p>This is the public job-description shell.</p>")
+        events = []
+        uploader = UniversalDocumentUploader(
+            page, on_event=lambda name, evidence: events.append((name, evidence))
+        )
+        assert uploader.upload(resume=_resume(), cover_letter=None) == {}
+        assert any(
+            name == "DOCUMENT_UPLOAD_UNVERIFIED"
+            and evidence["reason"] == "UPLOAD_CONTROL_NOT_FOUND"
+            and evidence["native_input_count"] == 0
+            for name, evidence in events
+        )
+    finally:
+        browser.close()
+        pw.stop()

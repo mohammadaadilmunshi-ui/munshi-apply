@@ -126,6 +126,20 @@ PY
 )"
   [[ "$active_submitting" == "0" ]] || { echo "Apply production has active SUBMITTING session(s): $active_submitting" >&2; exit 13; }
 
+  # Submit must remain enabled during a code-only upgrade, so do not rotate
+  # any running browser session with an approved, pending final submission.
+  ready_to_submit="$(docker exec -i "$old_api_id" python - <<'PY_READINESS'
+import sqlite3
+db=sqlite3.connect("file:/data/munshi-apply.sqlite?mode=ro",uri=True,timeout=15)
+try:
+    n=db.execute("SELECT COUNT(*) FROM complete_application_sessions WHERE state='READY_TO_SUBMIT'").fetchone()[0]
+finally:
+    db.close()
+print(n)
+PY_READINESS
+)"
+  [[ "$ready_to_submit" == "0" ]] || { echo "Apply production has READY_TO_SUBMIT session(s); do not rotate workers" >&2; exit 13; }
+
   db_backup="$ROOT/backups/apply-predeploy-$stamp.sqlite"
   docker exec -i "$old_api_id" python - "$stamp" <<'PY'
 import sqlite3,sys
@@ -267,9 +281,39 @@ timeout 1200s docker run --rm \
     /app/apps/native-host/tests/test_workday_generic_file_upload_regression.py
 echo "APPLY_PRODUCTION_EXACT_IMAGE_TESTS=PASS"
 
-echo "=== FORCE SUBMIT OFF DURING REVERSIBLE DEPLOYMENT ==="
-MUNSHI_APPLY_PRODUCTION_SUBMIT_AUTHORITY_ENABLED=false MUNSHI_APPLY_DEPLOY_SHA="$commit" MUNSHI_APPLY_IMAGE_TAG="$commit"   "${compose[@]}" --profile hosted-prepare stop submit-worker >/dev/null 2>&1 || true
-MUNSHI_APPLY_PRODUCTION_SUBMIT_AUTHORITY_ENABLED=false MUNSHI_APPLY_DEPLOY_SHA="$commit" MUNSHI_APPLY_IMAGE_TAG="$commit"   "${compose[@]}" --profile hosted-prepare up -d --force-recreate apply prepare-worker
+echo "=== PRESERVE ENABLED SUBMIT AUTHORITY ACROSS CODE RELEASE ==="
+# An image build may take minutes while Prepare continues. Recheck immediately
+# before the swap, so newly prepared or in-flight applications cannot be cut
+# over beneath an existing submit authorization.
+pending_at_swap="$(docker exec -i "$old_api_id" python - <<'PY_PENDING'
+import sqlite3
+db=sqlite3.connect("file:/data/munshi-apply.sqlite?mode=ro",uri=True,timeout=15)
+try:
+    count=db.execute(
+        "SELECT COUNT(*) FROM complete_application_sessions "
+        "WHERE state IN ('READY_TO_SUBMIT','SUBMITTING')"
+    ).fetchone()[0]
+finally:
+    db.close()
+print(count)
+PY_PENDING
+)"
+[[ "$pending_at_swap" == "0" ]] || {
+  echo "Application became ready/submitting during build; do not replace submit workers" >&2
+  exit 24
+}
+[[ "$(docker inspect -f '{{.State.Running}}' "$old_submit_id" 2>/dev/null)" == "true" ]] || {
+  echo "Existing Apply submit worker is not running; release blocked" >&2
+  exit 24
+}
+# Do not silently deactivate an already-live submit worker. A release can
+# proceed only when production already has its approved submit runtime on.
+[[ "$old_submit_running" == "1" ]] || { echo "Apply production submit worker not active; release blocked" >&2; exit 24; }
+[[ "${MUNSHI_APPLY_PRODUCTION_SUBMIT_AUTHORITY_ENABLED:-}" == "true" ]] || {
+  echo "Submit authority was not enabled in production configuration; release blocked" >&2
+  exit 24
+}
+MUNSHI_APPLY_DEPLOY_SHA="$commit" MUNSHI_APPLY_IMAGE_TAG="$commit"   "${compose[@]}" --profile hosted-prepare --profile hosted-submit   up -d --force-recreate apply prepare-worker submit-worker
 recreated=1
 
 for _ in $(seq 1 60); do
@@ -281,7 +325,8 @@ for _ in $(seq 1 60); do
 done
 [[ "${health:-}" == "healthy" ]] || { echo "Apply production API did not become healthy" >&2; exit 22; }
 
-"$VERIFY" --expected-sha "$commit" --expect-submit off
+# Verify both the canonical submit worker and the existing API role flags.
+"$VERIFY" --expected-sha "$commit" --expect-submit on
 
 protected_after="$(snapshot_protected)"
 [[ "$protected_before" == "$protected_after" ]] || {
@@ -292,6 +337,6 @@ protected_after="$(snapshot_protected)"
 echo "DEPLOYED_APPLY_PRODUCTION_SHA=$commit"
 echo "DEPLOYED_APPLY_PRODUCTION_BRANCH=$branch"
 echo "APPLY_PRODUCTION_DB_BACKUP=$db_backup"
-echo "FINAL_SUBMIT_ENABLED=false"
+echo "FINAL_SUBMIT_ENABLED=true (dedicated Submit Worker)"
 echo "RESULT=APPLY_PRODUCTION_DEPLOYMENT_PASS"
 trap - ERR

@@ -19,22 +19,21 @@ def _database(tmp_path: Path) -> Database:
     database.migrate()
     now = datetime.now(UTC).isoformat()
     with database.connect() as connection:
-        connection.execute(
-            """
-            INSERT INTO applications (
-                application_id, job_id, status, resume_id, job_signal_score,
-                submitted_at, created_at, updated_at
-            ) VALUES ('app-worker', NULL, 'DETECTED', NULL, NULL, NULL, ?, ?)
-            """,
-            (now, now),
-        )
+        for application_id in ("app-worker", "app-worker-2", "app-worker-3"):
+            connection.execute(
+                """INSERT INTO applications (
+                    application_id, job_id, status, resume_id, job_signal_score,
+                    submitted_at, created_at, updated_at
+                ) VALUES (?, NULL, 'DETECTED', NULL, NULL, NULL, ?, ?)""",
+                (application_id, now, now),
+            )
     return database
 
 
-def _lesson(observation_id: str) -> dict[str, object]:
+def _lesson(observation_id: str, *, application_id: str = "app-worker") -> dict[str, object]:
     return {
         "observationId": observation_id,
-        "applicationId": "app-worker",
+        "applicationId": application_id,
         "siteOrigin": "https://jobs.example.test",
         "componentFingerprint": "cfp-worker-country",
         "semanticType": "COUNTRY",
@@ -90,7 +89,12 @@ def test_worker_promotes_after_three_independent_verified_lessons(tmp_path: Path
     worker = TeachMunshiLearningWorker(database, batch_size=1)
 
     for index in range(3):
-        captured = service.capture(_lesson(f"worker-success-{index}"))
+        captured = service.capture(
+            _lesson(
+                f"worker-success-{index}",
+                application_id=("app-worker", "app-worker-2", "app-worker-3")[index],
+            )
+        )
         assert captured["providerCallMade"] is False
         assert worker.drain_once() == 1
 

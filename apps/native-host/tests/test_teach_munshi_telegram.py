@@ -13,6 +13,15 @@ def _database(tmp_path: Path) -> Database:
     migrations = Path(__file__).resolve().parents[3] / "migrations"
     database = Database(tmp_path / "teach-telegram.sqlite", migrations)
     database.migrate()
+    with database.connect() as connection:
+        for index in range(3):
+            connection.execute(
+                """INSERT INTO applications(
+                   application_id,job_id,status,resume_id,job_signal_score,
+                   submitted_at,created_at,updated_at
+                ) VALUES (?,NULL,'DETECTED',NULL,NULL,NULL,?,?)""",
+                (f"app-telegram-{index}", _TEST_ACTIVATION, _TEST_ACTIVATION),
+            )
     return database
 
 
@@ -23,6 +32,7 @@ def _promote_recipe(database: Database) -> dict[str, object]:
         learned = service.record(
             {
                 "attemptId": f"attempt-{index}",
+                "applicationId": f"app-telegram-{index}",
                 "siteOrigin": "https://jobs.example.test",
                 "componentFingerprint": "cfp-example-control",
                 "semanticType": "WORK_AUTH_US",

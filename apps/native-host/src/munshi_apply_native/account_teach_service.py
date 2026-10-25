@@ -266,6 +266,25 @@ class AccountTeachService:
         }
         return self._lookup(row, promoted_only=True)
 
+    @staticmethod
+    def _promote_with_independent_evidence(connection: object, recipe_id: str, now: str) -> None:
+        independent_successes = connection.execute(
+            """SELECT COUNT(DISTINCT application_id) FROM recipe_attempts
+               WHERE recipe_id=? AND verified=1 AND success=1
+                 AND application_id IS NOT NULL AND application_id<>''""",
+            (recipe_id,),
+        ).fetchone()[0]
+        if int(independent_successes) >= 3:
+            connection.execute(
+                """UPDATE interaction_recipes SET state='PROMOTED', updated_at=?
+                   WHERE recipe_id=? AND state='SHADOW'
+                     AND EXISTS (
+                       SELECT 1 FROM interaction_recipe_context c
+                        WHERE c.recipe_id=? AND c.lifecycle_state='ACTIVE'
+                     )""",
+                (now, recipe_id, recipe_id),
+            )
+
     def _create_recipe(self, connection: object, row: dict[str, object], actions: list[dict[str, object]], now: str) -> str:
         existing_version = connection.execute(
             """
@@ -302,6 +321,18 @@ class AccountTeachService:
                 row.get("ui_fingerprint"), now, now, now, now,
             ),
         )
+        # The founding lesson must have the same durable, idempotent attempt
+        # record as subsequent lessons. Context counters alone are not proof
+        # of independent applications.
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO recipe_attempts(
+                attempt_id, recipe_id, application_id, occurred_at,
+                success, verified, failure_reason
+            ) VALUES(?,?,?,?,1,1,NULL)
+            """,
+            (f"ats-teach-{row['lesson_id']}", recipe_id, row.get("application_id"), now),
+        )
         return recipe_id
 
     def _learn(self, row: dict[str, object]) -> str:
@@ -335,15 +366,7 @@ class AccountTeachService:
                         """,
                         (now, now, now, recipe_id),
                     )
-            successes = connection.execute(
-                "SELECT verified_successes FROM interaction_recipe_context WHERE recipe_id=?",
-                (recipe_id,),
-            ).fetchone()[0]
-            if int(successes) >= 3:
-                connection.execute(
-                    "UPDATE interaction_recipes SET state='PROMOTED', updated_at=? WHERE recipe_id=? AND state='SHADOW'",
-                    (now, recipe_id),
-                )
+            self._promote_with_independent_evidence(connection, recipe_id, now)
         return recipe_id
 
     def drain(self, *, limit: int = 20) -> dict[str, object]:
@@ -434,6 +457,9 @@ class AccountTeachService:
                     """,
                     (now, now, now, recipe_id),
                 )
+                # Outcomes from the actual Native replay are durable learning
+                # proof too; no further teaching lesson should be necessary.
+                self._promote_with_independent_evidence(connection, recipe_id, now)
             else:
                 connection.execute(
                     """

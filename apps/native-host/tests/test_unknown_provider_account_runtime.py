@@ -17,15 +17,14 @@ def _runtime(tmp_path: Path) -> tuple[Database, UnknownProviderAccountRuntime]:
     database = Database(tmp_path / "unknown-provider.sqlite", migrations)
     database.migrate()
     with database.connect() as connection:
-        connection.execute(
-            """
-            INSERT INTO applications(
-                application_id, job_id, status, resume_id, job_signal_score,
-                submitted_at, created_at, updated_at
-            ) VALUES('app-unknown',NULL,'DETECTED',NULL,NULL,NULL,?,?)
-            """,
-            (NOW, NOW),
-        )
+        for application_id in ("app-unknown", "app-unknown-2", "app-unknown-3"):
+            connection.execute(
+                """INSERT INTO applications(
+                    application_id, job_id, status, resume_id, job_signal_score,
+                    submitted_at, created_at, updated_at
+                ) VALUES (?,NULL,'DETECTED',NULL,NULL,NULL,?,?)""",
+                (application_id, NOW, NOW),
+            )
     return database, UnknownProviderAccountRuntime(database)
 
 
@@ -153,11 +152,11 @@ def test_unknown_provider_learns_promotes_then_reuses_recipe(tmp_path: Path) -> 
     # No promoted recipe exists yet, so each verified fallback continues the
     # application immediately and queues a secretless lesson. Draining simulates
     # the asynchronous Teach worker after the application has already continued.
-    for _ in range(3):
+    for index in range(3):
         fallback = _verified_fallback()
         result = runtime.execute(
             context=_context(),
-            application_id="app-unknown",
+            application_id=("app-unknown", "app-unknown-2", "app-unknown-3")[index],
             occurred_at=NOW,
             recipe_executor=recipe,
             fallback_executor=fallback,
@@ -194,10 +193,10 @@ def test_repeated_promoted_recipe_failures_roll_back_and_use_verified_fallback(
 ) -> None:
     _database, runtime = _runtime(tmp_path)
     learning_recipe = RecipeExecutor(success=True)
-    for _ in range(3):
+    for index in range(3):
         result = runtime.execute(
             context=_context(),
-            application_id="app-unknown",
+            application_id=("app-unknown", "app-unknown-2", "app-unknown-3")[index],
             occurred_at=NOW,
             recipe_executor=learning_recipe,
             fallback_executor=_verified_fallback(),
