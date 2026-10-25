@@ -286,13 +286,23 @@ class InteractionRecipeService:
         state = str(recipe["state"])
         knowledge = self.knowledge.context(recipe_id)
 
-        # Every learned mechanic, regardless of the teacher provider, needs three
-        # independently verified successes before deterministic promotion.
+        # Repeated retries on a single job do not independently establish a
+        # portable mechanic. Promotion requires browser-verified successes on
+        # three different canonical applications, not merely three attempts.
         promotion_threshold = 3
+        distinct_success_applications = {
+            str(item["application_id"])
+            for item in verified_attempts
+            if item["success"] and item.get("application_id")
+        }
         if knowledge is not None and knowledge["lifecycle_state"] == "QUARANTINED":
             if state in {"SHADOW", "PROMOTED"}:
                 state = "ROLLED_BACK"
-        elif state == "SHADOW" and len(verified_attempts) >= promotion_threshold:
+        elif (
+            state == "SHADOW"
+            and len(distinct_success_applications) >= promotion_threshold
+            and len(verified_attempts) >= promotion_threshold
+        ):
             recent = verified_attempts[-promotion_threshold:]
             if all(bool(item["success"]) for item in recent):
                 state = "PROMOTED"

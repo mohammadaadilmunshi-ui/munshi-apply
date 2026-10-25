@@ -196,6 +196,32 @@ describe("resolveProfileAnswer", () => {
     expect(tooEarly).toMatchObject({ state: "READY", value: "No" });
   });
 
+  it("compares the calendar day, not local-versus-UTC midnight", () => {
+    const factProfile = profile([
+      fact({
+        key: "earliest_start_date",
+        value: "2027-01-01",
+        category: "AVAILABILITY",
+      }),
+    ]);
+    const sameDay = resolveProfileAnswer(
+      question({
+        rawText: "Are you available to start on January 1, 2027? *",
+        semanticType: "START_DATE",
+      }),
+      factProfile,
+    );
+    const earlierDay = resolveProfileAnswer(
+      question({
+        rawText: "Are you available to start on December 31, 2026? *",
+        semanticType: "START_DATE",
+      }),
+      factProfile,
+    );
+    expect(sameDay).toMatchObject({ state: "READY", value: "Yes" });
+    expect(earlierDay).toMatchObject({ state: "READY", value: "No" });
+  });
+
   it("keeps normal start-date fields as the exact saved date", () => {
     const result = resolveProfileAnswer(
       question({
